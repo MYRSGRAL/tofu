@@ -1,0 +1,15 @@
+[package]
+name = "tofu-import"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.23.1"
+url = "2.5.8"
+percent-encoding = "2.3.2"
+serde_json = { version = "1.0.154", features = ["raw_value"] }
+serde = "1.0.229"
+
+[lints]
+workspace = true
