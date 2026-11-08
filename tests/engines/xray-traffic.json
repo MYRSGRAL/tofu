@@ -1,0 +1,13 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{"tag": "tun", "protocol": "tun", "settings": {"name": "tofu-test", "mtu": 1500}}],
+  "outbounds": [
+    {"tag": "block", "protocol": "blackhole"},
+    {"tag": "echo4", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:24081"}},
+    {"tag": "echo6", "protocol": "freedom", "settings": {"redirect": "[::1]:24081"}}
+  ],
+  "routing": {"rules": [
+    {"type": "field", "ip": ["2001:db8:746f::/126"], "outboundTag": "echo6"},
+    {"type": "field", "ip": ["198.18.0.0/30"], "outboundTag": "echo4"}
+  ]}
+}

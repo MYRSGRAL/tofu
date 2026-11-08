@@ -1,0 +1,14 @@
+{
+  "log": {"level": "warn"},
+  "inbounds": [{
+    "type": "tun", "tag": "tun", "interface_name": "tofu-test",
+    "address": ["198.18.0.1/30", "2001:db8:746f::1/126"],
+    "mtu": 1500, "auto_route": false
+  }],
+  "outbounds": [{"type": "direct", "tag": "echo"}],
+  "route": {"rules": [
+    {"ip_cidr": ["2001:db8:746f::/126"], "action": "route", "outbound": "echo", "override_address": "::1", "override_port": 24081},
+    {"ip_cidr": ["198.18.0.0/30"], "action": "route", "outbound": "echo", "override_address": "127.0.0.1", "override_port": 24081},
+    {"action": "reject"}
+  ]}
+}
