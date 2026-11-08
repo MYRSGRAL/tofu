@@ -184,6 +184,7 @@ pub fn main() -> ExitCode {
         if !report.issues.is_empty() {
             emit(json!({"event":"partial_import","parsed":report.servers.len(),"rejected":report.issues.len(),"server_index":args.server})).map_err(|e| e.to_string())?;
         }
+        drop(report);
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
