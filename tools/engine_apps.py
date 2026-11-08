@@ -158,23 +158,25 @@ def main() -> int:
     if args.worker_namespace is not None:
         worker(binary, args.engine, args.worker_namespace, work_dir)
         return 0
-    run_sandbox(
-        [
-            "unshare",
-            "--user",
-            "--map-root-user",
-            "--net",
-            sys.executable,
-            str(Path(__file__).resolve()),
-            args.engine,
-            str(binary),
-            "--work-dir",
-            str(work_dir),
-            "--worker-namespace",
-            str(os.stat("/proc/self/ns/net").st_ino),
-        ],
-        timeout=60,
-    )
+    # SIGKILL worker не запускает его finally: каталогом владеет родитель.
+    with tempfile.TemporaryDirectory(prefix="apps-", dir=work_dir) as workspace:
+        run_sandbox(
+            [
+                "unshare",
+                "--user",
+                "--map-root-user",
+                "--net",
+                sys.executable,
+                str(Path(__file__).resolve()),
+                args.engine,
+                str(binary),
+                "--work-dir",
+                workspace,
+                "--worker-namespace",
+                str(os.stat("/proc/self/ns/net").st_ino),
+            ],
+            timeout=60,
+        )
     return 0
 
 
