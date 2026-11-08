@@ -34,3 +34,4 @@ jobs:
           "$RUNNER_TEMP/tofu-lint/bin/pip" install ruff==0.17.4
           "$RUNNER_TEMP/tofu-lint/bin/ruff" format --check tools
           "$RUNNER_TEMP/tofu-lint/bin/ruff" check tools
+          python3 -m unittest discover -s tools/tests -v

@@ -32,6 +32,9 @@ G-APP, G-ANDROID и G-POWER не пройдены. Готового прилож
 - `cargo test --workspace`: 5 поведенческих тестов и compile-fail doctest.
 - `cargo clippy --workspace --all-targets -- -D warnings`.
 - `cargo fmt --all -- --check` и release-сборка.
+- Ruff check/format и регрессионный unittest cleanup process group при SIGINT,
+  SIGTERM и timeout. Тест запускает реального потомка с дочерним процессом,
+  прерывает управляющий процесс и проверяет отсутствие активных потомков.
 - Xray `run -test` и sing-box `check` для синтетических fixtures.
 - Оба ядра: создание TUN в новом network namespace, затем отсутствие интерфейса
   после SIGTERM и SIGKILL. После каждого завершения список интерфейсов равен
@@ -42,6 +45,10 @@ G-APP, G-ANDROID и G-POWER не пройдены. Готового прилож
 сетей. Reviewer обнаружил возможность задать PrivateVpn как пользовательское
 действие; исправление разделяет Action и Route. Compile-fail тест запрещает
 восстановление такого состояния API.
+
+Второй review обнаружил отсутствие очистки process group при прерывании
+smoke-родителя. Очистка перенесена в `finally`, SIGTERM переводится в выход
+через тот же путь; добавлена указанная регрессионная проверка.
 
 ## Приватная подписка
 

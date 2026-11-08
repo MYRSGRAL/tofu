@@ -16,6 +16,28 @@ LOG = logging.getLogger("tofu.smoke")
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "engines"
 
 
+def install_signal_handlers() -> None:
+    def terminate(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, terminate)
+
+
+def run_sandbox(command: list[str], timeout: float = 30) -> None:
+    # Отдельная группа не получает Ctrl+C терминала: завершаем её явно.
+    with subprocess.Popen(command, start_new_session=True) as sandbox:
+        try:
+            code = sandbox.wait(timeout=timeout)
+            if code:
+                raise subprocess.CalledProcessError(code, command)
+        finally:
+            try:
+                os.killpg(sandbox.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # Группа уже завершилась; повторная очистка безопасна.
+            sandbox.wait(timeout=5)
+
+
 def links() -> set[str]:
     result = subprocess.run(
         ["ip", "-j", "link", "show"], check=True, capture_output=True, timeout=5
@@ -96,21 +118,13 @@ def main() -> int:
         "--worker-namespace",
         str(os.stat("/proc/self/ns/net").st_ino),
     ]
-    # Таймаут должен завершить и worker, и ядро, удерживающее namespace.
-    with subprocess.Popen(command, start_new_session=True) as sandbox:
-        try:
-            code = sandbox.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            os.killpg(sandbox.pid, signal.SIGKILL)
-            sandbox.wait(timeout=5)
-            raise
-        if code:
-            raise subprocess.CalledProcessError(code, command)
+    run_sandbox(command)
     return 0
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    install_signal_handlers()
     try:
         raise SystemExit(main())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
