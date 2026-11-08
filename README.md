@@ -24,6 +24,8 @@ application, installer or production network adapter yet.
 - Bounded URI/Base64 import for VLESS, VMess, Trojan, Shadowsocks, HTTP CONNECT and SOCKS5.
 - Strict single-server configuration compilers for Xray 26.10.31 and sing-box 1.14.4,
   with a loopback SOCKS listener, TLS verification and explicit unsupported-option errors.
+- Linux `tofu-local` host: verifies an immutable engine snapshot, runs config-check,
+  serves local SOCKS, checks HTTPS through that outbound, and stops/reaps the core.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Domain
@@ -41,7 +43,8 @@ checked artifact. This does not replace OS authorization or atomic host-side App
 ### Development
 
 Rust 1.85+ (edition 2024). Domain/application remain std-only; the importer uses
-Base64, URL/IDNA and JSON libraries. Cargo.lock pins MSRV-compatible dependencies.
+Base64, URL/IDNA and JSON libraries. The Linux host uses Tokio, reqwest/rustls,
+SHA-256 and safe rustix syscalls. Cargo.lock pins MSRV-compatible dependencies.
 Build artifacts belong outside the checkout. On the project development host:
 
 ```sh
@@ -133,6 +136,47 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_compile.py "
 
 Requires `openssl` in addition to the namespace test tools, and the pinned engine versions.
 [Compiler evidence and limitations](docs/validation/2026-11-09-engine-compiler.md).
+
+### Run a local SOCKS session on Linux
+
+Linux 6.3+ with executable sealed memfd and `/proc` is required. Obtain the pinned
+core binary separately and verify its release archive before trusting its binary hash.
+`--sha256` is the hash of the extracted executable, not the archive. For the verified
+Xray Linux amd64 release used in our tests:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /absolute/path/to/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 < local/subscription.txt
+```
+
+The host copies and hashes the regular ELF file into a sealed memory snapshot;
+version, config-check and start use that same snapshot. Configurations stay in memory
+and are passed through stdin. Core stdout/stderr are suppressed to protect secrets.
+Listener ownership is verified against the child process, including during health checks.
+The only managed resource is the child core and its `127.0.0.1:10808` SOCKS listener.
+This does not enable system proxy, TUN, routes or system DNS.
+
+Output is safe NDJSON. `Connected` requires HTTPS 2xx through that exact SOCKS outbound;
+TLS, timeout and HTTP failures result in `Limited`, with the core still serving SOCKS.
+There is no direct fallback or redirect following. `--check-url` chooses an HTTPS endpoint,
+`--check-timeout` accepts 1–60 seconds; the default is generate_204 with 10 seconds.
+Ctrl+C/SIGTERM stops and reaps the core. `--once` checks, stops and exits: 0 for success
+or cancellation, 2 for a failed endpoint check, 1 for an import/config/host failure.
+No automatic recovery or persistent supervisor is implemented yet; SIGKILL of the host
+cannot run cleanup. The local CLI is not the complete production EngineHost.
+
+Partial imports fail by default. After reviewing `tofu-import` results,
+`--accept-partial --server N` explicitly selects one parsed record and reports the rejected
+count; it never enables unsupported parameters of that record. Native JSON remains unsupported.
+Indices count parsed records from zero. For sing-box use `sing-box` and its own verified
+executable/hash. Engine binaries are not bundled.
+
+Isolated host tests (also require `rustc`, `openssl`, PID/mount namespaces):
+
+```sh
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$tofu_build/target/debug/tofu-local" /absolute/path/to/xray /absolute/path/to/sing-box
+```
+
+[Host evidence and remaining work](docs/validation/2026-11-09-linux-engine-host.md).
 
 ### Documentation and license
 
