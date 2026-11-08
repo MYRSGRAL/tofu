@@ -40,7 +40,9 @@ fn endpoint_failure_keeps_limited_session_and_can_be_rechecked() {
     let limited = advance(&mut session, token, Event::EndpointUnavailable);
     assert_eq!(session.state(), State::Limited);
     assert!(session.applied_generation().is_some());
-    advance(&mut session, limited, Event::CheckPassed);
+    let repeated = advance(&mut session, limited, Event::EndpointUnavailable);
+    assert_eq!(session.state(), State::Limited);
+    advance(&mut session, repeated, Event::CheckPassed);
     assert_eq!(session.state(), State::Connected);
 }
 

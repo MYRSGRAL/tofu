@@ -158,7 +158,9 @@ impl Session {
             (State::Preparing, Event::Validated) => (State::Starting, None),
             (State::Starting, Event::NetworkApplied) => (State::Checking, None),
             (State::Checking | State::Limited, Event::CheckPassed) => (State::Connected, None),
-            (State::Checking, Event::EndpointUnavailable) => (State::Limited, None),
+            (State::Checking | State::Limited, Event::EndpointUnavailable) => {
+                (State::Limited, None)
+            }
             (State::Preparing, Event::Failed(fault)) => (State::Error, Some(fault)),
             (
                 State::Starting | State::Checking | State::Connected | State::Limited,
@@ -214,5 +216,25 @@ mod tests {
             assert_eq!(session.generation, generation);
             assert_eq!(session.active, None);
         }
+    }
+
+    #[test]
+    fn exhausted_request_cannot_partially_apply_or_cancel_running_operation() {
+        let mut session = Session::new(NonZeroU64::MIN);
+        let first = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
+        let token = match session.accept(first, super::Event::Validated) {
+            Ok(super::Outcome::Applied(Some(token))) => token,
+            other => panic!("Ожидался Starting: {other:?}"),
+        };
+        session.request = u64::MAX;
+        assert_eq!(
+            session.accept(token, super::Event::NetworkApplied),
+            Err(Error::Exhausted)
+        );
+        assert_eq!(session.stop(), Err(Error::Exhausted));
+        assert_eq!(session.state(), State::Starting);
+        assert_eq!(session.applied_generation(), None);
+        assert_eq!(session.active, Some(token));
+        assert_eq!(session.request, u64::MAX);
     }
 }

@@ -25,7 +25,7 @@ callbacks которых ещё возможны, включая пересоз�
 ## Проверки
 
 - Rust 1.97.0 и MSRV 1.85.1: тесты workspace и clippy по всем targets без warnings.
-- В новом crate: 7 integration tests и 1 unit test границ счётчиков.
+- В новом crate: 7 integration tests и 2 unit tests границ счётчиков.
   В domain: прежние 5 integration tests и compile-fail doctest.
 - Проверены неверные переходы, busy, поздние callbacks, разные controller ID,
   отмена Preparing, повторный Stop, сбой старта и cleanup/retry.
@@ -46,3 +46,12 @@ reducer не реализованы. Host-события пока не подк�
 Recovery, reconfiguration/rollback, desired-profile, persistence, планировщик
 и привязка PreparedPlan к network/application generation — следующие этапы.
 Наличие enum State не является доказательством успешного сетевого подключения.
+
+## Review
+
+Независимый reviewer проверил diff `9808e66..c9ae9ce`, блокирующих findings не
+обнаружил. Отметил отсутствие отдельного покрытия переполнения stop/accept и
+повторного неуспешного endpoint-check в Limited. Добавлены проверки границ этих
+методов; повторный EndpointUnavailable теперь сохраняет Limited и обновляет token.
+Регрессия endpoint воспроизвела InvalidTransition до исправления и проходит после.
+Reviewer выполнял статический анализ, запуски тестов принял по evidence root.
