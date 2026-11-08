@@ -7,7 +7,7 @@ KDE Plasma, Wayland), Android later. Planned features include Xray-core and
 sing-box, TUN, Fake DNS, subscriptions, per-application routing and a system tray.
 
 **Early development:** this repository contains specifications, an initial portable
-Rust routing library and isolated engine smoke tests. There is no usable desktop
+Rust libraries for routing/session control and isolated engine tests. There is no usable desktop
 application, installer or production network adapter yet.
 
 ### Implemented
@@ -19,11 +19,17 @@ application, installer or production network adapter yet.
 - Private-network blocking when its VPN route becomes unavailable.
 - Synthetic Xray/sing-box TUN lifecycle and TCP/UDP IPv4/IPv6 echo tests in isolated Linux namespaces.
 - Native executable-path routing checks, including two clients with the same basename.
+- Portable session reducer with stale-event rejection and explicit cleanup confirmation.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Domain
 matching, DNS/Fake-IP, import, storage, engine configuration compilers, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
+
+`tofu-application` currently implements the initial connect/check/stop loop.
+Its host-provided controller ID must be unique while callbacks from an older
+controller can still arrive. It does not perform I/O, recovery, reconfiguration
+or persistence, and its state is not independent proof of network health.
 
 ### Development
 

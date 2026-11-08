@@ -3,5 +3,9 @@
 version = 4
 
 [[package]]
+name = "tofu-application"
+version = "0.1.0"
+
+[[package]]
 name = "tofu-domain"
 version = "0.1.0"
