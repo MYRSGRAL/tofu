@@ -24,18 +24,44 @@ def install_signal_handlers() -> None:
 
 
 def run_sandbox(command: list[str], timeout: float = 30) -> None:
-    # Отдельная группа не получает Ctrl+C терминала: завершаем её явно.
-    with subprocess.Popen(command, start_new_session=True) as sandbox:
+    pending: int | None = None
+
+    def defer_signal(signum: int, _frame: object) -> None:
+        nonlocal pending
+        pending = signum
+
+    signals = (signal.SIGINT, signal.SIGTERM)
+    previous = {event: signal.getsignal(event) for event in signals}
+    sandbox: subprocess.Popen[bytes] | None = None
+    try:
+        # Дочерний процесс может начать работу раньше возврата Popen.
+        # Откладываем исключение до получения handle, иначе cleanup его потеряет.
+        for event in signals:
+            signal.signal(event, defer_signal)
+        sandbox = subprocess.Popen(command, start_new_session=True)
+        for event, handler in previous.items():
+            signal.signal(event, handler)
+        if pending == signal.SIGINT:
+            raise KeyboardInterrupt
+        if pending is not None:
+            raise SystemExit(128 + pending)
+        code = sandbox.wait(timeout=timeout)
+        if code:
+            raise subprocess.CalledProcessError(code, command)
+    finally:
         try:
-            code = sandbox.wait(timeout=timeout)
-            if code:
-                raise subprocess.CalledProcessError(code, command)
+            if sandbox is not None:
+                # Повторный сигнал не должен прервать очистку всей группы.
+                for event in signals:
+                    signal.signal(event, defer_signal)
+                try:
+                    os.killpg(sandbox.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # Группа уже завершилась; повторная очистка безопасна.
+                sandbox.wait(timeout=5)
         finally:
-            try:
-                os.killpg(sandbox.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # Группа уже завершилась; повторная очистка безопасна.
-            sandbox.wait(timeout=5)
+            for event, handler in previous.items():
+                signal.signal(event, handler)
 
 
 def links() -> set[str]:

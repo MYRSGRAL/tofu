@@ -24,9 +24,15 @@ def running(pid: int) -> bool:
 
 class CleanupTests(unittest.TestCase):
     def test_interrupt_and_termination_stop_entire_process_group(self) -> None:
-        for event in (signal.SIGINT, signal.SIGTERM, None):
+        for event, startup in [
+            (signal.SIGINT, False),
+            (signal.SIGTERM, False),
+            (None, False),
+            (signal.SIGINT, True),
+            (signal.SIGTERM, True),
+        ]:
             with (
-                self.subTest(event=event),
+                self.subTest(event=event, startup=startup),
                 tempfile.TemporaryDirectory(prefix="tofu-signal-") as directory,
             ):
                 ready = Path(directory) / "ready"
@@ -36,10 +42,27 @@ class CleanupTests(unittest.TestCase):
                     "tmp=Path(sys.argv[1]+'.tmp'); tmp.write_text(f'{os.getpid()} {p.pid}'); "
                     "tmp.replace(sys.argv[1]); time.sleep(60)"
                 )
-                parent = (
-                    "import sys; from tools.engine_smoke import run_sandbox, install_signal_handlers; "
-                    "install_signal_handlers(); run_sandbox([sys.executable,'-c',sys.argv[1],sys.argv[2]], timeout=float(sys.argv[3]))"
-                )
+                parent = """
+import os, sys, time
+from pathlib import Path
+from tools import engine_smoke as smoke
+if int(sys.argv[4]):
+    original = smoke.subprocess.Popen
+    def launch(*args, **kwargs):
+        process = original(*args, **kwargs)
+        deadline = time.monotonic() + 5
+        while not Path(sys.argv[2]).exists():
+            if time.monotonic() >= deadline:
+                process.kill()
+                process.wait()
+                raise TimeoutError()
+            time.sleep(0.01)
+        os.kill(os.getpid(), int(sys.argv[4]))
+        return process
+    smoke.subprocess.Popen = launch
+smoke.install_signal_handlers()
+smoke.run_sandbox([sys.executable, '-c', sys.argv[1], sys.argv[2]], timeout=float(sys.argv[3]))
+"""
                 process = subprocess.Popen(
                     [
                         sys.executable,
@@ -48,6 +71,7 @@ class CleanupTests(unittest.TestCase):
                         child,
                         str(ready),
                         "1" if event is None else "30",
+                        str(int(event)) if startup else "0",
                     ],
                     cwd=ROOT,
                     stdout=subprocess.DEVNULL,
@@ -67,7 +91,7 @@ class CleanupTests(unittest.TestCase):
                     )
                     children = [int(pid) for pid in ready.read_text().split()]
                     self.assertEqual(len(children), 2)
-                    if event is not None:
+                    if event is not None and not startup:
                         process.send_signal(event)
                     process.wait(timeout=5)
                     deadline = time.monotonic() + 3
