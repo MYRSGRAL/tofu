@@ -2,6 +2,9 @@
 
 use std::{fmt, num::NonZeroU64};
 
+mod plan;
+pub use plan::{ConfigDigest, EnvironmentStamp, PreparedPlan};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Disconnected,
@@ -21,11 +24,11 @@ pub enum Fault {
     Engine,
     Network,
     Permission,
+    StalePlan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    Validated,
     NetworkApplied,
     CheckPassed,
     EndpointUnavailable,
@@ -59,6 +62,9 @@ pub enum Error {
     Busy,
     InvalidTransition,
     Exhausted,
+    StaleOperation,
+    StalePlan,
+    PermissionDenied,
 }
 
 impl fmt::Display for Error {
@@ -67,6 +73,9 @@ impl fmt::Display for Error {
             Self::Busy => "Сессия занята",
             Self::InvalidTransition => "Недопустимый переход сессии",
             Self::Exhausted => "Исчерпаны идентификаторы операций",
+            Self::StaleOperation => "Операция устарела или отменена",
+            Self::StalePlan => "Проверенный план устарел",
+            Self::PermissionDenied => "Недостаточно прав для применения плана",
         })
     }
 }
@@ -130,7 +139,8 @@ impl Session {
         Ok(token)
     }
 
-    /// Возвращает cleanup token; None означает отсутствие ресурсов для очистки.
+    /// Возвращает cleanup token; None означает отсутствие сетевых ресурсов сессии.
+    /// Подготовительные I/O-задачи и их отмена остаются ответственностью host.
     /// Повторный Stop в Stopping сохраняет token: host-release идемпотентен.
     pub fn stop(&mut self) -> Result<Option<Token>, Error> {
         match self.state {
@@ -155,7 +165,6 @@ impl Session {
             return Ok(Outcome::Ignored);
         }
         let (state, fault) = match (self.state, event) {
-            (State::Preparing, Event::Validated) => (State::Starting, None),
             (State::Starting, Event::NetworkApplied) => (State::Checking, None),
             (State::Checking | State::Limited, Event::CheckPassed) => (State::Connected, None),
             (State::Checking | State::Limited, Event::EndpointUnavailable) => {
@@ -222,7 +231,18 @@ mod tests {
     fn exhausted_request_cannot_partially_apply_or_cancel_running_operation() {
         let mut session = Session::new(NonZeroU64::MIN);
         let first = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
-        let token = match session.accept(first, super::Event::Validated) {
+        let stamp = super::EnvironmentStamp {
+            network: 0,
+            applications: 0,
+            authorization: 0,
+            engine: 0,
+            authorized: true,
+        };
+        let digest = super::ConfigDigest::new([0; 32]);
+        let plan = session
+            .prepare(first, stamp, digest)
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        let token = match session.apply(plan, stamp, digest) {
             Ok(super::Outcome::Applied(Some(token))) => token,
             other => panic!("Ожидался Starting: {other:?}"),
         };
