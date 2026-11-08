@@ -11,6 +11,8 @@ fn config(engine: Engine, uri: &str) -> Result<Value, CompileError> {
     let report = import_bytes(uri.as_bytes().to_vec()).expect("fixture импортируется");
     assert!(report.issues.is_empty());
     let config = compile(&report.servers[0], engine, NonZeroU16::new(10808).unwrap())?;
+    assert_eq!(config.engine(), engine);
+    assert_eq!(config.listen_port().get(), 10808);
     let debug = format!("{config:?}");
     assert!(!debug.contains(UUID));
     assert!(!debug.contains("secret.example"));

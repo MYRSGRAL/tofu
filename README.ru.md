@@ -25,6 +25,8 @@ desktop-приложения, установщика и рабочего сет�
 - Ограниченный URI/Base64 импорт VLESS, VMess, Trojan, Shadowsocks, HTTP CONNECT и SOCKS5.
 - Строгая компиляция одного сервера для Xray 26.10.31 и sing-box 1.14.4:
   loopback SOCKS, проверка TLS и явные ошибки неподдерживаемых параметров.
+- Linux host `tofu-local`: проверяет immutable snapshot ядра и конфигурацию,
+  обслуживает локальный SOCKS, проверяет HTTPS через него и завершает/reap процесс.
 
 Rust-библиотека рассчитывает политику; изолированные стенды дают описанные ниже
 ограниченные сетевые доказательства. Домены, DNS/Fake-IP,
@@ -42,7 +44,8 @@ Host обязан выбрать уникальный controller ID, пока в
 ### Разработка
 
 Rust 1.85+ (edition 2024). Domain/application используют только std; у импортера
-стандартные библиотеки Base64, URL/IDNA и JSON. Cargo.lock фиксирует MSRV-совместимые версии.
+стандартные библиотеки Base64, URL/IDNA и JSON. Linux host использует Tokio,
+reqwest/rustls, SHA-256 и безопасные rustix syscalls. Cargo.lock фиксирует MSRV-совместимые версии.
 Сборки размещаются вне checkout. На рабочей машине проекта:
 
 ```sh
@@ -135,6 +138,48 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_compile.py "
 
 Нужен `openssl` в дополнение к namespace-инструментам и закреплённые версии ядер.
 [Результаты и ограничения компиляторов](docs/validation/2026-11-09-engine-compiler.md).
+
+### Запуск локального SOCKS на Linux
+
+Нужны Linux 6.3+, executable sealed memfd и `/proc`. Закреплённый бинарник ядра
+загружается отдельно: сначала проверьте release-архив, затем доверенный хеш бинарника.
+`--sha256` относится к извлечённому executable, не к архиву. Для проверенного
+Xray Linux amd64, использованного в тестах:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 < local/subscription.txt
+```
+
+Host копирует и хеширует ELF regular file в sealed memory snapshot; version,
+config-check и start используют одну и ту же неизменяемую копию. Конфигурация
+остаётся в памяти и передаётся через stdin. Stdio ядра скрыт для защиты секретов.
+Принадлежность listener процессу проверяется до и после проверки HTTPS.
+Управляемый ресурс — процесс ядра и его SOCKS на `127.0.0.1:10808`.
+Системный прокси, TUN, маршруты и системный DNS не включаются.
+
+Вывод — безопасные NDJSON события. Для `Connected` нужен HTTPS 2xx строго через
+выбранный SOCKS outbound. Ошибки TLS, timeout и HTTP дают `Limited`; ядро продолжает
+обслуживать SOCKS. Прямого fallback и перехода по redirect нет. `--check-url` выбирает
+HTTPS endpoint, `--check-timeout` принимает 1–60 секунд; по умолчанию generate_204 и
+10 секунд. Ctrl+C/SIGTERM останавливает и reap ядро. `--once` проверяет и завершает
+сессию: exit 0 при успехе/отмене, 2 при отказе endpoint, 1 при ошибке импорта/host.
+Автоматического recovery и постоянного supervisor пока нет; SIGKILL host не позволяет
+выполнить cleanup. Локальный CLI ещё не является полным production EngineHost.
+
+Частичный импорт по умолчанию отклоняется. После просмотра отчёта `tofu-import`
+флаги `--accept-partial --server N` явно выбирают одну распознанную запись и сообщают
+число отклонённых; неподдерживаемые параметры выбранной записи не разрешаются.
+Native JSON пока не поддерживается. Индексы считаются среди распознанных записей
+с нуля. Для sing-box укажите `sing-box` и его проверенный executable/hash.
+Ядра не включены в поставку CLI.
+
+Изолированные тесты host (также нужны `rustc`, `openssl`, PID/mount namespaces):
+
+```sh
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$tofu_build/target/debug/tofu-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
+```
+
+[Результаты и оставшаяся работа](docs/validation/2026-11-09-linux-engine-host.md).
 
 ### Документация и лицензия
 
