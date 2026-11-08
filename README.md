@@ -6,8 +6,8 @@ A native, open source proxy client in development. Linux first (CachyOS/Arch,
 KDE Plasma, Wayland), Android later. Planned features include Xray-core and
 sing-box, TUN, Fake DNS, subscriptions, per-application routing and a system tray.
 
-**Early development:** this repository contains specifications, an initial portable
-Rust libraries, an offline import CLI and isolated engine tests. There is no usable desktop
+**Early development:** this repository contains specifications, portable
+Rust libraries, offline import/configuration CLIs and isolated engine tests. There is no usable desktop
 application, installer or production network adapter yet.
 
 ### Implemented
@@ -22,10 +22,12 @@ application, installer or production network adapter yet.
 - Portable session reducer with stale-event rejection and explicit cleanup confirmation.
 - Single-use PreparedPlan guard bound to environment generations and the checked config digest.
 - Bounded URI/Base64 import for VLESS, VMess, Trojan, Shadowsocks, HTTP CONNECT and SOCKS5.
+- Strict single-server configuration compilers for Xray 26.10.31 and sing-box 1.14.4,
+  with a loopback SOCKS listener, TLS verification and explicit unsupported-option errors.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Domain
-matching, DNS/Fake-IP, network subscription updates, storage, engine configuration compilers, helper,
+matching, DNS/Fake-IP, network subscription updates, storage, policy-to-engine compilation, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
 
 `tofu-application` currently implements the initial connect/check/stop loop.
@@ -97,9 +99,40 @@ protocols and static issue codes/line numbers; exit 0 means an analysis report
 was produced, including partial/rejected records. It never activates a profile.
 Limits: 8 MiB input, 32 MiB decoded, 20,000 URI records, 64 KiB per URI, JSON depth 64.
 Native JSON is retained opaque after syntax validation; managed outbound extraction
-and engine capability/config-check remain pending. Fatal errors preserve input
+remain pending. The separate compiler checks URI capabilities; the host still needs
+to run the pinned engine's config-check before activation. Fatal errors preserve input
 bytes in the library API; an oversized/broken stream is explicitly marked incomplete.
 See [import evidence and limitations](docs/validation/2026-11-09-subscription-import.md).
+
+### Compile one server
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-engine --bin tofu-compile -- xray --server 0 < local/profile.txt
+```
+
+The default output is metadata (`compiled_not_checked`), not a connection result.
+Input must be a complete URI import with no rejected records; `--server` is zero-based.
+Use `sing-box` to select the other engine and `--listen-port` to change 10808.
+`--emit-secret-config` explicitly writes sensitive JSON to stdout: pipe it only to a
+trusted consumer, never logs or a public issue. The library's `CompiledConfig` Debug
+is redacted; only `write_sensitive` exports the JSON.
+
+Supported: the six imported protocols, compatible TCP/WS/gRPC, XHTTP on Xray,
+TLS with certificate verification (system CA), VLESS TCP REALITY and Vision.
+Unknown/inapplicable options, insecure TLS, legacy VMess alterId, plugins and unsupported
+transports/ciphers fail explicitly. Xray public plaintext VLESS is rejected; private IP
+fixtures are allowed. SOCKS-over-TLS and native JSON activation are not implemented.
+The listener is always `127.0.0.1`; there is one proxy outbound and no direct fallback.
+This does not configure TUN, routing policy, system proxy or DNS, or start an engine.
+
+Synthetic config-check, TCP/UDP IPv4/IPv6 forwarding and TLS negative controls:
+
+```sh
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_compile.py "$tofu_build/target/debug/tofu-compile" /absolute/path/to/xray /absolute/path/to/sing-box
+```
+
+Requires `openssl` in addition to the namespace test tools, and the pinned engine versions.
+[Compiler evidence and limitations](docs/validation/2026-11-09-engine-compiler.md).
 
 ### Documentation and license
 
