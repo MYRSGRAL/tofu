@@ -191,3 +191,16 @@ fn recursive_listener_and_public_xray_plaintext_are_rejected() {
     );
     assert!(config(Engine::Xray, &format!("vless://{UUID}@10.0.0.1:443")).is_ok());
 }
+
+#[test]
+fn mapped_ipv4_and_localhost_dot_cannot_create_self_proxy() {
+    for engine in [Engine::Xray, Engine::SingBox] {
+        for address in ["[::ffff:127.0.0.1]", "localhost.", "LOCALHOST"] {
+            assert_eq!(
+                config(engine, &format!("socks5://{address}:10808")),
+                Err(CompileError::ListenerConflict)
+            );
+        }
+        assert!(config(engine, "socks5://[::ffff:127.0.0.1]:10809").is_ok());
+    }
+}

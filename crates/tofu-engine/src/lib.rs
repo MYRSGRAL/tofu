@@ -2,7 +2,12 @@
 
 mod options;
 
-use std::{fmt, io::Write, num::NonZeroU16};
+use std::{
+    fmt,
+    io::Write,
+    net::{IpAddr, Ipv4Addr},
+    num::NonZeroU16,
+};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use options::Options;
@@ -66,9 +71,12 @@ pub fn compile(
     engine: Engine,
     port: NonZeroU16,
 ) -> Result<CompiledConfig, CompileError> {
-    if server.endpoint().port() == port.get()
-        && matches!(server.endpoint().host(), "127.0.0.1" | "localhost")
-    {
+    let host = server.endpoint().host();
+    let listener_address = host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.to_canonical() == IpAddr::V4(Ipv4Addr::LOCALHOST));
+    if server.endpoint().port() == port.get() && listener_address {
         return Err(CompileError::ListenerConflict);
     }
     let options = options::validate(server, engine)?;

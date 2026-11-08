@@ -9,7 +9,9 @@
 CompiledConfig с закрытым JSON и скрывающим Debug; только write_sensitive
 выдаёт содержимое host. Нет запуска команд, чтения файлов или сетевого I/O.
 Один SOCKS inbound на 127.0.0.1, один proxy outbound, без direct fallback.
-Повторное направление на собственный IPv4 listener отклоняется.
+Повторное направление на собственный IPv4 listener отклоняется, включая
+IPv4-mapped IPv6 и localhost с конечной точкой. DNS alias/rebinding требует
+повторной проверки разрешённого адреса будущим host: компилятор не выполняет DNS.
 
 Компиляция не равна config-check и не равна Connected. tofu-compile выводит
 только метаданные по умолчанию; чувствительный экспорт требует отдельного
@@ -83,11 +85,16 @@ Connected и FR-10 не объявлены пройденными. При пер
 
 ## Локальные сборочные проверки
 
-Rust 1.85.1: fmt, clippy --workspace --all-targets -- -D warnings, 55 тестов
+Rust 1.85.1: fmt, clippy --workspace --all-targets -- -D warnings, 56 тестов
 и 4 compile-fail doctest, release build всего workspace и Android
 aarch64-linux-android compile-check прошли. Ruff 0.17.4 format/check и четыре
 Python unittest прошли. Новых внешних зависимостей в lockfile нет: tofu-engine
 переиспользует уже закреплённые serde_json, url, base64 и tofu-import.
+
+Независимый review fe1112e..60bcb09 нашёл один P2: IPv4-mapped IPv6 обходил
+ListenerConflict. Добавлена нормализация адреса и регрессионный тест для обоих
+ядер, localhost./LOCALHOST и разрешённого другого порта. Перед исправлением
+тест воспроизводил ошибку.
 
 ## Границы
 

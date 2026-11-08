@@ -119,7 +119,7 @@ pub(crate) fn validate(server: &ParsedServer, engine: Engine) -> Result<Options,
             .endpoint()
             .host()
             .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| match ip {
+            .is_ok_and(|ip| match ip.to_canonical() {
                 std::net::IpAddr::V4(ip) => {
                     ip.is_loopback() || ip.is_private() || ip.is_link_local()
                 }
