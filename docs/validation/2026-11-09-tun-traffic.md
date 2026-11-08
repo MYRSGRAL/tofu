@@ -52,6 +52,16 @@ Python unittest включает локальные echo endpoints всех че
 - Локально выполняются Rust tests/fmt/clippy/release, Ruff и Python unittest.
   Android, G-DNS/G-APP/G-POWER/G-UI остаются открытыми.
 
+В дополнение к первоначальному отчёту проверена заявленная минимальная версия:
+Rust 1.85.1 — `test --workspace --locked` (5 integration + 1 doctest),
+`clippy --workspace --all-targets --locked -- -D warnings`, `fmt --all -- --check`
+и `build --workspace --release --locked` проходят. Toolchain установлен только
+в собственный transient-каталог, глобальные настройки Rust не менялись.
+
+Независимый read-only reviewer проверил diff `59cd29d..024346e`: блокирующих
+findings не обнаружил. Реальные engine-прогоны и результаты тестов reviewer
+принял по evidence root; повторно их не запускал.
+
 Источники схем:
 [Xray FreedomConfig](https://github.com/XTLS/Xray-core/blob/v26.10.31/infra/conf/freedom.go),
 [sing-box route actions](https://sing-box.sagernet.org/configuration/route/rule_action/).
