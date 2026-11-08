@@ -7,7 +7,7 @@ KDE Plasma, Wayland), Android later. Planned features include Xray-core and
 sing-box, TUN, Fake DNS, subscriptions, per-application routing and a system tray.
 
 **Early development:** this repository contains specifications, an initial portable
-Rust libraries for routing/session control and isolated engine tests. There is no usable desktop
+Rust libraries, an offline import CLI and isolated engine tests. There is no usable desktop
 application, installer or production network adapter yet.
 
 ### Implemented
@@ -21,10 +21,11 @@ application, installer or production network adapter yet.
 - Native executable-path routing checks, including two clients with the same basename.
 - Portable session reducer with stale-event rejection and explicit cleanup confirmation.
 - Single-use PreparedPlan guard bound to environment generations and the checked config digest.
+- Bounded URI/Base64 import for VLESS, VMess, Trojan, Shadowsocks, HTTP CONNECT and SOCKS5.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Domain
-matching, DNS/Fake-IP, import, storage, engine configuration compilers, helper,
+matching, DNS/Fake-IP, network subscription updates, storage, engine configuration compilers, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
 
 `tofu-application` currently implements the initial connect/check/stop loop.
@@ -37,7 +38,8 @@ checked artifact. This does not replace OS authorization or atomic host-side App
 
 ### Development
 
-Rust 1.85+ (edition 2024); no third-party Rust dependencies in the initial library.
+Rust 1.85+ (edition 2024). Domain/application remain std-only; the importer uses
+Base64, URL/IDNA and JSON libraries. Cargo.lock pins MSRV-compatible dependencies.
 Build artifacts belong outside the checkout. On the project development host:
 
 ```sh
@@ -83,6 +85,21 @@ flows, not desktop application coverage or the complete G-APP gate.
 
 Never commit subscription links, credentials or real server configurations.
 `local/` is ignored for private development files.
+
+### Offline import diagnostic
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-import < local/subscription.txt
+```
+
+Input is a subscription body, not a download URL. The CLI only prints counts,
+protocols and static issue codes/line numbers; exit 0 means an analysis report
+was produced, including partial/rejected records. It never activates a profile.
+Limits: 8 MiB input, 32 MiB decoded, 20,000 URI records, 64 KiB per URI, JSON depth 64.
+Native JSON is retained opaque after syntax validation; managed outbound extraction
+and engine capability/config-check remain pending. Fatal errors preserve input
+bytes in the library API; an oversized/broken stream is explicitly marked incomplete.
+See [import evidence and limitations](docs/validation/2026-11-09-subscription-import.md).
 
 ### Documentation and license
 
