@@ -1,5 +1,26 @@
 use std::num::NonZeroU64;
-use tofu_application::{Error, Event, Fault, Outcome, Session, State, Token};
+use tofu_application::{
+    ConfigDigest, EnvironmentStamp, Error, Event, Fault, Outcome, Session, State, Token,
+};
+
+const ENV: EnvironmentStamp = EnvironmentStamp {
+    network: 0,
+    applications: 0,
+    authorization: 0,
+    engine: 0,
+    authorized: true,
+};
+const DIGEST: ConfigDigest = ConfigDigest::new([0; 32]);
+
+fn starting(session: &mut Session, token: Token) -> Token {
+    let plan = session
+        .prepare(token, ENV, DIGEST)
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    match session.apply(plan, ENV, DIGEST) {
+        Ok(Outcome::Applied(Some(token))) => token,
+        other => panic!("Ожидался Starting: {other:?}"),
+    }
+}
 
 fn advance(session: &mut Session, token: Token, event: Event) -> Token {
     match session.accept(token, event) {
@@ -10,7 +31,7 @@ fn advance(session: &mut Session, token: Token, event: Event) -> Token {
 
 fn checking(session: &mut Session) -> Token {
     let token = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
-    let token = advance(session, token, Event::Validated);
+    let token = starting(session, token);
     advance(session, token, Event::NetworkApplied)
 }
 
@@ -23,7 +44,7 @@ fn engine_start_is_not_a_verified_connection() {
         session.accept(first, Event::CheckPassed),
         Err(Error::InvalidTransition)
     );
-    let second = advance(&mut session, first, Event::Validated);
+    let second = starting(&mut session, first);
     assert_eq!(session.state(), State::Starting);
     assert_eq!(session.applied_generation(), None);
     let third = advance(&mut session, second, Event::NetworkApplied);
@@ -88,7 +109,7 @@ fn stop_invalidates_callbacks_and_requires_confirmed_cleanup() {
 fn failure_after_launch_keeps_reason_until_cleanup_and_restart() {
     let mut session = Session::new(NonZeroU64::MIN);
     let token = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
-    let starting = advance(&mut session, token, Event::Validated);
+    let starting = starting(&mut session, token);
     let cleanup = advance(&mut session, starting, Event::Failed(Fault::Engine));
     assert_eq!(session.state(), State::Stopping);
     assert_eq!(session.fault(), Some(Fault::Engine));
@@ -118,10 +139,10 @@ fn validation_failure_needs_no_network_cleanup_and_duplicate_events_are_stale() 
     );
     assert_eq!(session.state(), State::Error);
     let token = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
-    let next = advance(&mut session, token, Event::Validated);
+    let next = starting(&mut session, token);
     assert_eq!(
-        session.accept(token, Event::Validated),
-        Ok(Outcome::Ignored)
+        session.prepare(token, ENV, DIGEST).err(),
+        Some(Error::StaleOperation)
     );
     assert_eq!(session.state(), State::Starting);
     assert_eq!(
@@ -138,10 +159,10 @@ fn foreign_controller_token_cannot_advance_same_generation() {
     let own = second.begin().unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(foreign.generation(), own.generation());
     assert_eq!(
-        second.accept(foreign, Event::Validated),
-        Ok(Outcome::Ignored)
+        second.prepare(foreign, ENV, DIGEST).err(),
+        Some(Error::StaleOperation)
     );
-    advance(&mut second, own, Event::Validated);
+    starting(&mut second, own);
     assert_eq!(second.state(), State::Starting);
 }
 
@@ -151,7 +172,10 @@ fn cancel_preparation_and_duplicate_stop_do_not_revive_old_operation() {
     let old = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(session.stop(), Ok(None));
     assert_eq!(session.state(), State::Disconnected);
-    assert_eq!(session.accept(old, Event::Validated), Ok(Outcome::Ignored));
+    assert_eq!(
+        session.prepare(old, ENV, DIGEST).err(),
+        Some(Error::StaleOperation)
+    );
     let current = checking(&mut session);
     let stop = session.stop().unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(session.stop(), Ok(stop));

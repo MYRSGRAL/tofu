@@ -20,6 +20,7 @@ application, installer or production network adapter yet.
 - Synthetic Xray/sing-box TUN lifecycle and TCP/UDP IPv4/IPv6 echo tests in isolated Linux namespaces.
 - Native executable-path routing checks, including two clients with the same basename.
 - Portable session reducer with stale-event rejection and explicit cleanup confirmation.
+- Single-use PreparedPlan guard bound to environment generations and the checked config digest.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Domain
@@ -30,6 +31,9 @@ GUI and tray remain to be implemented. GUI toolkit selection is still open.
 Its host-provided controller ID must be unique while callbacks from an older
 controller can still arrive. It does not perform I/O, recovery, reconfiguration
 or persistence, and its state is not independent proof of network health.
+Preparation now goes through `prepare/apply`; direct `Event::Validated` is removed.
+The trusted host supplies fresh generations and a SHA-256 digest of the immutable
+checked artifact. This does not replace OS authorization or atomic host-side Apply.
 
 ### Development
 
