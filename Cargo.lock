@@ -276,6 +276,16 @@ name = "tofu-domain"
 version = "0.1.0"
 
 [[package]]
+name = "tofu-engine"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "tofu-import",
+ "url",
+]
+
+[[package]]
 name = "tofu-import"
 version = "0.1.0"
 dependencies = [
