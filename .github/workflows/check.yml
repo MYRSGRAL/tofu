@@ -24,6 +24,10 @@ jobs:
         run: cargo +1.85.1 test --workspace --locked
       - name: Собрать release
         run: cargo +1.85.1 build --workspace --release --locked
+      - name: Проверить общую библиотеку для Android
+        run: |
+          rustup target add aarch64-linux-android --toolchain 1.85.1
+          cargo +1.85.1 check --workspace --target aarch64-linux-android --locked
   python:
     runs-on: ubuntu-latest
     steps:
