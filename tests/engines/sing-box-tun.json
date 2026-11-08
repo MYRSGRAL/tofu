@@ -1,0 +1,12 @@
+{
+  "log": {"level": "warn"},
+  "inbounds": [{
+    "type": "tun",
+    "tag": "tun",
+    "interface_name": "tofu-test",
+    "address": ["198.18.0.1/30", "fd00:746f:6675::1/126"],
+    "mtu": 1500,
+    "auto_route": false
+  }],
+  "route": {"rules": [{"action": "reject"}]}
+}
