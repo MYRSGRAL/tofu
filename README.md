@@ -18,8 +18,10 @@ application, installer or production network adapter yet.
 - Executable and destination conditions: AND between groups, OR within each group.
 - Private-network blocking when its VPN route becomes unavailable.
 - Synthetic Xray/sing-box TUN lifecycle and TCP/UDP IPv4/IPv6 echo tests in isolated Linux namespaces.
+- Native executable-path routing checks, including two clients with the same basename.
 
-These are policy calculations, not evidence of actual packet routing. Domain
+The Rust library calculates policy; the isolated suites provide the specific
+network evidence described below. Domain
 matching, DNS/Fake-IP, import, storage, engine configuration compilers, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
 
@@ -54,7 +56,20 @@ suite sends random payloads through TUN to redirected local echo endpoints and
 checks interface counters and a negative control after shutdown.
 [Traffic evidence](docs/validation/2026-11-09-tun-traffic.md).
 Neither suite completes the G-LINUX/G-DNS/G-APP gates: proxy outbounds, DNS,
-private VPN integration and process attribution still require verification.
+private VPN integration and broader process attribution still require verification.
+
+Executable attribution has a separate baseline suite:
+
+```sh
+tofu_apps=/var/tmp/codex-myrs/transient/tofu-apps
+mkdir -p "$tofu_apps"
+flock -s "$tofu_apps" python tools/engine_apps.py xray /absolute/path/to/xray --work-dir "$tofu_apps"
+flock -s "$tofu_apps" python tools/engine_apps.py sing-box /absolute/path/to/sing-box --work-dir "$tofu_apps"
+```
+
+This verifies exact executable paths for sequential same-UID TCP/UDP IPv4/IPv6
+flows, not desktop application coverage or the complete G-APP gate.
+[Process routing evidence](docs/validation/2026-11-09-process-routing.md).
 
 Never commit subscription links, credentials or real server configurations.
 `local/` is ignored for private development files.
