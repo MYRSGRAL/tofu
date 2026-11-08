@@ -7,7 +7,30 @@ pub enum Action {
     #[default]
     Proxy,
     Block,
+}
+
+/// Результат содержит VPN только после проверки приватной сети.
+/// Пользовательские правила ограничены Direct/Proxy/Block.
+/// ```compile_fail
+/// use tofu_domain::Action;
+/// let invalid = Action::PrivateVpn;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    Direct,
+    Proxy,
+    Block,
     PrivateVpn,
+}
+
+impl From<Action> for Route {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Direct => Self::Direct,
+            Action::Proxy => Self::Proxy,
+            Action::Block => Self::Block,
+        }
+    }
 }
 
 /// Только подтверждённый host-адаптером executable, не display name/PID.
@@ -70,7 +93,7 @@ pub enum RuleOrigin {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decision {
-    pub action: Action,
+    pub action: Route,
     pub origin: RuleOrigin,
 }
 
@@ -85,7 +108,7 @@ impl Policy {
                 // Пересечение с недоступной защищённой сетью не разрешает обход.
                 if !private.available {
                     return Decision {
-                        action: Action::Block,
+                        action: Route::Block,
                         origin: RuleOrigin::PrivateNetwork,
                     };
                 }
@@ -93,13 +116,13 @@ impl Policy {
         }
         if private_match {
             return Decision {
-                action: Action::PrivateVpn,
+                action: Route::PrivateVpn,
                 origin: RuleOrigin::PrivateNetwork,
             };
         }
         if self.lan.iter().any(|cidr| cidr.contains(flow.destination)) {
             return Decision {
-                action: Action::Direct,
+                action: Route::Direct,
                 origin: RuleOrigin::Lan,
             };
         }
@@ -112,13 +135,13 @@ impl Policy {
                 .find(|rule| rule.enabled && rule.conditions.matches(flow))
             {
                 return Decision {
-                    action: rule.action,
+                    action: rule.action.into(),
                     origin: origin(rule.id),
                 };
             }
         }
         Decision {
-            action: self.default_action,
+            action: self.default_action.into(),
             origin: RuleOrigin::Default,
         }
     }

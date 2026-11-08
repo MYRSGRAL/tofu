@@ -4,4 +4,6 @@ mod cidr;
 mod policy;
 
 pub use cidr::{Cidr, InvalidCidr};
-pub use policy::{Action, Conditions, Decision, Flow, Policy, PrivateNetwork, Rule, RuleOrigin};
+pub use policy::{
+    Action, Conditions, Decision, Flow, Policy, PrivateNetwork, Route, Rule, RuleOrigin,
+};

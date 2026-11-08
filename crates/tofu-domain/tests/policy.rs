@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 use tofu_domain::{
-    Action, Cidr, Conditions, Decision, Flow, Policy, PrivateNetwork, Rule, RuleOrigin,
+    Action, Cidr, Conditions, Decision, Flow, Policy, PrivateNetwork, Route, Rule, RuleOrigin,
 };
 
 fn ip(value: &str) -> IpAddr {
@@ -69,14 +69,14 @@ fn private_network_cannot_escape_to_lan_user_or_preset() {
     assert_eq!(
         policy.evaluate(&flow(None, "10.0.0.1")),
         Decision {
-            action: Action::Block,
+            action: Route::Block,
             origin: RuleOrigin::PrivateNetwork
         }
     );
     policy.private_networks[0].available = true;
     assert_eq!(
         policy.evaluate(&flow(None, "10.0.0.1")).action,
-        Action::PrivateVpn
+        Route::PrivateVpn
     );
 }
 
@@ -95,16 +95,16 @@ fn overlapping_private_networks_block_if_any_required_route_is_missing() {
     ]);
     assert_eq!(
         policy.evaluate(&flow(None, "10.1.2.3")).action,
-        Action::Block
+        Route::Block
     );
     policy.private_networks.reverse();
     assert_eq!(
         policy.evaluate(&flow(None, "10.1.2.3")).action,
-        Action::Block
+        Route::Block
     );
     assert_eq!(
         policy.evaluate(&flow(None, "10.2.2.3")).action,
-        Action::PrivateVpn
+        Route::PrivateVpn
     );
 }
 
@@ -120,17 +120,17 @@ fn source_and_destination_are_and_values_are_or() {
     for address in ["192.0.2.3", "2001:db8::1"] {
         assert_eq!(
             policy.evaluate(&flow(Some("/usr/bin/b"), address)).action,
-            Action::Block
+            Route::Block
         );
         for path in [None, Some("b"), Some("/opt/b")] {
-            assert_eq!(policy.evaluate(&flow(path, address)).action, Action::Proxy);
+            assert_eq!(policy.evaluate(&flow(path, address)).action, Route::Proxy);
         }
     }
     assert_eq!(
         policy
             .evaluate(&flow(Some("/usr/bin/b"), "198.51.100.1"))
             .action,
-        Action::Proxy
+        Route::Proxy
     );
 }
 
@@ -167,7 +167,7 @@ fn lan_user_preset_and_default_have_explicit_order() {
     assert_eq!(
         policy.evaluate(&flow(None, "198.51.100.1")),
         Decision {
-            action: Action::Proxy,
+            action: Route::Proxy,
             origin: RuleOrigin::Default
         }
     );
