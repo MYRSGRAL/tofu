@@ -152,6 +152,7 @@ pub enum IssueCode {
     InvalidJson,
     TooLarge,
     DuplicateParameter,
+    ConflictingParameter,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {

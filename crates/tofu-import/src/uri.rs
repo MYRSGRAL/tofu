@@ -3,7 +3,7 @@ use crate::{
     SecretText, Security, Transport, decode, json, model::RecordError,
 };
 use percent_encoding::percent_decode_str;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, net::IpAddr};
 use url::{Host, Url};
 
 const QUERY_KEYS: &[&str] = &[
@@ -70,6 +70,10 @@ fn uuid(text: &str) -> Result<SecretText, RecordError> {
 }
 
 fn host(text: &str) -> Result<String, RecordError> {
+    // JSON хранит IPv6 literal без URI-скобок.
+    if let Ok(address) = text.parse::<IpAddr>() {
+        return Ok(address.to_string());
+    }
     match Host::parse(text).map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))? {
         Host::Domain(name) if !name.is_empty() => Ok(name),
         Host::Ipv4(address) => Ok(address.to_string()),
@@ -244,6 +248,16 @@ pub(crate) fn parse(text: &str) -> Result<ParsedServer, RecordError> {
             .unwrap_or(tls_default),
         &mut flags,
     );
+    if protocol == Protocol::HttpConnect
+        && tls
+            != if scheme == "https" {
+                Security::Tls
+            } else {
+                Security::None
+            }
+    {
+        return Err((IssueCode::ConflictingParameter, Field::Parameters));
+    }
     let username = component(value.username(), Field::Credentials)?;
     let password = value
         .password()
@@ -348,17 +362,7 @@ fn vmess(source: &str, body: &str) -> Result<ParsedServer, RecordError> {
         .ok_or((IssueCode::InvalidHost, Field::Endpoint))?;
     let port = object
         .get("port")
-        .and_then(|v| {
-            v.as_u64().and_then(|p| u16::try_from(p).ok()).or_else(|| {
-                v.as_str().and_then(|s| {
-                    if s.bytes().all(|b| b.is_ascii_digit()) {
-                        s.parse::<u16>().ok()
-                    } else {
-                        None
-                    }
-                })
-            })
-        })
+        .and_then(integer16)
         .filter(|p| *p != 0)
         .ok_or((IssueCode::InvalidPort, Field::Endpoint))?;
     let id = object
@@ -373,11 +377,11 @@ fn vmess(source: &str, body: &str) -> Result<ParsedServer, RecordError> {
     if object.keys().any(|key| !known.contains(&key.as_str())) {
         flags.push(ReviewFlag::UnknownParameter);
     }
-    if object
-        .get("aid")
-        .is_some_and(|v| v.as_str().is_some_and(|s| s != "0") || v.as_u64().is_some_and(|n| n != 0))
-    {
-        flags.push(ReviewFlag::LegacyOption);
+    if let Some(value) = object.get("aid") {
+        let aid = integer16(value).ok_or((IssueCode::InvalidCredentials, Field::Parameters))?;
+        if aid != 0 {
+            flags.push(ReviewFlag::LegacyOption);
+        }
     }
     let network = transport(optional_text(&object, "net", "tcp")?, &mut flags);
     let tls = security(optional_text(&object, "tls", "none")?, &mut flags);
@@ -406,4 +410,15 @@ fn optional_text<'a>(
             .as_str()
             .ok_or((IssueCode::InvalidJson, Field::Parameters))
     })
+}
+
+fn integer16(value: &serde_json::Value) -> Option<u16> {
+    if let Some(text) = value.as_str() {
+        if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        text.parse().ok()
+    } else {
+        value.as_u64().and_then(|number| u16::try_from(number).ok())
+    }
 }

@@ -34,13 +34,13 @@ Debug скрывает исходник, адреса, credentials и парам
 
 ## Проверки
 
-20 новых integration/CLI tests: шесть протоколов, partial import/line indices,
+23 новых integration/CLI tests: шесть протоколов, partial import/line indices,
 однослойный Base64 с padding/URL-safe/BOM, opaque JSON/depth, IDNA/IPv6,
 SS legacy и percent-escaped password, duplicate/mistyped VMess, безопасная
 диагностика canary-секретов, exact limits/overflow/unbounded reader и сохранение
 полного/неполного исходника при ошибках.
 
-Вместе с предыдущими crates: 42 теста + 4 doctest. Rust 1.97 и MSRV 1.85.1,
+Вместе с предыдущими crates: 45 тестов + 4 doctest. Rust 1.97 и MSRV 1.85.1,
 fmt/clippy, MSRV release и Android compile-check проверяются локально.
 Cargo.lock фиксирует совместимые с Rust 1.85 версии; URL/IDNA транзитивные ICU
 зависимости выбраны resolver из совместимого диапазона.
@@ -65,3 +65,16 @@ extraction, config compilers и активации. Hysteria2/TUIC и други
 Источники форматов:
 [SIP002](https://shadowsocks.org/doc/sip002.html),
 [VMess share JSON](https://github.com/2dust/v2rayN/wiki/Description-of-VMess-share-link).
+
+## Review и исправления
+
+Независимое ревью diff `2c96860..be439e3` нашло три P2: bare IPv6 в VMess JSON
+не проходил URI-oriented Host::parse; query security мог отключить TLS для HTTPS
+proxy; неверные типы/диапазон aid не диагностировались. Все три воспроизведены
+регрессионными тестами до исправления.
+
+IPv6 теперь сначала нормализуется как IpAddr; конфликт security с HTTP(S) scheme
+отклоняется; aid допускает только unsigned number/decimal string в диапазоне
+0…65535, ненулевое значение получает LegacyOption. Диапазон соответствует
+[описанию alterId](https://www.v2fly.org/config/protocols/vmess.html#userobject).
+Review не включал отложенные FetchHost/storage/managed JSON/engine adapters.
