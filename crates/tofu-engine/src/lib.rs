@@ -52,10 +52,20 @@ impl fmt::Display for CompileError {
 impl std::error::Error for CompileError {}
 
 /// Содержит credentials. JSON доступен только явной записью в выбранный host writer.
-pub struct CompiledConfig(Value);
+pub struct CompiledConfig {
+    value: Value,
+    engine: Engine,
+    port: NonZeroU16,
+}
 impl CompiledConfig {
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+    pub fn listen_port(&self) -> NonZeroU16 {
+        self.port
+    }
     pub fn write_sensitive(&self, writer: impl Write) -> Result<(), serde_json::Error> {
-        serde_json::to_writer(writer, &self.0)
+        serde_json::to_writer(writer, &self.value)
     }
 }
 impl fmt::Debug for CompiledConfig {
@@ -95,7 +105,11 @@ pub fn compile(
             "route":{"final":"proxy"},
         }),
     };
-    Ok(CompiledConfig(value))
+    Ok(CompiledConfig {
+        value,
+        engine,
+        port,
+    })
 }
 
 fn validate_credentials(server: &ParsedServer, engine: Engine) -> Result<(), CompileError> {
