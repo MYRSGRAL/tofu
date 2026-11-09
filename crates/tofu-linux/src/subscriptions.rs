@@ -17,9 +17,10 @@ use std::{
 };
 use tofu_import::{ImportReport, import_bytes};
 use tofu_subscription::{ApprovedUpdate, StagedUpdate, Subscription, Summary};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, Semaphore, watch};
 
 static CONTROLLERS: AtomicU64 = AtomicU64::new(1);
+static IMPORT_GATE: Semaphore = Semaphore::const_new(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionError {
@@ -30,6 +31,7 @@ pub enum SubscriptionError {
     Exhausted,
     ForeignApproval,
     StaleUpdate,
+    Worker,
     Fetch(FetchError),
     Import(tofu_subscription::Error),
     Repository(RepositoryError),
@@ -44,6 +46,7 @@ impl fmt::Display for SubscriptionError {
             Self::Exhausted => "Исчерпаны идентификаторы обновлений",
             Self::ForeignApproval => "Согласие относится к другому хранилищу подписок",
             Self::StaleUpdate => "Обновление подписки устарело или отменено",
+            Self::Worker => "Не удалось завершить обработку подписки",
             Self::Fetch(_) => "Не удалось загрузить подписку",
             Self::Import(_) => "Обновление не принято импортером",
             Self::Repository(_) => "Не удалось сохранить подписку",
@@ -274,8 +277,16 @@ impl SubscriptionService {
             .await?
             .ok_or(SubscriptionError::NotFound)?;
         let snapshot = record.snapshot.ok_or(SubscriptionError::NoSnapshot)?;
-        let report =
-            import_bytes(snapshot.body.to_vec()).map_err(|_| SubscriptionError::CorruptSnapshot)?;
+        let permit = IMPORT_GATE
+            .acquire()
+            .await
+            .map_err(|_| SubscriptionError::Worker)?;
+        let report = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            import_bytes(snapshot.body.to_vec()).map_err(|_| SubscriptionError::CorruptSnapshot)
+        })
+        .await
+        .map_err(|_| SubscriptionError::Worker)??;
         Ok(OfflineSnapshot {
             report,
             revision: snapshot.revision,
@@ -329,6 +340,7 @@ impl SubscriptionService {
             .map(|bytes| decode_validators(bytes, spec.0.local_exception))
             .transpose()?;
         let host = FetchHost::new(timeout).map_err(SubscriptionError::Fetch)?;
+        let mut parse_cancel = cancel.clone();
         let response = tokio::select! {
             biased;
             _ = superseded.changed() => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
@@ -374,15 +386,12 @@ impl SubscriptionService {
                 (body.into_bytes(), encode_validators(&validators)?)
             }
         };
-        let next = CONTROLLERS
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map_err(|_| SubscriptionError::Exhausted)?;
-        let mut controller =
-            Subscription::new(NonZeroU64::new(next).ok_or(SubscriptionError::Exhausted)?);
-        let ticket = controller.begin().map_err(SubscriptionError::Import)?;
-        let staged = controller
-            .stage(ticket, body)
-            .map_err(SubscriptionError::Import)?;
+        let (controller, staged) = tokio::select! {
+            biased;
+            _ = watch_cancelled(&mut superseded) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
+            _ = watch_cancelled(&mut parse_cancel) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
+            result = stage_body(body) => result?,
+        };
         Ok(RefreshResult::Pending(Box::new(PendingRefresh {
             service: self.identity.clone(),
             request: serial,
@@ -447,4 +456,35 @@ fn check_request(
         Some(request) if request.serial == serial && !*request.cancellation.borrow() => Ok(()),
         _ => Err(SubscriptionError::StaleUpdate),
     }
+}
+
+async fn watch_cancelled(receiver: &mut watch::Receiver<bool>) {
+    loop {
+        if *receiver.borrow_and_update() || receiver.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), SubscriptionError> {
+    // Permit остаётся внутри blocking-задачи даже при отмене ожидающего future.
+    let permit = IMPORT_GATE
+        .acquire()
+        .await
+        .map_err(|_| SubscriptionError::Worker)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let next = CONTROLLERS
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| SubscriptionError::Exhausted)?;
+        let mut controller =
+            Subscription::new(NonZeroU64::new(next).ok_or(SubscriptionError::Exhausted)?);
+        let ticket = controller.begin().map_err(SubscriptionError::Import)?;
+        let staged = controller
+            .stage(ticket, body)
+            .map_err(SubscriptionError::Import)?;
+        Ok((controller, staged))
+    })
+    .await
+    .map_err(|_| SubscriptionError::Worker)?
 }

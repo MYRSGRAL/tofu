@@ -274,6 +274,13 @@ impl FetchHost {
             if !response.status().is_success() {
                 return Err(FetchError::HttpStatus);
             }
+            // Range не запрашивался: валидный URI-префикс частичного ответа
+            // иначе мог бы выглядеть полным отчётом и заменить весь snapshot.
+            if response.status() == reqwest::StatusCode::PARTIAL_CONTENT
+                || response.headers().contains_key(header::CONTENT_RANGE)
+            {
+                return Err(FetchError::HttpStatus);
+            }
             if response
                 .content_length()
                 .is_some_and(|length| length > MAX_FETCH_BODY as u64)
@@ -642,6 +649,15 @@ mod tests {
             ),
             (
                 "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".into(),
+                FetchError::HttpStatus,
+            ),
+            (
+                "HTTP/1.1 206 Partial Content\r\nContent-Length: 0\r\n\r\n".into(),
+                FetchError::HttpStatus,
+            ),
+            (
+                "HTTP/1.1 200 OK\r\nContent-Range: bytes 0-9/100\r\nContent-Length: 0\r\n\r\n"
+                    .into(),
                 FetchError::HttpStatus,
             ),
             (
