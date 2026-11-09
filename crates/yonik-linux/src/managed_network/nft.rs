@@ -1,5 +1,6 @@
-//! Реальные эффекты ограничены пустой собственной nft-таблицей: это ещё не firewall.
+//! Типизированные nftables-ресурсы с durable-учётом и проверкой владения.
 //! Неоднозначность оставляет durable intent; Drop не обещает сетевую очистку.
+use super::firewall::PublicBlockPolicy;
 use super::{
     Journal, JournalError, NftFamily, Ownership, Reconciled, RecordState, Resource, Scope,
 };
@@ -95,6 +96,9 @@ enum Action<'a> {
     List,
     Create(&'a Table),
     Delete(&'a Table, u64),
+    ListTable(&'a Table),
+    InstallBlock(&'a Table, &'a PublicBlockPolicy),
+    ReplaceBlock(&'a Table, u64, &'a Table, &'a PublicBlockPolicy),
 }
 fn request(action: Action<'_>) -> Value {
     let command = match action {
@@ -104,6 +108,22 @@ fn request(action: Action<'_>) -> Value {
         }
         Action::Delete(table, handle) => {
             json!({"delete":{"table":{"family":table.family,"handle":handle}}})
+        }
+        Action::ListTable(table) => {
+            json!({"list":{"table":{"family":table.family,"name":table.name}}})
+        }
+        Action::InstallBlock(table, policy) => {
+            let mut commands = vec![request(Action::Create(table))["nftables"][0].clone()];
+            commands.extend(policy.commands(&table.name));
+            return json!({"nftables": commands});
+        }
+        Action::ReplaceBlock(old, handle, new, policy) => {
+            let mut commands = vec![
+                request(Action::Delete(old, handle))["nftables"][0].clone(),
+                request(Action::Create(new))["nftables"][0].clone(),
+            ];
+            commands.extend(policy.commands(&new.name));
+            return json!({"nftables": commands});
         }
     };
     json!({"nftables":[command]})
@@ -240,6 +260,9 @@ impl NftExecutor {
     }
     async fn run(&mut self, action: Action<'_>) -> Result<Vec<u8>, NftError> {
         let bytes = serde_json::to_vec(&request(action)).map_err(|_| NftError::Invalid)?;
+        if bytes.len() > MAX_OUTPUT {
+            return Err(NftError::Invalid);
+        }
         let gate = tokio::time::timeout(DEADLINE, Arc::clone(&self.gate).acquire_owned())
             .await
             .map_err(|_| NftError::Timeout)?
@@ -250,7 +273,7 @@ impl NftExecutor {
             .map_err(|_| NftError::Io)?;
         self.check_namespace()?;
         let child = Command::new(format!("/proc/self/fd/{}", self.executable.as_raw_fd()))
-            .args(["-j", "-f", "-"])
+            .args(["-j", "-n", "-f", "-"])
             .env_clear()
             .current_dir("/")
             .stdin(Stdio::piped())
@@ -415,3 +438,6 @@ async fn drain(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>, NftError> 
 #[cfg(test)]
 #[path = "nft_tests.rs"]
 mod tests;
+
+#[path = "nft_block.rs"]
+mod block;
