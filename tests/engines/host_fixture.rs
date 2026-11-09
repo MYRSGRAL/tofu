@@ -8,6 +8,9 @@ fn block() -> ! {
 }
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("block-stdin") {
+        block();
+    }
     let mode = std::env::var("SSL_CERT_DIR").unwrap_or_default();
     if args.get(1).map(String::as_str) == Some("version") {
         if mode.ends_with("version-hang") {

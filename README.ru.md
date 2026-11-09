@@ -83,7 +83,9 @@ Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop eng
 не изменяются. При обычном запуске недоступные службы явно отображаются в GUI.
 
 Прототип требует Qt 6 Base/Declarative (Quick, Controls, Widgets, Network, DBus и
-QML build tools), C++ compiler и системный SQLite. Qt включается optional feature
+QML build tools), C++ compiler, системный SQLite и совместимый linker
+(`lld`, `gold` или `mold`; CI устанавливает `lld`). CXX-Qt выбирает его вместо
+системного GNU ld.bfd. Qt включается optional feature
 `gui`; обычные workspace/Android проверки Qt не собирают. CXX-Qt закреплён на
 0.10.0 с согласованными версиями ABI CXX/cxx-gen.
 

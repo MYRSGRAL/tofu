@@ -66,3 +66,20 @@ accessibility, fractional HiDPI, clipboard и tray. G-UI/G-POWER остаютс�
 сопоставимых измерений. Установка системных шрифтов или изменение профиля питания
 не выполнялись. Сырые локальные журналы сохраняются в
 `local/validation/ui-comparison/` (не входят в Git).
+
+## Первый реально запущенный CI
+
+Для head `e2ef351` Python, UI-модель и native adapter прошли в обоих runs
+42619370027/42619380715. Rust упал в тесте отмены blocked stdin: системный
+`/usr/bin/sleep`, запущенный через sealed memfd, завершился с `Security violation`,
+поэтому вместо Cancelled получен Process. Desktop упал при link: CXX-Qt сообщил
+отсутствие mold/lld/gold, GNU ld.bfd не разрешил initializer symbols.
+
+Исправление заменяет только sleep-fixture в трёх host unit tests на собственный
+Rust ELF с режимом `block-stdin`; sealed snapshot, отмена/reap и process group
+проверяются по-прежнему. Production `BinarySnapshot::command` не меняется.
+Host tests компилируют fixture локальным rustc и удаляют собственные каталоги.
+В desktop-job добавлен пакет lld; выбор linker подтверждён исходниками
+закреплённого qt-build-utils 0.10.0, отдельные linker flags не дублируются.
+Локально прошли 7 host tests, fmt и scoped Clippy --no-deps с -D warnings на
+Rust 1.97.0. Исправленный CI ещё должен подтвердить поведение на runner.
