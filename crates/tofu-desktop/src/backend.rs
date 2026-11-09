@@ -17,9 +17,9 @@ use tofu_engine::Engine;
 use tofu_import::{Field, IssueCode, ReviewFlag};
 use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
-    FetchError, FetchRoute, HostError, LocalSession, PendingRefresh, ProbeTarget, ProfileQuery,
-    RefreshResult, ResolvedProfile, SubscriptionError, SubscriptionService, SubscriptionSource,
-    subscription_master_key,
+    FetchError, FetchRoute, HostError, LocalSession, PendingRefresh, ProbeResult, ProbeTarget,
+    ProfileQuery, RefreshResult, ResolvedProfile, SubscriptionError, SubscriptionService,
+    SubscriptionSource, subscription_master_key,
 };
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroizing;
@@ -73,6 +73,8 @@ impl std::error::Error for DesktopError {}
 
 type Result<T> = std::result::Result<T, DesktopError>;
 type Callback = Arc<dyn Fn(String) + Send + Sync>;
+const DEFAULT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
@@ -112,6 +114,11 @@ enum Command {
     SetEngine {
         engine: EngineChoice,
     },
+    SetProbeTarget {
+        url: String,
+        expected_status: u16,
+    },
+    ResetProbeTarget,
     Connect,
     Stop,
     Shutdown,
@@ -228,6 +235,7 @@ impl DesktopHost {
                 | Command::Connect
                 | Command::Stop
                 | Command::Shutdown
+                | Command::ResetProbeTarget
         ) {
             let object: serde_json::Value =
                 serde_json::from_str(request).map_err(|_| DesktopError("invalid_input"))?;
@@ -283,6 +291,7 @@ fn validate(command: &Command) -> Result<()> {
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
         Command::SourcePage { offset } => *offset <= 40_000,
         Command::ReviewPage { offset } => *offset <= 160_000,
+        Command::SetProbeTarget { url, .. } => text(url, 2048),
         Command::SelectSource { id } | Command::Favorite { id, .. } => *id > 0,
         Command::SelectProfile { id, revision } => *id > 0 && *revision > 0,
         _ => true,
@@ -419,6 +428,9 @@ struct Snapshot {
     can_stop: bool,
     active_name: Option<String>,
     active_engine: Option<EngineChoice>,
+    probe_custom: bool,
+    probe_expected_status: u16,
+    probe_result: Option<HealthResultDto>,
 }
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
@@ -446,6 +458,9 @@ impl Snapshot {
             can_stop: false,
             active_name: None,
             active_engine: None,
+            probe_custom: false,
+            probe_expected_status: 204,
+            probe_result: None,
         }
     }
     fn emit(&self, callback: &Callback) {
@@ -517,8 +532,21 @@ struct Actor {
     pending: Option<Box<PendingRefresh>>,
     search: String,
     favorites_only: bool,
+    probe_url: Zeroizing<String>,
 }
 impl Actor {
+    fn probe_target(&self) -> Result<ProbeTarget> {
+        ProbeTarget::new(&self.probe_url, PROBE_TIMEOUT)
+            .and_then(|target| target.with_expected_status(self.state.probe_expected_status))
+            .map_err(|_| DesktopError("probe_target_invalid"))
+    }
+    fn update(&mut self, update: SessionUpdate) {
+        self.state.status = update.status;
+        self.state.error = update.error;
+        if let Some(result) = update.probe_result {
+            self.state.probe_result = Some(result);
+        }
+    }
     fn emit(&mut self) {
         self.state.can_connect = self.selected.is_some()
             && !self.state.can_stop
@@ -705,6 +733,33 @@ impl Actor {
                 self.state.engine = engine;
                 Ok(())
             }
+            Command::SetProbeTarget {
+                url,
+                expected_status,
+            } => {
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                let url = Zeroizing::new(url);
+                ProbeTarget::new(&url, PROBE_TIMEOUT)
+                    .and_then(|target| target.with_expected_status(expected_status))
+                    .map_err(|_| DesktopError("probe_target_invalid"))?;
+                self.probe_url = url;
+                self.state.probe_custom = true;
+                self.state.probe_expected_status = expected_status;
+                self.state.probe_result = None;
+                Ok(())
+            }
+            Command::ResetProbeTarget => {
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                self.probe_url = Zeroizing::new(DEFAULT_PROBE_URL.into());
+                self.state.probe_custom = false;
+                self.state.probe_expected_status = 204;
+                self.state.probe_result = None;
+                Ok(())
+            }
             _ => Err(DesktopError("invalid_input")),
         }
     }
@@ -746,6 +801,33 @@ fn map_subscription(error: SubscriptionError) -> DesktopError {
 struct SessionUpdate {
     status: &'static str,
     error: Option<&'static str>,
+    probe_result: Option<HealthResultDto>,
+}
+#[derive(Serialize)]
+struct HealthResultDto {
+    kind: &'static str,
+    http_status: Option<u16>,
+    elapsed_ms: Option<u64>,
+}
+impl From<ProbeResult> for HealthResultDto {
+    fn from(result: ProbeResult) -> Self {
+        match result {
+            ProbeResult::Response { status, elapsed } => Self {
+                kind: "http",
+                http_status: Some(status),
+                elapsed_ms: Some(elapsed.as_millis().min(u64::MAX as u128) as u64),
+            },
+            other => Self {
+                kind: match other {
+                    ProbeResult::Timeout => "timeout",
+                    ProbeResult::Tls => "tls",
+                    _ => "transport",
+                },
+                http_status: None,
+                elapsed_ms: None,
+            },
+        }
+    }
 }
 type RefreshTask = (
     u64,
@@ -762,6 +844,7 @@ async fn session(
     config: tofu_engine::CompiledConfig,
     engine_dir: PathBuf,
     engine: Engine,
+    target: ProbeTarget,
     mut cancel: Cancellation,
     updates: mpsc::Sender<SessionUpdate>,
 ) -> std::result::Result<(), LocalSession> {
@@ -770,6 +853,7 @@ async fn session(
             .send(SessionUpdate {
                 status: "Error",
                 error: Some("engine_failed"),
+                probe_result: None,
             })
             .await;
         return Ok(());
@@ -818,28 +902,32 @@ async fn session(
             .send(SessionUpdate {
                 status: "Checking",
                 error: None,
+                probe_result: None,
             })
             .await;
-        let target = ProbeTarget::new(
-            "https://www.gstatic.com/generate_204",
-            Duration::from_secs(10),
-        )
-        .map_err(|_| "check_failed")?;
-        let passed = session
-            .check(&target, &mut cancel)
-            .await
-            .map_err(|e| {
-                if e == HostError::Cancelled {
-                    "cancelled"
-                } else {
-                    "check_failed"
-                }
-            })?
-            .passed();
+        let result = session.check(&target, &mut cancel).await.map_err(|e| {
+            if e == HostError::Cancelled {
+                "cancelled"
+            } else {
+                "check_failed"
+            }
+        })?;
+        let passed = target.accepts(result);
+        let error = if passed {
+            None
+        } else {
+            Some(match result {
+                ProbeResult::Response { .. } => "check_http_status",
+                ProbeResult::Timeout => "check_timeout",
+                ProbeResult::Tls => "check_tls",
+                ProbeResult::Transport => "check_transport",
+            })
+        };
         let _ = updates
             .send(SessionUpdate {
                 status: if passed { "Connected" } else { "Limited" },
-                error: if passed { None } else { Some("check_failed") },
+                error,
+                probe_result: Some(result.into()),
             })
             .await;
         session.wait_exit(&mut cancel).await.map_err(|e| {
@@ -856,6 +944,7 @@ async fn session(
             .send(SessionUpdate {
                 status: "CleanupError",
                 error: Some("cleanup_failed"),
+                probe_result: None,
             })
             .await;
         return Err(session);
@@ -869,6 +958,7 @@ async fn session(
                 "Disconnected"
             },
             error,
+            probe_result: None,
         })
         .await;
     Ok(())
@@ -946,6 +1036,7 @@ async fn run(
         pending: None,
         search: String::new(),
         favorites_only: false,
+        probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
     };
     if let Err(error) = actor.reload().await {
         actor.state.error = Some(error.key());
@@ -980,7 +1071,7 @@ async fn run(
                 if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.error = Some("cleanup_failed"); }
                 if failed_session.is_none() { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
                 // Финальный event может ожидать в канале; сначала применяем его.
-                while let Ok(update) = events.try_recv() { actor.state.status = update.status; actor.state.error = update.error; }
+                while let Ok(update) = events.try_recv() { actor.update(update); }
                 actor.emit();
             }
             result = async { (&mut refreshing.as_mut().expect("guard").2).await }, if refreshing.is_some() => {
@@ -993,7 +1084,7 @@ async fn run(
                 actor.emit();
             }
             Some(update) = events.recv() => {
-                actor.state.status = update.status; actor.state.error = update.error; actor.emit();
+                actor.update(update); actor.emit();
             }
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
@@ -1015,15 +1106,16 @@ async fn run(
                         else if let Some(profile) = actor.selected.as_ref() {
                             if actor.pending.is_some() { Err(DesktopError("review_required")) }
                             else {
-                                match NonZeroU16::new(actor.state.port).and_then(|port| tofu_engine::compile(&profile.server, actor.state.engine.engine(), port).ok()) {
-                                    Some(compiled) => {
+                                match (NonZeroU16::new(actor.state.port).and_then(|port| tofu_engine::compile(&profile.server, actor.state.engine.engine(), port).ok()), actor.probe_target()) {
+                                    (Some(compiled), Ok(target)) => {
                                         let (cancel, receiver) = Cancellation::new();
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), receiver, updates.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone()));
                                         running = Some(Running { cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
-                                        actor.state.status = "Preparing"; Ok(())
+                                        actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
                                     }
-                                    None => Err(DesktopError("engine_config")),
+                                    (_, Err(error)) => Err(error),
+                                    _ => Err(DesktopError("engine_config")),
                                 }
                             }
                         } else { Err(DesktopError("profile_required")) }

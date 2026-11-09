@@ -5,13 +5,17 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import socket
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from engine_compile import UUID
+from engine_host import https_server, peer
 from engine_smoke import run_sandbox
 
 LOG = logging.getLogger("desktop-smoke")
@@ -52,12 +56,20 @@ def run_case(
     partial: bool,
     engine: str | None,
     namespace: bool,
+    *,
+    profile: str | None = None,
+    probe_url: str | None = None,
+    expected_status: int = 204,
+    expected_state: str = "Limited",
+    ca: Path | None = None,
 ) -> dict[str, object]:
     endpoint = free_port()
     bodies = [
         f"trojan://invented-secret@127.0.0.1:{endpoint}#Москва • TLS",
         "socks5://invented:password@192.0.2.1:1080#<b>Plain text</b>",
     ]
+    if profile is not None:
+        bodies = [profile]
     if partial:
         bodies.append("unknown://not-supported")
     handler = type(
@@ -88,7 +100,11 @@ def run_case(
                 steps.append(approve)
             steps.append(
                 step(
-                    {"profiles_count": 2, "busy": False, "pending": False},
+                    {
+                        "profiles_count": len(bodies) - int(partial),
+                        "busy": False,
+                        "pending": False,
+                    },
                     "select_profile",
                     id=1,
                     revision=1,
@@ -101,12 +117,47 @@ def run_case(
                     steps.append(
                         step({"selected_profile": 1}, "set_engine", engine=engine)
                     )
+                if probe_url is not None:
+                    steps.append(
+                        step(
+                            {"engine": engine, "selected_profile": 1},
+                            "set_probe_target",
+                            url=probe_url,
+                            expected_status=expected_status,
+                        )
+                    )
+                connect_when: dict[str, object] = {
+                    "engine": engine,
+                    "selected_profile": 1,
+                }
+                if probe_url is not None:
+                    connect_when.update(
+                        probe_custom=True, probe_expected_status=expected_status
+                    )
+                steps.append(step(connect_when, "connect"))
+                stop_when: dict[str, object] = {
+                    "status": expected_state,
+                    "can_stop": True,
+                }
+                if probe_url is not None:
+                    frozen = step(
+                        stop_when,
+                        "set_probe_target",
+                        url="https://mutation.invalid/never-request?secret=not-sent",
+                        expected_status=201,
+                    )
+                    frozen["capture"] = True
+                    steps.append(frozen)
+                    stop_when = {
+                        **stop_when,
+                        "error": "busy",
+                        "probe_expected_status": expected_status,
+                    }
                 steps.extend(
                     [
-                        step({"engine": engine, "selected_profile": 1}, "connect"),
                         {
-                            **step({"status": "Limited", "can_stop": True}, "stop"),
-                            "capture": True,
+                            **step(stop_when, "stop"),
+                            "capture": probe_url is None,
                         },
                         step({"status": "Disconnected", "can_stop": False}, "shutdown"),
                     ]
@@ -149,7 +200,11 @@ def run_case(
             ]
             if engines is not None:
                 command.extend(["--engine-dir", str(engines)])
-            run_sandbox(command, timeout=45)
+            if ca is None:
+                run_sandbox(command, timeout=45)
+            else:
+                with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca)}):
+                    run_sandbox(command, timeout=45)
         events = [json.loads(line) for line in trace.read_text().splitlines()]
         if not events or not events[-1].get("closed"):
             raise RuntimeError("Нет подтверждения closed после cleanup")
@@ -158,20 +213,109 @@ def run_case(
         text = trace.read_text()
         if "invented-secret" in text or "subscription" in text or "password" in text:
             raise RuntimeError("Чувствительные данные попали в trace")
-        if engine is not None and not any(
-            event.get("status") == "Limited" for event in events
+        allowed = {
+            "status",
+            "ready",
+            "busy",
+            "error",
+            "revision",
+            "selected_profile",
+            "closed",
+            "source_count",
+            "profile_count",
+            "pending",
+            "step",
+        }
+        if any(set(event) - allowed for event in events):
+            raise RuntimeError("Trace содержит поля вне разрешённых metadata")
+        if probe_url is not None and (
+            probe_url in text or UUID in text or "https://" in text
         ):
-            raise RuntimeError("Не наблюдалось состояние Limited живого ядра")
+            raise RuntimeError("Тестовый endpoint или credential попал в trace")
+        if engine is not None and not any(
+            event.get("status") == expected_state for event in events
+        ):
+            raise RuntimeError(f"Не наблюдалось состояние {expected_state} живого ядра")
+        if engine is not None:
+            observed = next(
+                index
+                for index, event in enumerate(events)
+                if event.get("status") == expected_state
+            )
+            if not any(
+                event.get("status") == "Disconnected"
+                for event in events[observed + 1 :]
+            ):
+                raise RuntimeError("После Stop не наблюдалось Disconnected")
+            if probe_url is not None and not any(
+                event.get("error") == "busy" for event in events
+            ):
+                raise RuntimeError("Активная сессия не отклонила изменение endpoint")
         return {
             "case": name,
             "events": len(events),
             "closed": True,
             "screenshot": str(screenshot),
+            **(
+                {
+                    "engine": engine,
+                    "expected_status": expected_status,
+                    "status": expected_state,
+                }
+                if probe_url is not None
+                else {}
+            ),
         }
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, object]]:
+    results = []
+    with tempfile.TemporaryDirectory(prefix="tofu-gui-health-") as temporary:
+        workspace = Path(temporary)
+        with https_server(workspace, "health", 0, "127.0.0.1") as https:
+            for engine, directory in (
+                ("xray", "xray-26.10.31"),
+                ("sing-box", "sing-box-1.14.4"),
+            ):
+                port = free_port()
+                with peer(
+                    engines / directory / engine,
+                    engine,
+                    workspace,
+                    port=port,
+                    target_ports=str(https.server_port),
+                ):
+                    for suffix, path, status, state in (
+                        ("204", "/", 204, "Connected"),
+                        ("unexpected-200", "/ok200", 204, "Limited"),
+                        ("custom-200", "/ok200", 200, "Connected"),
+                    ):
+                        name = f"health-{engine}-{suffix}"
+                        https.requested.clear()
+                        results.append(
+                            run_case(
+                                binary,
+                                engines,
+                                output,
+                                name,
+                                False,
+                                engine,
+                                True,
+                                profile=f"vless://{UUID}@127.0.0.1:{port}#Тестовый сервер",
+                                probe_url=f"https://127.0.0.1:{https.server_port}{path}",
+                                expected_status=status,
+                                expected_state=state,
+                                ca=workspace / "health.ca.pem",
+                            )
+                        )
+                        if not https.requested.is_set():
+                            raise RuntimeError("HTTPS fixture не получил проверку")
+                        LOG.info("%s: %s → Stop → Disconnected → closed", name, state)
+    return results
 
 
 def main() -> int:
@@ -186,7 +330,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--case",
-        choices=("profiles", "partial", "xray", "sing-box", "all"),
+        choices=("profiles", "partial", "xray", "sing-box", "health", "all"),
         default="profiles",
     )
     arguments = parser.parse_args()
@@ -199,12 +343,17 @@ def main() -> int:
     output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     cases = (
-        ("profiles", "partial", "xray", "sing-box")
+        ("profiles", "partial", "xray", "sing-box", "health")
         if arguments.case == "all"
         else (arguments.case,)
     )
     results = []
     for name in cases:
+        if name == "health":
+            if engines is None:
+                parser.error("Для health нужен --engine-dir")
+            results.extend(run_health(binary, engines, output))
+            continue
         engine = name if name in ("xray", "sing-box") else None
         result = run_case(
             binary,

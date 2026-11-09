@@ -2,7 +2,44 @@
 
 use std::{path::Path, time::Duration};
 use tofu_engine::Engine;
-use tofu_linux::{BinarySnapshot, Cancellation, HostError, ProbeTarget, Sha256};
+use tofu_linux::{BinarySnapshot, Cancellation, HostError, ProbeResult, ProbeTarget, Sha256};
+
+#[test]
+fn probe_success_requires_the_configured_status() {
+    let response = |status| ProbeResult::Response {
+        status,
+        elapsed: Duration::from_millis(1),
+    };
+    let target = ProbeTarget::new(
+        "https://example.invalid/private?secret=token",
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert!(target.accepts(response(204)));
+    assert!(!target.accepts(response(200)));
+    assert!(!response(200).passed());
+    let target = target.with_expected_status(200).unwrap();
+    assert!(target.accepts(response(200)));
+    assert!(!target.accepts(response(204)));
+    for result in [
+        response(302),
+        response(503),
+        ProbeResult::Timeout,
+        ProbeResult::Tls,
+        ProbeResult::Transport,
+    ] {
+        assert!(!target.accepts(result));
+    }
+    for status in [0, 199, 300, 302, 600, u16::MAX] {
+        assert!(
+            ProbeTarget::new("https://example.invalid/", Duration::from_secs(5))
+                .unwrap()
+                .with_expected_status(status)
+                .is_err()
+        );
+    }
+    assert!(!format!("{target:?}").contains("secret"));
+}
 
 #[test]
 fn hash_and_probe_url_validate_without_disclosing_input() {

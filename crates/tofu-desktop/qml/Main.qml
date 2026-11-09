@@ -27,8 +27,10 @@ ApplicationWindow {
     property var state: ({ready: false, busy: true, error: null, pending: null,
         sources: [], sources_total: 0, sources_offset: 0, source_id: null, profiles: [], total: 0, offset: 0,
         revision: 0, status: "Disconnected", selected_profile: null,
+        probe_custom: false, probe_expected_status: 204, probe_result: null,
         selected_name: "", engine: "xray", active_name: "", active_engine: "", port: 10808, can_connect: false, can_stop: false})
     readonly property bool activeConnection: ["Preparing", "Starting", "Checking", "Connected", "Limited", "Stopping", "CleanupError"].indexOf(state.status) >= 0
+    readonly property bool canEditProbe: state.ready && !state.busy && !state.can_stop
     readonly property color ink: "#252b28"
     readonly property color muted: "#626b65"
     readonly property color accent: "#376b51"
@@ -71,6 +73,19 @@ ApplicationWindow {
         }
         const pair = values[status]
         return pair ? tr(pair[0], pair[1]) : tr("Состояние недоступно", "State unavailable")
+    }
+    function probeResultText(result) {
+        if (!result) return ""
+        const kinds = {
+            http: ["Ответ HTTPS", "HTTPS response"],
+            tls: ["Ошибка TLS", "TLS error"],
+            timeout: ["Истекло время проверки", "Check timed out"],
+            transport: ["Ошибка транспорта", "Transport error"]
+        }
+        const pair = kinds[result.kind]
+        return (pair ? tr(pair[0], pair[1]) : tr("Результат проверки", "Check result"))
+            + (result.http_status !== null && result.http_status !== undefined ? " · HTTP " + result.http_status : "")
+            + (result.elapsed_ms !== null && result.elapsed_ms !== undefined ? " · " + result.elapsed_ms + tr(" мс", " ms") : "")
     }
     function reviewText(row) {
         const reasons = {
@@ -121,6 +136,11 @@ ApplicationWindow {
             engine_missing: ["Прокси-ядро не найдено. Установите выбранное ядро и перезапустите приложение.", "Proxy engine not found. Install the selected engine and restart the application."],
             engine_config: ["Профиль несовместим с выбранным ядром. Проверьте параметры подключения.", "The profile is incompatible with the selected engine. Check connection settings."],
             engine_failed: ["Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.", "Could not start the proxy engine. Check the profile and engine installation."],
+            probe_target_invalid: ["Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.", "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299."],
+            check_http_status: ["Сайт проверки вернул неожиданный HTTP-статус. Редирект не считается успехом.", "The check endpoint returned an unexpected HTTP status. Redirects are not successful."],
+            check_tls: ["Не удалось проверить TLS сайта проверки.", "TLS verification failed for the check endpoint."],
+            check_timeout: ["Истекло время проверки доступа через прокси.", "The connectivity check through the proxy timed out."],
+            check_transport: ["Не удалось выполнить запрос через прокси: ошибка транспорта.", "The request through the proxy failed with a transport error."],
             check_failed: ["Прокси работает, но доступность интернета не подтверждена.", "The proxy is running, but internet access is unconfirmed."],
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
@@ -246,6 +266,11 @@ ApplicationWindow {
                             SmallLabel {
                                 visible: window.state.can_stop
                                 text: window.tr("Активное ядро: ", "Active engine: ") + window.state.active_engine
+                            }
+                            SmallLabel {
+                                visible: window.state.can_stop && !!window.state.active_name && !!window.state.probe_result
+                                Layout.fillWidth: true
+                                text: window.tr("Проверка активной сессии: ", "Active session check: ") + window.probeResultText(window.state.probe_result)
                             }
                             SmallLabel {
                                 Layout.fillWidth: true
@@ -423,26 +448,95 @@ ApplicationWindow {
                         Button { text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: window.send({command: "refresh"}) }
                     }
                 }
-                ColumnLayout {
-                    spacing: 20
-                    SectionTitle { text: window.tr("Настройки", "Settings") }
-                    GridLayout {
-                        columns: 2
-                        columnSpacing: 30
-                        rowSpacing: 20
-                        PlainLabel { text: window.tr("Язык интерфейса", "Interface language") }
-                        ComboBox { model: ["Русский", "English"]; currentIndex: window.language === "ru" ? 0 : 1; onActivated: window.language = currentIndex === 0 ? "ru" : "en"; Accessible.name: window.tr("Язык интерфейса", "Interface language") }
-                        PlainLabel { text: window.tr("Режим подключения", "Connection mode") }
-                        PlainLabel { text: window.tr("Локальный SOCKS5", "Local SOCKS5") }
-                        PlainLabel { text: window.tr("Адрес прокси", "Proxy address") }
-                        PlainLabel { text: "127.0.0.1:" + window.state.port }
+                ScrollView {
+                    id: settingsScroll
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                        width: settingsScroll.availableWidth
+                        spacing: 16
+                        SectionTitle { text: window.tr("Настройки", "Settings") }
+                        GridLayout {
+                            columns: 2
+                            columnSpacing: 30
+                            rowSpacing: 20
+                            PlainLabel { text: window.tr("Язык интерфейса", "Interface language") }
+                            ComboBox { model: ["Русский", "English"]; currentIndex: window.language === "ru" ? 0 : 1; onActivated: window.language = currentIndex === 0 ? "ru" : "en"; Accessible.name: window.tr("Язык интерфейса", "Interface language") }
+                            PlainLabel { text: window.tr("Режим подключения", "Connection mode") }
+                            PlainLabel { text: window.tr("Локальный SOCKS5", "Local SOCKS5") }
+                            PlainLabel { text: window.tr("Адрес прокси", "Proxy address") }
+                            PlainLabel { text: "127.0.0.1:" + window.state.port }
+                        }
+                        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#dce1d8" }
+                        PlainLabel { text: window.tr("Проверка доступа", "Connectivity check"); font.pixelSize: 18; font.weight: Font.DemiBold }
+                        SmallLabel {
+                            Layout.fillWidth: true
+                            text: (window.state.probe_custom ? window.tr("Применена своя проверка", "Custom check applied") : window.tr("Стандартная проверка: gstatic", "Default check: gstatic"))
+                                + window.tr(" · ожидается HTTP ", " · expected HTTP ") + window.state.probe_expected_status
+                        }
+                        PlainLabel { text: window.tr("HTTPS URL новой проверки", "New check HTTPS URL") }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: probeUrl
+                                Layout.fillWidth: true
+                                maximumLength: 2048
+                                placeholderText: "https://www.gstatic.com/generate_204"
+                                echoMode: revealProbe.checked ? TextInput.Normal : TextInput.Password
+                                selectByMouse: true
+                                enabled: window.canEditProbe
+                                inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                                Accessible.name: window.tr("Секретный HTTPS URL проверки", "Secret check HTTPS URL")
+                            }
+                            CheckBox { id: revealProbe; text: window.tr("Показать", "Show"); enabled: window.canEditProbe }
+                        }
+                        RowLayout {
+                            PlainLabel { text: window.tr("Ожидаемый HTTP-статус", "Expected HTTP status") }
+                            SpinBox {
+                                id: probeExpectedStatus
+                                from: 200
+                                to: 299
+                                value: 204
+                                enabled: window.canEditProbe
+                                Accessible.name: window.tr("Ожидаемый HTTP-статус проверки", "Expected check HTTP status")
+                            }
+                        }
+                        RowLayout {
+                            Button {
+                                text: window.tr("Применить", "Apply")
+                                enabled: window.canEditProbe && probeUrl.text.trim().length > 0
+                                onClicked: {
+                                    window.send({command: "set_probe_target", url: probeUrl.text.trim(), expected_status: probeExpectedStatus.value})
+                                    probeUrl.clear()
+                                    revealProbe.checked = false
+                                }
+                            }
+                            Button {
+                                text: window.tr("Сбросить проверку", "Reset check")
+                                enabled: window.canEditProbe
+                                onClicked: {
+                                    window.send({command: "reset_probe_target"})
+                                    probeUrl.clear()
+                                    revealProbe.checked = false
+                                    probeExpectedStatus.value = 204
+                                }
+                            }
+                        }
+                        SmallLabel {
+                            Layout.fillWidth: true
+                            text: window.tr("Настройка действует в этом сеансе приложения со следующего подключения. Для изменения сначала отключите прокси. Повторная проверка подключённой сессии пока недоступна. URL может содержать секрет: после отправки поле очищается.", "This setting applies for this application session from the next connection. Disconnect the proxy before editing. Rechecking a connected session is not available yet. The URL may contain a secret: the field is cleared after sending.")
+                        }
+                        SmallLabel {
+                            Layout.fillWidth: true
+                            text: window.tr("HTTPS-запрос идёт через выбранный outbound локального SOCKS5. TLS проверяется; редиректы не считаются успехом. Время включает весь запрос и не измеряет пропускную способность. Ошибка транспорта пока не разделяет DNS, соединение и туннель.", "The HTTPS request uses the selected outbound through local SOCKS5. TLS is verified; redirects are not successful. Timing covers the whole request and does not measure throughput. Transport errors do not yet distinguish DNS, connection and tunnel failures.")
+                        }
+                        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#dce1d8" }
+                        SmallLabel { Layout.fillWidth: true; text: window.tr("Эта версия предоставляет локальный прокси. TUN, системный VPN и редактор сетевых политик ещё не доступны. Язык выбирается на текущий сеанс.", "This version provides a local proxy. TUN, system VPN and the routing policy editor are not available yet. Language applies to this session.") }
+                        SmallLabel { Layout.fillWidth: true; text: window.tr("Если трей доступен, закрытие окна скрывает приложение в нём. Для выхода используйте меню трея. Без трея закрытие отключает прокси и завершает приложение.", "When a tray is available, closing hides the window there. Use the tray menu to quit. Without a tray, closing disconnects the proxy and exits.") }
+                        Button { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
+                        SmallLabel { text: "tofu · " + window.tr("Открытый исходный код", "Open source") }
                     }
-                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#dce1d8" }
-                    SmallLabel { Layout.fillWidth: true; text: window.tr("Эта версия предоставляет локальный прокси. TUN, системный VPN и редактор сетевых политик ещё не доступны. Язык выбирается на текущий сеанс.", "This version provides a local proxy. TUN, system VPN and the routing policy editor are not available yet. Language applies to this session.") }
-                    SmallLabel { Layout.fillWidth: true; text: window.tr("Если трей доступен, закрытие окна скрывает приложение в нём. Для выхода используйте меню трея. Без трея закрытие отключает прокси и завершает приложение.", "When a tray is available, closing hides the window there. Use the tray menu to quit. Without a tray, closing disconnects the proxy and exits.") }
-                    Button { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
-                    Item { Layout.fillHeight: true }
-                    SmallLabel { text: "tofu · " + window.tr("Открытый исходный код", "Open source") }
                 }
             }
         }
