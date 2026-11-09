@@ -88,12 +88,19 @@ enum Command {
         url: String,
         local_exception: bool,
         route: Route,
+        #[serde(default)]
+        hwid_enabled: bool,
     },
     ImportSource {
         name: String,
         url: String,
         local_exception: bool,
         route: Route,
+        #[serde(default)]
+        hwid_enabled: bool,
+    },
+    SetSourceHwid {
+        enabled: bool,
     },
     SelectSource {
         id: i64,
@@ -337,6 +344,7 @@ fn validate(command: &Command) -> Result<()> {
 struct SourceDto {
     id: i64,
     name: String,
+    hwid_enabled: bool,
 }
 #[derive(Serialize)]
 struct ProfileDto {
@@ -435,6 +443,8 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    build_id: &'static str,
+    source_hwid_enabled: bool,
     ready: bool,
     busy: bool,
     error: Option<&'static str>,
@@ -476,6 +486,8 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            build_id: env!("TOFU_BUILD_ID"),
+            source_hwid_enabled: false,
             ready: false,
             busy: false,
             error: None,
@@ -698,6 +710,7 @@ impl Actor {
             .map(|source| SourceDto {
                 id: source.id,
                 name: source.name,
+                hwid_enabled: source.hwid_enabled,
             })
             .collect();
         Ok(())
@@ -706,9 +719,15 @@ impl Actor {
         self.state.profiles.clear();
         self.state.total = 0;
         self.state.revision = 0;
+        self.state.source_hwid_enabled = false;
         let Some(id) = self.state.source_id else {
             return Ok(());
         };
+        self.state.source_hwid_enabled = self
+            .service
+            .source_hwid_enabled(id)
+            .await
+            .map_err(map_subscription)?;
         let page = self
             .service
             .profiles(
@@ -761,16 +780,32 @@ impl Actor {
                 url,
                 local_exception,
                 route,
+                hwid_enabled,
             } => {
                 if matches!(route, Route::Proxy) {
                     return Err(DesktopError("unsupported_proxy"));
                 }
                 let source =
                     SubscriptionSource::new(name, url, local_exception, FetchRoute::Direct)
+                        .and_then(|source| source.with_hwid(hwid_enabled))
                         .map_err(map_subscription)?;
                 let id = self.service.add(source).await.map_err(map_subscription)?;
                 self.state.source_id = Some(id);
                 self.state.offset = 0;
+                self.pending = None;
+                self.state.pending = None;
+                self.clear_selection();
+                self.reload().await
+            }
+            Command::SetSourceHwid { enabled } => {
+                let id = self
+                    .state
+                    .source_id
+                    .ok_or(DesktopError("source_required"))?;
+                self.service
+                    .set_source_hwid(id, enabled)
+                    .await
+                    .map_err(map_subscription)?;
                 self.pending = None;
                 self.state.pending = None;
                 self.clear_selection();
@@ -919,6 +954,10 @@ impl Actor {
 fn map_subscription(error: SubscriptionError) -> DesktopError {
     DesktopError(match error {
         SubscriptionError::InvalidSource => "invalid_input",
+        SubscriptionError::Fetch(FetchError::HwidRequired) => "hwid_required",
+        SubscriptionError::Fetch(FetchError::HwidLimit) => "hwid_limit",
+        SubscriptionError::Fetch(FetchError::HwidRejected) => "hwid_rejected",
+        SubscriptionError::Fetch(FetchError::HwidRedirect) => "hwid_redirect",
         SubscriptionError::Fetch(FetchError::UnsupportedPeerVerification) => "unsupported_proxy",
         SubscriptionError::Fetch(_) => "fetch",
         SubscriptionError::Import(_) => "import",
@@ -1025,6 +1064,21 @@ mod settings_tests {
     impl Drop for Directory {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).expect("очистка своего тестового каталога");
+        }
+    }
+
+    #[test]
+    fn hwid_fetch_failures_have_specific_public_codes() {
+        for (error, key) in [
+            (super::FetchError::HwidRequired, "hwid_required"),
+            (super::FetchError::HwidLimit, "hwid_limit"),
+            (super::FetchError::HwidRejected, "hwid_rejected"),
+            (super::FetchError::HwidRedirect, "hwid_redirect"),
+        ] {
+            assert_eq!(
+                super::map_subscription(super::SubscriptionError::Fetch(error)).key(),
+                key
+            );
         }
     }
 
@@ -1702,10 +1756,10 @@ async fn run(
                             Ok(())
                         } else { Err(DesktopError("profile_required")) }
                     }
-                    Command::ImportSource { name, url, local_exception, route } => {
+                    Command::ImportSource { name, url, local_exception, route, hwid_enabled } => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else {
-                            match actor.command(Command::AddSource { name, url, local_exception, route }).await {
+                            match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
                                     match actor.refresh(envelope.generation) {
@@ -1713,6 +1767,18 @@ async fn run(
                                         Err(error) => Err(error),
                                     }
                                 }
+                                Err(error) => Err(error),
+                            }
+                        }
+                    }
+                    Command::SetSourceHwid { enabled } => {
+                        if refreshing.is_some() { Err(DesktopError("busy")) }
+                        else {
+                            match actor.command(Command::SetSourceHwid { enabled }).await {
+                                Ok(()) => match actor.refresh(envelope.generation) {
+                                    Ok(task) => { refreshing = Some(task); Ok(()) }
+                                    Err(error) => Err(error),
+                                },
                                 Err(error) => Err(error),
                             }
                         }

@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 520
     minimumHeight: 640
     visible: true
-    title: "tofu"
+    title: "tofu · " + (state.build_id || "local")
     objectName: "tofuWindow"
     color: "#070707"
     palette.window: "#070707"
@@ -38,7 +38,7 @@ ApplicationWindow {
         : tr("Подключить", "Connect")
     property string language: "ru"
     property int page: 0
-    property string settingsSection: "connection"
+    property string settingsSection: ""
     property bool reducedMotion: false
     onPageChanged: {
         if (page !== 2 && addDialog.visible) addDialog.close()
@@ -198,6 +198,10 @@ ApplicationWindow {
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
             source_required: ["Сначала выберите подписку.", "Select a subscription first."],
             unsupported_proxy: ["Загрузка подписки через прокси пока не поддерживается. Выберите прямой маршрут.", "Fetching subscriptions through a proxy is not supported yet. Choose Direct."],
+            hwid_required: ["Провайдер требует ID устройства. Включите его в настройках подписки.", "The provider requires a device ID. Enable it in subscription settings."],
+            hwid_limit: ["Достигнут лимит устройств подписки. Проверьте устройства у провайдера.", "The subscription device limit has been reached. Review devices with your provider."],
+            hwid_rejected: ["Провайдер отклонил ID устройства. Обратитесь в поддержку провайдера.", "The provider rejected the device ID. Contact provider support."],
+            hwid_redirect: ["Провайдер перенаправляет запрос с ID устройства. Проверьте ссылку подписки.", "The provider redirects device ID requests. Check the subscription link."],
             fetch: ["Не удалось загрузить подписку. Проверьте сеть и адрес. Сохранённые профили не изменены.", "Could not fetch the subscription. Check the network and URL. Saved profiles are unchanged."],
             "import": ["Не удалось распознать профили подписки.", "Could not parse subscription profiles."],
             review_required: ["Сначала подтвердите или отмените текущий импорт.", "Approve or discard the current import first."],
@@ -229,7 +233,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Escape"
         enabled: window.page !== 0 && !addDialog.visible && !reviewDialog.visible
-        onActivated: window.page = 0
+        onActivated: { if (window.page === 2 && window.settingsSection !== "") window.settingsSection = ""; else window.page = 0 }
     }
 
     component PlainLabel: Label {
@@ -269,14 +273,35 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            radius: 10
-            property color hoverColor: control.hovered ? "#242127" : window.surface
+            radius: 14
+            property color hoverColor: control.down ? "#35283f" : control.hovered ? "#26212b" : window.surface
             color: control.highlighted && control.enabled ? window.accent : hoverColor
             border.width: control.activeFocus ? 2 : 1
             border.color: control.activeFocus ? window.accent : window.line
             opacity: control.enabled ? 1 : 0.55
-            Behavior on hoverColor { ColorAnimation { duration: window.reducedMotion ? 0 : 140 } }
+            Behavior on hoverColor { ColorAnimation { duration: window.reducedMotion ? 0 : 160 } }
             Behavior on opacity { NumberAnimation { duration: window.reducedMotion ? 0 : 120 } }
+        }
+    }
+    component SettingsRow: ActionButton {
+        id: row
+        property string description: ""
+        property string symbol: ""
+        Layout.fillWidth: true
+        implicitHeight: 78
+        leftPadding: 16; rightPadding: 16
+        contentItem: RowLayout {
+            spacing: 14
+            Rectangle {
+                implicitWidth: 40; implicitHeight: 40; radius: 12; color: "#2a2033"
+                PlainLabel { anchors.centerIn: parent; text: row.symbol; color: window.accent; font.pixelSize: 21 }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 5
+                PlainLabel { text: row.text; font.weight: Font.Medium; font.pixelSize: 15 }
+                SmallLabel { text: row.description; Layout.fillWidth: true; font.pixelSize: 12 }
+            }
+            PlainLabel { text: "›"; color: window.muted; font.pixelSize: 24 }
         }
     }
     component HelpButton: ActionButton {
@@ -321,20 +346,10 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
-        anchors.top: parent.top; anchors.right: parent.right
-        width: parent.width; height: parent.height * 0.6
-        opacity: 0.65
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#21132f" }
-            GradientStop { position: 1; color: "#070707" }
-        }
-    }
-    Rectangle { x: window.width - 33; y: 116; width: 1; height: 104; color: "#674785"; opacity: 0.5 }
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 20
+        anchors.margins: 28
+        spacing: 24
         RowLayout {
             Layout.fillWidth: true
             ActionButton {
@@ -342,8 +357,8 @@ ApplicationWindow {
                 visible: window.page !== 0
                 text: "‹"
                 implicitWidth: 44
-                Accessible.name: window.tr("На главный экран", "Home")
-                onClicked: window.page = 0
+                Accessible.name: window.tr("Назад", "Back")
+                onClicked: { if (window.page === 2 && window.settingsSection !== "") window.settingsSection = ""; else window.page = 0 }
             }
             RowLayout {
                 spacing: 10
@@ -359,11 +374,17 @@ ApplicationWindow {
                 }
             }
             Item { Layout.fillWidth: true }
+            Rectangle {
+                visible: window.page === 0
+                implicitWidth: modeLabel.implicitWidth + 20; implicitHeight: 28; radius: 14
+                color: "#191919"
+                SmallLabel { id: modeLabel; anchors.centerIn: parent; text: "SOCKS5"; font.pixelSize: 11; font.letterSpacing: 1 }
+            }
             ActionButton {
                 objectName: "settingsButton"
                 text: "⚙"; implicitWidth: 44; font.pixelSize: 22
                 Accessible.name: window.tr("Настройки", "Settings")
-                onClicked: window.page = 2
+                onClicked: { window.settingsSection = ""; window.page = 2 }
             }
         }
         StackLayout {
@@ -372,59 +393,61 @@ ApplicationWindow {
             currentIndex: window.page
             Item {
                 ColumnLayout {
-                    anchors.centerIn: parent
-                    width: Math.min(parent.width, 360)
+                    anchors.fill: parent
                     spacing: 0
-                    PlainLabel {
-                        Layout.fillWidth: true; Layout.bottomMargin: 20
+                    SmallLabel {
                         visible: window.height >= 720
-                        text: window.tr("Ваше пространство.\nВаш маршрут.", "Your space.\nYour route.")
-                        font.family: displayFont.status === FontLoader.Ready ? displayFont.name : window.font.family
-                        font.pixelSize: 23; font.weight: Font.DemiBold; lineHeight: 1.15
+                        text: window.tr("ПОДКЛЮЧЕНИЕ", "CONNECTION")
+                        font.pixelSize: 11; font.letterSpacing: 2
+                        Layout.bottomMargin: 12
                     }
                     ActionButton {
                         id: serverCard
                         objectName: "serverPickerButton"
                         Layout.fillWidth: true
-                        implicitHeight: 88
+                        implicitHeight: window.height < 720 ? 80 : 92
+                        leftPadding: 18; rightPadding: 18
                         enabled: window.state.ready && !window.state.closed
                         Accessible.name: window.tr("Выбрать сервер", "Choose server") + ": " + serverName.text
-                        onClicked: window.page = 1
+                        onClicked: { favorites.checked = false; window.query(0); window.page = 1 }
                         background: Rectangle {
-                            radius: 16
-                            border.color: serverCard.activeFocus ? window.accent : "#4b365e"
+                            radius: 20
+                            border.color: serverCard.activeFocus ? window.accent : serverCard.hovered ? "#755589" : "#493254"
                             border.width: serverCard.activeFocus ? 2 : 1
                             gradient: Gradient {
-                                GradientStop { position: 0; color: serverCard.hovered ? "#372442" : "#2a1b36" }
+                                GradientStop { position: 0; color: serverCard.down ? "#352340" : "#2a1b36" }
                                 GradientStop { position: 1; color: "#17101f" }
                             }
+                            Behavior on border.color { ColorAnimation { duration: window.reducedMotion ? 0 : 160 } }
                         }
                         contentItem: RowLayout {
-                            spacing: 16
-                            PlainLabel { text: "◎"; color: window.accent; font.pixelSize: 30 }
+                            spacing: 14
+                            Rectangle {
+                                implicitWidth: 44; implicitHeight: 44; radius: 14; color: "#372544"
+                                PlainLabel { anchors.centerIn: parent; text: "◎"; color: "#d9c6fc"; font.pixelSize: 28 }
+                            }
                             ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 5
+                                Layout.fillWidth: true; spacing: 5
+                                SmallLabel { text: window.state.can_stop ? window.tr("Текущий сервер", "Current server") : window.tr("Сервер", "Server"); font.pixelSize: 11 }
                                 PlainLabel {
                                     id: serverName
                                     objectName: "mainServerName"
                                     Layout.fillWidth: true
                                     text: (window.state.can_stop ? window.state.active_name : window.state.selected_name) || window.tr("Выберите сервер", "Choose a server")
-                                    maximumLineCount: 1; elide: Text.ElideRight; font.weight: Font.Medium; font.pixelSize: 16
+                                    maximumLineCount: 1; elide: Text.ElideRight; font.weight: Font.Medium; font.pixelSize: 17
                                 }
-                                SmallLabel { text: window.state.can_stop ? window.tr("Активное подключение", "Active connection") : window.tr("Ваш следующий маршрут", "Your next route") }
                             }
-                            PlainLabel { text: "›"; color: window.muted; font.pixelSize: 25 }
+                            PlainLabel { text: "›"; color: "#d9c6fc"; font.pixelSize: 28 }
                         }
                     }
-                    Item { Layout.preferredHeight: window.height < 720 ? 20 : 28 }
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 24; Layout.maximumHeight: 64 }
                     Button {
                         id: powerButton
                         objectName: "mainConnectButton"
                         Layout.alignment: Qt.AlignHCenter
-                        implicitWidth: window.height < 720 ? 164 : 196; implicitHeight: implicitWidth
+                        implicitWidth: window.height < 720 ? 184 : 224; implicitHeight: implicitWidth
                         scale: down ? 0.96 : hovered && enabled ? 1.025 : 1
-                        Behavior on scale { NumberAnimation { duration: window.reducedMotion ? 0 : 150; easing.type: Easing.OutCubic } }
+                        Behavior on scale { NumberAnimation { duration: window.reducedMotion ? 0 : 160; easing.type: Easing.OutCubic } }
                         enabled: window.state.ready && !window.state.closed && (window.state.can_stop || window.state.can_connect)
                         Accessible.name: window.actionText
                         text: window.actionText
@@ -432,49 +455,56 @@ ApplicationWindow {
                         Keys.onReturnPressed: if (enabled) clicked()
                         Keys.onEnterPressed: if (enabled) clicked()
                         background: Rectangle {
-                            radius: width / 2; color: "#120d19"
-                            Rectangle {
-                                anchors.fill: parent; anchors.margins: -8
-                                radius: width / 2; color: "transparent"; border.color: "#302039"
-                            }
-                            border.color: powerButton.activeFocus ? window.accent : window.line
+                            radius: width / 2
+                            color: "#17101f"
+                            border.color: powerButton.activeFocus ? "#d9c6fc" : "#483253"
                             border.width: powerButton.activeFocus ? 3 : 1
                             Rectangle {
-                                anchors.fill: parent; anchors.margins: 10; radius: width / 2
+                                anchors.fill: parent; anchors.margins: -12
+                                radius: width / 2; color: "transparent"; border.color: "#271c30"
+                            }
+                            Rectangle {
+                                anchors.fill: parent; anchors.margins: 12; radius: width / 2
                                 gradient: Gradient {
-                                    GradientStop { position: 0; color: window.state.can_stop ? "#33243f" : "#d9c6fc" }
-                                    GradientStop { position: 0.5; color: window.state.can_stop ? "#211729" : "#bfa4d0" }
-                                    GradientStop { position: 1; color: window.state.can_stop ? "#17101f" : "#80629b" }
+                                    GradientStop { position: 0; color: window.state.can_stop ? "#392746" : "#d9c6fc" }
+                                    GradientStop { position: 1; color: window.state.can_stop ? "#1d1427" : "#b69ad9" }
                                 }
-                                opacity: powerButton.enabled ? (powerButton.down ? 0.7 : 1) : 0.35
-                                border.color: window.state.can_stop ? window.accent : "transparent"
+                                border.color: window.state.can_stop ? "#c3a6ef" : "#e2d3f8"
+                                opacity: powerButton.enabled ? (powerButton.down ? 0.8 : 1) : 0.65
                             }
                         }
                         contentItem: Item {
                             Canvas {
-                                anchors.centerIn: parent; width: 56; height: 56
+                                anchors.centerIn: parent; width: 64; height: 64
                                 property color stroke: window.state.can_stop ? window.accent : "#070707"
                                 onStrokeChanged: requestPaint()
                                 onVisibleChanged: if (visible) requestPaint()
                                 onPaint: {
-                                    const ctx = getContext("2d"); ctx.reset(); ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.lineCap = "round"
-                                    ctx.beginPath(); ctx.arc(28, 29, 20, -Math.PI / 2 + 0.6, 3 * Math.PI / 2 - 0.6); ctx.stroke()
-                                    ctx.beginPath(); ctx.moveTo(28, 5); ctx.lineTo(28, 28); ctx.stroke()
+                                    const ctx = getContext("2d"); ctx.reset(); ctx.strokeStyle = stroke; ctx.lineWidth = 3.5; ctx.lineCap = "round"
+                                    ctx.beginPath(); ctx.arc(32, 33, 23, -Math.PI / 2 + 0.6, 3 * Math.PI / 2 - 0.6); ctx.stroke()
+                                    ctx.beginPath(); ctx.moveTo(32, 5); ctx.lineTo(32, 31); ctx.stroke()
                                 }
                             }
                         }
                     }
-                    PlainLabel {
-                        objectName: "mainStatusLabel"
-                        Layout.topMargin: 25; Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter; font.pixelSize: 23; font.weight: Font.Medium
-                        text: !window.state.ready ? window.tr("Инициализация…", "Initializing…") : window.statusText(window.state.status)
-                        color: ["Limited", "CleanupError", "Error"].indexOf(window.state.status) >= 0 ? "#e6bc83" : window.ink
-                        Accessible.role: Accessible.StaticText
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter; Layout.topMargin: window.height < 720 ? 20 : 26; spacing: 9
+                        Rectangle {
+                            implicitWidth: 7; implicitHeight: 7; radius: 4
+                            color: window.state.status === "Connected" ? "#a8d8bc" : ["Limited", "CleanupError", "Error"].indexOf(window.state.status) >= 0 ? "#e6bc83" : window.accent
+                        }
+                        PlainLabel {
+                            objectName: "mainStatusLabel"
+                            font.pixelSize: 22; font.weight: Font.Medium
+                            text: !window.state.ready ? window.tr("Инициализация…", "Initializing…") : window.statusText(window.state.status)
+                            color: ["Limited", "CleanupError", "Error"].indexOf(window.state.status) >= 0 ? "#e6bc83" : window.ink
+                            Accessible.role: Accessible.StaticText
+                        }
                     }
                     SmallLabel {
                         objectName: "mainErrorLabel"
-                        Layout.fillWidth: true; Layout.topMargin: 9
+                        maximumLineCount: 3; elide: Text.ElideRight
+                        Layout.fillWidth: true; Layout.topMargin: window.height < 720 ? 8 : 10
                         horizontalAlignment: Text.AlignHCenter
                         text: window.parseError || (window.state.error ? window.errorText(window.state.error)
                             : window.state.status === "Limited" ? window.tr("Доступ к интернету не подтверждён", "Internet access is unconfirmed")
@@ -482,11 +512,25 @@ ApplicationWindow {
                             : window.state.can_stop ? window.actionText
                             : window.state.selected_name ? window.tr("Нажмите, чтобы подключиться", "Press to connect") : window.tr("Добавьте подписку и выберите сервер", "Add a subscription and choose a server"))
                     }
-                }
-                SmallLabel {
-                    anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-                    text: window.tr("Прокси", "Proxy")
-                    font.pixelSize: 11
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: window.height < 720 ? 12 : 20 }
+                    ActionButton {
+                        objectName: "homeFavoritesButton"
+                        Layout.fillWidth: true; implicitHeight: window.height < 720 ? 56 : 64
+                        enabled: window.state.ready && !window.state.busy
+                        onClicked: { favorites.checked = true; window.query(0); window.page = 1 }
+                        contentItem: RowLayout {
+                            spacing: 12
+                            PlainLabel { text: "☆"; color: window.accent; font.pixelSize: 25 }
+                            PlainLabel { text: window.tr("Избранное", "Favorites"); Layout.fillWidth: true; font.weight: Font.Medium }
+                            SmallLabel { text: window.tr("Серверы", "Servers") }
+                            PlainLabel { text: "›"; color: window.muted; font.pixelSize: 24 }
+                        }
+                    }
+                    SmallLabel {
+                        Layout.fillWidth: true; Layout.topMargin: window.height < 720 ? 10 : 14
+                        horizontalAlignment: Text.AlignHCenter
+                        text: window.tr("Локальный прокси · SOCKS5", "Local proxy · SOCKS5"); font.pixelSize: 11
+                    }
                 }
             }
             ColumnLayout {
@@ -604,21 +648,24 @@ ApplicationWindow {
             ColumnLayout {
                 spacing: 14
                 SectionTitle { text: window.tr("Настройки", "Settings") }
-                Flow {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: implicitHeight
-                    spacing: 6
-                    ActionButton { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); highlighted: window.settingsSection === "connection"; onClicked: window.settingsSection = "connection" }
-                    ActionButton { objectName: "settingsSubscriptionsButton"; text: window.tr("Подписки", "Subscriptions"); highlighted: window.settingsSection === "subscriptions"; onClicked: window.settingsSection = "subscriptions" }
-                    ActionButton { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); highlighted: window.settingsSection === "diagnostics"; onClicked: window.settingsSection = "diagnostics" }
-                    ActionButton { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); highlighted: window.settingsSection === "appearance"; onClicked: window.settingsSection = "appearance" }
-                    ActionButton { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); highlighted: window.settingsSection === "about"; onClicked: window.settingsSection = "about" }
+                ColumnLayout {
+                    visible: window.settingsSection === ""
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    spacing: 10
+                    SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
+                    SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
+                    SettingsRow { objectName: "settingsSubscriptionsButton"; text: window.tr("Подписки", "Subscriptions"); description: window.tr("Источники серверов и обновление", "Server sources and refresh"); symbol: "+"; onClicked: window.settingsSection = "subscriptions" }
+                    SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
+                    SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык и анимация", "Language and motion"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
+                    SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
+                    Item { Layout.fillHeight: true }
                 }
                 Loader {
                     id: settingsPanel
                     objectName: "settingsPanel"
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    active: window.page === 2
+                    visible: window.settingsSection !== ""
+                    active: window.page === 2 && window.settingsSection !== ""
                     sourceComponent: window.settingsSection === "subscriptions" ? subscriptionsPanel
                         : window.settingsSection === "diagnostics" ? diagnosticsPanel
                         : window.settingsSection === "appearance" ? appearancePanel
@@ -709,6 +756,18 @@ ApplicationWindow {
             SmallLabel { Layout.fillWidth: true; visible: window.state.source_id !== null && !window.state.busy && !window.state.pending; text: window.state.total === 0 ? window.tr("Профилей нет. Обновите подписку, чтобы повторить загрузку.", "No profiles. Refresh the subscription to retry loading.") : window.tr("Профилей: ", "Profiles: ") + window.state.total }
             RowLayout {
                 Layout.fillWidth: true
+                CheckBox {
+                    objectName: "subscriptionHwidChoice"
+                    Layout.fillWidth: true
+                    text: window.tr("ID устройства", "Device ID")
+                    checked: window.state.source_hwid_enabled === true
+                    enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !window.state.pending
+                    onToggled: window.send({command: "set_source_hwid", enabled: checked})
+                }
+                HelpButton { explanation: window.tr("Случайный стабильный ID отправляется провайдеру. Данные оборудования не используются. Включите, только если провайдер требует ID устройства.", "A random stable ID is sent to the provider. Hardware data is not used. Enable only if the provider requires a device ID.") }
+            }
+            RowLayout {
+                Layout.fillWidth: true
                 ActionButton { objectName: "refreshSourceButton"; text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: { window.send({command: "refresh"}) } }
                 ActionButton { objectName: "subscriptionServersButton"; text: window.tr("К серверам", "Choose server"); enabled: window.state.total > 0 && !window.state.busy; onClicked: window.page = 1 }
             }
@@ -735,6 +794,16 @@ ApplicationWindow {
             spacing: 18
             SectionTitle { text: "tofu" }
             SmallLabel { text: window.tr("Открытый исходный код", "Open source") }
+            Rectangle {
+                Layout.fillWidth: true; implicitHeight: buildDetails.implicitHeight + 32
+                color: window.surface; radius: 16
+                ColumnLayout {
+                    id: buildDetails
+                    anchors.fill: parent; anchors.margins: 16; spacing: 8
+                    SmallLabel { text: window.tr("СБОРКА", "BUILD"); font.pixelSize: 11; font.letterSpacing: 2 }
+                    PlainLabel { objectName: "buildIdLabel"; Layout.fillWidth: true; text: window.state.build_id || window.tr("Локальная сборка", "Local build"); font.pixelSize: 13; wrapMode: Text.WrapAnywhere }
+                }
+            }
             RowLayout {
                 PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
                 HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея закрытие отключает прокси и завершает приложение.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, closing disconnects the proxy and exits.") }
@@ -913,7 +982,7 @@ ApplicationWindow {
         modal: true
         title: window.tr("Добавить подписку", "Add subscription")
         closePolicy: Popup.CloseOnEscape
-        onClosed: { sourceName.clear(); sourceUrl.clear(); localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
+        onClosed: { sourceName.clear(); sourceUrl.clear(); sourceHwid.checked = false; localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
         contentItem: ColumnLayout {
             spacing: 12
             RowLayout {
@@ -927,7 +996,7 @@ ApplicationWindow {
             ActionButton {
                 id: sourceAdvanced; objectName: "sourceAdvancedButton"
                 text: window.tr("Дополнительно", "Advanced"); checkable: true; highlighted: checked
-                onCheckedChanged: if (!checked) localException.checked = false
+                onCheckedChanged: if (!checked) { localException.checked = false; sourceHwid.checked = false }
             }
             PlainLabel { visible: sourceAdvanced.checked; text: window.tr("Название · необязательно", "Name · optional") }
             TextField { id: sourceName; objectName: "sourceNameInput"; visible: sourceAdvanced.checked; Layout.fillWidth: true; maximumLength: 128; selectByMouse: true; Accessible.name: window.tr("Название подписки", "Subscription name") }
@@ -935,6 +1004,11 @@ ApplicationWindow {
                 visible: sourceAdvanced.checked
                 CheckBox { id: localException; objectName: "sourceLocalException"; Layout.fillWidth: true; text: window.tr("Локальный источник", "Local source") }
                 HelpButton { explanation: window.tr("Разрешает HTTP и адреса внутри своей сети. Включайте только для доверенной ссылки.", "Allows HTTP and addresses inside your network. Enable only for a trusted link.") }
+            }
+            RowLayout {
+                visible: sourceAdvanced.checked
+                CheckBox { id: sourceHwid; objectName: "sourceHwidChoice"; Layout.fillWidth: true; text: window.tr("ID устройства", "Device ID"); checked: false }
+                HelpButton { explanation: window.tr("Случайный стабильный ID отправляется провайдеру. Данные оборудования не используются. Включите, только если провайдер требует ID устройства.", "A random stable ID is sent to the provider. Hardware data is not used. Enable only if the provider requires a device ID.") }
             }
             RowLayout {
                 Layout.topMargin: 10
@@ -950,7 +1024,7 @@ ApplicationWindow {
                         window.page = 2
                         search.clear()
                         favorites.checked = false
-                        window.send({command: "import_source", name: sourceName.text.trim() || window.tr("Подписка", "Subscription"), url: sourceUrl.text.trim(), local_exception: localException.checked, route: "direct"})
+                        window.send({command: "import_source", name: sourceName.text.trim() || window.tr("Подписка", "Subscription"), url: sourceUrl.text.trim(), local_exception: localException.checked, hwid_enabled: sourceHwid.checked, route: "direct"})
                         sourceUrl.clear()
                         addDialog.close()
                     }

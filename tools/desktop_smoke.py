@@ -434,6 +434,13 @@ def run_case(
                                             "object": "homeButton",
                                         },
                                     },
+                                    {
+                                        "when": stop_when,
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "homeButton",
+                                        },
+                                    },
                                 ]
                             )
                         frozen = step(

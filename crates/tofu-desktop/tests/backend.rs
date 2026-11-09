@@ -88,6 +88,13 @@ impl Harness {
 }
 
 fn fixture(bodies: Vec<impl Into<String>>) -> (String, thread::JoinHandle<()>) {
+    fixture_with_requests(bodies, |_| {})
+}
+
+fn fixture_with_requests(
+    bodies: Vec<impl Into<String>>,
+    inspect: impl Fn(&[u8]) + Send + 'static,
+) -> (String, thread::JoinHandle<()>) {
     let bodies: Vec<String> = bodies.into_iter().map(Into::into).collect();
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
     listener.set_nonblocking(true).expect("nonblocking fixture");
@@ -118,6 +125,7 @@ fn fixture(bodies: Vec<impl Into<String>>) -> (String, thread::JoinHandle<()>) {
                 request.push(byte[0]);
                 assert!(request.len() < 16384);
             }
+            inspect(&request);
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -811,8 +819,8 @@ fn shutdown_cancels_inflight_fetch_before_close_ack() {
 }
 
 #[test]
-fn import_stop_and_shutdown_cancel_fetch_and_reject_concurrent_import() {
-    for shutdown in [false, true] {
+fn import_and_hwid_toggle_stop_and_shutdown_cancel_fetch_and_reject_concurrent_changes() {
+    for (shutdown, toggle) in [(false, false), (true, false), (false, true), (true, true)] {
         let directory = Directory::new();
         let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
         listener.set_nonblocking(true).expect("fixture listener");
@@ -847,13 +855,22 @@ fn import_stop_and_shutdown_cancel_fetch_and_reject_concurrent_import() {
         });
         let mut app = Harness::new(directory.config());
         app.wait(|v| v["ready"] == true);
-        app.send(json!({"command":"import_source","name":"Slow","url":url,"local_exception":true,"route":"direct"}));
+        if toggle {
+            app.send(json!({"command":"add_source","name":"Slow","url":url,"local_exception":true,"route":"direct"}));
+            app.wait(|v| v["sources_total"] == 1);
+            app.send(json!({"command":"set_source_hwid","enabled":true}));
+        } else {
+            app.send(json!({"command":"import_source","name":"Slow","url":url,"local_exception":true,"route":"direct"}));
+        }
         app.wait(|v| v["busy"] == true);
         request
             .recv_timeout(Duration::from_secs(5))
             .expect("fetch started");
         app.send(json!({"command":"import_source","name":"Concurrent","url":url,"local_exception":true,"route":"direct"}));
         let rejected = app.wait(|v| v["error"] == "busy");
+        app.send(json!({"command":"set_source_hwid","enabled":!toggle}));
+        let toggle_rejected = app.wait(|v| v["error"] == "busy");
+        assert_eq!(toggle_rejected["source_hwid_enabled"], toggle);
         assert_eq!(rejected["sources_total"], 1);
         assert_eq!(rejected["busy"], true);
         let started = Instant::now();
@@ -991,5 +1008,141 @@ fn automatic_port_collision_reselects_and_fixed_override_reports_busy() {
         assert!(occupied.local_addr().is_ok());
         app.close();
         server.join().expect("fixture");
+    }
+}
+
+#[test]
+fn hwid_preferences_are_opt_in_persisted_and_refresh_selected_source() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec![
+        "trojan://fixture@example.invalid:443#После переключения",
+    ]);
+    let mut app = Harness::new(directory.config());
+    let initial = app.wait(|v| v["ready"] == true);
+    assert_eq!(initial["source_hwid_enabled"], false);
+    assert!(
+        initial["build_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id != "0.1.0")
+    );
+    app.send(json!({"command":"add_source","name":"По умолчанию","url":url,"local_exception":true,"route":"direct"}));
+    let first = app.wait(|v| v["sources_total"] == 1);
+    assert_eq!(first["source_hwid_enabled"], false);
+    let first_id = first["source_id"].clone();
+    app.send(json!({"command":"add_source","name":"Opt-in","url":url,"local_exception":true,"route":"direct","hwid_enabled":true}));
+    let second = app.wait(|v| v["sources_total"] == 2);
+    assert_eq!(second["source_hwid_enabled"], true);
+    let second_id = second["source_id"].clone();
+    app.send(json!({"command":"select_source","id":first_id}));
+    app.wait(|v| v["source_id"] == first_id && v["source_hwid_enabled"] == false);
+    app.send(json!({"command":"select_source","id":second_id}));
+    app.wait(|v| v["source_id"] == second_id && v["source_hwid_enabled"] == true);
+    // Отключение автоматически обновляет выбранную подписку без передачи идентификатора.
+    app.send(json!({"command":"set_source_hwid","enabled":false}));
+    let refreshed = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+    assert_eq!(refreshed["source_hwid_enabled"], false);
+    assert_eq!(refreshed["profiles"][0]["name"], "После переключения");
+    app.close();
+    server.join().expect("автоматическое обновление завершено");
+    let mut restarted = Harness::new(directory.config());
+    let loaded = restarted.wait(|v| v["ready"] == true);
+    assert_eq!(loaded["source_hwid_enabled"], false);
+    assert_eq!(loaded["sources"][1]["hwid_enabled"], false);
+    restarted.close();
+    for snapshot in app.snapshots.iter().chain(&restarted.snapshots) {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        assert!(value.get("hwid").is_none());
+        assert!(value.get("hwid_id").is_none());
+        assert!(!snapshot.contains("fixture-secret"));
+    }
+}
+
+#[test]
+fn hwid_commands_reject_non_boolean_and_require_selection() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    for value in [json!(null), json!("true"), json!(1)] {
+        for command in [
+            json!({"command":"set_source_hwid","enabled":value}),
+            json!({"command":"add_source","name":"x","url":"https://example.invalid","local_exception":false,"route":"direct","hwid_enabled":value}),
+            json!({"command":"import_source","name":"x","url":"https://example.invalid","local_exception":false,"route":"direct","hwid_enabled":value}),
+        ] {
+            assert_eq!(
+                app.host
+                    .dispatch(&command.to_string())
+                    .expect_err("только bool")
+                    .key(),
+                "invalid_input"
+            );
+        }
+    }
+    app.send(json!({"command":"set_source_hwid","enabled":true}));
+    app.wait(|v| v["error"] == "source_required");
+    app.close();
+}
+
+#[test]
+fn import_hwid_opt_in_sends_stable_private_id_and_toggle_refreshes() {
+    let directory = Directory::new();
+    let (sender, requests) = mpsc::channel();
+    let (url, server) = fixture_with_requests(
+        vec!["trojan://fixture@example.invalid:443#HWID"; 4],
+        move |request| {
+            let request = String::from_utf8_lossy(request);
+            let hwid = request.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("x-hwid")
+                    .then(|| value.trim().to_owned())
+            });
+            sender.send(hwid).expect("заголовок тестового запроса");
+        },
+    );
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_source","name":"HWID","url":url,"local_exception":true,"route":"direct","hwid_enabled":true}));
+    let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+    assert_eq!(imported["source_hwid_enabled"], true);
+    let hwid = requests
+        .recv_timeout(Duration::from_secs(2))
+        .expect("запрос")
+        .expect("opt-in HWID");
+    assert_eq!(hwid.len(), 32);
+    app.send(json!({"command":"set_source_hwid","enabled":false}));
+    app.wait(|v| v["source_hwid_enabled"] == false && v["busy"] == false);
+    assert!(
+        requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("без HWID")
+            .is_none()
+    );
+    app.send(json!({"command":"set_source_hwid","enabled":true}));
+    app.wait(|v| v["source_hwid_enabled"] == true && v["busy"] == false);
+    // Не используем assert_eq: при ошибке тест не должен напечатать идентификатор.
+    assert!(
+        requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("повторный opt-in")
+            .as_deref()
+            == Some(hwid.as_str())
+    );
+    app.close();
+    let mut restarted = Harness::new(directory.config());
+    let loaded = restarted.wait(|v| v["ready"] == true);
+    assert_eq!(loaded["source_hwid_enabled"], true);
+    restarted.send(json!({"command":"refresh"}));
+    restarted.wait(|v| v["busy"] == true);
+    restarted.wait(|v| v["busy"] == false);
+    assert!(
+        requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("после перезапуска")
+            .as_deref()
+            == Some(hwid.as_str())
+    );
+    restarted.close();
+    server.join().expect("все обновления завершены");
+    for snapshot in app.snapshots.iter().chain(&restarted.snapshots) {
+        assert!(!snapshot.contains(&hwid));
     }
 }

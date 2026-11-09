@@ -57,10 +57,17 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ),
         ui(
             "click",
+            "settingsConnectionButton",
+            expect={"window": {"settingsSection": ""}},
+            capture="settings-index.png",
+        ),
+        ui(
+            "click",
             "proxyCopyButton",
             expect={"proxyAddress": {"text": {"contains": "127.0.0.1:"}}},
             capture="settings-connection.png",
         ),
+        ui("click", "homeButton"),
         ui("click", "settingsAppearanceButton"),
         ui(
             "key",
@@ -77,6 +84,7 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             capture="settings-en.png",
         ),
         ui("key", "languageChoice", key="Enter"),
+        ui("click", "homeButton"),
         ui(
             "click",
             "settingsSubscriptionsButton",
@@ -89,6 +97,10 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             expect={"addSourceDialog": {"visible": True}},
             value="https://cancel.invalid/?ui-secret=hidden",
         ),
+        ui("key", "sourceAdvancedButton", key="Enter"),
+        ui(
+            "click", "sourceHwidChoice", expect={"sourceHwidChoice": {"checked": False}}
+        ),
         ui("click", "revealSourceUrl"),
         ui("click", "sourceAddCancelButton"),
         ui("click", "addSourceButton", expect={"addSourceDialog": {"visible": False}}),
@@ -99,6 +111,7 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             expect={
                 "sourceUrlInput": {"text": ""},
                 "revealSourceUrl": {"checked": False},
+                "sourceHwidChoice": {"checked": False},
             },
         ),
         ui("text", "sourceNameInput", value="Тест А"),
@@ -110,8 +123,16 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ),
         ui(
             "click",
+            "sourceHwidChoice",
+            expect={"sourceHwidChoice": {"checked": False}},
+        ),
+        ui(
+            "click",
             "sourceAddConfirmButton",
-            expect={"sourceLocalException": {"checked": True}},
+            expect={
+                "sourceLocalException": {"checked": True},
+                "sourceHwidChoice": {"checked": True},
+            },
         ),
         ui(
             "click",
@@ -133,6 +154,28 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             },
         ),
         ui("click", "approveRefreshButton", when={"pending": True, "busy": False}),
+        ui(
+            "click",
+            "subscriptionHwidChoice",
+            when={"pending": False, "busy": False, "profiles_count": 2},
+            expect={"subscriptionHwidChoice": {"checked": True}},
+        ),
+        ui(
+            "click",
+            "approveRefreshButton",
+            when={"pending": True, "busy": False, "source_hwid_enabled": False},
+        ),
+        ui(
+            "click",
+            "subscriptionHwidChoice",
+            when={"pending": False, "busy": False, "source_hwid_enabled": False},
+            expect={"subscriptionHwidChoice": {"checked": False}},
+        ),
+        ui(
+            "click",
+            "approveRefreshButton",
+            when={"pending": True, "busy": False, "source_hwid_enabled": True},
+        ),
         ui(
             "click",
             "subscriptionServersButton",
@@ -158,6 +201,12 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ),
         ui("key", "profileSearch", key="Enter"),
         ui("click", "profileSelect_1", when={"profiles_count": 2}),
+        ui("click", "homeFavoritesButton", expect={"window": {"page": 0}}),
+        ui(
+            "click",
+            "profileSelect_1",
+            when={"profiles_count": 1, "favorites_only": True},
+        ),
         ui(
             "key",
             "mainConnectButton",
@@ -212,11 +261,13 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             "applyProbeTargetButton",
             expect={"revealProbeUrl": {"checked": True}},
         ),
+        ui("click", "homeButton"),
         ui(
             "click",
             "settingsAppearanceButton",
             when={"probe_custom": True, "probe_expected_status": 200},
         ),
+        ui("click", "homeButton"),
         ui("click", "settingsDiagnosticsButton"),
         ui(
             "key",
@@ -233,6 +284,7 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
                 "revealProbeUrl": {"checked": False},
             },
         ),
+        ui("click", "homeButton"),
         ui(
             "click",
             "settingsAppearanceButton",
@@ -241,6 +293,14 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ui("key", "languageChoice", key="Down"),
         ui("key", "languageChoice", key="Enter"),
         ui("click", "homeButton", expect={"window": {"language": "en"}}),
+        ui("click", "settingsAboutButton", capture="settings-about.png"),
+        ui(
+            "click",
+            "homeButton",
+            expect={"buildIdLabel": {"visible": True, "text": {"contains": "0.1.0"}}},
+            capture="about-build.png",
+        ),
+        ui("click", "homeButton"),
         ui(
             "click",
             "serverPickerButton",
@@ -388,7 +448,15 @@ def run(
     tcp = threading.Thread(target=accept_tcp, daemon=True)
     tcp.start()
     body = f"trojan://invented-secret@127.0.0.1:{port}#Москва • TLS\nsocks5://invented:password@192.0.2.1:1080#<b>Plain text</b>\nunknown://not-supported".encode()
-    handler = type("UiFixture", (Fixture,), {"body": body})
+    captured_hwids: list[str | None] = []
+
+    class UiFixture(Fixture):
+        def do_GET(self) -> None:
+            captured_hwids.append(self.headers.get("x-hwid"))
+            super().do_GET()
+
+    UiFixture.body = body
+    handler = UiFixture
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     http = threading.Thread(target=server.serve_forever, daemon=True)
     http.start()
@@ -423,12 +491,24 @@ def run(
             if (output / "outside.png").exists():
                 raise RuntimeError("Capture вышел за пределы собственного каталога")
             rejected.append(label)
+        if (
+            len(captured_hwids) != 4
+            or not captured_hwids[0]
+            or captured_hwids[2] is not None
+            or captured_hwids[0] != captured_hwids[1]
+            or captured_hwids[0] != captured_hwids[3]
+        ):
+            raise RuntimeError("HWID opt-in/toggle wire sequence не совпадает")
+        saved_trace = (output / "trace.jsonl").read_text()
+        if any(value and value in saved_trace for value in captured_hwids):
+            raise RuntimeError("HWID попал в GUI trace")
         if failures or len(accepted) != 3:
             raise RuntimeError(f"TCP fixture: EOF={len(accepted)}, failures={failures}")
         result = {
             "steps": len(steps),
             "events": len(events),
             "tcp_eof": len(accepted),
+            "hwid_requests": len(captured_hwids),
             "width": width,
             "height": height,
             "scale": scale,
