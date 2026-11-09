@@ -198,6 +198,18 @@ only counts, status and durations: `cargo run --locked -p tofu-linux --example t
 Pipe local profile text into stdin; subscription URLs and credentials must stay
 out of argv and logs. The example supports SIGINT/SIGTERM cancellation.
 
+### Managed network resource journal
+
+`tofu_linux::managed_network` provides a bounded, durable ownership journal for
+the future privileged network helper. It records intent before effects, requires
+explicit OS reconciliation after reopening, and retains unresolved cleanup items.
+Session resources and the public kill-switch block have separate lifetimes.
+Storage uses private permissions, directory-FD operations, an exclusive writer
+lock and fsync/atomic replacement. It contains typed descriptors, without secrets
+or executable commands. This component does not apply routes, DNS or firewall
+rules and does not enable system TUN. [Checks and limits](docs/validation/2026-11-09-network-resource-journal.md),
+[helper plan](docs/superpowers/plans/2026-11-09-linux-network-helper.md).
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses

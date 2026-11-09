@@ -1,0 +1,74 @@
+# Журнал владения сетевыми ресурсами
+
+`tofu_linux::managed_network` — первый файловый компонент будущего системного
+NetworkHost/helper. Он не меняет сеть и не предоставляет привилегии; полный
+G-LINUX/G-DNS, применение kill switch и recovery helper этим этапом не закрыты.
+
+## Контракт
+
+Journal привязан к owner UID, session, generation и идентичности network namespace
+(device/inode). Каталог принадлежит effective UID helper: в production это
+системный сервис, в тестах — текущий непривилегированный пользователь. UID в
+Ownership обозначает владельца сессии и не заменяет проверку D-Bus peer/polkit.
+
+Типизированные дескрипторы TUN/nft/route/rule/DNS не содержат путей, shell,
+engine-конфигов или секретов. Имена создаёт будущий helper из numeric IDs.
+Дескриптор и исторический Confirmed не доказывают фактическое владение объектом.
+После открытия каждая запись снова требует явной доверенной сверки с ОС.
+Будущий backend обязан проверять namespace/маркер/полную идентичность объекта
+перед подтверждением Owned и перед удалением; журнал сам этого не делает.
+
+`intent` фиксируется до эффекта. `reconcile` принимает Owned/Absent; неизвестный
+или чужой объект остаётся несверенным. Cleanup получает только подтверждённые
+записи нужного scope, продолжает после неудачи одного удаления и сохраняет
+остатки. Unknown рядом с Owned не препятствует очистке Owned; полностью
+несверенный scope возвращает ReconcileRequired без callback.
+
+Сессионные ресурсы и публичная блокировка имеют отдельные scope. Cleanup Session
+не удаляет PublicBlock. Один журнал не перепривязывается к новому поколению:
+будущий helper должен отдельно удерживать учёт публичной защиты до её передачи
+или явного авторизованного Unlock.
+
+## Хранение
+
+Пределы: 128 записей и 128 KiB JSON. Превышение, неизвестные поля/версия, конфликт
+идентификаторов, неверные дескрипторы и повреждение — явные ошибки. Исходный
+неизвестный/повреждённый файл сохраняется.
+
+Приватный каталог 0700 открывается через directory FD с NOFOLLOW для каждого
+компонента; существующие небезопасные права не исправляются. Родительские
+каталоги проверяются, root-owned sticky temporary directory допустим. На самом
+каталоге удерживается exclusive flock. Файлы требуют 0600, effective UID,
+regular inode и nlink=1; symlink/hardlink не переиспользуются.
+
+Commit выполняет write temporary → fsync file → atomic rename → fsync directory.
+После ошибки записи handle блокируется до повторного открытия и сверки; нельзя
+считать неуспешную запись разрешением на последующий эффект. Directory FD
+сохраняет адресацию уже открытого каталога после переименования родителя.
+
+## Проверки
+
+Rust 1.85.1: 16 integration test entries, включая отдельный child-process fixture.
+RED до реализации — отсутствующий managed_network; mixed Owned/Unknown дополнен
+отдельным RED→GREEN. Проверены recovery, generation/owner mismatch, duplicate
+conflict/no-op, schema/limits, ссылки/права, второй writer, unsafe pending file,
+блокировка handle после failed write, canonical route prefix, routing-rule
+protocol, частичная очистка и независимый scope публичной блокировки.
+
+Настоящий дочерний процесс делает durable intent и завершается exit(73) без Drop.
+Повторное открытие получает сохранённый Intent, освобождённый lock и требование
+reconciliation. Это проверка process crash, не аппаратного отключения питания.
+Ошибки fsync на каждом физическом шаге не инъецировались.
+
+После синхронизации с main прошли workspace tests, workspace clippy all-targets
+с `-D warnings`, fmt и проверка diff на Rust 1.85.1.
+Изолированный build-каталог удерживается flock и очищается после review/проверок.
+Результаты root-проверок находятся локально в `local/validation/network-journal/`.
+
+## Следующая интеграция
+
+[План системного helper](../superpowers/plans/2026-11-09-linux-network-helper.md)
+включает peer/polkit, immutable Prepare/Apply, trusted engine registry, настоящие
+Netlink/nft/resolved эффекты, компенсацию, сверку после аварии и настройки UI.
+Наличие journal не является подтверждением установки helper, фактической
+публичной блокировки или работоспособности TUN продукта.
