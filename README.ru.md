@@ -69,9 +69,11 @@ Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop eng
 [проверки resolution pin](docs/validation/2026-11-09-resolution-pin.md).
 
 Для переработки UI выбраны почти чёрная тема, лавандовый акцент и простой экран
-подключения. Все настройки уходят в отдельный раздел. Далее — замеры toolkit и
-варианты дизайна; текущий GUI остаётся функциональным прототипом.
-[Направление UI](docs/specs/ui-direction.md).
+подключения. Все настройки уходят в отдельный раздел. Из
+[интерактивных вариантов](design/ui-variants.html) выбран А с большой кнопкой по центру.
+[Изолированный стенд Qt/GTK4/Slint](bench/ui/README.md) отделён от приложения;
+замеры реальных окон и выбор toolkit ещё впереди. Текущий GUI остаётся
+функциональным прототипом. [Направление UI](docs/specs/ui-direction.md).
 
 ## Разработка
 
@@ -81,7 +83,9 @@ Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop eng
 не изменяются. При обычном запуске недоступные службы явно отображаются в GUI.
 
 Прототип требует Qt 6 Base/Declarative (Quick, Controls, Widgets, Network, DBus и
-QML build tools), C++ compiler и системный SQLite. Qt включается optional feature
+QML build tools), C++ compiler, системный SQLite и совместимый linker
+(`lld`, `gold` или `mold`; CI устанавливает `lld`). CXX-Qt выбирает его вместо
+системного GNU ld.bfd. Qt включается optional feature
 `gui`; обычные workspace/Android проверки Qt не собирают. CXX-Qt закреплён на
 0.10.0 с согласованными версиями ABI CXX/cxx-gen.
 

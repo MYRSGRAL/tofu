@@ -67,9 +67,11 @@ The compiler keeps mixed DNS/Fake-IP disabled and the desktop engine is unchange
 [resolution pin evidence](docs/validation/2026-11-09-resolution-pin.md).
 
 The UI redesign direction is a nearly black theme with lavender accents and a
-simple connect screen. All configuration moves to Settings. Toolkit measurements
-and design variants come next; the current GUI remains a functional prototype.
-[UI direction](docs/specs/ui-direction.md).
+simple connect screen. All configuration moves to Settings. Variant A, with a
+large central connect button, has been selected in the [interactive concepts](design/ui-variants.html).
+The [isolated Qt/GTK4/Slint benchmark](bench/ui/README.md) is separate from the
+application; real-window measurements and toolkit selection remain pending.
+The current GUI remains a functional prototype. [UI direction](docs/specs/ui-direction.md).
 
 ## Development
 
@@ -79,7 +81,9 @@ The test suite also requires `dbus-daemon` for its private bus; it never changes
 the host's D-Bus services. Runtime monitoring reports missing services explicitly.
 
 The prototype requires Qt 6 Base/Declarative (Quick, Controls, Widgets, Network,
-DBus and QML development tools), a C++ compiler and system SQLite. GUI dependencies
+DBus and QML development tools), a C++ compiler, system SQLite and a compatible
+linker (`lld`, `gold` or `mold`; CI installs `lld`). CXX-Qt selects one when GNU
+ld.bfd is the system default. GUI dependencies
 are behind the optional `gui` feature; ordinary workspace and Android checks do not
 build Qt. CXX-Qt is pinned to 0.10.0, with matching CXX/cxx-gen ABI versions.
 

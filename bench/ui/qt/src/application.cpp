@@ -1,0 +1,63 @@
+#include "application.h"
+#include <QGuiApplication>
+#include <QFont>
+#include <QQmlApplicationEngine>
+#include <QQuickStyle>
+#include <QQuickWindow>
+#include <QVariant>
+#include <atomic>
+
+namespace tofu_bench {
+namespace {
+QQuickWindow* window = nullptr;
+std::atomic<std::int32_t> requested{0};
+std::int32_t synchronizedToken = 0;
+}
+
+void request_frame(std::int32_t token)
+{
+    requested.store(token, std::memory_order_release);
+    if (window) window->update();
+}
+
+void resume_for_show()
+{
+    if (window && !window->isVisible()) window->show();
+}
+
+void exit_application()
+{
+    QCoreApplication::quit();
+}
+
+int run_application()
+{
+    int argc = 1;
+    char name[] = "tofu-bench-qt";
+    char* argv[] = {name, nullptr};
+    QGuiApplication app(argc, argv);
+    QGuiApplication::setQuitOnLastWindowClosed(false);
+    QFont font(QStringLiteral("Noto Sans"));
+    font.setPixelSize(14);
+    QGuiApplication::setFont(font);
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
+    QQmlApplicationEngine engine;
+    engine.loadFromModule("tofu.benchmark", "Main");
+    if (engine.rootObjects().isEmpty()) return 1;
+    window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+    if (!window) return 1;
+    // beforeSynchronizing выполняется после остановки GUI thread: token относится
+    // именно к синхронизированному layout, а не к предыдущему кадру в полёте.
+    QObject::connect(window, &QQuickWindow::beforeSynchronizing, window, [] {
+        synchronizedToken = requested.load(std::memory_order_acquire);
+    }, Qt::DirectConnection);
+    QObject::connect(window, &QQuickWindow::frameSwapped, window, [quick = window] {
+        const auto token = synchronizedToken;
+        QMetaObject::invokeMethod(quick, "acknowledgeFrame", Qt::QueuedConnection,
+                                  Q_ARG(QVariant, QVariant(token)));
+    }, Qt::DirectConnection);
+    const int result = app.exec();
+    window = nullptr;
+    return result;
+}
+}

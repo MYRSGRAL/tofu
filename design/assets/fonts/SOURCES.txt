@@ -1,0 +1,4 @@
+Onest.ttf	966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31	https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/onest/Onest%5Bwght%5D.ttf
+Onest-OFL.txt	071195d8806e226faeee60259c28ca67b458227af5195a73f5cfcab06e3003bc	https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/onest/OFL.txt
+Unbounded.ttf	323b511be380c8d474ef030686b71aedde501f8d9cd46da558b7c40454372c3f	https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/unbounded/Unbounded%5Bwght%5D.ttf
+Unbounded-OFL.txt	31e5d4e83955e7103c34570dd49b0570ef490800bd65b42923c0dd02445263b3	https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/unbounded/OFL.txt
