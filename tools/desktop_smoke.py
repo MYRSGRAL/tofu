@@ -62,6 +62,7 @@ def run_case(
     expected_status: int = 204,
     expected_state: str = "Limited",
     ca: Path | None = None,
+    tcp_status: str | None = None,
 ) -> dict[str, object]:
     endpoint = free_port()
     bodies = [
@@ -110,7 +111,12 @@ def run_case(
                     revision=1,
                 )
             )
-            if engine is not None:
+            if tcp_status is not None:
+                steps.append(step({"selected_profile": 1}, "check_tcp"))
+                finish = step({"tcp_status": tcp_status, "tcp_busy": False}, "shutdown")
+                finish["capture"] = True
+                steps.append(finish)
+            elif engine is not None:
                 if engines is None:
                     raise ValueError("Для проверки ядра нужен --engine-dir")
                 if engine != "xray":
@@ -140,6 +146,12 @@ def run_case(
                     "can_stop": True,
                 }
                 if probe_url is not None:
+                    steps.append(step(stop_when, "check_tcp"))
+                    stop_when = {
+                        **stop_when,
+                        "tcp_status": "reachable",
+                        "tcp_busy": False,
+                    }
                     frozen = step(
                         stop_when,
                         "set_probe_target",
@@ -224,6 +236,8 @@ def run_case(
             "source_count",
             "profile_count",
             "pending",
+            "tcp_busy",
+            "tcp_status",
             "step",
         }
         if any(set(event) - allowed for event in events):
@@ -236,6 +250,10 @@ def run_case(
             event.get("status") == expected_state for event in events
         ):
             raise RuntimeError(f"Не наблюдалось состояние {expected_state} живого ядра")
+        if tcp_status is not None and not any(
+            event.get("tcp_status") == tcp_status for event in events
+        ):
+            raise RuntimeError("Ожидаемый TCP результат не получен")
         if engine is not None:
             observed = next(
                 index
@@ -318,6 +336,82 @@ def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, obje
     return results
 
 
+def run_tcp(
+    binary: Path, output: Path, *, native_dns: bool = True, namespace: bool = True
+) -> list[dict[str, object]]:
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.listen(2)
+    listener.settimeout(15)
+    failures: list[str] = []
+    closed: list[bool] = []
+    cases = [("tcp-literal", "127.0.0.1", namespace, "reachable")]
+    if native_dns:
+        if namespace:
+            cases.append(
+                ("tcp-resolver-restricted", "localhost", True, "resolver_unavailable")
+            )
+        # Host root/service UID не отображены в user namespace. Проверяем native
+        # resolver в исходном UID-пространстве; сценарий не запускает ядра.
+        cases.append(("tcp-resolved", "localhost", False, "reachable"))
+    expected_connections = sum(status == "reachable" for _, _, _, status in cases)
+
+    def accept_probes() -> None:
+        try:
+            for _ in range(expected_connections):
+                with listener.accept()[0] as client:
+                    client.settimeout(5)
+                    if client.recv(1) != b"":
+                        raise RuntimeError("TCP probe отправил payload")
+                    closed.append(True)
+        except (OSError, RuntimeError) as error:
+            failures.append(type(error).__name__)
+        finally:
+            listener.close()
+
+    thread = threading.Thread(target=accept_probes, daemon=True)
+    thread.start()
+    results = []
+    try:
+        for name, host, scoped, status in cases:
+            results.append(
+                run_case(
+                    binary,
+                    None,
+                    output,
+                    name,
+                    False,
+                    None,
+                    scoped,
+                    profile=f"trojan://invented-secret@{host}:{port}#TCP fixture",
+                    tcp_status=status,
+                )
+            )
+        thread.join(timeout=15)
+        if thread.is_alive() or failures or len(closed) != expected_connections:
+            raise RuntimeError("TCP fixture не подтвердил EOF/cleanup")
+        results.append(
+            run_case(
+                binary,
+                None,
+                output,
+                "tcp-refused",
+                False,
+                None,
+                namespace,
+                profile=f"trojan://invented-secret@127.0.0.1:{port}#TCP closed fixture",
+                tcp_status="connect_failed",
+            )
+        )
+        return results
+    finally:
+        listener.close()
+        thread.join(timeout=16)
+        if thread.is_alive():
+            raise RuntimeError("TCP fixture не завершился")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -330,12 +424,27 @@ def main() -> int:
     )
     parser.add_argument(
         "--case",
-        choices=("profiles", "partial", "xray", "sing-box", "health", "all"),
+        choices=(
+            "profiles",
+            "partial",
+            "xray",
+            "sing-box",
+            "health",
+            "tcp",
+            "tcp-basic",
+            "all",
+        ),
         default="profiles",
     )
     arguments = parser.parse_args()
-    if arguments.no_namespace and arguments.case not in ("profiles", "partial"):
-        parser.error("--no-namespace разрешён только для profiles/partial без ядра")
+    if arguments.no_namespace and arguments.case not in (
+        "profiles",
+        "partial",
+        "tcp-basic",
+    ):
+        parser.error(
+            "--no-namespace разрешён только для profiles/partial/tcp-basic без ядра"
+        )
     binary = arguments.binary.resolve(strict=True)
     engines = (
         arguments.engine_dir.resolve(strict=True) if arguments.engine_dir else None
@@ -343,12 +452,22 @@ def main() -> int:
     output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     cases = (
-        ("profiles", "partial", "xray", "sing-box", "health")
+        ("profiles", "partial", "xray", "sing-box", "health", "tcp")
         if arguments.case == "all"
         else (arguments.case,)
     )
     results = []
     for name in cases:
+        if name in ("tcp", "tcp-basic"):
+            results.extend(
+                run_tcp(
+                    binary,
+                    output,
+                    native_dns=name == "tcp",
+                    namespace=not arguments.no_namespace,
+                )
+            )
+            continue
         if name == "health":
             if engines is None:
                 parser.error("Для health нужен --engine-dir")

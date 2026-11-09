@@ -48,9 +48,13 @@ struct Harness {
 }
 impl Harness {
     fn new(config: HostConfig) -> Self {
+        Self::with_hook(config, |_| {})
+    }
+    fn with_hook(config: HostConfig, hook: impl Fn(&str) + Send + Sync + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
-            let _ = sender.send(value);
+            let _ = sender.send(value.clone());
+            hook(&value);
         })
         .expect("backend thread");
         Self {
@@ -283,6 +287,204 @@ fn health_target_settings_are_validated_without_disclosing_url() {
         for secret in ["health.invalid", "health-token", "hidden", "user:secret"] {
             assert!(!snapshot.contains(secret));
         }
+    }
+}
+
+#[test]
+fn tcp_check_is_separate_from_session_and_bound_to_selected_profile() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("TCP fixture");
+    let port = listener.local_addr().expect("TCP адрес").port();
+    listener.set_nonblocking(true).expect("nonblocking");
+    let (closed_sender, closed) = mpsc::channel();
+    let peer = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("TCP accept: {error}"),
+            }
+        };
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("timeout");
+        assert_eq!(socket.read(&mut [0]).expect("TCP EOF"), 0);
+        closed_sender.send(()).expect("EOF ack");
+    });
+    let directory = Directory::new();
+    let (url, server) = fixture(vec![format!(
+        "trojan://tcp-secret@127.0.0.1:{port}#Доступный\ntrojan://other-secret@127.0.0.1:{port}#Второй"
+    )]);
+    let blocked = Arc::new((Mutex::new(false), Condvar::new()));
+    let gate = blocked.clone();
+    let busy_count = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["tcp_busy"] == true && busy_count.fetch_add(1, Ordering::Relaxed) == 1 {
+            let (lock, condition) = &*gate;
+            let mut released = lock.lock().expect("gate lock");
+            while !*released {
+                released = condition.wait(released).expect("gate wait");
+            }
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    assert_eq!(
+        app.host
+            .dispatch(r#"{"command":"check_tcp","unexpected":true}"#)
+            .expect_err("strict TCP command")
+            .key(),
+        "invalid_input"
+    );
+    app.send(json!({"command":"check_tcp"}));
+    app.wait(|v| v["error"] == "profile_required");
+    app.send(json!({"command":"add_source","name":"TCP fixture","url":url,"local_exception":true,"route":"direct"}));
+    app.wait(|v| v["source_id"].is_number());
+    app.send(json!({"command":"refresh"}));
+    let imported = app.wait(|v| v["total"] == 2 && v["busy"] == false);
+    let id = imported["profiles"][0]["id"].as_i64().expect("id");
+    let other = imported["profiles"][1]["id"].as_i64().expect("другой id");
+    let revision = imported["revision"].as_i64().expect("revision");
+    app.send(json!({"command":"select_profile","id":id,"revision":revision}));
+    app.wait(|v| v["selected_profile"] == id);
+    app.send(json!({"command":"check_tcp"}));
+    let reachable = app.wait(|v| v["tcp_result"]["status"] == "reachable");
+    assert_eq!(reachable["tcp_result"]["profile_id"], id);
+    assert_eq!(reachable["tcp_result"]["revision"], revision);
+    assert_eq!(reachable["tcp_result"]["dns_ms"], Value::Null);
+    assert!(reachable["tcp_result"]["connect_ms"].is_u64());
+    assert!(
+        reachable["tcp_result"]["checked_at_ms"]
+            .as_u64()
+            .expect("время")
+            > 0
+    );
+    assert_eq!(reachable["tcp_busy"], false);
+    assert_eq!(reachable["status"], "Disconnected");
+    assert_eq!(reachable["can_stop"], false);
+    closed
+        .recv_timeout(Duration::from_secs(3))
+        .expect("сокет проверки закрыт");
+    peer.join().expect("TCP peer завершён");
+    // Останавливаем actor после spawn, до polling TCP future: выбор меняется
+    // в очереди, пока callback старой проверки ещё не обработан.
+    app.send(json!({"command":"check_tcp"}));
+    app.wait(|v| v["tcp_busy"] == true);
+    app.send(json!({"command":"select_profile","id":other,"revision":revision}));
+    let (lock, condition) = &*blocked;
+    *lock.lock().expect("gate lock") = true;
+    condition.notify_all();
+    let selected = app.wait(|v| v["selected_profile"] == other && v["tcp_busy"] == false);
+    assert!(selected["tcp_result"].is_null());
+    // Listener уже закрыт; повторная TCP-проверка не превращается в Connect ядра.
+    app.send(json!({"command":"check_tcp"}));
+    let refused = app.wait(|v| v["tcp_result"]["status"] == "connect_failed");
+    assert_eq!(refused["tcp_result"]["profile_id"], other);
+    assert_eq!(refused["status"], "Disconnected");
+    app.close();
+    server.join().expect("HTTP fixture завершён");
+    for snapshot in &app.snapshots {
+        assert!(!snapshot.contains("tcp-secret"));
+        assert!(!snapshot.contains("other-secret"));
+        assert!(!snapshot.contains("trojan://"));
+    }
+}
+
+#[test]
+fn tcp_cancel_bypasses_full_queue_and_invalidates_queued_probe() {
+    let directory = Directory::new();
+    let blocked = Arc::new((Mutex::new(false), Condvar::new()));
+    let gate = blocked.clone();
+    let mut app = Harness::with_hook(directory.config(), move |_| {
+        let (lock, condition) = &*gate;
+        let mut released = lock.lock().expect("gate lock");
+        while !*released {
+            released = condition.wait(released).expect("gate wait");
+        }
+    });
+    app.wait(|_| true);
+    for _ in 0..127 {
+        app.send(json!({"command":"reload"}));
+    }
+    app.send(json!({"command":"check_tcp"}));
+    assert_eq!(
+        app.host
+            .dispatch(r#"{"command":"reload"}"#)
+            .expect_err("queue limit")
+            .key(),
+        "busy"
+    );
+    app.send(json!({"command":"cancel_tcp"}));
+    let (lock, condition) = &*blocked;
+    *lock.lock().expect("gate lock") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["error"] == "cancelled");
+    assert_eq!(cancelled["tcp_busy"], false);
+    assert_eq!(cancelled["status"], "Disconnected");
+    assert!(cancelled["tcp_result"].is_null());
+    app.close();
+}
+
+#[test]
+fn stop_and_shutdown_finish_a_pending_tcp_task_before_acknowledgement() {
+    for shutdown in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("свой TCP listener");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("порт").port();
+        let directory = Directory::new();
+        let (url, server) = fixture(vec![format!(
+            "trojan://pending-secret@127.0.0.1:{port}#Pending"
+        )]);
+        let blocked = Arc::new((Mutex::new(false), Condvar::new()));
+        let gate = blocked.clone();
+        let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+            let value: Value = serde_json::from_str(snapshot).expect("DTO");
+            if value["tcp_busy"] == true {
+                let (lock, condition) = &*gate;
+                let mut released = lock.lock().expect("gate lock");
+                while !*released {
+                    released = condition.wait(released).expect("gate wait");
+                }
+            }
+        });
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"add_source","name":"Pending","url":url,"local_exception":true,"route":"direct"}));
+        app.wait(|v| v["source_id"].is_number());
+        app.send(json!({"command":"refresh"}));
+        let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+        app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+        app.wait(|v| v["selected_profile"].is_number());
+        app.send(json!({"command":"check_tcp"}));
+        app.wait(|v| v["tcp_busy"] == true);
+        if shutdown {
+            app.host.shutdown();
+        } else {
+            app.send(json!({"command":"stop"}));
+        }
+        let (lock, condition) = &*blocked;
+        *lock.lock().expect("gate lock") = true;
+        condition.notify_all();
+        if shutdown {
+            let closed = app.wait(|v| v["closed"] == true);
+            assert_eq!(closed["tcp_busy"], false);
+            assert!(app.host.wait_closed(Duration::from_secs(2)));
+        } else {
+            let cancelled =
+                app.wait(|v| v["tcp_busy"] == false && v["tcp_result"]["status"] == "cancelled");
+            assert_eq!(cancelled["status"], "Disconnected");
+            app.close();
+        }
+        assert_eq!(
+            listener
+                .accept()
+                .expect_err("отмена до polling connect")
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        server.join().expect("HTTP fixture завершён");
     }
 }
 

@@ -97,6 +97,23 @@ routing screens, persistent GUI preferences and full T-01…T-04 acceptance rema
 
 [Configurable HTTPS checks and evidence](docs/validation/2026-11-09-configurable-health.md).
 
+In Overview, **Check TCP** measures the selected server separately from HTTPS.
+It opens and immediately closes a direct TCP socket without authentication or
+payload. DNS and connect durations are separate, with a five-second total deadline.
+Names use the native systemd-resolved Varlink API; literals need no resolver.
+Missing resolver support is explicit, with no external DNS fallback. QUIC or an
+unknown transport reports “not applicable”. Cancel stops only TCP; Stop/Quit also
+cancel it. A result is tied to the selected source/profile/revision and timestamp.
+This is one historical measurement; network changes and result history are not
+tracked yet. It does not prove proxy authentication, HTTPS access or throughput.
+
+[TCP checks and evidence](docs/validation/2026-11-09-tcp-probe.md).
+
+A stdin-only diagnostic example checks one accepted record by index and emits
+only counts, status and durations: `cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
+Pipe local profile text into stdin; subscription URLs and credentials must stay
+out of argv and logs. The example supports SIGINT/SIGTERM cancellation.
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses

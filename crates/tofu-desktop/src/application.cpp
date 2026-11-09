@@ -293,7 +293,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             stopAction->setEnabled(snapshot.value(QStringLiteral("can_stop")).toBool());
             updateTrayLabels();
             QJsonObject metadata;
-            for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed"}) {
+            for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed", "tcp_busy"}) {
                 metadata.insert(QLatin1String(key), snapshot.value(QLatin1String(key)));
             }
             const auto sources = snapshot.value(QStringLiteral("sources")).toArray().size();
@@ -303,6 +303,8 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             metadata.insert(QStringLiteral("profile_count"), profiles);
             metadata.insert(QStringLiteral("pending"), pending);
             metadata.insert(QStringLiteral("step"), stepIndex);
+            const auto tcpStatus = snapshot.value(QStringLiteral("tcp_result")).toObject().value(QStringLiteral("status"));
+            metadata.insert(QStringLiteral("tcp_status"), tcpStatus);
             if (smokeTest && traceFile.isOpen()) {
                 const auto line = QJsonDocument(metadata).toJson(QJsonDocument::Compact) + '\n';
                 if (traceFile.pos() + line.size() > 500000 || traceFile.write(line) != line.size()) {
@@ -321,6 +323,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
                     if (it.key() == QStringLiteral("sources_count")) actual = sources;
                     if (it.key() == QStringLiteral("profiles_count")) actual = profiles;
                     if (it.key() == QStringLiteral("pending")) actual = pending;
+                    if (it.key() == QStringLiteral("tcp_status")) actual = tcpStatus;
                     if (actual != it.value()) matches = false;
                 }
                 if (matches) {

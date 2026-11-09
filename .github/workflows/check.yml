@@ -72,3 +72,4 @@ jobs:
         run: |
           python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case profiles --no-namespace --output "$RUNNER_TEMP/gui-profiles"
           python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case partial --no-namespace --output "$RUNNER_TEMP/gui-partial"
+          python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case tcp-basic --no-namespace --output "$RUNNER_TEMP/gui-tcp"
