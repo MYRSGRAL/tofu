@@ -115,6 +115,9 @@ enum Command {
     SetEngine {
         engine: EngineChoice,
     },
+    SetListenPort {
+        port: NonZeroU16,
+    },
     SetProbeTarget {
         url: String,
         expected_status: u16,
@@ -783,6 +786,13 @@ impl Actor {
                 self.state.engine = engine;
                 Ok(())
             }
+            Command::SetListenPort { port } => {
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                self.state.port = port.get();
+                Ok(())
+            }
             Command::SetProbeTarget {
                 url,
                 expected_status,
@@ -928,6 +938,80 @@ async fn network_invalidated(network: &mut Option<NetworkWatch>, stamp: Option<N
             return;
         }
         network_changed(network).await;
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::{Actor, DEFAULT_PROBE_URL, HostConfig, Snapshot, open};
+    use std::{
+        fs,
+        os::unix::fs::DirBuilderExt,
+        path::PathBuf,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use zeroize::Zeroizing;
+
+    struct Directory(PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).expect("очистка своего тестового каталога");
+        }
+    }
+
+    #[tokio::test]
+    async fn listen_port_is_busy_during_active_session_and_failed_cleanup() {
+        let path = std::env::temp_dir().join(format!(
+            "tofu-desktop-settings-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("часы")
+                .as_nanos()
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("создание собственного тестового каталога");
+        let directory = Directory(path);
+        let mut config = HostConfig::new(directory.0.clone(), directory.0.join("engines"))
+            .with_ephemeral_key([77; 32]);
+        let (service, _lock) = open(&mut config).await.expect("тестовая БД");
+        let mut actor = Actor {
+            service,
+            state: Snapshot::new(true),
+            callback: Arc::new(|_| {}),
+            selected: None,
+            pending: None,
+            search: String::new(),
+            favorites_only: false,
+            probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
+            network: None,
+        };
+        actor.state.port = 18888;
+        actor.state.can_stop = true;
+        for status in ["Preparing", "Connected", "CleanupError"] {
+            actor.state.status = status;
+            let command = serde_json::from_str(r#"{"command":"set_listen_port","port":18889}"#)
+                .expect("команда настройки");
+            assert_eq!(
+                actor
+                    .command(command)
+                    .await
+                    .expect_err("сессия удерживается")
+                    .key(),
+                "busy"
+            );
+            assert_eq!(actor.state.port, 18888);
+        }
+        // После подтверждённого освобождения сессии настройка снова применима.
+        actor.state.can_stop = false;
+        let command = serde_json::from_str(r#"{"command":"set_listen_port","port":18889}"#)
+            .expect("команда настройки");
+        actor.command(command).await.expect("сессия освобождена");
+        assert_eq!(actor.state.port, 18889);
+        actor.service.close().await.expect("закрытие БД");
     }
 }
 
