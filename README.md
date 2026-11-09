@@ -124,17 +124,21 @@ routing screens, persistent GUI preferences and full T-01…T-04 acceptance rema
 [Configurable HTTPS checks and evidence](docs/validation/2026-11-09-configurable-health.md).
 
 In Overview, **Check TCP** measures the selected server separately from HTTPS.
-It opens and immediately closes a direct TCP socket without authentication or
-payload. DNS and connect durations are separate, with a five-second total deadline.
+It resolves DNS once and takes three direct TCP samples to the same winning IP,
+port and IPv6 scope, closing each socket without authentication or payload.
+The reported connect time is the median of three successful samples, excluding
+DNS and address-race waiting. A partial failure stops the series and has no median.
+All stages share a five-second total deadline.
 Names use the native systemd-resolved Varlink API; literals need no resolver.
 Missing resolver support is explicit, with no external DNS fallback. QUIC or an
 unknown transport reports “not applicable”. Cancel stops only TCP; Stop/Quit also
 cancel it. A result is tied to the selected source/profile/revision and timestamp.
-This is one historical measurement. Observed network changes cancel pending TCP
+This is one historical three-sample series. Observed network changes cancel pending TCP
 checks and remove old results; result history is not saved. It does not prove
 proxy authentication, HTTPS access or throughput.
 
-[TCP checks and evidence](docs/validation/2026-11-09-tcp-probe.md).
+[TCP checks and evidence](docs/validation/2026-11-09-tcp-probe.md),
+[three-sample series](docs/validation/2026-11-09-tcp-series.md).
 
 Linux now observes route/address changes through netlink and DNS/network service
 changes through system D-Bus. The GUI reports unavailable sources explicitly.
