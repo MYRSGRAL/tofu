@@ -15,7 +15,7 @@ PID/mount namespaces и отдельный `/proc` ограничивают clea
 `dns_fixture.py` ограничивает packet/records, проверяет ID/question/owner/family,
 compression pointers, truncation/rcode и trailing bytes. Пять новых unit-тестов
 покрывают IPv4/IPv6, NODATA, TTL, ошибочные ответы/петли/границы и cleanup UDP server.
-Ruff 0.17.4 format/check и все девять Python unit-тестов прошли.
+Ruff 0.17.4 format/check и все двенадцать Python unit-тестов прошли.
 
 Native config-check обязателен. Процесс должен быть жив после запроса, затем
 останавливается/reap в context manager. Отказ SOCKS сам по себе не считается
@@ -72,7 +72,7 @@ Evidence: `local/validation/native-dns-contracts/pinning/run-1/result.json`,
 Ограниченная последовательность новых DNS-имён добивается повторной выдачи этого
 адреса другому имени; старый адрес затем достигает маркера нового имени.
 
-В финальном TTL-стенде:
+В первом зафиксированном TTL-стенде:
 
 - Xray: DNS TTL 1 секунда, повторная выдача после четырёх allocations; старый адрес
   достиг M03 примерно через 0.004 с, внутри исходного TTL.
@@ -90,6 +90,15 @@ pool или benchmark нагрузки. Полный D-07 и поведение 
 
 Evidence: `local/validation/native-dns-contracts/fakeip/ttl-proof/result.json`,
 DNS TTL/transcript, начальный/повторный/новый-session markers и native config/log.
+
+## Исправление review самого стенда
+
+P2: FakeIP-проба только записывала `within_original_ttl`; истёкший TTL не вызывал
+ошибку. Mock с TTL 1/elapsed 2 воспроизвёл ложный успешный возврат. Теперь возраст
+измеряется один раз, проверяется до формирования контрпримера; неожиданное
+завершение ядра также отклоняет прогон. Отдельные тесты live/expired/dead-engine
+проходят. Native-проба обоих ядер повторена успешно со строгой проверкой TTL,
+живого процесса и reap: `local/validation/native-dns-contracts/fakeip/review-fixed/result.json`.
 
 ## Следствие для реализации
 

@@ -225,11 +225,15 @@ def run_engine(binary: Path, engine: str, output: Path) -> dict:
                     actual = connect(old)
                     if actual != f"M{index:02d}":
                         raise RuntimeError(f"Повторный FakeIP не достиг B: {actual}")
+                    elapsed = time.monotonic() - original_at
+                    if not 0 <= elapsed < original_ttl:
+                        raise RuntimeError(
+                            "Повторное назначение до исходного DNS TTL не подтверждено"
+                        )
                     reused = {
                         "original_dns_ttl": original_ttl,
-                        "elapsed_seconds": time.monotonic() - original_at,
-                        "within_original_ttl": time.monotonic() - original_at
-                        < original_ttl,
+                        "elapsed_seconds": elapsed,
+                        "within_original_ttl": True,
                         "old_ip": old,
                         "old_qname": "name-0.fakeip.test",
                         "new_qname": f"name-{index}.fakeip.test",
@@ -241,6 +245,11 @@ def run_engine(binary: Path, engine: str, output: Path) -> dict:
             if reused is None:
                 raise RuntimeError("Повторное назначение не найдено за 32 запроса")
             first_alive = process.poll() is None
+            if not first_alive:
+                raise RuntimeError(
+                    "Первое ядро неожиданно завершилось во время проверки"
+                )
+        first_reaped = process.returncode is not None
         second = output / "session-2"
         second.mkdir(exist_ok=True)
         with engine_process(binary, engine, config(engine), second) as process:
@@ -268,6 +277,13 @@ def run_engine(binary: Path, engine: str, output: Path) -> dict:
                     "Нет повторного назначения после restart за 32 запроса"
                 )
             second_alive = process.poll() is None
+            if not second_alive:
+                raise RuntimeError(
+                    "Второе ядро неожиданно завершилось во время проверки"
+                )
+        second_reaped = process.returncode is not None
+        if not first_reaped or not second_reaped:
+            raise RuntimeError("Не подтверждён reap обоих экземпляров ядра")
     return {
         "engine": engine,
         "gate_supported": False,
@@ -277,6 +293,7 @@ def run_engine(binary: Path, engine: str, output: Path) -> dict:
         "same_session_stale_alias": reused,
         "new_session_stale_alias": epoch_reuse,
         "engines_alive_during_probe": first_alive and second_alive,
+        "engines_reaped": first_reaped and second_reaped,
         "dns_wire_transcript": transcript,
         "scope": "Синтетический маленький pool; фактический TTL измерен, весь D07 не закрыт",
     }
