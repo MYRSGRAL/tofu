@@ -83,7 +83,8 @@ impl Harness {
     }
 }
 
-fn fixture(bodies: Vec<&'static str>) -> (String, thread::JoinHandle<()>) {
+fn fixture(bodies: Vec<impl Into<String>>) -> (String, thread::JoinHandle<()>) {
+    let bodies: Vec<String> = bodies.into_iter().map(Into::into).collect();
     let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
     listener.set_nonblocking(true).expect("nonblocking fixture");
     let url = format!(
@@ -196,6 +197,61 @@ fn real_subscription_approval_revision_and_favorite() {
             .windows(CLEAN.len())
             .any(|bytes| bytes == CLEAN.as_bytes())
     );
+}
+
+#[test]
+fn review_reasons_are_paginated_and_do_not_expose_source_data() {
+    let directory = Directory::new();
+    let body = format!(
+        "trojan://review-secret@example.invalid:443?allowInsecure=1&private-secret=hidden-value#Секрет\n{}",
+        vec!["unknown://rejected-secret"; 103].join("\n")
+    );
+    let (url, server) = fixture(vec![body]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"add_source","name":"Fixture","url":url,"local_exception":true,"route":"direct"}));
+    app.wait(|v| v["source_id"].is_number());
+    app.send(json!({"command":"refresh"}));
+    let first = app.wait(|v| !v["pending"].is_null());
+    assert_eq!(first["pending"]["rows_total"], 105);
+    assert_eq!(
+        first["pending"]["rows"].as_array().expect("строки").len(),
+        100
+    );
+    assert_eq!(
+        first["pending"]["rows"][0],
+        json!({"kind":"rejected","position":2,"code":"unsupported_protocol","field":"source"})
+    );
+    app.send(json!({"command":"review_page","offset":100}));
+    let last = app.wait(|v| v["pending"]["rows_offset"] == 100);
+    let rows = last["pending"]["rows"]
+        .as_array()
+        .expect("последняя страница");
+    assert_eq!(rows.len(), 5);
+    assert_eq!(
+        rows[3],
+        json!({"kind":"flagged","position":1,"code":"unknown_parameter","field":null})
+    );
+    assert_eq!(rows[4]["code"], "unsafe_option");
+    app.send(json!({"command":"review_page","offset":106}));
+    app.wait(|v| v["error"] == "invalid_input");
+    app.send(json!({"command":"discard_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["error"].is_null());
+    app.close();
+    server.join().expect("HTTP fixture завершён");
+    for snapshot in &app.snapshots {
+        for secret in [
+            "review-secret",
+            "private-secret",
+            "hidden-value",
+            "rejected-secret",
+            "example.invalid",
+            "trojan://",
+            "fixture-secret",
+        ] {
+            assert!(!snapshot.contains(secret), "секрет не попадает в DTO");
+        }
+    }
 }
 
 #[test]

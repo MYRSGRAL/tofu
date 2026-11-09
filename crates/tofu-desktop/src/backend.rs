@@ -14,6 +14,7 @@ use std::{
     time::Duration,
 };
 use tofu_engine::Engine;
+use tofu_import::{Field, IssueCode, ReviewFlag};
 use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, PendingRefresh, ProbeTarget, ProfileQuery,
@@ -92,6 +93,9 @@ enum Command {
     Refresh,
     ApproveRefresh,
     DiscardRefresh,
+    ReviewPage {
+        offset: usize,
+    },
     Query {
         search: String,
         favorites_only: bool,
@@ -278,6 +282,7 @@ fn validate(command: &Command) -> Result<()> {
         }
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
         Command::SourcePage { offset } => *offset <= 40_000,
+        Command::ReviewPage { offset } => *offset <= 160_000,
         Command::SelectSource { id } | Command::Favorite { id, .. } => *id > 0,
         Command::SelectProfile { id, revision } => *id > 0 && *revision > 0,
         _ => true,
@@ -310,6 +315,84 @@ struct PendingDto {
     rejected: usize,
     flagged: usize,
     native_json: bool,
+    rows: Vec<ReviewRow>,
+    rows_total: usize,
+    rows_offset: usize,
+}
+#[derive(Serialize)]
+struct ReviewRow {
+    kind: &'static str,
+    position: usize,
+    code: &'static str,
+    field: Option<&'static str>,
+}
+
+fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
+    let report = pending.report();
+    let total = report.issues.len()
+        + report
+            .servers
+            .iter()
+            .map(|server| server.review_flags().len())
+            .sum::<usize>();
+    if offset > total {
+        return Err(DesktopError("invalid_input"));
+    }
+    // Только закрытые enum-коды и позиции: ни URI, ни пользовательские параметры.
+    let issues = report.issues.iter().map(|issue| ReviewRow {
+        kind: "rejected",
+        position: issue.line,
+        code: match issue.code {
+            IssueCode::MalformedUri => "malformed_uri",
+            IssueCode::UnsupportedProtocol => "unsupported_protocol",
+            IssueCode::InvalidPort => "invalid_port",
+            IssueCode::InvalidHost => "invalid_host",
+            IssueCode::InvalidCredentials => "invalid_credentials",
+            IssueCode::InvalidEncoding => "invalid_encoding",
+            IssueCode::InvalidJson => "invalid_json",
+            IssueCode::TooLarge => "too_large",
+            IssueCode::DuplicateParameter => "duplicate_parameter",
+            IssueCode::ConflictingParameter => "conflicting_parameter",
+        },
+        field: Some(match issue.field {
+            Field::Source => "source",
+            Field::Endpoint => "endpoint",
+            Field::Credentials => "credentials",
+            Field::Parameters => "parameters",
+            Field::Payload => "payload",
+        }),
+    });
+    let flags = report
+        .servers
+        .iter()
+        .enumerate()
+        .flat_map(|(index, server)| {
+            server.review_flags().iter().map(move |flag| ReviewRow {
+                kind: "flagged",
+                // Это номер принятого профиля в отчёте, а не строка исходного URI.
+                position: index + 1,
+                code: match flag {
+                    ReviewFlag::UnknownParameter => "unknown_parameter",
+                    ReviewFlag::UnsupportedTransport => "unsupported_transport",
+                    ReviewFlag::UnsupportedSecurity => "unsupported_security",
+                    ReviewFlag::UnsupportedCipher => "unsupported_cipher",
+                    ReviewFlag::UnsupportedOption => "unsupported_option",
+                    ReviewFlag::UnsafeOption => "unsafe_option",
+                    ReviewFlag::LegacyOption => "legacy_option",
+                },
+                field: None,
+            })
+        });
+    let summary = pending.summary();
+    Ok(PendingDto {
+        accepted: summary.accepted,
+        rejected: summary.rejected,
+        flagged: summary.flagged,
+        native_json: summary.native_json,
+        rows: issues.chain(flags).skip(offset).take(100).collect(),
+        rows_total: total,
+        rows_offset: offset,
+    })
 }
 #[derive(Serialize)]
 struct Snapshot {
@@ -574,6 +657,14 @@ impl Actor {
                 self.state.pending = None;
                 Ok(())
             }
+            Command::ReviewPage { offset } => {
+                let pending = self
+                    .pending
+                    .as_ref()
+                    .ok_or(DesktopError("review_required"))?;
+                self.state.pending = Some(pending_dto(pending, offset)?);
+                Ok(())
+            }
             Command::Query {
                 search,
                 favorites_only,
@@ -626,12 +717,7 @@ impl Actor {
             RefreshResult::Pending(pending) => {
                 let summary = pending.summary();
                 if summary.needs_review() {
-                    self.state.pending = Some(PendingDto {
-                        accepted: summary.accepted,
-                        rejected: summary.rejected,
-                        flagged: summary.flagged,
-                        native_json: summary.native_json,
-                    });
+                    self.state.pending = Some(pending_dto(&pending, 0)?);
                     self.pending = Some(pending);
                     Ok(())
                 } else {

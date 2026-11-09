@@ -72,6 +72,37 @@ ApplicationWindow {
         const pair = values[status]
         return pair ? tr(pair[0], pair[1]) : tr("Состояние недоступно", "State unavailable")
     }
+    function reviewText(row) {
+        const reasons = {
+            malformed_uri: ["Некорректная ссылка", "Malformed URI"],
+            unsupported_protocol: ["Протокол не поддерживается", "Unsupported protocol"],
+            invalid_port: ["Некорректный порт", "Invalid port"],
+            invalid_host: ["Некорректный адрес", "Invalid host"],
+            invalid_credentials: ["Некорректные учётные данные", "Invalid credentials"],
+            invalid_encoding: ["Некорректная кодировка", "Invalid encoding"],
+            invalid_json: ["Некорректный JSON", "Invalid JSON"],
+            too_large: ["Превышен размер записи", "Record too large"],
+            duplicate_parameter: ["Повторяющийся параметр", "Duplicate parameter"],
+            conflicting_parameter: ["Конфликт параметров", "Conflicting parameters"],
+            unknown_parameter: ["Неизвестный параметр", "Unknown parameter"],
+            unsupported_transport: ["Транспорт не поддерживается", "Unsupported transport"],
+            unsupported_security: ["Защита не поддерживается", "Unsupported security"],
+            unsupported_cipher: ["Шифр не поддерживается", "Unsupported cipher"],
+            unsupported_option: ["Опция не поддерживается", "Unsupported option"],
+            unsafe_option: ["Небезопасная опция", "Unsafe option"],
+            legacy_option: ["Устаревшая опция", "Legacy option"]
+        }
+        const fields = {
+            source: ["источник", "source"], endpoint: ["адрес", "endpoint"],
+            credentials: ["учётные данные", "credentials"],
+            parameters: ["параметры", "parameters"], payload: ["содержимое", "payload"]
+        }
+        const reason = reasons[row.code]
+        const field = fields[row.field]
+        return (row.kind === "rejected" ? tr("Строка ", "Line ") : tr("Принятый профиль ", "Accepted profile "))
+            + row.position + ": " + (reason ? tr(reason[0], reason[1]) : tr("Требует проверки", "Review required"))
+            + (field ? " (" + tr(field[0], field[1]) + ")" : "")
+    }
     function errorText(key) {
         const messages = {
             startup: ["Не удалось запустить приложение.", "Could not start the application."],
@@ -264,7 +295,7 @@ ApplicationWindow {
                                     elide: Text.ElideRight
                                 }
                             }
-                            onActivated: { search.clear(); favorites.checked = false; window.send({command: "select_source", id: currentValue}) }
+                            onActivated: window.send({command: "select_source", id: currentValue})
                             enabled: window.state.ready && !window.state.busy && count > 0
                             Accessible.name: window.tr("Подписка профилей", "Profile subscription")
                         }
@@ -471,6 +502,35 @@ ApplicationWindow {
             PlainLabel { text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
             PlainLabel { text: window.tr("Требуют внимания: ", "Flagged: ") + (window.state.pending ? window.state.pending.flagged : 0) }
             PlainLabel { Layout.fillWidth: true; color: "#75431e"; visible: !!window.state.pending && !!window.state.pending.native_json; text: window.tr("Источник содержит конфигурацию ядра JSON. Её содержимое не показывается: она может содержать секреты. Подтверждайте импорт только из доверенного источника.", "The source contains native engine JSON configuration. Its contents are hidden because they may contain secrets. Approve only a trusted source.") }
+            ListView {
+                id: reviewRows
+                Layout.fillWidth: true
+                Layout.preferredHeight: visible ? 150 : 0
+                visible: !!window.state.pending && window.state.pending.rows_total > 0
+                clip: true
+                spacing: 8
+                model: window.state.pending ? window.state.pending.rows : []
+                delegate: PlainLabel {
+                    required property var modelData
+                    width: reviewRows.width - 20
+                    text: window.reviewText(modelData)
+                }
+                ScrollBar.vertical: ScrollBar { }
+            }
+            RowLayout {
+                visible: !!window.state.pending && window.state.pending.rows_total > 100
+                Button {
+                    text: window.tr("Назад", "Previous")
+                    enabled: !!window.state.pending && window.state.pending.rows_offset > 0 && !window.state.busy
+                    onClicked: { reviewRows.positionViewAtBeginning(); window.send({command: "review_page", offset: Math.max(0, window.state.pending.rows_offset - 100)}) }
+                }
+                SmallLabel { text: window.state.pending ? (window.state.pending.rows_offset + 1) + "–" + Math.min(window.state.pending.rows_offset + 100, window.state.pending.rows_total) + " / " + window.state.pending.rows_total : "" }
+                Button {
+                    text: window.tr("Далее", "Next")
+                    enabled: !!window.state.pending && window.state.pending.rows_offset + 100 < window.state.pending.rows_total && !window.state.busy
+                    onClicked: { reviewRows.positionViewAtBeginning(); window.send({command: "review_page", offset: window.state.pending.rows_offset + 100}) }
+                }
+            }
             RowLayout {
                 Item { Layout.fillWidth: true }
                 Button { text: window.tr("Отменить импорт", "Discard import"); enabled: !window.state.busy; onClicked: window.send({command: "discard_refresh"}) }

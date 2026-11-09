@@ -40,12 +40,14 @@ CxxQtThread.queue. CXX/cxx-gen закреплены на согласованн�
 
 ## Проверки
 
-- MSRV Rust 1.85.1: workspace — 146 Rust-тестов и 4 doctest; два inherited
+- MSRV Rust 1.85.1: workspace — 147 Rust-тестов и 4 doctest; два inherited
   environment-dependent теста остаются ignored в hermetic прогоне.
-- Семь actor-тестов: clean/partial/native import, approval, revision/favorite,
+- Восемь actor-тестов: clean/partial/native import, approval, revision/favorite,
   bounded strict commands, priority Stop/Shutdown, exclusive flock/reopen,
   отмена зависшей HTTP-загрузки, сохранение чужих permissions, явный отказ Proxy
-  и настраиваемый порт. Все URL/credentials вымышленные.
+  и настраиваемый порт. Дополнительная проверка отчёта: 105 причин на двух
+  страницах, issue line/code/field и review flags; URL/credentials/raw parameters
+  отсутствуют в DTO. Все URL/credentials вымышленные.
 - Отдельный source-page тест: 65 источников, граница64, повреждённое тело snapshot
   не читается при получении имён; invalid offset отклоняется.
 - Workspace clippy/fmt, GUI feature clippy, release GUI и Android default-feature
@@ -86,3 +88,12 @@ Persistent key creation через реальный Secret Service в этом G
 пока на сеанс, health URL фиксирован на generate_204, recovery supervisor,
 TUN/system proxy/DNS, редактор политики и управление ядрами/установка ещё впереди.
 Native JSON сохраняется opaque после review и не активируется произвольно.
+
+## Исправления независимого review
+
+- При смене подписки сохраняются видимые фильтры, как и фильтры backend; скрытый
+  поиск/избранное больше не возникает из-за очистки только QML-контролов.
+- Перед approval отображаются безопасные причины отклонения и предупреждения:
+  номер строки для issue, номер принятого профиля для review flag, enum-код
+  и категория поля. Отчёт передаётся страницами по100; исходные значения и
+  содержимое native JSON остаются скрытыми.
