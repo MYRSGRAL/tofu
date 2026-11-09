@@ -72,6 +72,7 @@ large central connect button, has been selected in the [interactive concepts](de
 The [isolated Qt/GTK4/Slint benchmark](bench/ui/README.md) is separate from the
 application; real-window measurements and toolkit selection remain pending.
 The current GUI remains a functional prototype. [UI direction](docs/specs/ui-direction.md).
+[Main-screen/backend contract](docs/specs/ui-backend-contract.md).
 
 ## Development
 
