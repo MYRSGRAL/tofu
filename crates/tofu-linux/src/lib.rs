@@ -52,3 +52,6 @@ pub use network::{
 };
 #[cfg(target_os = "linux")]
 pub use resolver::*;
+
+#[cfg(target_os = "linux")]
+pub mod helper;
