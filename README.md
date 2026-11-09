@@ -67,9 +67,11 @@ The compiler keeps mixed DNS/Fake-IP disabled and the desktop engine is unchange
 [resolution pin evidence](docs/validation/2026-11-09-resolution-pin.md).
 
 The UI redesign direction is a nearly black theme with lavender accents and a
-simple connect screen. All configuration moves to Settings. Toolkit measurements
-and design variants come next; the current GUI remains a functional prototype.
-[UI direction](docs/specs/ui-direction.md).
+simple connect screen. All configuration moves to Settings. Variant A, with a
+large central connect button, has been selected in the [interactive concepts](design/ui-variants.html).
+The [isolated Qt/GTK4/Slint benchmark](bench/ui/README.md) is separate from the
+application; real-window measurements and toolkit selection remain pending.
+The current GUI remains a functional prototype. [UI direction](docs/specs/ui-direction.md).
 
 ## Development
 
