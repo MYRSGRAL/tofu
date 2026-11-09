@@ -25,11 +25,28 @@ MAX_RECORDS = 128
 
 
 @dataclass(frozen=True)
+class Cname:
+    target: str
+    ttl: int
+
+
+@dataclass(frozen=True)
+class Soa:
+    zone: str
+    ttl: int
+    minimum: int
+
+
+@dataclass(frozen=True)
 class Reply:
     addresses: tuple[str, ...] = ()
     rcode: int = 0
     ttl: int = 0
     drop: bool = False
+    cname: Cname | None = None
+    soa: Soa | None = None
+    opcode: int = 0
+    reserved: bool = False
 
 
 def decode_name(packet: bytes, offset: int) -> tuple[str, int]:
@@ -99,24 +116,62 @@ def make_response(packet: bytes, reply: Reply) -> bytes:
         len(reply.addresses) > 64
         or not 0 <= reply.rcode <= 15
         or not 0 <= reply.ttl <= 0xFFFFFFFF
+        or not 0 <= reply.opcode <= 15
     ):
         raise ValueError("Некорректный DNS fixture reply")
+
+    def wire_name(value: str) -> bytes:
+        return question_bytes(value, 1)[:-4]
+
     answers = []
+    owner = b"\xc0\x0c"
+    if reply.cname is not None:
+        if not 0 <= reply.cname.ttl <= 0xFFFFFFFF:
+            raise ValueError("Некорректный CNAME TTL")
+        target = wire_name(reply.cname.target)
+        answers.append(
+            owner + struct.pack("!HHIH", 5, 1, reply.cname.ttl, len(target)) + target
+        )
+        owner = target
+    authority = b""
+    if reply.soa is not None:
+        if (
+            not 0 <= reply.soa.ttl <= 0xFFFFFFFF
+            or not 0 <= reply.soa.minimum <= 0xFFFFFFFF
+        ):
+            raise ValueError("Некорректный SOA TTL/MINIMUM")
+        payload = (
+            wire_name("ns.example")
+            + wire_name("hostmaster.example")
+            + struct.pack("!IIIII", 1, 60, 30, 3600, reply.soa.minimum)
+        )
+        authority = (
+            wire_name(reply.soa.zone)
+            + struct.pack("!HHIH", 6, 1, reply.soa.ttl, len(payload))
+            + payload
+        )
     for text in reply.addresses:
         address = ipaddress.ip_address(text)
         if qtype not in (1, 28) or address.version != (4 if qtype == 1 else 6):
             raise ValueError("DNS fixture family mismatch")
         answers.append(
-            b"\xc0\x0c"
+            owner
             + struct.pack("!HHIH", qtype, 1, reply.ttl, len(address.packed))
             + address.packed
         )
-    flags = 0x8080 | (struct.unpack_from("!H", packet, 2)[0] & 0x0100) | reply.rcode
+    flags = (
+        0x8080
+        | (struct.unpack_from("!H", packet, 2)[0] & 0x0100)
+        | reply.rcode
+        | (reply.opcode << 11)
+        | (0x40 if reply.reserved else 0)
+    )
     return (
         packet[:2]
-        + struct.pack("!HHHHH", flags, 1, len(answers), 0, 0)
+        + struct.pack("!HHHHH", flags, 1, len(answers), int(reply.soa is not None), 0)
         + question_bytes(name, qtype)
         + b"".join(answers)
+        + authority
     )
 
 
@@ -129,16 +184,18 @@ def response_addresses(
 ) -> list[str]:
     actual_name, actual_type, offset = read_question(packet)
     flags, _, count, authority, additional = struct.unpack_from("!HHHHH", packet, 2)
-    if packet[:2] != identifier or not flags & 0x8000 or flags & 0x020F:
+    if packet[:2] != identifier or not flags & 0x8000 or flags & 0x7A4F:
         raise ValueError("DNS id/error/truncation mismatch")
     if (
         actual_name.lower() != name.lower()
         or actual_type != qtype
-        or count > 64
+        or count > MAX_RECORDS
         or count + authority + additional > MAX_RECORDS
     ):
         raise ValueError("DNS question/count mismatch")
     addresses = []
+    expected_owner = name.lower()
+    aliases = {expected_owner}
     for index in range(count + authority + additional):
         owner, offset = decode_name(packet, offset)
         if offset + 10 > len(packet):
@@ -147,8 +204,26 @@ def response_addresses(
         offset += 10
         if offset + size > len(packet):
             raise ValueError("Обрезан DNS resource payload")
-        if index < count and kind == qtype and qclass == 1:
-            if owner.lower() != name.lower() or size != (4 if qtype == 1 else 16):
+        if index < count and kind == 5 and qclass == 1:
+            target, end = decode_name(packet, offset)
+            if (
+                addresses
+                or owner.lower() != expected_owner
+                or end != offset + size
+                or target.lower() in aliases
+                or len(aliases) >= 16
+            ):
+                raise ValueError("Некорректная цепочка CNAME")
+            expected_owner = target.lower()
+            aliases.add(expected_owner)
+            if ttl_capture is not None:
+                ttl_capture.append(ttl)
+        elif index < count and kind == qtype and qclass == 1:
+            if (
+                owner.lower() != expected_owner
+                or size != (4 if qtype == 1 else 16)
+                or len(addresses) >= 64
+            ):
                 raise ValueError("DNS answer owner/family mismatch")
             addresses.append(str(ipaddress.ip_address(packet[offset : offset + size])))
             if ttl_capture is not None:
@@ -220,6 +295,19 @@ class DnsFixture:
                         "rcode": reply.rcode,
                         "addresses": list(reply.addresses),
                         "drop": reply.drop,
+                        "ttl": reply.ttl,
+                        "opcode": reply.opcode,
+                        "reserved": reply.reserved,
+                        "cname": None
+                        if reply.cname is None
+                        else {"target": reply.cname.target, "ttl": reply.cname.ttl},
+                        "soa": None
+                        if reply.soa is None
+                        else {
+                            "zone": reply.soa.zone,
+                            "ttl": reply.soa.ttl,
+                            "minimum": reply.soa.minimum,
+                        },
                     }
                 )
                 if not reply.drop:
