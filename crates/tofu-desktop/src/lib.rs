@@ -1,0 +1,8 @@
+#![forbid(unsafe_code)]
+
+//! Desktop host выполняет I/O вне Qt-потока; GUI получает только снимки и команды.
+
+#[cfg(target_os = "linux")]
+mod backend;
+#[cfg(target_os = "linux")]
+pub use backend::{DesktopError, DesktopHost, HostConfig};

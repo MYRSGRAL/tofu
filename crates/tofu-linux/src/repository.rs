@@ -51,6 +51,10 @@ pub struct SourceRecord {
     pub generation: i64,
     pub payload: Zeroizing<Vec<u8>>,
 }
+pub struct SourceRecordsPage {
+    pub records: Vec<SourceRecord>,
+    pub total: usize,
+}
 pub struct SnapshotInput {
     pub body: Vec<u8>,
     pub metadata: Vec<u8>,
@@ -272,6 +276,63 @@ impl EncryptedSubscriptionRepository {
                 return Err(RepositoryError::Corrupt);
             }
             Ok(ids)
+        })
+        .await
+    }
+
+    /// Страница source metadata без чтения/дешифровки snapshot body.
+    pub async fn source_records(&self, offset: usize, limit: usize) -> Result<SourceRecordsPage> {
+        if offset > SOURCE_LIMIT as usize || !(1..=64).contains(&limit) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.run(move |db| {
+            let tx = db.connection.transaction().map_err(storage)?;
+            let total: usize = tx
+                .query_row("SELECT count(*) FROM sources", [], |row| row.get(0))
+                .map_err(storage)?;
+            if total > SOURCE_LIMIT as usize {
+                return Err(RepositoryError::Corrupt);
+            }
+            let records = {
+                let mut query = tx
+                    .prepare(
+                        "SELECT id,generation,payload FROM sources ORDER BY id LIMIT ?1 OFFSET ?2",
+                    )
+                    .map_err(storage)?;
+                let rows = query
+                    .query_map(params![limit, offset], |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            bounded_blob(row, 2, SMALL_LIMIT + 40)?,
+                        ))
+                    })
+                    .map_err(storage)?;
+                let mut records = Vec::new();
+                for row in rows {
+                    let (id, generation, payload) = row.map_err(|_| RepositoryError::Corrupt)?;
+                    if id <= 0 || generation <= 0 {
+                        return Err(RepositoryError::Corrupt);
+                    }
+                    records.push(SourceRecord {
+                        id,
+                        generation,
+                        payload: decrypt(
+                            &db.key,
+                            &db.id,
+                            1,
+                            id,
+                            generation,
+                            0,
+                            &payload,
+                            SMALL_LIMIT,
+                        )?,
+                    });
+                }
+                records
+            };
+            tx.commit().map_err(storage)?;
+            Ok(SourceRecordsPage { records, total })
         })
         .await
     }

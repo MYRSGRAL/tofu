@@ -6,9 +6,9 @@ A native, open source proxy client in development. Linux first (CachyOS/Arch,
 KDE Plasma, Wayland), Android later. Planned features include Xray-core and
 sing-box, TUN, Fake DNS, subscriptions, per-application routing and a system tray.
 
-**Early development:** this repository contains specifications, portable
-Rust libraries, offline import/configuration CLIs and isolated engine tests. There is no usable desktop
-application, installer or production network adapter yet.
+**Early development:** this repository includes a native Linux GUI prototype,
+portable Rust libraries, CLIs and isolated engine tests. The GUI manages subscriptions
+and local SOCKS sessions; TUN, system network integration and an installer are still pending.
 
 ### Implemented
 
@@ -36,11 +36,14 @@ application, installer or production network adapter yet.
   still reads profiles from stdin.
 - Stable server identities and encrypted favourites, search/sort pages, duplicate
   reconciliation and revision-bound selection from the same stored snapshot.
+- Optional Qt Quick/CXX-Qt desktop: RU/EN screens, subscription review, profile
+  selection and local-session controls; event-driven tray and one instance per data directory.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Full mixed domain/CIDR DNS/Fake-IP execution,
-subscription UI/scheduling, proxied fetch peer verification, TUN policy integration, helper,
-GUI and tray remain to be implemented. GUI toolkit selection is still open.
+scheduled subscription updates, proxied fetch peer verification, TUN policy integration,
+helper and the routing editor remain to be implemented. Desktop/tray acceptance on
+live KDE Wayland and the final visual design are still open.
 
 `tofu-application` currently implements the initial connect/check/stop loop.
 Its host-provided controller ID must be unique while callbacks from an older
@@ -50,7 +53,41 @@ Preparation now goes through `prepare/apply`; direct `Event::Validated` is remov
 The trusted host supplies fresh generations and a SHA-256 digest of the immutable
 checked artifact. This does not replace OS authorization or atomic host-side Apply.
 
-### Development
+## Development
+
+### Native Linux GUI
+
+The prototype requires Qt 6 Base/Declarative (Quick, Controls, Widgets, Network,
+DBus and QML development tools), a C++ compiler and system SQLite. GUI dependencies
+are behind the optional `gui` feature; ordinary workspace and Android checks do not
+build Qt. CXX-Qt is pinned to 0.10.0, with matching CXX/cxx-gen ABI versions.
+
+```sh
+tofu_build=/var/tmp/codex-myrs/transient/tofu-dev
+mkdir -p "$tofu_build"
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --locked -p tofu-desktop --features gui --release
+"$tofu_build/target/release/tofu-desktop" --engine-dir /absolute/path/to/engines
+```
+
+The engine directory contains verified `xray-26.10.31/xray` and/or
+`sing-box-1.14.4/sing-box`; binaries are not bundled. `--listen-port PORT` changes
+the local SOCKS port (default 10808). Configure that SOCKS proxy explicitly in the
+application that should use it. The GUI does not enable TUN or system proxy.
+
+Paste a subscription into **Subscriptions → Add**, fetch it, approve any partial
+import, select a profile and connect. `Limited` means the core is running but the
+HTTPS check failed. Data lives under `$XDG_DATA_HOME/tofu` or `~/.local/share/tofu`;
+`--data-dir PATH` selects a private directory. The master key stays in Secret Service.
+A locked/missing key never triggers plaintext fallback. Never pass subscription
+URLs as command-line arguments.
+
+Closing hides the window when a tray is available; otherwise it requests a clean
+shutdown. Quit waits for session cleanup. Tray commands use the same controller.
+The current tray has basic connect/disconnect/restore/quit; favourites menus,
+routing screens, persistent GUI preferences and full T-01…T-04 acceptance remain pending.
+[GUI checks and remaining gates](docs/validation/2026-11-09-native-desktop.md).
+
+### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses
 Base64, URL/IDNA and JSON libraries. The Linux host uses Tokio, reqwest/rustls,
@@ -212,7 +249,7 @@ Local HTTP/private sources require an explicit source exception. Proxy fetch
 currently returns `UnsupportedPeerVerification`: SOCKS exposes the proxy peer,
 not the upstream peer required by the contract. There is no Direct fallback.
 Native JSON may be saved after review, but this does not authorize its execution.
-Scheduling, GUI integration and automatic session
+Scheduling, the routing UI and automatic session
 reconfiguration are still pending. [Validation and limits](docs/validation/2026-11-09-subscription-snapshots.md).
 
 Server identities use versioned connection parameters, including unknown options;

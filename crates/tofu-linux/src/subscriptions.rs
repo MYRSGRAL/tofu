@@ -163,6 +163,15 @@ pub struct OfflineSnapshot {
     pub source_generation: i64,
     pub current_source_generation: i64,
 }
+pub struct SubscriptionSummary {
+    pub id: i64,
+    pub name: String,
+}
+pub struct SubscriptionSourcesPage {
+    pub sources: Vec<SubscriptionSummary>,
+    pub total: usize,
+    pub offset: usize,
+}
 pub struct PendingRefresh {
     service: Arc<()>,
     request: u64,
@@ -242,6 +251,29 @@ impl SubscriptionService {
 
     pub async fn add(&self, source: SubscriptionSource) -> Result<i64, SubscriptionError> {
         Ok(self.repository.create_source(source.encode()?).await?.id)
+    }
+
+    pub async fn sources_page(
+        &self,
+        offset: usize,
+    ) -> Result<SubscriptionSourcesPage, SubscriptionError> {
+        let page = self.repository.source_records(offset, 64).await?;
+        let mut sources = Vec::with_capacity(page.records.len());
+        for record in page.records {
+            let data: SourceData = serde_json::from_slice(&record.payload)
+                .map_err(|_| SubscriptionError::InvalidSource)?;
+            let source = SubscriptionSource(data);
+            source.validate()?;
+            sources.push(SubscriptionSummary {
+                id: record.id,
+                name: source.0.name,
+            });
+        }
+        Ok(SubscriptionSourcesPage {
+            sources,
+            total: page.total,
+            offset,
+        })
     }
 
     pub async fn profiles(
