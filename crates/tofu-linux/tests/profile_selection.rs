@@ -298,3 +298,37 @@ async fn favorite_changed_after_report_is_not_lost_at_snapshot_commit() {
     task.await.expect("fixture");
     service.close().await.expect("закрытие");
 }
+
+#[tokio::test]
+async fn source_pages_expose_names_without_reading_snapshot_bodies() {
+    let dir = Directory::new();
+    let service = dir.service().await;
+    for index in 0..65 {
+        let source = SubscriptionSource::new(
+            format!("Источник {index}"),
+            format!("https://source-{index}.example.invalid/private-token"),
+            false,
+            FetchRoute::Direct,
+        )
+        .expect("источник");
+        service.add(source).await.expect("сохранение");
+    }
+    let connection = rusqlite::Connection::open(dir.0.join("profiles.sqlite")).expect("fixture");
+    // Невалидный snapshot не должен мешать чтению отдельной страницы источников.
+    connection.execute("INSERT INTO snapshots(source_id,source_generation,revision,body,metadata) VALUES (1,1,1,zeroblob(40),zeroblob(40))",[]).expect("corrupt fixture body");
+    let first = service.sources_page(0).await.expect("первая страница");
+    assert_eq!(first.total, 65);
+    assert_eq!(first.sources.len(), 64);
+    assert_eq!(first.sources[0].name, "Источник 0");
+    let last = service.sources_page(64).await.expect("последняя страница");
+    assert_eq!(last.sources.len(), 1);
+    assert_eq!(last.sources[0].id, 65);
+    assert_eq!(last.offset, 64);
+    assert!(service.offline(1).await.is_err());
+    assert!(matches!(
+        service.sources_page(20_001).await,
+        Err(SubscriptionError::Repository(RepositoryError::InvalidInput))
+    ));
+    drop(connection);
+    service.close().await.expect("закрытие");
+}
