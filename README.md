@@ -140,6 +140,11 @@ proxy authentication, HTTPS access or throughput.
 [TCP checks and evidence](docs/validation/2026-11-09-tcp-probe.md),
 [three-sample series](docs/validation/2026-11-09-tcp-series.md).
 
+The Linux batch API schedules up to 10,000 TCP series with 1–32 active/result
+slots and a bounded output channel. Cancellation, receiver closure and dropping
+the batch release its I/O. It adds no runtime or task per target; the desktop
+bulk-check action is still pending. [Batch contract](docs/specs/tcp-batch-contract.md).
+
 Linux now observes route/address changes through netlink and DNS/network service
 changes through system D-Bus. The GUI reports unavailable sources explicitly.
 Results carry a process-local network generation; late replies from an older
