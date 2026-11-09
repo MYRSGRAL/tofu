@@ -28,6 +28,7 @@ ApplicationWindow {
         sources: [], sources_total: 0, sources_offset: 0, source_id: null, profiles: [], total: 0, offset: 0,
         revision: 0, status: "Disconnected", selected_profile: null,
         probe_custom: false, probe_expected_status: 204, probe_result: null,
+        tcp_busy: false, tcp_name: null, tcp_result: null,
         selected_name: "", engine: "xray", active_name: "", active_engine: "", port: 10808, can_connect: false, can_stop: false})
     readonly property bool activeConnection: ["Preparing", "Starting", "Checking", "Connected", "Limited", "Stopping", "CleanupError"].indexOf(state.status) >= 0
     readonly property bool canEditProbe: state.ready && !state.busy && !state.can_stop
@@ -87,6 +88,41 @@ ApplicationWindow {
             + (result.http_status !== null && result.http_status !== undefined ? " · HTTP " + result.http_status : "")
             + (result.elapsed_ms !== null && result.elapsed_ms !== undefined ? " · " + result.elapsed_ms + tr(" мс", " ms") : "")
     }
+    function tcpStatusText(status) {
+        const values = {
+            reachable: ["TCP доступен", "TCP reachable"],
+            not_applicable: ["Неприменимо: UDP или неизвестный транспорт", "Not applicable: UDP or unknown transport"],
+            resolver_unavailable: ["DNS недоступен: требуется systemd-resolved с Varlink", "DNS unavailable: systemd-resolved with Varlink is required"],
+            dns_failed: ["Не удалось разрешить DNS-имя", "DNS resolution failed"],
+            connect_failed: ["Не удалось установить TCP-соединение", "TCP connection failed"],
+            dns_timeout: ["Истекло время DNS-запроса", "DNS timed out"],
+            connect_timeout: ["Истекло время TCP-соединения", "TCP connection timed out"],
+            cancelled: ["TCP-проверка отменена", "TCP check cancelled"]
+        }
+        const pair = values[status]
+        return pair ? tr(pair[0], pair[1]) : tr("Результат недоступен", "Result unavailable")
+    }
+    function tcpTimingText(result) {
+        if (!result) return ""
+        const dns = result.dns_ms !== null && result.dns_ms !== undefined
+            ? "DNS: " + result.dns_ms + tr(" мс", " ms")
+            : (["reachable", "connect_failed", "connect_timeout"].indexOf(result.status) >= 0
+                ? tr("DNS не потребовался", "DNS not needed") : "DNS: —")
+        const tcp = result.connect_ms !== null && result.connect_ms !== undefined
+            ? "TCP: " + result.connect_ms + tr(" мс", " ms") : "TCP: —"
+        return dns + " · " + tcp
+    }
+    function tcpEndpointText(result) {
+        if (!result) return ""
+        const host = result.host.indexOf(":") >= 0 ? "[" + result.host + "]" : result.host
+        return result.name + " · " + host + ":" + result.port
+    }
+    function tcpCheckedAtText(result) {
+        if (!result) return ""
+        if (!result.checked_at_ms) return tr("Время проверки недоступно", "Check time unavailable")
+        return tr("Проверено: ", "Checked: ")
+            + new Date(result.checked_at_ms).toLocaleString(Qt.locale(language === "ru" ? "ru_RU" : "en_US"))
+    }
     function reviewText(row) {
         const reasons = {
             malformed_uri: ["Некорректная ссылка", "Malformed URI"],
@@ -142,6 +178,7 @@ ApplicationWindow {
             check_timeout: ["Истекло время проверки доступа через прокси.", "The connectivity check through the proxy timed out."],
             check_transport: ["Не удалось выполнить запрос через прокси: ошибка транспорта.", "The request through the proxy failed with a transport error."],
             check_failed: ["Прокси работает, но доступность интернета не подтверждена.", "The proxy is running, but internet access is unconfirmed."],
+            tcp_failed: ["Не удалось выполнить TCP-проверку. Повторите попытку.", "Could not complete the TCP check. Try again."],
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
@@ -230,8 +267,16 @@ ApplicationWindow {
                 currentIndex: window.page
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                ColumnLayout {
-                    spacing: 16
+                ScrollView {
+                    id: overviewScroll
+                    clip: true
+                    contentWidth: availableWidth
+                    contentHeight: overviewContent.implicitHeight
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                        id: overviewContent
+                        width: overviewScroll.availableWidth
+                        spacing: 16
                     RowLayout {
                         SectionTitle { text: window.tr("Обзор", "Overview"); Layout.fillWidth: true }
                         SmallLabel { text: window.state.busy ? window.tr("Выполняется операция…", "Working…") : window.tr("Локальное подключение", "Local connection") }
@@ -299,6 +344,80 @@ ApplicationWindow {
                             }
                         }
                     }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: tcpLayout.implicitHeight + 24
+                        color: "#ffffff"
+                        border.color: "#dce1d8"
+                        radius: 6
+                        ColumnLayout {
+                            id: tcpLayout
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 5
+                            RowLayout {
+                                Layout.fillWidth: true
+                                PlainLabel {
+                                    Layout.fillWidth: true
+                                    text: window.tr("Доступность сервера по TCP", "Server TCP availability")
+                                    font.weight: Font.DemiBold
+                                }
+                                Button {
+                                    objectName: "checkTcpButton"
+                                    text: window.tr("Проверить TCP", "Check TCP")
+                                    enabled: window.state.ready && window.state.selected_profile !== null && !window.state.busy && !window.state.tcp_busy
+                                    onClicked: window.send({command: "check_tcp"})
+                                }
+                                Button {
+                                    objectName: "cancelTcpButton"
+                                    visible: !!window.state.tcp_busy
+                                    text: window.tr("Отменить", "Cancel")
+                                    enabled: !!window.state.tcp_busy
+                                    onClicked: window.send({command: "cancel_tcp"})
+                                }
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_busy
+                                text: window.tr("Проверяется: ", "Checking: ") + (window.state.tcp_name || "")
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                            }
+                            PlainLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_result
+                                text: window.state.tcp_result ? window.tcpStatusText(window.state.tcp_result.status) : ""
+                                font.weight: Font.Medium
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_result
+                                text: window.tcpEndpointText(window.state.tcp_result)
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_result
+                                text: window.tcpTimingText(window.state.tcp_result)
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_result
+                                text: window.tcpCheckedAtText(window.state.tcp_result)
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                font.pixelSize: 11
+                                text: window.tr("Напрямую через обычную сеть, без системного прокси. Один замер; до 5 с на DNS и TCP вместе. Без внешнего DNS-резерва.", "Direct over the regular network, without the system proxy. One measurement; up to 5 s for DNS and TCP combined. No external DNS fallback.")
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                font.pixelSize: 11
+                                text: window.tr("Не проверяет аутентификацию, HTTPS или скорость. Изменения сети не отслеживаются; история пока не сохраняется.", "Does not test authentication, HTTPS or throughput. Network changes are not tracked; history is not saved yet.")
+                            }
+                        }
+                    }
                     RowLayout {
                         PlainLabel { text: window.tr("Профили", "Profiles"); font.pixelSize: 18; font.weight: Font.DemiBold; Layout.fillWidth: true }
                         ComboBox {
@@ -345,6 +464,8 @@ ApplicationWindow {
                         color: "#ffffff"
                         border.color: "#dce1d8"
                         radius: 6
+                        Layout.minimumHeight: 160
+                        Layout.preferredHeight: 220
                         ListView {
                             id: profileList
                             anchors.fill: parent
@@ -397,6 +518,7 @@ ApplicationWindow {
                         Button { text: window.tr("Назад", "Previous"); enabled: window.state.offset > 0 && !window.state.busy; onClicked: window.query(Math.max(0, window.state.offset - 200)) }
                         Button { text: window.tr("Далее", "Next"); enabled: window.state.offset + window.state.profiles.length < window.state.total && !window.state.busy; onClicked: window.query(window.state.offset + 200) }
                     }
+                }
                 }
                 ColumnLayout {
                     spacing: 18

@@ -11,7 +11,7 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tofu_engine::Engine;
 use tofu_import::{Field, IssueCode, ReviewFlag};
@@ -19,7 +19,8 @@ use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, PendingRefresh, ProbeResult, ProbeTarget,
     ProfileQuery, RefreshResult, ResolvedProfile, SubscriptionError, SubscriptionService,
-    SubscriptionSource, subscription_master_key,
+    SubscriptionSource, TcpProbeResult, TcpProbeStatus, TcpProbeTarget, check_tcp,
+    subscription_master_key,
 };
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroizing;
@@ -119,6 +120,8 @@ enum Command {
         expected_status: u16,
     },
     ResetProbeTarget,
+    CheckTcp,
+    CancelTcp,
     Connect,
     Stop,
     Shutdown,
@@ -146,6 +149,7 @@ impl EngineChoice {
 }
 struct Envelope {
     generation: u64,
+    tcp_generation: u64,
     command: Command,
 }
 #[derive(Clone, Copy, Default)]
@@ -156,9 +160,15 @@ struct Priority {
 struct Control {
     generation: AtomicU64,
     priority: watch::Sender<Priority>,
+    tcp_priority: watch::Sender<u64>,
     closed: (Mutex<bool>, Condvar),
 }
 impl Control {
+    fn cancel_tcp(&self) {
+        // Тот же lock watch сериализует cancel и generation для queued TCP requests.
+        self.tcp_priority
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
+    }
     fn interrupt(&self, shutdown: bool) {
         // send_modify сериализует Stop/Shutdown, shutdown остаётся sticky.
         self.priority.send_modify(|state| {
@@ -186,9 +196,11 @@ impl DesktopHost {
     ) -> Result<Self> {
         let (commands, receiver) = mpsc::channel(128);
         let (priority, priority_rx) = watch::channel(Priority::default());
+        let (tcp_priority, _) = watch::channel(0);
         let control = Arc::new(Control {
             generation: AtomicU64::new(0),
             priority,
+            tcp_priority,
             closed: (Mutex::new(false), Condvar::new()),
         });
         let worker_control = control.clone();
@@ -236,6 +248,8 @@ impl DesktopHost {
                 | Command::Stop
                 | Command::Shutdown
                 | Command::ResetProbeTarget
+                | Command::CheckTcp
+                | Command::CancelTcp
         ) {
             let object: serde_json::Value =
                 serde_json::from_str(request).map_err(|_| DesktopError("invalid_input"))?;
@@ -253,10 +267,15 @@ impl DesktopHost {
                 self.control.interrupt(false);
                 Ok(())
             }
+            Command::CancelTcp => {
+                self.control.cancel_tcp();
+                Ok(())
+            }
             command => self
                 .commands
                 .try_send(Envelope {
                     generation: self.control.generation.load(Ordering::SeqCst),
+                    tcp_generation: *self.control.tcp_priority.borrow(),
                     command,
                 })
                 .map_err(|_| DesktopError("busy")),
@@ -431,6 +450,9 @@ struct Snapshot {
     probe_custom: bool,
     probe_expected_status: u16,
     probe_result: Option<HealthResultDto>,
+    tcp_busy: bool,
+    tcp_name: Option<String>,
+    tcp_result: Option<TcpResultDto>,
 }
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
@@ -461,6 +483,9 @@ impl Snapshot {
             probe_custom: false,
             probe_expected_status: 204,
             probe_result: None,
+            tcp_busy: false,
+            tcp_name: None,
+            tcp_result: None,
         }
     }
     fn emit(&self, callback: &Callback) {
@@ -535,6 +560,14 @@ struct Actor {
     probe_url: Zeroizing<String>,
 }
 impl Actor {
+    fn tcp_key(&self) -> Option<TcpKey> {
+        let selected = self.selected.as_ref()?;
+        Some(TcpKey {
+            source: selected.profile.source_id,
+            profile: selected.profile.id,
+            revision: selected.snapshot_revision,
+        })
+    }
     fn probe_target(&self) -> Result<ProbeTarget> {
         ProbeTarget::new(&self.probe_url, PROBE_TIMEOUT)
             .and_then(|target| target.with_expected_status(self.state.probe_expected_status))
@@ -558,6 +591,7 @@ impl Actor {
         self.selected = None;
         self.state.selected_profile = None;
         self.state.selected_name = None;
+        self.state.tcp_result = None;
     }
     async fn reload(&mut self) -> Result<()> {
         self.sources().await?;
@@ -721,6 +755,9 @@ impl Actor {
                 {
                     return Err(DesktopError("profile_unavailable"));
                 }
+                if self.state.selected_profile != Some(id) {
+                    self.state.tcp_result = None;
+                }
                 self.state.selected_profile = Some(id);
                 self.state.selected_name = Some(profile.profile.name.clone());
                 self.selected = Some(profile);
@@ -838,6 +875,61 @@ type RefreshTask = (
 struct Running {
     cancel: watch::Sender<bool>,
     task: tokio::task::JoinHandle<std::result::Result<(), LocalSession>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TcpKey {
+    source: i64,
+    profile: i64,
+    revision: i64,
+}
+#[derive(Serialize)]
+struct TcpResultDto {
+    source_id: i64,
+    profile_id: i64,
+    revision: i64,
+    name: String,
+    host: String,
+    port: u16,
+    status: &'static str,
+    dns_ms: Option<u64>,
+    connect_ms: Option<u64>,
+    checked_at_ms: u64,
+}
+impl TcpResultDto {
+    fn key(&self) -> TcpKey {
+        TcpKey {
+            source: self.source_id,
+            profile: self.profile_id,
+            revision: self.revision,
+        }
+    }
+    fn finish(&mut self, result: TcpProbeResult) {
+        self.status = match result.status {
+            TcpProbeStatus::Reachable => "reachable",
+            TcpProbeStatus::NotApplicable => "not_applicable",
+            TcpProbeStatus::ResolverUnavailable => "resolver_unavailable",
+            TcpProbeStatus::DnsFailure => "dns_failed",
+            TcpProbeStatus::ConnectFailure => "connect_failed",
+            TcpProbeStatus::DnsTimeout => "dns_timeout",
+            TcpProbeStatus::ConnectTimeout => "connect_timeout",
+            TcpProbeStatus::Cancelled => "cancelled",
+        };
+        let millis = |duration: Duration| duration.as_millis().min(u64::MAX as u128) as u64;
+        self.dns_ms = result.dns_elapsed.map(millis);
+        self.connect_ms = result.connect_elapsed.map(millis);
+        self.checked_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(millis)
+            .unwrap_or_default();
+    }
+}
+struct TcpRunning {
+    generation: u64,
+    tcp_generation: u64,
+    result: TcpResultDto,
+    cancel: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<std::result::Result<TcpProbeResult, HostError>>,
 }
 
 async fn session(
@@ -1046,6 +1138,8 @@ async fn run(
     let mut running: Option<Running> = None;
     let mut failed_session: Option<LocalSession> = None;
     let mut refreshing: Option<RefreshTask> = None;
+    let mut tcp_running: Option<TcpRunning> = None;
+    let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
     loop {
         tokio::select! {
@@ -1057,6 +1151,7 @@ async fn run(
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.error = Some("cleanup_failed"); }
                 }
@@ -1064,6 +1159,29 @@ async fn run(
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
                 }
                 actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" };
+                actor.emit();
+            }
+            changed = tcp_priority.changed() => {
+                let _ = changed;
+                tcp_priority.borrow_and_update();
+                if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
+            }
+            result = async { (&mut tcp_running.as_mut().expect("guard").task).await }, if tcp_running.is_some() => {
+                let mut tcp = tcp_running.take().expect("guard");
+                actor.state.tcp_busy = false;
+                actor.state.tcp_name = None;
+                if actor.tcp_key() == Some(tcp.result.key()) && !quitting {
+                    match result {
+                        Ok(Ok(mut result)) => {
+                            if tcp.generation != control.generation.load(Ordering::SeqCst)
+                                || tcp.tcp_generation != *control.tcp_priority.borrow() {
+                                result.status = TcpProbeStatus::Cancelled;
+                            }
+                            tcp.result.finish(result); actor.state.tcp_result = Some(tcp.result);
+                        }
+                        _ => { actor.state.tcp_result = None; actor.state.error = Some("tcp_failed"); }
+                    }
+                }
                 actor.emit();
             }
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
@@ -1091,6 +1209,28 @@ async fn run(
                 if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
                 actor.state.error = None;
                 let outcome = match envelope.command {
+                    Command::CheckTcp => {
+                        if envelope.tcp_generation != *control.tcp_priority.borrow() {
+                            Err(DesktopError("cancelled"))
+                        } else if tcp_running.is_some() || actor.state.busy {
+                            Err(DesktopError("busy"))
+                        } else if let Some(profile) = actor.selected.as_ref() {
+                            let target = TcpProbeTarget::for_server(&profile.server);
+                            let result = TcpResultDto {
+                                source_id: profile.profile.source_id, profile_id: profile.profile.id,
+                                revision: profile.snapshot_revision, name: profile.profile.name.clone(),
+                                host: profile.server.endpoint().host().into(), port: profile.server.endpoint().port(),
+                                status: "cancelled", dns_ms: None, connect_ms: None, checked_at_ms: 0,
+                            };
+                            let (cancel, mut receiver) = Cancellation::new();
+                            let task = tokio::spawn(async move { check_tcp(target, Duration::from_secs(5), &mut receiver).await });
+                            actor.state.tcp_busy = true; actor.state.tcp_name = Some(result.name.clone());
+                            actor.state.tcp_result = None;
+                            tcp_running = Some(TcpRunning { generation: envelope.generation,
+                                tcp_generation: envelope.tcp_generation, result, cancel, task });
+                            Ok(())
+                        } else { Err(DesktopError("profile_required")) }
+                    }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else if let Some(id) = actor.state.source_id {
@@ -1130,7 +1270,21 @@ async fn run(
                 actor.emit();
             }
         }
-        if quitting && running.is_none() && refreshing.is_none() {
+        if let Some(tcp) = tcp_running.as_ref() {
+            if actor.tcp_key() != Some(tcp.result.key()) {
+                tcp.cancel.send_replace(true);
+            }
+        }
+        if actor
+            .state
+            .tcp_result
+            .as_ref()
+            .is_some_and(|result| actor.tcp_key() != Some(result.key()))
+        {
+            actor.state.tcp_result = None;
+            actor.emit();
+        }
+        if quitting && running.is_none() && refreshing.is_none() && tcp_running.is_none() {
             if failed_session.is_some() {
                 quitting = false;
                 actor.state.error = Some("cleanup_failed");
