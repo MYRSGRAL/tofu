@@ -272,9 +272,15 @@ rules and does not enable system TUN. [Checks and limits](docs/validation/2026-1
 owned empty nftables tables. It pins the namespace and trusted system `nft`,
 checks the complete ownership marker, and deletes by a nonzero kernel handle.
 `Journal::mark_cleanup` persists the cleanup boundary before an asynchronous
-effect. Commands have bounded output, concurrency and execution time. This
-does not yet install traffic-blocking rules or connect the GUI to a privileged
-service. [Executor contract](docs/specs/helper-nftables-executor.md).
+effect. Commands have bounded output, concurrency and execution time.
+[Executor contract](docs/specs/helper-nftables-executor.md).
+
+`PublicBlockPolicy` adds atomic IPv4/IPv6 output blocking with explicit LAN/VPN,
+TUN and tightly bound service exceptions. Applied state requires the complete
+kernel ruleset to match; replacement preserves protection in one transaction.
+The library can preserve the public block after session cleanup and remove it
+explicitly on Unlock. GUI/service authorization and full platform integration
+remain unfinished. [Public-block contract](docs/specs/helper-public-block.md).
 
 ### Rust libraries and CLIs
 

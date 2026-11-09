@@ -6,6 +6,7 @@
 //! Helper обязан сверить namespace, собственную метку ресурса и его атрибуты.
 //! Drop/отмена не очищает сеть и не удаляет неоднозначные намерения.
 
+pub mod firewall;
 pub mod nft;
 mod storage;
 
@@ -443,6 +444,28 @@ impl Journal {
         }
         let mut document = self.document.clone();
         document.records[index].state = RecordState::CleanupRemaining;
+        self.persist(document)?;
+        self.reconciled.remove(&id);
+        Ok(())
+    }
+    /// Изменение существующего ресурса тоже требует durable intent. Отмена
+    /// оставляет неизвестный старый/новый результат до независимой сверки ОС.
+    pub fn mark_update(&mut self, ownership: Ownership, id: u64) -> Result<(), JournalError> {
+        self.check(ownership)?;
+        let index = self
+            .document
+            .records
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or(JournalError::Missing)?;
+        if self.document.records[index].state == RecordState::CleanupRemaining {
+            return Err(JournalError::Conflict);
+        }
+        if !self.reconciled.contains(&id) {
+            return Err(JournalError::ReconcileRequired);
+        }
+        let mut document = self.document.clone();
+        document.records[index].state = RecordState::Intent;
         self.persist(document)?;
         self.reconciled.remove(&id);
         Ok(())

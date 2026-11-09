@@ -98,6 +98,31 @@ fn async_cleanup_requires_fresh_reconciliation_and_is_durable_before_effect() {
 }
 
 #[test]
+fn update_is_durable_and_cannot_reverse_cleanup() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    assert_eq!(
+        journal.mark_update(owner(), 1).unwrap_err(),
+        JournalError::ReconcileRequired
+    );
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    journal.mark_update(owner(), 1).unwrap();
+    assert!(journal.needs_reconciliation(1));
+    assert_eq!(journal.records()[0].state(), RecordState::Intent);
+    drop(journal);
+    let mut journal = open(&area);
+    assert!(journal.needs_reconciliation(1));
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    journal.mark_cleanup(owner(), 1).unwrap();
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    assert_eq!(
+        journal.mark_update(owner(), 1).unwrap_err(),
+        JournalError::Conflict
+    );
+}
+
+#[test]
 fn partial_cleanup_is_durable_and_public_block_has_independent_lifetime() {
     let area = Area::new();
     let mut journal = open(&area);
