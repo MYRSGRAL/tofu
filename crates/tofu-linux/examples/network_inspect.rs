@@ -201,4 +201,6 @@ fn main() {
     linux::main();
 }
 #[cfg(not(target_os = "linux"))]
-fn main() {}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Err("Инспекция сети доступна только в Linux".into())
+}
