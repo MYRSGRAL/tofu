@@ -21,7 +21,11 @@ mod subscriptions;
 #[cfg(target_os = "linux")]
 pub use subscriptions::*;
 #[cfg(target_os = "linux")]
+mod tcp_batch;
+#[cfg(target_os = "linux")]
 mod tcp_probe;
+#[cfg(target_os = "linux")]
+pub use tcp_batch::{TcpBatchResult, TcpBatchTarget, check_tcp_batch};
 #[cfg(target_os = "linux")]
 pub use tcp_probe::{
     TCP_SERIES_SAMPLES, TcpProbeResult, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget,
