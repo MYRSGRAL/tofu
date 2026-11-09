@@ -79,7 +79,7 @@ pub(super) async fn run(publisher: NetworkPublisher, mut cancel: watch::Receiver
 
 #[derive(Default)]
 struct Observations {
-    // Tombstone сохраняет дедупликацию DEL до повторного NEW.
+    // Ключ объединяет обновления; каждое DEL считается реальным изменением.
     records: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     bytes: usize,
 }
@@ -117,6 +117,14 @@ impl Observations {
     }
 
     fn update(&mut self, record: Record) -> Result<bool, ()> {
+        if record.value.is_none() {
+            // Один coarse key допускает несколько rules/routes. DEL второго
+            // объекта нельзя отличить от повтора: прежний tombstone терял событие.
+            if let Some(value) = self.records.remove(&record.key) {
+                self.bytes -= record.key.len() + value.as_ref().map_or(0, Vec::len);
+            }
+            return Ok(true);
+        }
         if self.records.get(&record.key) == Some(&record.value) {
             return Ok(false);
         }
@@ -498,7 +506,25 @@ mod tests {
         let mut deletion = bytes.clone();
         deletion[4..6].copy_from_slice(&17u16.to_ne_bytes());
         assert_eq!(accept(&mut cache, &deletion), Ok(true));
-        assert_eq!(accept(&mut cache, &deletion), Ok(false));
+        assert_eq!(accept(&mut cache, &deletion), Ok(true));
+        assert!(cache.records.is_empty());
+        assert_eq!(cache.bytes, 0);
         assert_eq!(accept(&mut cache, &bytes), Ok(true));
+    }
+
+    #[test]
+    fn deletion_of_each_rule_with_same_priority_invalidates() {
+        let mut cache = Observations::default();
+        let mut first = vec![2, 25, 0, 0, 100, 0, 0, 1, 0, 0, 0, 0];
+        first.extend(attribute(6, &12346u32.to_ne_bytes()));
+        first.extend(attribute(1, &[203, 0, 113, 0]));
+        let mut second = first.clone();
+        *second.last_mut().expect("второй selector") = 128;
+        assert_eq!(accept(&mut cache, &message(32, &first)), Ok(true));
+        assert_eq!(accept(&mut cache, &message(32, &second)), Ok(true));
+        assert_eq!(accept(&mut cache, &message(33, &first)), Ok(true));
+        assert_eq!(accept(&mut cache, &message(33, &second)), Ok(true));
+        assert!(cache.records.is_empty());
+        assert_eq!(cache.bytes, 0);
     }
 }
