@@ -207,6 +207,16 @@ only counts, status and durations: `cargo run --locked -p tofu-linux --example t
 Pipe local profile text into stdin; subscription URLs and credentials must stay
 out of argv and logs. The example supports SIGINT/SIGTERM cancellation.
 
+### Network helper authorization
+
+`tofu_linux::helper::PeerAuthorizer` checks the sender's bus credentials and a
+fixed polkit action, pins the root-owned authority and validates raw reply senders.
+It rechecks the peer and authority after the decision, bounds concurrent checks,
+and cancels requests through the original authority owner. Its `PeerIdentity` is
+a snapshot; Prepare/Apply must authorize again before effects. Tests use a private
+bus and fake authority. No system service is installed or network changed.
+[Authorization contract](docs/specs/helper-authorization.md).
+
 ### Managed network resource journal
 
 `tofu_linux::managed_network` provides a bounded, durable ownership journal for
