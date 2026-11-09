@@ -1,4 +1,5 @@
 #include "application.h"
+#include "ui_smoke.h"
 #include "tofu-desktop/src/bridge.cxxqt.h"
 
 #include <QApplication>
@@ -127,6 +128,10 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     int argc = 1;
     char name[] = "tofu-desktop";
     char* argv[] = {name, nullptr};
+    // Независимая от desktop-темы палитра; явный выбор пользователя сохраняется.
+    if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
+        qputenv("QT_QUICK_CONTROLS_STYLE", QByteArrayLiteral("Basic"));
+    }
     QApplication application(argc, argv);
     application.setApplicationName(QStringLiteral("tofu"));
     application.setOrganizationDomain(QStringLiteral("highpriority.cloud"));
@@ -286,7 +291,62 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     connectAction->setEnabled(false);
     stopAction->setEnabled(false);
     bool cleanupConfirmed = false;
-    QObject::connect(bridge, &DesktopBridge::snapshot_jsonChanged, &application,
+    const auto advanceSmokeStep = [&, bridge, window] {
+        if (!smokeTest || stepIndex >= steps.size() || smokeFailed || stepDispatchPending) return;
+        const auto snapshot = QJsonDocument::fromJson(bridge->getSnapshot_json().toUtf8()).object();
+        if (snapshot.value(QStringLiteral("closed")).toBool()) return;
+        const auto step = steps.at(stepIndex).toObject();
+        const auto when = step.value(QStringLiteral("when")).toObject();
+        const auto tcp = snapshot.value(QStringLiteral("tcp_result")).toObject();
+        for (auto it = when.begin(); it != when.end(); ++it) {
+            QJsonValue actual = snapshot.value(it.key());
+            if (it.key() == QStringLiteral("sources_count")) actual = snapshot.value(QStringLiteral("sources")).toArray().size();
+            if (it.key() == QStringLiteral("profiles_count")) actual = snapshot.value(QStringLiteral("profiles")).toArray().size();
+            if (it.key() == QStringLiteral("pending")) actual = snapshot.value(QStringLiteral("pending")).isObject();
+            if (it.key() == QStringLiteral("tcp_status")) actual = tcp.value(QStringLiteral("status"));
+            if (it.key() == QStringLiteral("tcp_samples_count")) actual = tcp.value(QStringLiteral("samples_ms")).toArray().size();
+            if (it.key() == QStringLiteral("tcp_samples_requested")) actual = tcp.value(QStringLiteral("samples_requested"));
+            if (actual != it.value()) return;
+        }
+        if (!smoke::matches(qobject_cast<QQuickWindow*>(window), step.value(QStringLiteral("ui_when")).toObject())) return;
+        const bool ui = step.value(QStringLiteral("ui")).isObject();
+        if (ui == step.value(QStringLiteral("command")).isObject()) {
+            smokeFailed = true;
+            bridge->shutdown();
+            return;
+        }
+        stepDispatchPending = true;
+        ++stepIndex;
+        const auto perform = [&, bridge, window, step, ui] {
+            if (ui) {
+                if (!smoke::perform(qobject_cast<QQuickWindow*>(window), step.value(QStringLiteral("ui")).toObject())) {
+                    qWarning("tofu smoke: UI action failed at step %lld", static_cast<long long>(stepIndex));
+                    smokeFailed = true;
+                    bridge->shutdown();
+                }
+            } else {
+                bridge->dispatch(QString::fromUtf8(QJsonDocument(step.value(QStringLiteral("command")).toObject()).toJson(QJsonDocument::Compact)));
+            }
+            stepDispatchPending = false;
+        };
+        if ((step.value(QStringLiteral("capture")).toBool() || step.contains(QStringLiteral("capture_name"))) && !screenshot.isEmpty()) {
+            const auto path = smoke::capturePath(screenshot, step);
+            if (path.isEmpty()) { smokeFailed = true; bridge->shutdown(); return; }
+            captureWindow(window, path, [&, bridge, perform](bool saved) {
+                if (!saved) { smokeFailed = true; bridge->shutdown(); return; }
+                QTimer::singleShot(500, bridge, perform);
+            });
+        } else {
+            QTimer::singleShot(0, bridge, perform);
+        }
+    };
+    QTimer smokeSteps;
+    if (smokeTest && !steps.isEmpty()) {
+        smokeSteps.setInterval(25);
+        QObject::connect(&smokeSteps, &QTimer::timeout, &smokeSteps, advanceSmokeStep);
+        smokeSteps.start();
+    }
+    QObject::connect(bridge, &DesktopBridge::snapshot_jsonChanged, &smokeSteps,
         [&, bridge, window, smokeTest, screenshot] {
             const auto snapshot = QJsonDocument::fromJson(bridge->getSnapshot_json().toUtf8()).object();
             connectAction->setEnabled(snapshot.value(QStringLiteral("can_connect")).toBool());
@@ -319,43 +379,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
                 }
                 traceFile.flush();
             }
-            if (smokeTest && stepIndex < steps.size() && !smokeFailed && !stepDispatchPending
-                && !snapshot.value(QStringLiteral("closed")).toBool()) {
-                const auto step = steps.at(stepIndex).toObject();
-                const auto when = step.value(QStringLiteral("when")).toObject();
-                bool matches = true;
-                for (auto it = when.begin(); it != when.end(); ++it) {
-                    QJsonValue actual = snapshot.value(it.key());
-                    if (it.key() == QStringLiteral("sources_count")) actual = sources;
-                    if (it.key() == QStringLiteral("profiles_count")) actual = profiles;
-                    if (it.key() == QStringLiteral("pending")) actual = pending;
-                    if (it.key() == QStringLiteral("tcp_status")) actual = tcpStatus;
-                    if (it.key() == QStringLiteral("tcp_samples_count")) actual = tcpSamples;
-                    if (it.key() == QStringLiteral("tcp_samples_requested")) actual = tcpRequested;
-                    if (actual != it.value()) matches = false;
-                }
-                if (matches) {
-                    ++stepIndex;
-                    const auto command = QString::fromUtf8(QJsonDocument(
-                        step.value(QStringLiteral("command")).toObject()).toJson(QJsonDocument::Compact));
-                    if (step.value(QStringLiteral("capture")).toBool() && !screenshot.isEmpty()) {
-                        stepDispatchPending = true;
-                        captureWindow(window, screenshot, [&, bridge, command](bool saved) {
-                            if (!saved) {
-                                smokeFailed = true;
-                                bridge->shutdown();
-                                return;
-                            }
-                            QTimer::singleShot(500, bridge, [&, bridge, command] {
-                                stepDispatchPending = false;
-                                bridge->dispatch(command);
-                            });
-                        });
-                    } else {
-                        bridge->dispatch(command);
-                    }
-                }
-            }
+            advanceSmokeStep();
             if (smokeTest && !screenshot.isEmpty() && !window->property("smokeCaptured").toBool()
                 && script.isEmpty() && snapshot.contains(QStringLiteral("sources"))) {
                 window->setProperty("smokeCaptured", true);
@@ -382,6 +406,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     if (smokeTest) {
         QTimer::singleShot(30000, bridge, [&, bridge] {
             smokeFailed = smokeFailed || stepIndex < steps.size() || stepDispatchPending;
+            if (smokeFailed) qWarning("tofu smoke: incomplete script at step %lld", static_cast<long long>(stepIndex));
             bridge->shutdown();
         });
     }

@@ -96,6 +96,23 @@ def free_port() -> int:
 def step(
     when: dict[str, object], command: str, **arguments: object
 ) -> dict[str, object]:
+    if command in ("connect", "stop") and not arguments:
+        expected: dict[str, object] = {
+            "window": {"page": 0},
+            "mainConnectButton": {"enabled": True},
+        }
+        statuses = {
+            "Connected": "Подключено",
+            "Limited": "Соединение ограничено",
+            "Checking": "Проверка доступа…",
+        }
+        if label := statuses.get(str(when.get("status"))):
+            expected["mainStatusLabel"] = {"text": label}
+        return {
+            "when": when,
+            "ui_when": expected,
+            "ui": {"action": "click", "object": "mainConnectButton"},
+        }
     return {"when": when, "command": {"command": command, **arguments}}
 
 
@@ -255,6 +272,7 @@ def run_case(
     probe_url: str | None = None,
     expected_status: int = 204,
     expected_state: str = "Limited",
+    observed_status: int | None = None,
     ca: Path | None = None,
     tcp_status: str | None = None,
     network_invalidate: bool = False,
@@ -376,6 +394,41 @@ def run_case(
                             stop_when = {**stop_when, "revision": 2, "busy": False}
                             stop_when.pop("error")
                     if not network_invalidate:
+                        if observed_status is not None:
+                            steps.extend(
+                                [
+                                    {
+                                        "when": stop_when,
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "settingsButton",
+                                        },
+                                    },
+                                    {
+                                        "when": stop_when,
+                                        "ui_when": {
+                                            "probeResultLabel": {
+                                                "visible": True,
+                                                "text": {
+                                                    "contains": f"HTTP {observed_status}"
+                                                },
+                                            }
+                                        },
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "probeResultLabel",
+                                        },
+                                    },
+                                    {
+                                        "when": stop_when,
+                                        "capture_name": f"{name}-diagnostics.png",
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "homeButton",
+                                        },
+                                    },
+                                ]
+                            )
                         frozen = step(
                             stop_when,
                             "set_probe_target",
@@ -690,6 +743,7 @@ def run_health(
                                 probe_url=f"https://127.0.0.1:{https.server_port}{path}",
                                 expected_status=status,
                                 expected_state=state,
+                                observed_status=200 if path == "/ok200" else 204,
                                 ca=workspace / "health.ca.pem",
                             )
                         )
