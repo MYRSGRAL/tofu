@@ -200,6 +200,16 @@ DNS, namespace или G-DNS. Наблюдатель GUI выше пока не �
 Подавайте текст через stdin; URL подписки и credentials не передавайте через argv
 или логи. SIGINT/SIGTERM отменяют измерение.
 
+### Авторизация сетевого helper
+
+`tofu_linux::helper::PeerAuthorizer` проверяет credentials отправителя и
+фиксированное действие polkit, закрепляет root-owned authority и проверяет
+sender сырых ответов. После решения повторно сверяет peer и authority,
+ограничивает число проверок и отменяет запрос у исходного владельца authority.
+`PeerIdentity` — снимок: перед эффектами Prepare/Apply нужна новая авторизация.
+Тесты используют private bus и fake authority. Системный сервис не
+устанавливается, сеть не меняется. [Контракт авторизации](docs/specs/helper-authorization.md).
+
 ### Журнал управляемых сетевых ресурсов
 
 `tofu_linux::managed_network` предоставляет ограниченный устойчивый журнал
