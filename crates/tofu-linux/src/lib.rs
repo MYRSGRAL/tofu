@@ -28,6 +28,13 @@ pub use tcp_probe::{TcpProbeResult, TcpProbeStatus, TcpProbeTarget, check_tcp};
 mod network;
 #[cfg(target_os = "linux")]
 pub use network::{
+    IpPrefix, KernelRoute, LinuxAddress, LinuxLink, LinuxNexthop, LinuxRoute, LinuxRule,
+    LinuxTopology, LookupIncomplete, NetworkAttribute, NetworkNamespace, NetworkReadError,
+    NexthopMember, RouteKind, RouteNexthop, RouteQuery, TransportProtocol, lookup_route,
+    read_topology,
+};
+#[cfg(target_os = "linux")]
+pub use network::{
     NetworkCoverage, NetworkMonitor, NetworkMonitorError, NetworkSnapshot, NetworkStamp,
     NetworkWatch,
 };

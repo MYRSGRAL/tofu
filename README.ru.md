@@ -129,6 +129,23 @@ Linux наблюдает изменения маршрутов и адресов
 не реализует атомарный снимок и применение NetworkHost, необходимые для TUN.
 [Проверки наблюдения и оставшиеся ограничения](docs/validation/2026-11-09-network-observation.md).
 
+Linux-библиотека также предоставляет ограниченные read-only API `read_topology`
+и `lookup_route`: интерфейсы, адреса, маршруты всех таблиц, policy rules, nexthop
+objects либо запрос пути к ядру с явными UID/mark/source и TCP/UDP-селекторами.
+Неизвестные атрибуты сохраняются как неполнота интерпретации. Эти данные не дают
+права Apply, не доказывают достижимость и не включают привязку к приватному VPN.
+ResolverHost/DNS и привилегированный жизненный цикл сети ещё не реализованы.
+
+Для явной диагностики в build-каталоге из примера выше:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --locked -p tofu-linux --example network_inspect
+printf '%s\n' '{"op":"snapshot"}' | flock -s "$tofu_build" "$tofu_build/target/debug/examples/network_inspect"
+```
+
+CLI намеренно выводит адреса и селекторы сети; обычный Debug скрывает содержимое.
+[Проверки topology/route-get и ограничения](docs/validation/2026-11-09-network-topology.md).
+
 Диагностический пример читает профили только из stdin, проверяет одну принятую
 запись по индексу и выводит только счётчики/status/durations:
 `cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
