@@ -32,6 +32,13 @@ fn safe_file(file: &File) -> Result<(), JournalError> {
 /// Предки — root/euid-owned, без чужой записи (кроме root-owned sticky /tmp).
 /// Только последний компонент разрешено создать; права существующих не чиним.
 pub(super) fn directory(path: &Path) -> Result<File, JournalError> {
+    directory_with_sync(path, &mut File::sync_all)
+}
+
+fn directory_with_sync(
+    path: &Path,
+    sync_parent: &mut impl FnMut(&File) -> std::io::Result<()>,
+) -> Result<File, JournalError> {
     if !path.is_absolute() {
         return Err(JournalError::UnsafePath);
     }
@@ -55,7 +62,7 @@ pub(super) fn directory(path: &Path) -> Result<File, JournalError> {
             Ok(fd) => fd,
             Err(rustix::io::Errno::NOENT) if last => {
                 match fs::mkdirat(&current, *name, Mode::from_raw_mode(0o700)) {
-                    Ok(()) => current.sync_all().map_err(|_| JournalError::Io)?,
+                    Ok(()) => {}
                     Err(rustix::io::Errno::EXIST) => {}
                     Err(_) => return Err(JournalError::Io),
                 }
@@ -74,6 +81,11 @@ pub(super) fn directory(path: &Path) -> Result<File, JournalError> {
         };
         if !safe {
             return Err(JournalError::UnsafePath);
+        }
+        // Предыдущий процесс мог создать каталог и умереть до parent fsync.
+        // Поэтому подтверждаем его имя и при повторном открытии.
+        if last {
+            sync_parent(&current).map_err(|_| JournalError::Io)?;
         }
         current = File::from(opened);
     }
@@ -152,4 +164,53 @@ pub(super) fn write(directory: &File, document: &Document) -> Result<(), Journal
     directory
         .sync_all()
         .map_err(|_| JournalError::UncertainWrite)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JournalError, directory_with_sync};
+    use std::{fs, os::unix::fs::DirBuilderExt, path::PathBuf};
+
+    struct Area(PathBuf);
+    impl Drop for Area {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).expect("Очистка собственного тестового каталога");
+        }
+    }
+
+    #[test]
+    fn reopen_retries_parent_sync_after_interrupted_directory_creation() {
+        let mut nonce = [0; 8];
+        getrandom::getrandom(&mut nonce).expect("Тестовая случайность");
+        let area_path = std::env::temp_dir().join(format!(
+            "tofu-parent-sync-{:016x}",
+            u64::from_le_bytes(nonce)
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&area_path)
+            .expect("Тестовый каталог");
+        let area = Area(area_path);
+        let path = area.0.join("state");
+        let mut first_syncs = 0;
+        let failed = directory_with_sync(&path, &mut |_| {
+            first_syncs += 1;
+            Err(std::io::Error::other("Инъекция ошибки parent fsync"))
+        });
+        assert!(matches!(failed, Err(JournalError::Io)));
+        assert_eq!(first_syncs, 1);
+        assert!(path.is_dir());
+
+        let mut retry_syncs = 0;
+        let reopened = directory_with_sync(&path, &mut |parent| {
+            retry_syncs += 1;
+            parent.sync_all()
+        })
+        .expect("Повторное открытие");
+        drop(reopened);
+        assert_eq!(
+            retry_syncs, 1,
+            "Существующее имя каталога тоже требует parent fsync"
+        );
+    }
 }
