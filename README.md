@@ -264,9 +264,17 @@ explicit OS reconciliation after reopening, and retains unresolved cleanup items
 Session resources and the public kill-switch block have separate lifetimes.
 Storage uses private permissions, directory-FD operations, an exclusive writer
 lock and fsync/atomic replacement. It contains typed descriptors, without secrets
-or executable commands. This component does not apply routes, DNS or firewall
+or executable commands. The journal itself does not apply routes, DNS or firewall
 rules and does not enable system TUN. [Checks and limits](docs/validation/2026-11-09-network-resource-journal.md),
 [helper plan](docs/superpowers/plans/2026-11-09-linux-network-helper.md).
+
+`managed_network::nft::NftExecutor` adds creation, observation and removal of
+owned empty nftables tables. It pins the namespace and trusted system `nft`,
+checks the complete ownership marker, and deletes by a nonzero kernel handle.
+`Journal::mark_cleanup` persists the cleanup boundary before an asynchronous
+effect. Commands have bounded output, concurrency and execution time. This
+does not yet install traffic-blocking rules or connect the GUI to a privileged
+service. [Executor contract](docs/specs/helper-nftables-executor.md).
 
 ### Rust libraries and CLIs
 

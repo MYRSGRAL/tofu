@@ -63,6 +63,41 @@ fn recovery_requires_explicit_reconciliation_and_preserves_ambiguous_intent() {
 }
 
 #[test]
+fn async_cleanup_requires_fresh_reconciliation_and_is_durable_before_effect() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    assert_eq!(
+        journal.mark_cleanup(owner(), 1).unwrap_err(),
+        JournalError::ReconcileRequired
+    );
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    let foreign = Ownership::new(1001, 11, 1, 4, 99).unwrap();
+    assert_eq!(
+        journal.mark_cleanup(foreign, 1).unwrap_err(),
+        JournalError::WrongOwnership
+    );
+    journal.mark_cleanup(owner(), 1).unwrap();
+    assert!(journal.needs_reconciliation(1));
+    assert_eq!(journal.records()[0].state(), RecordState::CleanupRemaining);
+    assert_eq!(
+        journal.mark_cleanup(owner(), 1).unwrap_err(),
+        JournalError::ReconcileRequired
+    );
+    drop(journal);
+    let mut journal = open(&area);
+    assert_eq!(journal.records()[0].state(), RecordState::CleanupRemaining);
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    journal.mark_cleanup(owner(), 1).unwrap();
+    journal.reconcile(owner(), 1, Reconciled::Absent).unwrap();
+    assert!(journal.records().is_empty());
+    assert_eq!(
+        journal.mark_cleanup(owner(), 1).unwrap_err(),
+        JournalError::Missing
+    );
+}
+
+#[test]
 fn partial_cleanup_is_durable_and_public_block_has_independent_lifetime() {
     let area = Area::new();
     let mut journal = open(&area);
