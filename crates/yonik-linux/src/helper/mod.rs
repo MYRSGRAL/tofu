@@ -4,6 +4,12 @@
 //! `PeerIdentity` — снимок, а не разрешение на будущий Apply: перед каждым
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
+mod prepared;
+pub use prepared::{
+    MAX_ARTIFACT_BYTES, MAX_IN_FLIGHT, MAX_PENDING, MAX_PENDING_PER_PEER, PREPARED_TTL,
+    PreparedArtifact, PreparedContext, PreparedError, PreparedHandle, PreparedRequests,
+};
+
 mod registry;
 pub use registry::{RegistryError, TrustedRegistry};
 
@@ -184,27 +190,20 @@ impl PeerAuthorizer {
         })
         .await;
         let reply = match result {
-            Err(error @ (AuthorizationError::Cancelled | AuthorizationError::Timeout)) => {
+            Err(error) => {
                 // Best effort: удалённый ответ может опоздать; он больше не даёт разрешения.
                 // Отмена идёт тому же unique owner, никогда новому владельцу well-known name.
-                let _cancel_result = tokio::time::timeout(
-                    CANCEL_TIMEOUT,
-                    self.connection.call_method(
-                        Some(owner.as_str()),
-                        PATH,
-                        Some(INTERFACE),
-                        "CancelCheckAuthorization",
-                        &(cancellation_id.as_str(),),
-                    ),
-                )
-                .await;
+                self.cancel_check(&owner, &cancellation_id).await;
                 return Err(error);
             }
-            other => other?,
+            Ok(reply) => reply,
         };
         if reply.header().sender().map(|name| name.as_str()) != Some(owner.as_str())
             || reply.body().len() > MAX_REPLY
         {
+            // Чужой reply мог завершить только локальное ожидание: настоящий
+            // CheckAuthorization у закреплённого authority ещё может выполняться.
+            self.cancel_check(&owner, &cancellation_id).await;
             return Err(AuthorizationError::InvalidReply);
         }
         let ((authorized, challenge, _details),): ((bool, bool, HashMap<&str, &str>),) = reply
@@ -233,6 +232,20 @@ impl PeerAuthorizer {
         }
         cancel.check().map_err(|_| AuthorizationError::Cancelled)?;
         Ok(PeerIdentity { uid, sender })
+    }
+
+    async fn cancel_check(&self, owner: &str, cancellation_id: &str) {
+        let _cancel_result = tokio::time::timeout(
+            CANCEL_TIMEOUT,
+            self.connection.call_method(
+                Some(owner),
+                PATH,
+                Some(INTERFACE),
+                "CancelCheckAuthorization",
+                &(cancellation_id,),
+            ),
+        )
+        .await;
     }
 
     async fn daemon_call(&self, method: &str, name: &str) -> Result<Message, AuthorizationError> {

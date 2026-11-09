@@ -462,30 +462,51 @@ async fn concurrent_checks_have_distinct_ids_and_do_not_cross_cancel() {
 }
 
 #[tokio::test]
-async fn forged_allow_reply_from_other_peer_cannot_override_real_authority_deny() {
-    let mut fixture = Fixture::new().await;
-    let attacker = fixture.bus.connect().await;
-    let (_owner, cancel) = cancellation();
-    let query = fixture.helper.authorize(
-        &fixture.incoming,
-        NetworkAction::ManageNetwork,
-        Prompt::Never,
-        cancel,
-    );
-    let server = async {
-        let call = next_call(&mut fixture.stream, "CheckAuthorization").await;
-        reply(&attacker, &call, true, false).await;
-        // Барьер подтверждает обработку предыдущей записи тем же bus daemon.
-        zbus::fdo::DBusProxy::new(&attacker)
-            .await
-            .unwrap()
-            .get_id()
-            .await
-            .unwrap();
-        reply(&fixture.authority, &call, false, false).await;
-    };
-    let (result, ()) = tokio::join!(query, server);
-    assert_eq!(result, Err(AuthorizationError::InvalidReply));
+async fn forged_replies_cancel_pending_real_check_and_ignore_late_allow() {
+    for (use_error, expected) in [
+        (false, AuthorizationError::InvalidReply),
+        (true, AuthorizationError::Unavailable),
+    ] {
+        let mut fixture = Fixture::new().await;
+        let attacker = fixture.bus.connect().await;
+        let (_owner, cancel) = cancellation();
+        let query = fixture.helper.authorize(
+            &fixture.incoming,
+            NetworkAction::ManageNetwork,
+            Prompt::Never,
+            cancel,
+        );
+        let server = async {
+            let call = next_call(&mut fixture.stream, "CheckAuthorization").await;
+            if use_error {
+                attacker
+                    .reply_error(&call, "org.freedesktop.DBus.Error.Failed", &"fixture")
+                    .await
+                    .unwrap();
+            } else {
+                reply(&attacker, &call, true, false).await;
+            }
+            // Барьер подтверждает обработку предыдущей записи тем же bus daemon.
+            zbus::fdo::DBusProxy::new(&attacker)
+                .await
+                .unwrap()
+                .get_id()
+                .await
+                .unwrap();
+            let (_, _, _, _, expected_id): Check = call.body().deserialize().unwrap();
+            let cancel = next_call(&mut fixture.stream, "CancelCheckAuthorization").await;
+            assert_eq!(
+                cancel.header().destination().unwrap().as_str(),
+                fixture.authority.unique_name().unwrap().as_str()
+            );
+            let (id,): (String,) = cancel.body().deserialize().unwrap();
+            assert_eq!(id, expected_id);
+            fixture.authority.reply(&cancel, &()).await.unwrap();
+            reply(&fixture.authority, &call, true, false).await;
+        };
+        let (result, ()) = tokio::join!(query, server);
+        assert_eq!(result, Err(expected));
+    }
 }
 
 #[tokio::test]

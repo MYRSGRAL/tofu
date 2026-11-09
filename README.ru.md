@@ -249,6 +249,12 @@ sender сырых ответов. После решения повторно с�
 отклоняются. Пользовательский каталог ядер остаётся отдельным режимом. Компонент
 не устанавливает сервис и не применяет сеть. [Контракт реестра](docs/specs/helper-trusted-registry.md).
 
+`PreparedRequests<A>` привязывает проверенный artifact к peer и поколению,
+заново проверяет polkit на prepare/claim и выдаёт artifact однократно.
+Настоящий `CheckedConfig` предоставляет SHA-256 текущих bytes. Pending-операции,
+payload и TTL ограничены; для памяти executable snapshots нужен общий бюджет
+до подключения production service. [Контракт Prepare/claim](docs/specs/helper-prepared-requests.md).
+
 ### Журнал управляемых сетевых ресурсов
 
 `yonik_linux::managed_network` предоставляет ограниченный устойчивый журнал
