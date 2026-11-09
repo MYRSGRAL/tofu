@@ -131,7 +131,7 @@ async fn connect_phase(
         biased;
         _ = cancel.cancelled() => TcpProbeStatus::Cancelled,
         _ = sleep_until(deadline) => TcpProbeStatus::ConnectTimeout,
-        connected = dial(addresses) => if connected {
+        connected = dial(addresses, deadline) => if connected {
             TcpProbeStatus::Reachable
         } else {
             TcpProbeStatus::ConnectFailure
@@ -173,7 +173,10 @@ async fn resolve(
     let current = resolver_metadata(path, production).map_err(unavailable)?;
     if current.dev() != metadata.dev()
         || current.ino() != metadata.ino()
-        || socket.peer_cred().map_err(unavailable)?.uid() != metadata.uid()
+        || !trusted_peer(
+            metadata.uid(),
+            socket.peer_cred().map_err(unavailable)?.uid(),
+        )
     {
         return Err(TcpProbeStatus::ResolverUnavailable);
     }
@@ -210,6 +213,11 @@ async fn resolve(
             return parse_reply(&reply, port);
         }
     }
+}
+
+fn trusted_peer(socket_uid: u32, peer_uid: u32) -> bool {
+    // systemd socket activation сохраняет UID root в SO_PEERCRED listener.
+    peer_uid == 0 || peer_uid == socket_uid
 }
 
 #[derive(Deserialize)]
@@ -290,21 +298,43 @@ fn interleave(addresses: Vec<SocketAddr>) -> VecDeque<SocketAddr> {
 
 type Dial = Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>>;
 
-async fn dial(addresses: Vec<SocketAddr>) -> bool {
-    dial_with(addresses, |address| Box::pin(TcpStream::connect(address))).await
+async fn dial(addresses: Vec<SocketAddr>, deadline: Instant) -> bool {
+    dial_with(addresses, deadline, |address| {
+        Box::pin(TcpStream::connect(address))
+    })
+    .await
 }
 
 async fn dial_with(
     addresses: Vec<SocketAddr>,
+    deadline: Instant,
     mut connect: impl FnMut(SocketAddr) -> Dial,
 ) -> bool {
     let mut waiting = interleave(addresses);
+    // Делим остаток host deadline между парами адресов. Два blackhole не должны
+    // удерживать оба слота до общего timeout, не дав шанса следующим адресам.
+    let budget = deadline.saturating_duration_since(Instant::now())
+        / waiting.len().div_ceil(2).max(1) as u32;
+    let start_delay = if budget <= DIAL_DELAY {
+        Duration::ZERO
+    } else {
+        DIAL_DELAY
+    };
+    let mut timed_connect = |address| -> Dial {
+        let attempt = connect(address);
+        Box::pin(async move {
+            tokio::time::timeout(budget, attempt)
+                .await
+                .unwrap_or_else(|_| Err(io::Error::from(io::ErrorKind::TimedOut)))
+        })
+    };
     let mut attempts: [Option<Dial>; 2] = [None, None];
     let Some(first) = waiting.pop_front() else {
         return false;
     };
-    attempts[0] = Some(connect(first));
-    let mut next_start = Instant::now() + DIAL_DELAY;
+    attempts[0] = Some(timed_connect(first));
+    let mut next_start = Instant::now() + start_delay;
+    let mut had_timeout = false;
     loop {
         let can_start = !waiting.is_empty() && attempts.iter().any(Option::is_none);
         let finished = tokio::select! {
@@ -313,7 +343,8 @@ async fn dial_with(
                     if let Some(attempt) = attempt {
                         if let Poll::Ready(result) = attempt.as_mut().poll(cx) {
                             // Успешный TCP socket закрывается здесь без записи данных.
-                            return Poll::Ready((index, result.is_ok()));
+                            let timed_out = result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::TimedOut);
+                            return Poll::Ready((index, result.is_ok(), timed_out));
                         }
                     }
                 }
@@ -321,20 +352,25 @@ async fn dial_with(
             }) => Some(finished),
             _ = sleep_until(next_start), if can_start => None,
         };
-        if let Some((index, success)) = finished {
+        if let Some((index, success, timed_out)) = finished {
+            had_timeout |= timed_out;
             attempts[index] = None;
             if success {
                 return true;
             }
         }
-        // Ошибка сразу освобождает слот; blackhole занимает максимум один из двух.
+        // Ошибка или per-attempt timeout сразу освобождает слот.
         if let Some(slot) = attempts.iter_mut().find(|attempt| attempt.is_none()) {
             if let Some(address) = waiting.pop_front() {
-                *slot = Some(connect(address));
-                next_start = Instant::now() + DIAL_DELAY;
+                *slot = Some(timed_connect(address));
+                next_start = Instant::now() + start_delay;
             }
         }
         if attempts.iter().all(Option::is_none) {
+            // Сохраняем различие refused и timeout общего connect phase.
+            if had_timeout {
+                sleep_until(deadline).await;
+            }
             return false;
         }
     }
@@ -353,6 +389,33 @@ mod tests {
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, UnixListener};
+
+    #[test]
+    fn socket_activation_root_and_service_uid_are_trusted_but_foreign_uid_is_not() {
+        assert!(super::trusted_peer(974, 0));
+        assert!(super::trusted_peer(974, 974));
+        assert!(!super::trusted_peer(974, 1000));
+    }
+
+    #[tokio::test]
+    #[ignore = "требует работающий системный systemd-resolved Varlink; только localhost"]
+    async fn production_resolver_localhost_connects_and_closes_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (source, mut cancel) = Cancellation::new();
+        let result = super::check_tcp(
+            target("localhost", listener.local_addr().unwrap().port()),
+            Duration::from_secs(5),
+            &mut cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, TcpProbeStatus::Reachable);
+        assert!(result.dns_elapsed.is_some());
+        assert!(result.connect_elapsed.is_some());
+        let (mut socket, _) = listener.accept().await.unwrap();
+        assert_eq!(socket.read(&mut [0; 1]).await.unwrap(), 0);
+        drop(source);
+    }
 
     fn target(host: &str, port: u16) -> TcpProbeTarget {
         TcpProbeTarget {
@@ -694,6 +757,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_blackholes_do_not_hide_a_later_reachable_address() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good = listener.local_addr().unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            dial_with(
+                vec![
+                    "127.0.0.1:1".parse().unwrap(),
+                    "127.0.0.1:2".parse().unwrap(),
+                    good,
+                ],
+                Instant::now() + Duration::from_millis(800),
+                move |address| {
+                    Box::pin(async move {
+                        if address != good {
+                            std::future::pending::<()>().await;
+                        }
+                        TcpStream::connect(address).await
+                    })
+                },
+            ),
+        )
+        .await
+        .expect("поздний адрес должен получить попытку");
+        assert!(result);
+        let (mut socket, _) = listener.accept().await.unwrap();
+        assert_eq!(socket.read(&mut [0; 1]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn pending_ipv6_does_not_hide_ipv4_and_all_attempts_are_dropped() {
         use std::sync::Arc;
         struct Active(Arc<AtomicU64>);
@@ -722,6 +815,7 @@ mod tests {
             Duration::from_secs(1),
             dial_with(
                 vec!["[::1]:1".parse().unwrap(), "[::2]:1".parse().unwrap(), ipv4],
+                Instant::now() + Duration::from_secs(1),
                 connect,
             ),
         )
