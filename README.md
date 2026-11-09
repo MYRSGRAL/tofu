@@ -121,6 +121,18 @@ HTTPS check failed. Data lives under `$XDG_DATA_HOME/tofu` or `~/.local/share/to
 A locked/missing key never triggers plaintext fallback. Never pass subscription
 URLs as command-line arguments.
 
+If your provider requires HWID, enable **Device ID** in the add dialog's advanced
+options or the selected subscription's settings. It is off by default. Enabling
+it sends a random stable ID for that subscription; hardware identifiers are never
+read. The ID is encrypted at rest and survives disabling the option and restarting.
+Changing the setting immediately retries the download. Device-limit failures have
+a separate message; the app never generates another ID to bypass the limit.
+HWID applies to subscription downloads.
+
+The **About** page and window title show the build ID. When updating, quit the
+previous instance through its tray menu: closing a window can merely hide it,
+and launching again restores the running instance.
+
 Settings → Connectivity check accepts a custom HTTPS URL and expected status
 (200–299); the default requires exactly 204. The GUI uses a five-second timeout,
 checks TLS and rejects redirects. Settings apply to the next Connect and remain
