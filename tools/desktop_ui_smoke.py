@@ -278,7 +278,8 @@ def execute(
     if code != expected_exit or not events or not events[-1].get("closed"):
         progress = events[-1].get("step") if events else None
         raise RuntimeError(
-            f"GUI exit={code}, ожидалось {expected_exit}; step={progress}"
+            f"GUI exit={code}, ожидалось {expected_exit}; step={progress}\n"
+            + saved[-8192:].decode(errors="replace")
         )
     if expected_exit == 0 and events[-1].get("step") != len(steps):
         raise RuntimeError("Не выполнены все UI-действия")

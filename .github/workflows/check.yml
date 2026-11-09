@@ -115,3 +115,11 @@ jobs:
         run: |
           python3 tools/desktop_ui_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --output "$RUNNER_TEMP/gui-ui-a"
           python3 tools/desktop_ui_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --output "$RUNNER_TEMP/gui-ui-a-compact" --width 520 --height 640 --scale 1.5
+      - name: Сохранить диагностику синтетического UI при сбое
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui-a-failure
+          path: ${{ runner.temp }}/gui-ui-a*/
+          retention-days: 3
+          if-no-files-found: ignore
