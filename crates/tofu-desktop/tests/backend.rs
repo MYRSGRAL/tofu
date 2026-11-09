@@ -259,6 +259,87 @@ fn review_reasons_are_paginated_and_do_not_expose_source_data() {
 }
 
 #[test]
+fn listen_port_settings_are_strict_and_survive_reload() {
+    let directory = Directory::new();
+    let config = directory
+        .config()
+        .with_listen_port(std::num::NonZeroU16::new(18888).expect("порт"));
+    let mut app = Harness::new(config);
+    assert_eq!(app.wait(|v| v["ready"] == true)["port"], 18888);
+    // Занятый порт допустим: применение настройки не открывает listener.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("свой listener");
+    let port = listener.local_addr().expect("порт").port();
+    app.send(json!({"command":"set_listen_port","port":port}));
+    app.wait(|v| v["port"] == port);
+    for (index, invalid) in [
+        json!({"command":"set_listen_port","port":0}),
+        json!({"command":"set_listen_port","port":65536}),
+        json!({"command":"set_listen_port","port":-1}),
+        json!({"command":"set_listen_port","port":"10808"}),
+        json!({"command":"set_listen_port","port":true}),
+        json!({"command":"set_listen_port","port":1.5}),
+        json!({"command":"set_listen_port","port":null}),
+        json!({"command":"set_listen_port"}),
+        json!({"command":"set_listen_port","port":12345,"unknown":true}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            app.host
+                .dispatch(&invalid.to_string())
+                .expect_err("строгая команда")
+                .key(),
+            "invalid_input"
+        );
+        app.send(json!({"command":"reload"}));
+        // Смена ядра после reload служит FIFO-барьером: случайный сетевой
+        // snapshot не должен выдаваться за подтверждение обработки reload.
+        let engine = if index % 2 == 0 { "sing-box" } else { "xray" };
+        app.send(json!({"command":"set_engine","engine":engine}));
+        assert_eq!(app.wait(|v| v["engine"] == engine)["port"], port);
+    }
+    for boundary in [1, 65535] {
+        app.send(json!({"command":"set_listen_port","port":boundary}));
+        app.wait(|v| v["port"] == boundary);
+    }
+    app.close();
+}
+
+#[test]
+fn next_connect_compiles_with_updated_listen_port() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec!["trojan://port-secret@127.0.0.1:18889#Порт"]);
+    let config = directory
+        .config()
+        .with_listen_port(std::num::NonZeroU16::new(18888).expect("порт"));
+    let mut app = Harness::new(config);
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"add_source","name":"Порт","url":url,"local_exception":true,"route":"direct"}));
+    app.wait(|v| v["source_id"].is_number());
+    app.send(json!({"command":"refresh"}));
+    let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+    app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+    app.wait(|v| v["can_connect"] == true);
+    app.send(json!({"command":"connect"}));
+    app.wait(|v| v["error"] == "engine_missing" && v["can_stop"] == false);
+    app.send(json!({"command":"set_listen_port","port":18889}));
+    app.wait(|v| v["port"] == 18889);
+    app.send(json!({"command":"reload"}));
+    app.send(json!({"command":"set_engine","engine":"sing-box"}));
+    assert_eq!(app.wait(|v| v["engine"] == "sing-box")["port"], 18889);
+    app.send(json!({"command":"set_engine","engine":"xray"}));
+    app.wait(|v| v["engine"] == "xray");
+    // Совпадение loopback endpoint и listener отклоняется реальным compile
+    // до загрузки ядра; прежний порт привёл бы к engine_missing.
+    app.send(json!({"command":"connect"}));
+    let rejected = app.wait(|v| v["error"] == "engine_config");
+    assert_eq!(rejected["can_stop"], false);
+    app.close();
+    server.join().expect("HTTP fixture завершён");
+}
+
+#[test]
 fn health_target_settings_are_validated_without_disclosing_url() {
     let directory = Directory::new();
     let mut app = Harness::new(directory.config());

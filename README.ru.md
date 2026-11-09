@@ -74,6 +74,7 @@ Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop eng
 [Изолированный стенд Qt/GTK4/Slint](bench/ui/README.md) отделён от приложения;
 замеры реальных окон и выбор toolkit ещё впереди. Текущий GUI остаётся
 функциональным прототипом. [Направление UI](docs/specs/ui-direction.md).
+[Контракт главного экрана/backend](docs/specs/ui-backend-contract.md).
 
 ## Разработка
 
