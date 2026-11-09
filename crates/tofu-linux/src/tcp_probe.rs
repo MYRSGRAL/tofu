@@ -179,7 +179,13 @@ async fn series_with_resolver(
             connected = connect(address) => connected.map(|socket| {
                 drop(socket);
                 start.elapsed()
-            }).map_err(|_| TcpProbeStatus::ConnectFailure),
+            }).map_err(|error| {
+                if error.kind() == io::ErrorKind::TimedOut {
+                    TcpProbeStatus::ConnectTimeout
+                } else {
+                    TcpProbeStatus::ConnectFailure
+                }
+            }),
         };
         match sample {
             Ok(elapsed) => result.samples.push(elapsed),
@@ -586,7 +592,23 @@ mod tests {
 
     #[tokio::test]
     async fn series_retains_partial_samples_and_stops_on_failure_or_cancel() {
-        for cancel_after in [false, true] {
+        for (error_kind, cancel_after, expected) in [
+            (
+                std::io::ErrorKind::ConnectionRefused,
+                false,
+                TcpProbeStatus::ConnectFailure,
+            ),
+            (
+                std::io::ErrorKind::TimedOut,
+                false,
+                TcpProbeStatus::ConnectTimeout,
+            ),
+            (
+                std::io::ErrorKind::ConnectionRefused,
+                true,
+                TcpProbeStatus::Cancelled,
+            ),
+        ] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let (source, mut cancel) = Cancellation::new();
@@ -610,7 +632,7 @@ mod tests {
                                 source.send(true).unwrap();
                                 std::future::pending::<()>().await;
                             }
-                            Err(std::io::ErrorKind::ConnectionRefused.into())
+                            Err(error_kind.into())
                         }) as Dial
                     }
                 },
@@ -618,14 +640,7 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(calls, 2);
-            assert_eq!(
-                result.status,
-                if cancel_after {
-                    TcpProbeStatus::Cancelled
-                } else {
-                    TcpProbeStatus::ConnectFailure
-                }
-            );
+            assert_eq!(result.status, expected);
             assert_eq!(result.samples.len(), 1);
             assert_eq!(result.selected_address, Some(address));
             assert_eq!(result.median, None);
