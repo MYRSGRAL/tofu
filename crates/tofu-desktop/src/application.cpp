@@ -303,8 +303,13 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             metadata.insert(QStringLiteral("profile_count"), profiles);
             metadata.insert(QStringLiteral("pending"), pending);
             metadata.insert(QStringLiteral("step"), stepIndex);
-            const auto tcpStatus = snapshot.value(QStringLiteral("tcp_result")).toObject().value(QStringLiteral("status"));
+            const auto tcpResult = snapshot.value(QStringLiteral("tcp_result")).toObject();
+            const auto tcpStatus = tcpResult.value(QStringLiteral("status"));
+            const auto tcpSamples = tcpResult.value(QStringLiteral("samples_ms")).toArray().size();
+            const auto tcpRequested = tcpResult.value(QStringLiteral("samples_requested"));
             metadata.insert(QStringLiteral("tcp_status"), tcpStatus);
+            metadata.insert(QStringLiteral("tcp_samples_count"), tcpSamples);
+            metadata.insert(QStringLiteral("tcp_samples_requested"), tcpRequested);
             metadata.insert(QStringLiteral("probe_present"), snapshot.value(QStringLiteral("probe_result")).isObject());
             if (smokeTest && traceFile.isOpen()) {
                 const auto line = QJsonDocument(metadata).toJson(QJsonDocument::Compact) + '\n';
@@ -325,6 +330,8 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
                     if (it.key() == QStringLiteral("profiles_count")) actual = profiles;
                     if (it.key() == QStringLiteral("pending")) actual = pending;
                     if (it.key() == QStringLiteral("tcp_status")) actual = tcpStatus;
+                    if (it.key() == QStringLiteral("tcp_samples_count")) actual = tcpSamples;
+                    if (it.key() == QStringLiteral("tcp_samples_requested")) actual = tcpRequested;
                     if (actual != it.value()) matches = false;
                 }
                 if (matches) {

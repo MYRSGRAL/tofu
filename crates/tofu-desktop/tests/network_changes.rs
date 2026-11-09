@@ -286,13 +286,20 @@ fn route_changes_invalidate_completed_and_inflight_tcp_checks() {
     app.send(json!({"command":"check_tcp"}));
     let first = app.wait(|v| v["tcp_result"]["status"] == "reachable");
     assert_eq!(first["tcp_result"]["network_epoch"], first["network_epoch"]);
-    fixtures.wait_accepted(1);
+    assert_eq!(
+        first["tcp_result"]["samples_ms"]
+            .as_array()
+            .expect("выборки")
+            .len(),
+        3
+    );
+    fixtures.wait_accepted(3);
     network.ip(&["route", "add", "198.51.100.0/24", "dev", "lo"]);
     let changed =
         app.wait(|v| v["network_epoch"] != first["network_epoch"] && v["tcp_invalidated"] == true);
     assert_invalidated(&changed);
     app.stays_invalidated();
-    assert_eq!(fixtures.accepted.load(Ordering::SeqCst), 1);
+    assert_eq!(fixtures.accepted.load(Ordering::SeqCst), 3);
     app.send(json!({"command":"check_tcp"}));
     let second = app.wait(|v| v["tcp_result"]["status"] == "reachable");
     assert_eq!(
@@ -300,7 +307,14 @@ fn route_changes_invalidate_completed_and_inflight_tcp_checks() {
         changed["network_epoch"]
     );
     assert_eq!(second["tcp_invalidated"], false);
-    fixtures.wait_accepted(2);
+    assert_eq!(
+        second["tcp_result"]["samples_ms"]
+            .as_array()
+            .expect("выборки")
+            .len(),
+        3
+    );
+    fixtures.wait_accepted(6);
     app.block_next.store(true, Ordering::SeqCst);
     app.send(json!({"command":"check_tcp"}));
     app.wait(|v| v["tcp_busy"] == true);
@@ -318,7 +332,7 @@ fn route_changes_invalidate_completed_and_inflight_tcp_checks() {
     assert_eq!(closed["tcp_result"], Value::Null);
     assert_eq!(closed["tcp_invalidated"], true);
     assert!(
-        fixtures.accepted.load(Ordering::SeqCst) <= 3,
+        fixtures.accepted.load(Ordering::SeqCst) <= 9,
         "нет автоматических TCP проверок"
     );
 }

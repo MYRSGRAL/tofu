@@ -66,6 +66,142 @@ pub struct TcpProbeResult {
     pub connect_elapsed: Option<Duration>,
 }
 
+/// Число успешных соединений, необходимое для медианы серии.
+pub const TCP_SERIES_SAMPLES: usize = 3;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TcpProbeSeriesResult {
+    pub status: TcpProbeStatus,
+    pub dns_elapsed: Option<Duration>,
+    pub selected_address: Option<SocketAddr>,
+    pub samples: Vec<Duration>,
+    pub median: Option<Duration>,
+}
+impl fmt::Debug for TcpProbeSeriesResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TcpProbeSeriesResult")
+            .field("status", &self.status)
+            .field("dns_elapsed", &self.dns_elapsed)
+            .field(
+                "selected_address",
+                &self.selected_address.map(|_| "<скрыто>"),
+            )
+            .field("samples", &self.samples)
+            .field("median", &self.median)
+            .finish()
+    }
+}
+
+/// Три TCP-соединения к одному адресу с общей границей времени, без payload.
+pub async fn check_tcp_series(
+    target: TcpProbeTarget,
+    timeout: Duration,
+    cancel: &mut Cancellation,
+) -> Result<TcpProbeSeriesResult, HostError> {
+    series_with_resolver(
+        target,
+        timeout,
+        cancel,
+        Path::new(RESOLVER),
+        true,
+        |address| Box::pin(TcpStream::connect(address)),
+    )
+    .await
+}
+
+async fn series_with_resolver(
+    target: TcpProbeTarget,
+    timeout: Duration,
+    cancel: &mut Cancellation,
+    resolver: &Path,
+    production: bool,
+    mut connect: impl FnMut(SocketAddr) -> Dial,
+) -> Result<TcpProbeSeriesResult, HostError> {
+    if timeout.is_zero() || timeout > Duration::from_secs(60) {
+        return Err(HostError::ProbeTarget);
+    }
+    let mut result = TcpProbeSeriesResult {
+        status: TcpProbeStatus::NotApplicable,
+        dns_elapsed: None,
+        selected_address: None,
+        samples: Vec::with_capacity(TCP_SERIES_SAMPLES),
+        median: None,
+    };
+    if matches!(target.transport, Transport::Quic | Transport::Unsupported) {
+        return Ok(result);
+    }
+    if cancel.check().is_err() {
+        result.status = TcpProbeStatus::Cancelled;
+        return Ok(result);
+    }
+    let deadline = Instant::now() + timeout;
+    let addresses = if let Ok(ip) = target.host.parse::<IpAddr>() {
+        vec![SocketAddr::new(ip, target.port)]
+    } else {
+        let start = Instant::now();
+        let resolved = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(TcpProbeStatus::Cancelled),
+            _ = sleep_until(deadline) => Err(TcpProbeStatus::DnsTimeout),
+            resolved = resolve(&target.host, target.port, resolver, production) => resolved,
+        };
+        result.dns_elapsed = Some(start.elapsed());
+        match resolved {
+            Ok(addresses) => addresses,
+            Err(status) => {
+                result.status = status;
+                return Ok(result);
+            }
+        }
+    };
+    let first = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(TcpProbeStatus::Cancelled),
+        _ = sleep_until(deadline) => Err(TcpProbeStatus::ConnectTimeout),
+        winner = dial_winner_with(addresses, deadline, &mut connect) => winner.ok_or(TcpProbeStatus::ConnectFailure),
+    };
+    let (address, elapsed) = match first {
+        Ok(winner) => winner,
+        Err(status) => {
+            result.status = status;
+            return Ok(result);
+        }
+    };
+    result.selected_address = Some(address);
+    result.samples.push(elapsed);
+    while result.samples.len() < TCP_SERIES_SAMPLES {
+        let start = Instant::now();
+        let sample = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(TcpProbeStatus::Cancelled),
+            _ = sleep_until(deadline) => Err(TcpProbeStatus::ConnectTimeout),
+            connected = connect(address) => connected.map(|socket| {
+                drop(socket);
+                start.elapsed()
+            }).map_err(|error| {
+                if error.kind() == io::ErrorKind::TimedOut {
+                    TcpProbeStatus::ConnectTimeout
+                } else {
+                    TcpProbeStatus::ConnectFailure
+                }
+            }),
+        };
+        match sample {
+            Ok(elapsed) => result.samples.push(elapsed),
+            Err(status) => {
+                result.status = status;
+                return Ok(result);
+            }
+        }
+    }
+    let mut sorted = [result.samples[0], result.samples[1], result.samples[2]];
+    sorted.sort_unstable();
+    result.median = Some(sorted[1]);
+    result.status = TcpProbeStatus::Reachable;
+    Ok(result)
+}
+
 pub async fn check_tcp(
     target: TcpProbeTarget,
     timeout: Duration,
@@ -308,8 +444,20 @@ async fn dial(addresses: Vec<SocketAddr>, deadline: Instant) -> bool {
 async fn dial_with(
     addresses: Vec<SocketAddr>,
     deadline: Instant,
-    mut connect: impl FnMut(SocketAddr) -> Dial,
+    connect: impl FnMut(SocketAddr) -> Dial,
 ) -> bool {
+    dial_winner_with(addresses, deadline, connect)
+        .await
+        .is_some()
+}
+
+type TimedDial = Pin<Box<dyn Future<Output = io::Result<(SocketAddr, Duration)>> + Send>>;
+
+async fn dial_winner_with(
+    addresses: Vec<SocketAddr>,
+    deadline: Instant,
+    mut connect: impl FnMut(SocketAddr) -> Dial,
+) -> Option<(SocketAddr, Duration)> {
     let mut waiting = interleave(addresses);
     // Делим остаток host deadline между парами адресов. Два blackhole не должны
     // удерживать оба слота до общего timeout, не дав шанса следующим адресам.
@@ -320,18 +468,21 @@ async fn dial_with(
     } else {
         DIAL_DELAY
     };
-    let mut timed_connect = |address| -> Dial {
+    let mut timed_connect = |address| -> TimedDial {
+        let start = Instant::now();
         let attempt = connect(address);
         Box::pin(async move {
             tokio::time::timeout(budget, attempt)
                 .await
                 .unwrap_or_else(|_| Err(io::Error::from(io::ErrorKind::TimedOut)))
+                .map(|socket| {
+                    drop(socket);
+                    (address, start.elapsed())
+                })
         })
     };
-    let mut attempts: [Option<Dial>; 2] = [None, None];
-    let Some(first) = waiting.pop_front() else {
-        return false;
-    };
+    let mut attempts: [Option<TimedDial>; 2] = [None, None];
+    let first = waiting.pop_front()?;
     attempts[0] = Some(timed_connect(first));
     let mut next_start = Instant::now() + start_delay;
     let mut had_timeout = false;
@@ -344,7 +495,7 @@ async fn dial_with(
                         if let Poll::Ready(result) = attempt.as_mut().poll(cx) {
                             // Успешный TCP socket закрывается здесь без записи данных.
                             let timed_out = result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::TimedOut);
-                            return Poll::Ready((index, result.is_ok(), timed_out));
+                            return Poll::Ready((index, result.ok(), timed_out));
                         }
                     }
                 }
@@ -355,8 +506,8 @@ async fn dial_with(
         if let Some((index, success, timed_out)) = finished {
             had_timeout |= timed_out;
             attempts[index] = None;
-            if success {
-                return true;
+            if let Some(winner) = success {
+                return Some(winner);
             }
         }
         // Ошибка или per-attempt timeout сразу освобождает слот.
@@ -371,7 +522,7 @@ async fn dial_with(
             if had_timeout {
                 sleep_until(deadline).await;
             }
-            return false;
+            return None;
         }
     }
 }
@@ -389,6 +540,358 @@ mod tests {
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, UnixListener};
+
+    #[tokio::test]
+    async fn series_resolves_once_and_closes_three_sockets_without_payload() {
+        let fixture = ResolverFixture::new();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_source, mut cancel) = Cancellation::new();
+        let client = super::series_with_resolver(
+            target("private.invalid", address.port()),
+            Duration::from_secs(2),
+            &mut cancel,
+            &fixture.path,
+            false,
+            |address| Box::pin(TcpStream::connect(address)),
+        );
+        let server = async {
+            let (mut socket, _) = fixture.listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            socket
+                .write_all(
+                    b"{\"parameters\":{\"addresses\":[{\"family\":2,\"address\":[127,0,0,1]}]}}\0",
+                )
+                .await
+                .unwrap();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                assert_eq!(socket.read(&mut [0; 1]).await.unwrap(), 0);
+            }
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::join!(client, server)
+        })
+        .await
+        .unwrap();
+        let result = result.unwrap();
+        assert_eq!(result.status, TcpProbeStatus::Reachable);
+        assert_eq!(result.selected_address, Some(address));
+        assert_eq!(result.samples.len(), super::TCP_SERIES_SAMPLES);
+        let mut sorted = result.samples.clone();
+        sorted.sort_unstable();
+        assert_eq!(result.median, Some(sorted[1]));
+        assert!(result.dns_elapsed.is_some());
+        assert!(!format!("{result:?}").contains(&address.to_string()));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), fixture.listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn series_retains_partial_samples_and_stops_on_failure_or_cancel() {
+        for (error_kind, cancel_after, expected) in [
+            (
+                std::io::ErrorKind::ConnectionRefused,
+                false,
+                TcpProbeStatus::ConnectFailure,
+            ),
+            (
+                std::io::ErrorKind::TimedOut,
+                false,
+                TcpProbeStatus::ConnectTimeout,
+            ),
+            (
+                std::io::ErrorKind::ConnectionRefused,
+                true,
+                TcpProbeStatus::Cancelled,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let (source, mut cancel) = Cancellation::new();
+            let mut calls = 0;
+            let result = super::series_with_resolver(
+                target("127.0.0.1", address.port()),
+                Duration::from_secs(2),
+                &mut cancel,
+                Path::new("/missing"),
+                false,
+                |dialed| {
+                    calls += 1;
+                    assert_eq!(dialed, address);
+                    assert!(calls <= 2);
+                    let source = source.clone();
+                    if calls == 1 {
+                        Box::pin(TcpStream::connect(address)) as Dial
+                    } else {
+                        Box::pin(async move {
+                            if cancel_after {
+                                source.send(true).unwrap();
+                                std::future::pending::<()>().await;
+                            }
+                            Err(error_kind.into())
+                        }) as Dial
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(calls, 2);
+            assert_eq!(result.status, expected);
+            assert_eq!(result.samples.len(), 1);
+            assert_eq!(result.selected_address, Some(address));
+            assert_eq!(result.median, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn series_global_deadline_does_not_restart_for_later_sample() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_source, mut cancel) = Cancellation::new();
+        let mut calls = 0;
+        let start = Instant::now();
+        let result = super::series_with_resolver(
+            target("127.0.0.1", address.port()),
+            Duration::from_millis(400),
+            &mut cancel,
+            Path::new("/missing"),
+            false,
+            |_| {
+                calls += 1;
+                let call = calls;
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    assert!(call <= 2);
+                    TcpStream::connect(address).await
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, TcpProbeStatus::ConnectTimeout);
+        assert_eq!(result.samples.len(), 1);
+        assert_eq!(result.median, None);
+        assert_eq!(calls, 2);
+        assert!(start.elapsed() < Duration::from_millis(600));
+    }
+
+    #[tokio::test]
+    async fn series_validation_not_applicable_and_cancel_priority() {
+        let (source, mut cancel) = Cancellation::new();
+        source.send(true).unwrap();
+        for timeout in [Duration::ZERO, Duration::from_secs(61)] {
+            assert_eq!(
+                super::check_tcp_series(target("127.0.0.1", 1), timeout, &mut cancel).await,
+                Err(HostError::ProbeTarget)
+            );
+        }
+        let mut unsupported = target("private.invalid", 443);
+        unsupported.transport = Transport::Quic;
+        let result = super::check_tcp_series(unsupported, Duration::from_secs(1), &mut cancel)
+            .await
+            .unwrap();
+        assert_eq!(result.status, TcpProbeStatus::NotApplicable);
+        assert!(result.samples.is_empty());
+        assert_eq!(result.selected_address, None);
+        let result = super::check_tcp_series(
+            target("private.invalid", 443),
+            Duration::from_secs(1),
+            &mut cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, TcpProbeStatus::Cancelled);
+        assert_eq!(result.dns_elapsed, None);
+    }
+
+    #[tokio::test]
+    async fn series_pins_full_scoped_winner_drops_loser_and_excludes_dns_and_stagger() {
+        use std::sync::Arc;
+        struct Active(Arc<AtomicU64>);
+        impl Drop for Active {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+        let fixture = ResolverFixture::new();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local = listener.local_addr().unwrap();
+        let winner: SocketAddr = "[fe80::1%7]:8443".parse().unwrap();
+        let active = Arc::new(AtomicU64::new(0));
+        let counts = active.clone();
+        let mut calls = 0;
+        let (_source, mut cancel) = Cancellation::new();
+        let start = Instant::now();
+        let client = super::series_with_resolver(
+            target("private.invalid", 8443),
+            Duration::from_secs(3),
+            &mut cancel,
+            &fixture.path,
+            false,
+            |address| {
+                calls += 1;
+                let call = calls;
+                let count = counts.fetch_add(1, Ordering::Relaxed) + 1;
+                assert!(count <= if call <= 2 { 2 } else { 1 });
+                let guard = Active(counts.clone());
+                if call > 1 {
+                    assert_eq!(address, winner);
+                }
+                Box::pin(async move {
+                    let _guard = guard;
+                    if call == 1 {
+                        std::future::pending::<()>().await;
+                    }
+                    TcpStream::connect(local).await
+                })
+            },
+        );
+        let server = async {
+            let (mut socket, _) = fixture.listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let link_local = [254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+            let mut reply = serde_json::to_vec(&serde_json::json!({"parameters":{"addresses":[
+                {"family":2,"address":[127,0,0,2]},
+                {"family":10,"address":link_local,"ifindex":7},
+                {"family":10,"address":link_local,"ifindex":9}
+            ]}}))
+            .unwrap();
+            reply.push(0);
+            socket.write_all(&reply).await.unwrap();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                assert_eq!(socket.read(&mut [0; 1]).await.unwrap(), 0);
+            }
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(4), async {
+            tokio::join!(client, server)
+        })
+        .await
+        .unwrap();
+        let result = result.unwrap();
+        assert_eq!(result.status, TcpProbeStatus::Reachable);
+        assert_eq!(result.selected_address, Some(winner));
+        assert_eq!(calls, 4);
+        assert_eq!(active.load(Ordering::Relaxed), 0);
+        let dns = result.dns_elapsed.unwrap();
+        assert!(dns >= Duration::from_millis(300));
+        // Проверяем исключение значимых стадий, без ожиданий точности микросекунд.
+        assert!(start.elapsed() >= dns + super::DIAL_DELAY);
+        assert!(result.samples[0] < super::DIAL_DELAY);
+        assert!(!format!("{result:?}").contains("fe80"));
+    }
+
+    #[tokio::test]
+    async fn series_cancel_during_dns_or_race_drops_pending_io() {
+        for during_dns in [true, false] {
+            let fixture = ResolverFixture::new();
+            let (source, mut cancel) = Cancellation::new();
+            let client = super::series_with_resolver(
+                target("private.invalid", 443),
+                Duration::from_secs(2),
+                &mut cancel,
+                &fixture.path,
+                false,
+                |_| {
+                    source.send(true).unwrap();
+                    Box::pin(std::future::pending())
+                },
+            );
+            let server = async {
+                let (mut socket, _) = fixture.listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                if during_dns {
+                    source.send(true).unwrap();
+                    assert_eq!(socket.read(&mut [0; 1]).await.unwrap(), 0);
+                } else {
+                    socket.write_all(b"{\"parameters\":{\"addresses\":[{\"family\":2,\"address\":[127,0,0,1]}]}}\0").await.unwrap();
+                }
+            };
+            let (result, ()) = tokio::time::timeout(Duration::from_secs(3), async {
+                tokio::join!(client, server)
+            })
+            .await
+            .unwrap();
+            let result = result.unwrap();
+            assert_eq!(result.status, TcpProbeStatus::Cancelled);
+            assert!(result.samples.is_empty());
+            assert_eq!(result.selected_address, None);
+            assert_eq!(result.median, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn series_median_is_middle_sample_value_not_mean_or_last() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_source, mut cancel) = Cancellation::new();
+        let mut delays = [300, 150, 50].into_iter();
+        let result = super::series_with_resolver(
+            target("127.0.0.1", address.port()),
+            Duration::from_secs(3),
+            &mut cancel,
+            Path::new("/missing"),
+            false,
+            |_| {
+                let delay = delays.next().expect("только три попытки");
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    TcpStream::connect(address).await
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.samples[0] > result.samples[1]);
+        assert!(result.samples[1] > result.samples[2]);
+        assert_eq!(result.median, Some(result.samples[1]));
+    }
+
+    #[tokio::test]
+    async fn series_dns_consumes_the_same_deadline_as_samples() {
+        let fixture = ResolverFixture::new();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_source, mut cancel) = Cancellation::new();
+        let client = super::series_with_resolver(
+            target("private.invalid", address.port()),
+            Duration::from_millis(600),
+            &mut cancel,
+            &fixture.path,
+            false,
+            |_| {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    TcpStream::connect(address).await
+                })
+            },
+        );
+        let server = async {
+            let (mut socket, _) = fixture.listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            socket
+                .write_all(
+                    b"{\"parameters\":{\"addresses\":[{\"family\":2,\"address\":[127,0,0,1]}]}}\0",
+                )
+                .await
+                .unwrap();
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(client, server)
+        })
+        .await
+        .unwrap();
+        let result = result.unwrap();
+        assert_eq!(result.status, TcpProbeStatus::ConnectTimeout);
+        assert_eq!(result.samples.len(), 1);
+        assert_eq!(result.median, None);
+    }
 
     #[test]
     fn socket_activation_root_and_service_uid_are_trusted_but_foreign_uid_is_not() {
