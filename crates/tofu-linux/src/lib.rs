@@ -4,3 +4,19 @@
 mod host;
 #[cfg(target_os = "linux")]
 pub use host::*;
+#[cfg(target_os = "linux")]
+mod fetch;
+#[cfg(target_os = "linux")]
+pub use fetch::*;
+#[cfg(target_os = "linux")]
+mod credentials;
+#[cfg(target_os = "linux")]
+pub use credentials::*;
+#[cfg(target_os = "linux")]
+mod repository;
+#[cfg(target_os = "linux")]
+pub use repository::*;
+#[cfg(target_os = "linux")]
+mod subscriptions;
+#[cfg(target_os = "linux")]
+pub use subscriptions::*;

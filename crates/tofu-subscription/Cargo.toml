@@ -1,0 +1,11 @@
+[package]
+name = "tofu-subscription"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tofu-import = { path = "../tofu-import" }
+
+[lints]
+workspace = true
