@@ -60,6 +60,14 @@ route и dial и повторную выдачу Fake-IP до исходного
 DNS/Fake-IP режим остаётся выключенным; G-DNS не объявляется пройденным.
 [Evidence и требования адаптера](docs/validation/2026-11-09-native-dns-contracts.md).
 
+Экспериментальный opt-in патч закреплённого sing-box отклоняет неполный результат
+обязательных A/AAAA. Официальный бинарник, patched default/false и строгий режим
+прошли 92 изолированных native-сценария (184 попытки SOCKS/TCP). NODATA и
+односемейный lookup отличаются от частичной ошибки. Builder сохраняет source,
+patch/binary digests и параметры сборки; desktop engine не заменяется.
+TTL lease, привязка route/dial и Fake-IP lifecycle ещё не реализованы, поэтому
+смешанный DNS/Fake-IP остаётся выключен. [Патч, сборка и ограничения](adapters/sing-box/v1.14.4/README.md).
+
 ## Разработка
 
 ### Нативный Linux GUI

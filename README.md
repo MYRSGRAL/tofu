@@ -58,6 +58,14 @@ route-to-dial address changes and Fake-IP reuse before the original TTL expires.
 These results keep mixed DNS/Fake-IP execution disabled; they do not mark G-DNS
 as passed. [Evidence and adapter requirements](docs/validation/2026-11-09-native-dns-contracts.md).
 
+An experimental opt-in patch for pinned sing-box now rejects incomplete required
+A/AAAA results. The official binary, patched default/false and strict mode passed
+92 isolated native scenarios (184 SOCKS/TCP attempts). NODATA and single-family
+lookups are distinct from partial failure. The build tool records source, patch,
+binary digests and build settings; it does not replace the desktop engine.
+TTL leases, route-to-dial binding and Fake-IP lifecycle remain open, so mixed
+DNS/Fake-IP stays disabled. [Patch, build and limitations](adapters/sing-box/v1.14.4/README.md).
+
 ## Development
 
 ### Native Linux GUI
