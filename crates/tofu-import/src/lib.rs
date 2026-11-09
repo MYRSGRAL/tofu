@@ -1,10 +1,12 @@
 //! Ограниченный импорт, не выполняющий загрузку, сохранение или активацию профилей.
 
 mod decode;
+mod identity;
 mod json;
 mod model;
 mod uri;
 
+pub use identity::{IdentityError, SecretIdentity};
 pub use model::{
     Credentials, Endpoint, FatalError, Field, ImportFailure, ImportReport, Issue, IssueCode,
     ParsedServer, Protocol, ReviewFlag, SecretText, Security, Transport,
