@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonObject>
@@ -11,6 +12,7 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QVariant>
+#include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
 
@@ -90,6 +92,24 @@ inline bool perform(QQuickWindow* window, const QJsonObject& action)
     if (!item || !item->isVisible() || !item->isEnabled()) return false;
     reveal(item);
     item->forceActiveFocus(Qt::OtherFocusReason);
+    if (kind == QStringLiteral("wheel")) {
+        const auto delta = action.value(QStringLiteral("delta"));
+        const auto number = delta.toDouble();
+        if (!delta.isDouble() || !std::isfinite(number) || number == 0
+            || std::abs(number) > 1200 || number != std::floor(number)) return false;
+        // Край scroll viewport: поле ввода/SpinBox в центре может принять колесо.
+        const auto point = item->mapToScene(QPointF(std::min(4.0, item->width() / 2), item->height() / 2));
+        if (item->width() <= 0 || item->height() <= 0 || point.x() < 0 || point.y() < 0
+            || point.x() >= window->width() || point.y() >= window->height()) return false;
+        QWheelEvent wheel(point, window->mapToGlobal(point), QPoint(), QPoint(0, int(number)),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        // Flickable вычисляет скорость по timestamp; два нуля отбрасывают reverse.
+        static QElapsedTimer wheelClock;
+        if (!wheelClock.isValid()) wheelClock.start();
+        wheel.setTimestamp(static_cast<ulong>(wheelClock.elapsed() + 1));
+        QCoreApplication::sendEvent(window, &wheel);
+        return true;
+    }
     if (kind == QStringLiteral("click")) {
         const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
         if (item->width() <= 0 || item->height() <= 0 || point.x() < 0 || point.y() < 0

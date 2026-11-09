@@ -132,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("Не задан домашний каталог данных")?
         .join("tofu");
     let mut engine_dir = None;
-    let mut listen_port = NonZeroU16::new(10808).ok_or("Некорректный стандартный порт")?;
+    let mut listen_port = None;
     let mut explicit_data_dir = false;
     let mut smoke_test = false;
     let mut screenshot = None;
@@ -168,11 +168,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Some("--listen-port") => {
                 let port = arguments.next().ok_or("Не задан --listen-port")?;
-                listen_port = port
-                    .to_str()
-                    .ok_or("Порт должен быть числом")?
-                    .parse::<NonZeroU16>()
-                    .map_err(|_| "Порт должен быть в диапазоне 1–65535")?;
+                listen_port = Some(
+                    port.to_str()
+                        .ok_or("Порт должен быть числом")?
+                        .parse::<NonZeroU16>()
+                        .map_err(|_| "Порт должен быть в диапазоне 1–65535")?,
+                );
             }
             _ => return Err("Неизвестный параметр командной строки".into()),
         }
@@ -190,7 +191,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .create(&data_dir)?;
     let data_dir = std::fs::canonicalize(data_dir)?;
     let engine_dir = engine_dir.unwrap_or_else(|| data_dir.join("engines"));
-    let mut config = HostConfig::new(data_dir.clone(), engine_dir).with_listen_port(listen_port);
+    let mut config = HostConfig::new(data_dir.clone(), engine_dir);
+    if let Some(port) = listen_port {
+        config = config.with_listen_port(port);
+    }
     if smoke_test {
         let mut key = zeroize::Zeroizing::new([0_u8; 32]);
         getrandom::getrandom(key.as_mut()).map_err(|_| "Не удалось создать тестовый ключ")?;

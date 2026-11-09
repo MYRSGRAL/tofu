@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     fs::{self, DirBuilder, File, OpenOptions},
+    net::{Ipv4Addr, TcpListener, UdpSocket},
     num::NonZeroU16,
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -32,7 +33,7 @@ pub struct HostConfig {
     data_dir: PathBuf,
     engine_dir: PathBuf,
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
-    listen_port: u16,
+    listen_port: Option<NonZeroU16>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -40,7 +41,7 @@ impl HostConfig {
             data_dir,
             engine_dir,
             ephemeral_key: None,
-            listen_port: 10808,
+            listen_port: None,
         }
     }
     pub fn data_dir(&self) -> &Path {
@@ -54,7 +55,7 @@ impl HostConfig {
         self
     }
     pub fn with_listen_port(mut self, port: NonZeroU16) -> Self {
-        self.listen_port = port.get();
+        self.listen_port = Some(port);
         self
     }
 }
@@ -83,6 +84,12 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 enum Command {
     Reload,
     AddSource {
+        name: String,
+        url: String,
+        local_exception: bool,
+        route: Route,
+    },
+    ImportSource {
         name: String,
         url: String,
         local_exception: bool,
@@ -225,7 +232,7 @@ impl DesktopHost {
                     )),
                     Err(_) => {
                         let mut snapshot = Snapshot::new(config.ephemeral_key.is_some());
-                        snapshot.port = config.listen_port;
+                        snapshot.port = config.listen_port.map_or(0, NonZeroU16::get);
                         snapshot.error = Some("startup");
                         snapshot.closed = true;
                         snapshot.emit(&callback);
@@ -308,7 +315,7 @@ impl Drop for DesktopHost {
 fn validate(command: &Command) -> Result<()> {
     let text = |s: &str, max| s.len() <= max && !s.chars().any(char::is_control);
     let valid = match command {
-        Command::AddSource { name, url, .. } => {
+        Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
@@ -445,6 +452,8 @@ struct Snapshot {
     selected_name: Option<String>,
     engine: EngineChoice,
     port: u16,
+    search: String,
+    favorites_only: bool,
     can_connect: bool,
     closed: bool,
     ephemeral: bool,
@@ -483,7 +492,9 @@ impl Snapshot {
             selected_profile: None,
             selected_name: None,
             engine: EngineChoice::Xray,
-            port: 10808,
+            port: 0,
+            search: String::new(),
+            favorites_only: false,
             can_connect: false,
             closed: false,
             ephemeral,
@@ -505,10 +516,40 @@ impl Snapshot {
         }
     }
     fn emit(&self, callback: &Callback) {
-        if let Ok(json) = serde_json::to_string(self) {
+        #[derive(Serialize)]
+        struct View<'a> {
+            #[serde(flatten)]
+            snapshot: &'a Snapshot,
+            listen_address: String,
+        }
+        let view = View {
+            snapshot: self,
+            listen_address: format!("127.0.0.1:{}", self.port),
+        };
+        if let Ok(json) = serde_json::to_string(&view) {
             callback(json);
         }
     }
+}
+
+// Ядро не принимает готовые FD: проверка сужает окно гонки, но не резервирует порт.
+// Проверяем также UDP, поскольку SOCKS inbound Xray включает udp:true.
+fn available_port(requested: u16) -> Result<NonZeroU16> {
+    for _ in 0..16 {
+        let tcp = TcpListener::bind((Ipv4Addr::LOCALHOST, requested))
+            .map_err(|_| DesktopError("listen_port_busy"))?;
+        let port = tcp
+            .local_addr()
+            .map_err(|_| DesktopError("listen_port_busy"))?
+            .port();
+        if UdpSocket::bind((Ipv4Addr::LOCALHOST, port)).is_ok() {
+            return NonZeroU16::new(port).ok_or(DesktopError("listen_port_busy"));
+        }
+        if requested != 0 {
+            break;
+        }
+    }
+    Err(DesktopError("listen_port_busy"))
 }
 
 fn private_directory(path: &Path) -> Result<(PathBuf, File)> {
@@ -571,12 +612,37 @@ struct Actor {
     callback: Callback,
     selected: Option<ResolvedProfile>,
     pending: Option<Box<PendingRefresh>>,
-    search: String,
-    favorites_only: bool,
+    automatic_port: bool,
     probe_url: Zeroizing<String>,
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    fn prepare_port(&mut self) -> Result<()> {
+        match available_port(self.state.port) {
+            Ok(_) => Ok(()),
+            Err(_) if self.automatic_port => {
+                self.state.port = available_port(0)?.get();
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+    fn refresh(&mut self, generation: u64) -> Result<RefreshTask> {
+        let id = self
+            .state
+            .source_id
+            .ok_or(DesktopError("source_required"))?;
+        self.pending = None;
+        self.state.pending = None;
+        let service = self.service.clone();
+        let (cancel, receiver) = watch::channel(false);
+        let task =
+            tokio::spawn(
+                async move { service.refresh(id, Duration::from_secs(30), receiver).await },
+            );
+        self.state.busy = true;
+        Ok((generation, cancel, task))
+    }
     fn tcp_key(&self) -> Option<TcpKey> {
         let selected = self.selected.as_ref()?;
         Some(TcpKey {
@@ -648,8 +714,8 @@ impl Actor {
             .profiles(
                 id,
                 ProfileQuery {
-                    search: self.search.clone(),
-                    favorites_only: self.favorites_only,
+                    search: self.state.search.clone(),
+                    favorites_only: self.state.favorites_only,
                     include_unavailable: true,
                     offset: self.state.offset,
                     limit: 200,
@@ -749,8 +815,8 @@ impl Actor {
                 favorites_only,
                 offset,
             } => {
-                self.search = search;
-                self.favorites_only = favorites_only;
+                self.state.search = search;
+                self.state.favorites_only = favorites_only;
                 self.state.offset = offset;
                 self.page().await
             }
@@ -792,6 +858,7 @@ impl Actor {
                     return Err(DesktopError("busy"));
                 }
                 self.state.port = port.get();
+                self.automatic_port = false;
                 Ok(())
             }
             Command::SetProbeTarget {
@@ -961,6 +1028,19 @@ mod settings_tests {
         }
     }
 
+    #[test]
+    fn udp_collision_is_detected_without_touching_occupied_socket() {
+        let udp = std::net::UdpSocket::bind("127.0.0.1:0").expect("UDP fixture");
+        let port = udp.local_addr().expect("адрес").port();
+        assert_eq!(
+            super::available_port(port).expect_err("UDP занят").key(),
+            "listen_port_busy"
+        );
+        let automatic = super::available_port(0).expect("автопорт");
+        assert_ne!(automatic.get(), port);
+        assert!(udp.local_addr().is_ok());
+    }
+
     #[tokio::test]
     async fn listen_port_is_busy_during_active_session_and_failed_cleanup() {
         let path = std::env::temp_dir().join(format!(
@@ -985,8 +1065,7 @@ mod settings_tests {
             callback: Arc::new(|_| {}),
             selected: None,
             pending: None,
-            search: String::new(),
-            favorites_only: false,
+            automatic_port: true,
             probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
             network: None,
         };
@@ -1427,7 +1506,7 @@ async fn run(
     callback: Callback,
 ) {
     let mut state = Snapshot::new(config.ephemeral_key.is_some());
-    state.port = config.listen_port;
+    state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
     // Обработчики регистрируются до любого spawn ядра.
@@ -1458,7 +1537,13 @@ async fn run(
             return;
         }
     };
-    let opened = open(&mut config).await;
+    let opened = match config.listen_port.map_or_else(|| available_port(0), Ok) {
+        Ok(port) => {
+            state.port = port.get();
+            open(&mut config).await
+        }
+        Err(error) => Err(error),
+    };
     state.busy = false;
     let (service, _lock) = match opened {
         Ok(opened) => opened,
@@ -1492,8 +1577,7 @@ async fn run(
         callback,
         selected: None,
         pending: None,
-        search: String::new(),
-        favorites_only: false,
+        automatic_port: config.listen_port.is_none(),
         probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
         network: network.clone(),
     };
@@ -1618,18 +1702,33 @@ async fn run(
                             Ok(())
                         } else { Err(DesktopError("profile_required")) }
                     }
+                    Command::ImportSource { name, url, local_exception, route } => {
+                        if refreshing.is_some() { Err(DesktopError("busy")) }
+                        else {
+                            match actor.command(Command::AddSource { name, url, local_exception, route }).await {
+                                Ok(()) => {
+                                    actor.state.search.clear(); actor.state.favorites_only = false;
+                                    match actor.refresh(envelope.generation) {
+                                        Ok(task) => { refreshing = Some(task); Ok(()) }
+                                        Err(error) => Err(error),
+                                    }
+                                }
+                                Err(error) => Err(error),
+                            }
+                        }
+                    }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else if let Some(id) = actor.state.source_id {
-                            actor.pending = None; actor.state.pending = None;
-                            let service = actor.service.clone();
-                            let (cancel, receiver) = watch::channel(false);
-                            let task = tokio::spawn(async move { service.refresh(id, Duration::from_secs(30), receiver).await });
-                            refreshing = Some((envelope.generation, cancel, task)); actor.state.busy = true; Ok(())
-                        } else { Err(DesktopError("source_required")) }
+                        else { match actor.refresh(envelope.generation) {
+                            Ok(task) => { refreshing = Some(task); Ok(()) }
+                            Err(error) => Err(error),
+                        } }
                     }
                     Command::Connect => {
                         if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
+                        else if actor.selected.is_none() { Err(DesktopError("profile_required")) }
+                        else if actor.pending.is_some() { Err(DesktopError("review_required")) }
+                        else if let Err(error) = actor.prepare_port() { Err(error) }
                         else if let Some(profile) = actor.selected.as_ref() {
                             if actor.pending.is_some() { Err(DesktopError("review_required")) }
                             else {

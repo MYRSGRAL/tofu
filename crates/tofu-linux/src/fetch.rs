@@ -217,6 +217,12 @@ impl FetchHost {
                 .map_err(|_| FetchError::Transport)?;
             let mut request = client
                 .get(url.clone())
+                // Remnawave распознаёт /^Happ\// и выдаёт Xray JSON вместо URI fallback.
+                // Собственное имя клиента сохраняем отдельным product token.
+                .header(
+                    header::USER_AGENT,
+                    concat!("Happ/1.0 tofu/", env!("CARGO_PKG_VERSION")),
+                )
                 .header(header::ACCEPT_ENCODING, "identity");
             let conditional = validators.filter(|value| value.resource == url);
             let sent_conditional = conditional
@@ -585,6 +591,22 @@ mod tests {
                 .unwrap_err(),
             FetchError::BlockedAddress
         );
+    }
+
+    #[tokio::test]
+    async fn subscription_user_agent_selects_happ_json() {
+        let (source, task) = fixture(vec![
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".into(),
+        ])
+        .await;
+        let (_sender, receiver) = watch::channel(false);
+        host()
+            .fetch(&source, FetchRoute::Direct, None, receiver)
+            .await
+            .expect("загрузка");
+        let requests = task.await.expect("fixture");
+        assert!(requests[0].contains("user-agent: Happ/1.0 tofu/"));
+        assert!(requests[0].contains("accept-encoding: identity"));
     }
 
     #[tokio::test]
