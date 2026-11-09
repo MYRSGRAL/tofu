@@ -6,6 +6,9 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +18,78 @@ import desktop_smoke as smoke  # noqa: E402
 
 
 class DesktopNetworkTests(unittest.TestCase):
+    def test_refresh_rejects_completed_handler_without_transport_outcome(self) -> None:
+        for terminal in (None, "unknown"):
+            with self.subTest(terminal=terminal):
+                gate = smoke.ProbeGate()
+                gate.received.set()
+                gate.completed.set()
+                gate.terminal = terminal
+                handler = type(
+                    "FailedBarrierFixture", (smoke.Fixture,), {"refresh_gate": gate}
+                )
+                server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+                serving = threading.Thread(target=server.serve_forever)
+                serving.start()
+                try:
+                    with self.assertRaises(urllib.error.HTTPError) as failure:
+                        urllib.request.urlopen(
+                            f"http://127.0.0.1:{server.server_port}/", timeout=2
+                        )
+                    self.assertEqual(failure.exception.code, 503)
+                    self.assertFalse(gate.refresh_passed.is_set())
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    serving.join(timeout=2)
+                self.assertFalse(serving.is_alive())
+
+    def test_subscription_refresh_waits_for_terminal_late_https_attempt(self) -> None:
+        gate = smoke.ProbeGate()
+        gate.received.set()
+        handler = type(
+            "BarrierFixture",
+            (smoke.Fixture,),
+            {"refresh_gate": gate, "body": b"profile"},
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        serving = threading.Thread(target=server.serve_forever)
+        serving.start()
+        received = threading.Event()
+        failures: list[Exception] = []
+
+        def request() -> None:
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{server.server_port}/", timeout=3
+                ) as response:
+                    self.assertEqual(response.read(), b"profile")
+                received.set()
+            except Exception as error:
+                failures.append(error)
+
+        client = threading.Thread(target=request)
+        client.start()
+        try:
+            self.assertTrue(gate.refresh_requested.wait(timeout=1))
+            self.assertFalse(
+                received.wait(timeout=0.1),
+                "Refresh не должен завершаться до позднего HTTPS",
+            )
+            gate.terminal = "sent"
+            gate.completed.set()
+            self.assertTrue(received.wait(timeout=2))
+            self.assertTrue(gate.refresh_passed.is_set())
+            self.assertFalse(failures)
+        finally:
+            gate.completed.set()
+            client.join(timeout=4)
+            server.shutdown()
+            server.server_close()
+            serving.join(timeout=2)
+        self.assertFalse(client.is_alive())
+        self.assertFalse(serving.is_alive())
+
     def test_guard_rejects_host_and_nonempty_namespace_before_mutation(self) -> None:
         for expected, actual, interfaces in (
             (None, 1, {"lo"}),
@@ -87,28 +162,50 @@ class DesktopNetworkTests(unittest.TestCase):
 
     def test_https_handler_holds_real_response_until_release(self) -> None:
         gate = smoke.ProbeGate()
-        handler = smoke.HeldHttpsHandler.__new__(smoke.HeldHttpsHandler)
-        handler.gate = gate
+        handler = type("HeldFixture", (smoke.HeldHttpsHandler,), {"gate": gate})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        server.requested = threading.Event()
+        serving = threading.Thread(target=server.serve_forever)
+        serving.start()
         responded = threading.Event()
-        with patch.object(smoke.HttpsHandler, "do_GET", side_effect=responded.set):
-            thread = threading.Thread(target=handler.do_GET)
-            thread.start()
+        failures: list[Exception] = []
+
+        def request() -> None:
             try:
-                self.assertTrue(gate.received.wait(timeout=1))
-                self.assertFalse(responded.is_set())
-                gate.release.set()
-                self.assertTrue(gate.completed.wait(timeout=1))
-                self.assertTrue(responded.is_set())
-                self.assertFalse(gate.timed_out.is_set())
-            finally:
-                gate.release.set()
-                thread.join(timeout=2)
-        self.assertFalse(thread.is_alive())
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{server.server_port}/", timeout=3
+                ) as response:
+                    self.assertEqual(response.status, 204)
+                    self.assertEqual(response.read(), b"")
+                responded.set()
+            except Exception as error:
+                failures.append(error)
+
+        client = threading.Thread(target=request)
+        client.start()
+        try:
+            self.assertTrue(gate.received.wait(timeout=1))
+            self.assertFalse(responded.wait(timeout=0.1))
+            gate.release.set()
+            self.assertTrue(gate.completed.wait(timeout=2))
+            self.assertTrue(responded.wait(timeout=2))
+            self.assertEqual(gate.terminal, "sent")
+            self.assertFalse(gate.timed_out.is_set())
+            self.assertFalse(failures)
+        finally:
+            gate.release.set()
+            client.join(timeout=4)
+            server.shutdown()
+            server.server_close()
+            serving.join(timeout=2)
+        self.assertFalse(client.is_alive())
+        self.assertFalse(serving.is_alive())
 
     def test_checking_trigger_releases_response_only_after_invalidation(self) -> None:
         gate = smoke.ProbeGate()
         gate.received.set()
         gate.completed.set()
+        gate.terminal = "sent"
         proof: list[bool] = []
         failures: list[Exception] = []
         events = [

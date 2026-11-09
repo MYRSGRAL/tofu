@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -26,8 +27,19 @@ LOG = logging.getLogger("desktop-smoke")
 
 class Fixture(BaseHTTPRequestHandler):
     body: bytes = b""
+    refresh_gate: ProbeGate | None = None
 
     def do_GET(self) -> None:
+        if self.refresh_gate is not None and self.refresh_gate.received.is_set():
+            self.refresh_gate.refresh_requested.set()
+            if (
+                not self.refresh_gate.completed.wait(timeout=5)
+                or self.refresh_gate.terminal not in ("sent", "closed")
+                or self.refresh_gate.timed_out.is_set()
+            ):
+                self.send_error(503)
+                return
+            self.refresh_gate.refresh_passed.set()
         self.send_response(200)
         self.send_header("Content-Length", str(len(self.body)))
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -45,18 +57,32 @@ class ProbeGate:
         self.release = threading.Event()
         self.completed = threading.Event()
         self.timed_out = threading.Event()
+        self.refresh_requested = threading.Event()
+        self.refresh_passed = threading.Event()
+        self.terminal: str | None = None
 
 
 class HeldHttpsHandler(HttpsHandler):
     gate: ProbeGate
 
     def do_GET(self) -> None:
+        self.server.requested.set()
         self.gate.received.set()
         try:
             if not self.gate.release.wait(timeout=35):
                 self.gate.timed_out.set()
                 return
-            super().do_GET()
+            # Дольше старого screenshot dwell: Stop обязан ждать handshake,
+            # а не случайно выигрывать гонку за счёт таймера 500 мс.
+            time.sleep(0.8)
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            try:
+                self.end_headers()
+                self.wfile.flush()
+                self.gate.terminal = "sent"
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                self.gate.terminal = "closed"
         finally:
             self.gate.completed.set()
 
@@ -187,6 +213,17 @@ def invalidate_network(
                         raise RuntimeError(
                             "Удерживаемый HTTPS handler не отправил поздний ответ"
                         )
+                    if gate.terminal not in ("sent", "closed"):
+                        raise RuntimeError(
+                            "Нет доказанного terminal исхода поздней HTTPS-попытки"
+                        )
+                    alive = core_processes(engines)
+                    if any(
+                        alive.get(pid) != started for pid, started in current.items()
+                    ):
+                        raise RuntimeError(
+                            "Клиентское ядро завершилось до поздней HTTPS-попытки"
+                        )
                 proof.append(True)
                 return
     except Exception as error:
@@ -237,7 +274,9 @@ def run_case(
     if partial:
         bodies.append("unknown://not-supported")
     handler = type(
-        "SubscriptionFixture", (Fixture,), {"body": "\n".join(bodies).encode()}
+        "SubscriptionFixture",
+        (Fixture,),
+        {"body": "\n".join(bodies).encode(), "refresh_gate": gate},
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -325,6 +364,14 @@ def run_case(
                             "tcp_result": None,
                             "tcp_busy": False,
                         }
+                        if gate is not None:
+                            checkpoint = step(stop_when, "refresh")
+                            checkpoint["capture"] = True
+                            steps.append(checkpoint)
+                            # Этот revision приходит через backend после HTTP-
+                            # барьера, освобождаемого только terminal HTTPS.
+                            stop_when = {**stop_when, "revision": 2, "busy": False}
+                            stop_when.pop("error")
                     if not network_invalidate:
                         frozen = step(
                             stop_when,
@@ -343,7 +390,8 @@ def run_case(
                     [
                         {
                             **step(stop_when, "stop"),
-                            "capture": probe_url is None or network_invalidate,
+                            "capture": (probe_url is None or network_invalidate)
+                            and gate is None,
                         },
                         step({"status": "Disconnected", "can_stop": False}, "shutdown"),
                     ]
@@ -494,9 +542,24 @@ def run_case(
             event.get("status") == "Connected" for event in events
         ):
             raise RuntimeError("Поздний HTTPS-ответ восстановил Connected")
+        if gate is not None:
+            if not gate.refresh_passed.is_set() or not any(
+                event.get("revision") == 2
+                and event.get("status") == "Limited"
+                and event.get("can_stop") is True
+                for event in events
+            ):
+                raise RuntimeError(
+                    "Нет backend checkpoint после terminal HTTPS и до Stop"
+                )
         return {
             **(
-                {"checking_cancelled": True, "late_response_ignored": True}
+                {
+                    "checking_cancelled": True,
+                    "late_response_ignored": gate.terminal == "sent",
+                    "cancelled_transport_closed": gate.terminal == "closed",
+                    "terminal_before_stop": True,
+                }
                 if gate is not None
                 else {}
             ),
