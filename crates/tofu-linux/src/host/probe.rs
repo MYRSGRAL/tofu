@@ -7,6 +7,7 @@ use super::HostError;
 pub struct ProbeTarget {
     pub(crate) url: Url,
     pub(crate) timeout: Duration,
+    expected_status: u16,
 }
 impl std::fmt::Debug for ProbeTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,7 +32,22 @@ impl ProbeTarget {
         {
             return Err(HostError::ProbeTarget);
         }
-        Ok(Self { url, timeout })
+        Ok(Self {
+            url,
+            timeout,
+            expected_status: 204,
+        })
+    }
+    /// Редиректы и ошибки не могут стать успешной проверкой доступности.
+    pub fn with_expected_status(mut self, status: u16) -> Result<Self, HostError> {
+        if !(200..=299).contains(&status) {
+            return Err(HostError::ProbeTarget);
+        }
+        self.expected_status = status;
+        Ok(self)
+    }
+    pub fn accepts(&self, result: ProbeResult) -> bool {
+        matches!(result, ProbeResult::Response { status, .. } if status == self.expected_status)
     }
 }
 
@@ -43,14 +59,9 @@ pub enum ProbeResult {
     Transport,
 }
 impl ProbeResult {
+    /// Успех стандартного generate_204; для своего endpoint используйте ProbeTarget::accepts.
     pub fn passed(self) -> bool {
-        matches!(
-            self,
-            Self::Response {
-                status: 200..=299,
-                ..
-            }
-        )
+        matches!(self, Self::Response { status: 204, .. })
     }
 }
 

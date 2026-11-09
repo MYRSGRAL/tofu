@@ -81,11 +81,21 @@ HTTPS check failed. Data lives under `$XDG_DATA_HOME/tofu` or `~/.local/share/to
 A locked/missing key never triggers plaintext fallback. Never pass subscription
 URLs as command-line arguments.
 
+Settings → Connectivity check accepts a custom HTTPS URL and expected status
+(200–299); the default requires exactly 204. The GUI uses a five-second timeout,
+checks TLS and rejects redirects. Settings apply to the next Connect and remain
+for this session; editing is disabled while a core is active. The URL is hidden
+by default and stays out of state/tray/trace. The active result shows HTTP status
+and duration or TLS/timeout/transport failure. This is a single HTTPS measurement,
+not TCP host latency or a continuous internet guarantee.
+
 Closing hides the window when a tray is available; otherwise it requests a clean
 shutdown. Quit waits for session cleanup. Tray commands use the same controller.
 The current tray has basic connect/disconnect/restore/quit; favourites menus,
 routing screens, persistent GUI preferences and full T-01…T-04 acceptance remain pending.
 [GUI checks and remaining gates](docs/validation/2026-11-09-native-desktop.md).
+
+[Configurable HTTPS checks and evidence](docs/validation/2026-11-09-configurable-health.md).
 
 ### Rust libraries and CLIs
 
@@ -204,9 +214,10 @@ Listener ownership is verified against the child process, including during healt
 The only managed resource is the child core and its `127.0.0.1:10808` SOCKS listener.
 This does not enable system proxy, TUN, routes or system DNS.
 
-Output is safe NDJSON. `Connected` requires HTTPS 2xx through that exact SOCKS outbound;
+Output is safe NDJSON. `Connected` requires the expected HTTPS status through that exact SOCKS outbound;
 TLS, timeout and HTTP failures result in `Limited`, with the core still serving SOCKS.
 There is no direct fallback or redirect following. `--check-url` chooses an HTTPS endpoint,
+`--check-status` sets the expected status (200–299, default 204).
 `--check-timeout` accepts 1–60 seconds; the default is generate_204 with 10 seconds.
 Ctrl+C/SIGTERM stops and reaps the core. `--once` checks, stops and exits: 0 for success
 or cancellation, 2 for a failed endpoint check, 1 for an import/config/host failure.

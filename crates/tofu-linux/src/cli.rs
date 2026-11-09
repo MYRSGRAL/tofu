@@ -60,6 +60,7 @@ fn arguments() -> Result<Arguments, &'static str> {
             "--listen-port",
             "--check-url",
             "--check-timeout",
+            "--check-status",
             "--policy",
             "--policy-mode",
             "--probe-port",
@@ -99,11 +100,16 @@ fn arguments() -> Result<Arguments, &'static str> {
         .unwrap_or("10")
         .parse()
         .map_err(|_| "Некорректный timeout")?;
+    let expected_status = text("--check-status")?
+        .unwrap_or("204")
+        .parse()
+        .map_err(|_| "Ожидаемый статус должен быть числом 200–299")?;
     let target = ProbeTarget::new(
         text("--check-url")?.unwrap_or("https://www.gstatic.com/generate_204"),
         Duration::from_secs(seconds),
     )
-    .map_err(|_| "Некорректный HTTPS endpoint или timeout")?;
+    .and_then(|target| target.with_expected_status(expected_status))
+    .map_err(|_| "Некорректный HTTPS endpoint, ожидаемый статус или timeout")?;
     let policy = match (
         options.get("--policy"),
         text("--policy-mode")?,
@@ -171,7 +177,7 @@ async fn run(args: Arguments, config: tofu_engine::CompiledConfig) -> Result<u8,
                 ProbeResult::Transport => json!({"kind":"transport"}),
             };
             emit(json!({"state":format!("{:?}",session.state()),"probe":probe}))?;
-            if args.once { return Ok(if result.passed() { 0 } else { 2 }); }
+            if args.once { return Ok(if args.target.accepts(result) { 0 } else { 2 }); }
             session.wait_exit(&mut cancel).await?;
             Ok(0)
         }.await;

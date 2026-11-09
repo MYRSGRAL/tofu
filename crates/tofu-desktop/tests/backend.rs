@@ -255,6 +255,38 @@ fn review_reasons_are_paginated_and_do_not_expose_source_data() {
 }
 
 #[test]
+fn health_target_settings_are_validated_without_disclosing_url() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    let initial = app.wait(|v| v["ready"] == true);
+    assert_eq!(initial["probe_custom"], false);
+    assert_eq!(initial["probe_expected_status"], 204);
+    app.send(json!({"command":"set_probe_target","url":"https://health.invalid/private?health-token=hidden","expected_status":200}));
+    let custom = app.wait(|v| v["probe_custom"] == true);
+    assert_eq!(custom["probe_expected_status"], 200);
+    for (url, status) in [
+        ("http://health.invalid/", 204),
+        ("https://user:secret@health.invalid/", 204),
+        ("https://health.invalid/", 302),
+    ] {
+        app.send(json!({"command":"set_probe_target","url":url,"expected_status":status}));
+        let invalid = app.wait(|v| v["error"] == "probe_target_invalid");
+        assert_eq!(invalid["probe_custom"], true);
+        assert_eq!(invalid["probe_expected_status"], 200);
+    }
+    app.send(json!({"command":"reset_probe_target"}));
+    app.wait(|v| {
+        v["probe_custom"] == false && v["probe_expected_status"] == 204 && v["error"].is_null()
+    });
+    app.close();
+    for snapshot in &app.snapshots {
+        for secret in ["health.invalid", "health-token", "hidden", "user:secret"] {
+            assert!(!snapshot.contains(secret));
+        }
+    }
+}
+
+#[test]
 fn native_json_requires_approval_and_never_becomes_profile() {
     let directory = Directory::new();
     let (url, server) = fixture(vec![r#"{"outbounds":[{"type":"direct"}]}"#]);

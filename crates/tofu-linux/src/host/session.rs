@@ -216,7 +216,7 @@ impl LocalSession {
                     self.fail().await?;
                     return Err(error);
                 }
-                self.accept(if result.passed() {
+                self.accept(if target.accepts(result) {
                     Event::CheckPassed
                 } else {
                     Event::EndpointUnavailable

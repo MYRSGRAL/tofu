@@ -34,7 +34,7 @@ class HttpsHandler(http.server.BaseHTTPRequestHandler):
         self.server.requested.set()
         if self.path == "/slow":
             time.sleep(3)
-        status = {"/status": 503, "/redirect": 302}.get(self.path, 204)
+        status = {"/ok200": 200, "/status": 503, "/redirect": 302}.get(self.path, 204)
         self.send_response(status)
         if status == 302:
             self.send_header("Location", "https://redirect.invalid/")
@@ -338,14 +338,20 @@ def fake_preparation(host: Path, fake: Path, workspace: Path) -> None:
 
 
 @contextmanager
-def peer(binary: Path, engine: str, workspace: Path) -> Iterator[None]:
+def peer(
+    binary: Path,
+    engine: str,
+    workspace: Path,
+    port: int = 24443,
+    target_ports: str = "24444-24445",
+) -> Iterator[None]:
     if engine == "xray":
         config = {
             "log": {"loglevel": "none"},
             "inbounds": [
                 {
                     "listen": "127.0.0.1",
-                    "port": 24443,
+                    "port": port,
                     "protocol": "vless",
                     "settings": {"decryption": "none", "clients": [{"id": UUID}]},
                 }
@@ -358,7 +364,7 @@ def peer(binary: Path, engine: str, workspace: Path) -> Iterator[None]:
                             {
                                 "action": "allow",
                                 "ip": ["127.0.0.1/32"],
-                                "port": "24444-24445",
+                                "port": target_ports,
                             }
                         ]
                     },
@@ -372,7 +378,7 @@ def peer(binary: Path, engine: str, workspace: Path) -> Iterator[None]:
                 {
                     "type": "vless",
                     "listen": "127.0.0.1",
-                    "listen_port": 24443,
+                    "listen_port": port,
                     "users": [{"uuid": UUID}],
                 }
             ],
@@ -386,7 +392,7 @@ def peer(binary: Path, engine: str, workspace: Path) -> Iterator[None]:
         stderr=subprocess.DEVNULL,
     ) as process:
         try:
-            wait_listener(process, 24443)
+            wait_listener(process, port)
             yield
         finally:
             stop(process)
