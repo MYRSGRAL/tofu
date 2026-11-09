@@ -406,6 +406,13 @@ def run_case(
                                     },
                                     {
                                         "when": stop_when,
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "settingsDiagnosticsButton",
+                                        },
+                                    },
+                                    {
+                                        "when": stop_when,
                                         "ui_when": {
                                             "probeResultLabel": {
                                                 "visible": True,

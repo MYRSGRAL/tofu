@@ -1,4 +1,7 @@
 <RCC>
+  <qresource prefix="/icons">
+    <file alias="tofu.svg">assets/tofu.svg</file>
+  </qresource>
   <qresource prefix="/fonts">
     <file alias="Onest.ttf">../../design/assets/fonts/Onest.ttf</file>
     <file alias="Unbounded.ttf">../../design/assets/fonts/Unbounded.ttf</file>

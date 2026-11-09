@@ -42,16 +42,32 @@ def ui(
 
 def script(url: str, width: int, height: int) -> list[dict[str, object]]:
     return [
-        ui("resize", when={"ready": True}, width=width, height=height),
+        ui(
+            "resize",
+            when={"ready": True},
+            expect={"window": {"width": 520, "height": 800}},
+            width=width,
+            height=height,
+        ),
         ui(
             "click",
             "settingsButton",
             expect={"mainConnectButton": {"enabled": False}},
             capture="home-empty.png",
         ),
-        ui("value", "listenPort", expect={"window": {"page": 2}}, value=18492),
-        ui("click", "applyListenPort"),
-        ui("key", "languageChoice", when={"port": 18492}, key="Down"),
+        ui(
+            "click",
+            "proxyCopyButton",
+            expect={"proxyAddress": {"text": {"contains": "127.0.0.1:"}}},
+            capture="settings-connection.png",
+        ),
+        ui("click", "settingsAppearanceButton"),
+        ui(
+            "key",
+            "languageChoice",
+            expect={"window": {"settingsSection": "appearance"}},
+            key="Down",
+        ),
         ui("key", "languageChoice", key="Enter"),
         ui(
             "key",
@@ -61,21 +77,31 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             capture="settings-en.png",
         ),
         ui("key", "languageChoice", key="Enter"),
-        ui("click", "addSourceButton", expect={"window": {"language": "ru"}}),
-        ui("text", "sourceUrlInput", value="https://cancel.invalid/?ui-secret=hidden"),
+        ui(
+            "click",
+            "settingsSubscriptionsButton",
+            expect={"window": {"language": "ru"}},
+        ),
+        ui("click", "addSourceButton"),
+        ui(
+            "text",
+            "sourceUrlInput",
+            expect={"addSourceDialog": {"visible": True}},
+            value="https://cancel.invalid/?ui-secret=hidden",
+        ),
         ui("click", "revealSourceUrl"),
         ui("click", "sourceAddCancelButton"),
         ui("click", "addSourceButton", expect={"addSourceDialog": {"visible": False}}),
         ui(
-            "text",
-            "sourceNameInput",
+            "key",
+            "sourceAdvancedButton",
+            key="Enter",
             expect={
-                "addSourceDialog": {"visible": True},
                 "sourceUrlInput": {"text": ""},
                 "revealSourceUrl": {"checked": False},
             },
-            value="Тест А",
         ),
+        ui("text", "sourceNameInput", value="Тест А"),
         ui("text", "sourceUrlInput", value=url),
         ui(
             "click",
@@ -89,33 +115,30 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ),
         ui(
             "click",
-            "refreshSourceButton",
-            when={"sources_count": 1, "busy": False},
-            expect={
-                "addSourceDialog": {"visible": False},
-                "sourceUrlInput": {"text": ""},
-            },
-        ),
-        ui(
-            "click",
             "discardRefreshButton",
             when={"pending": True, "busy": False},
-            expect={"refreshReviewDialog": {"visible": True}},
+            expect={
+                "refreshReviewDialog": {"visible": True},
+                "sourceUrlInput": {"text": ""},
+            },
             capture="import-review.png",
         ),
         ui(
             "click",
             "refreshSourceButton",
             when={"pending": False, "busy": False, "profiles_count": 0},
-            expect={"refreshReviewDialog": {"visible": False}},
+            expect={
+                "refreshReviewDialog": {"visible": False},
+                "subscriptionFeedback": {"visible": False},
+            },
         ),
         ui("click", "approveRefreshButton", when={"pending": True, "busy": False}),
         ui(
             "click",
-            "homeButton",
+            "subscriptionServersButton",
             when={"profiles_count": 2, "busy": False, "pending": False},
+            expect={"subscriptionFeedback": {"visible": False}},
         ),
-        ui("click", "serverPickerButton", expect={"window": {"page": 0}}),
         ui(
             "click",
             "favorite_1",
@@ -153,7 +176,23 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             },
             capture="home-error.png",
         ),
-        ui("click", "tcpCheckButton", expect={"window": {"page": 2}}),
+        ui("click", "settingsDiagnosticsButton"),
+        ui("wheel", "diagnosticsScroll", delta=-1200),
+        ui(
+            "wheel",
+            "diagnosticsScroll",
+            expect={"diagnosticsScroll": {"atEnd": True, "moving": False}},
+            delta=1200,
+            capture="settings-scroll-bottom.png",
+        ),
+        ui(
+            "click",
+            "tcpCheckButton",
+            expect={
+                "window": {"settingsSection": "diagnostics"},
+                "diagnosticsScroll": {"atStart": True, "moving": False},
+            },
+        ),
         ui(
             "text",
             "probeUrlInput",
@@ -175,6 +214,18 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         ),
         ui(
             "click",
+            "settingsAppearanceButton",
+            when={"probe_custom": True, "probe_expected_status": 200},
+        ),
+        ui("click", "settingsDiagnosticsButton"),
+        ui(
+            "key",
+            "probeExpectedStatus",
+            key="Tab",
+            expect={"probeExpectedStatus": {"value": 200}},
+        ),
+        ui(
+            "click",
             "resetProbeTargetButton",
             when={"probe_custom": True, "probe_expected_status": 200},
             expect={
@@ -183,11 +234,11 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             },
         ),
         ui(
-            "key",
-            "languageChoice",
+            "click",
+            "settingsAppearanceButton",
             when={"probe_custom": False, "probe_expected_status": 204},
-            key="Down",
         ),
+        ui("key", "languageChoice", key="Down"),
         ui("key", "languageChoice", key="Enter"),
         ui("click", "homeButton", expect={"window": {"language": "en"}}),
         ui(
@@ -274,6 +325,11 @@ def execute(
         if reader.is_alive():
             raise RuntimeError("Не завершился reader собственного GUI")
         (output / "stderr.log").write_bytes(saved)
+    if expected_exit == 0 and any(
+        token in saved
+        for token in (b"ReferenceError", b"TypeError", b"Binding loop detected")
+    ):
+        raise RuntimeError("QML runtime error in own window")
     events = read_trace(trace)
     if code != expected_exit or not events or not events[-1].get("closed"):
         progress = events[-1].get("step") if events else None
@@ -400,8 +456,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--width", default=640, type=int, choices=range(520, 1601))
-    parser.add_argument("--height", default=780, type=int, choices=range(640, 1401))
+    parser.add_argument("--width", default=520, type=int, choices=range(520, 1601))
+    parser.add_argument("--height", default=800, type=int, choices=range(640, 1401))
     parser.add_argument("--scale", default="1", choices=("1", "1.25", "1.5", "2"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

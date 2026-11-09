@@ -590,6 +590,42 @@ fn stop_and_shutdown_finish_a_pending_tcp_task_before_acknowledgement() {
 }
 
 #[test]
+fn xray_json_auto_import_exposes_profiles_only_after_review() {
+    let directory = Directory::new();
+    let body = json!([{"remarks":"JSON-сервер","outbounds":[{
+        "protocol":"vless", "settings":{"vnext":[{
+            "address":"example.invalid", "port":443,
+            "users":[{"id":"11111111-1111-4111-8111-111111111111","encryption":"none"}]
+        }]}, "streamSettings":{"network":"tcp","security":"tls",
+            "tlsSettings":{"serverName":"example.invalid","enableSessionResumption":false}}
+    }]}])
+    .to_string();
+    let (url, server) = fixture(vec![body]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_source","name":"JSON","url":url,"local_exception":true,"route":"direct"}));
+    let pending = app.wait(|v| v["pending"]["native_json"] == true && v["busy"] == false);
+    assert_eq!(pending["pending"]["accepted"], 1);
+    assert_eq!(pending["pending"]["rejected"], 0);
+    assert_eq!(pending["total"], 0);
+    assert_eq!(pending["can_connect"], false);
+    app.send(json!({"command":"approve_refresh"}));
+    let imported = app.wait(|v| v["total"] == 1 && v["pending"].is_null());
+    app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+    app.wait(|v| v["can_connect"] == true);
+    app.send(json!({"command":"connect"}));
+    // До engine lookup прошла настоящая компиляция нормализованного профиля.
+    app.wait(|v| v["error"] == "engine_missing" && v["can_stop"] == false);
+    app.close();
+    server.join().expect("fixture");
+    assert!(
+        app.snapshots
+            .iter()
+            .all(|v| !v.contains("11111111-1111-4111-8111-111111111111"))
+    );
+}
+
+#[test]
 fn native_json_requires_approval_and_never_becomes_profile() {
     let directory = Directory::new();
     let (url, server) = fixture(vec![r#"{"outbounds":[{"type":"direct"}]}"#]);
@@ -772,4 +808,188 @@ fn shutdown_cancels_inflight_fetch_before_close_ack() {
     app.close();
     assert!(started.elapsed() < Duration::from_secs(3));
     server.join().expect("fetch socket closed");
+}
+
+#[test]
+fn import_stop_and_shutdown_cancel_fetch_and_reject_concurrent_import() {
+    for shutdown in [false, true] {
+        let directory = Directory::new();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        listener.set_nonblocking(true).expect("fixture listener");
+        let url = format!("http://{}/slow", listener.local_addr().expect("address"));
+        let (accepted, request) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline);
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("fixture accept: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("deadline");
+            let mut bytes = [0; 4096];
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let count = stream.read(&mut bytes).expect("request");
+                assert!(count > 0);
+                request.extend_from_slice(&bytes[..count]);
+                assert!(request.len() <= 16384);
+            }
+            accepted.send(()).expect("accepted");
+            // Ни ответа, ни sleep: отмена FetchHost закрывает соединение.
+            assert_eq!(stream.read(&mut bytes).expect("client close"), 0);
+        });
+        let mut app = Harness::new(directory.config());
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"import_source","name":"Slow","url":url,"local_exception":true,"route":"direct"}));
+        app.wait(|v| v["busy"] == true);
+        request
+            .recv_timeout(Duration::from_secs(5))
+            .expect("fetch started");
+        app.send(json!({"command":"import_source","name":"Concurrent","url":url,"local_exception":true,"route":"direct"}));
+        let rejected = app.wait(|v| v["error"] == "busy");
+        assert_eq!(rejected["sources_total"], 1);
+        assert_eq!(rejected["busy"], true);
+        let started = Instant::now();
+        if !shutdown {
+            app.send(json!({"command":"stop"}));
+            let stopped = app.wait(|v| v["busy"] == false);
+            assert_eq!(stopped["total"], 0);
+            assert!(stopped["pending"].is_null());
+            assert_eq!(stopped["sources_total"], 1);
+        }
+        app.close();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        server.join().expect("fetch socket closed");
+    }
+}
+
+#[test]
+fn import_source_loads_profiles_and_clears_stale_filters() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec!["trojan://import-password@example.invalid:443#Новый"]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(
+        json!({"command":"query","search":"Скрывающий фильтр","favorites_only":true,"offset":0}),
+    );
+    app.wait(|v| v["busy"] == false);
+    app.send(json!({"command":"import_source","name":"Новый источник","url":url,"local_exception":true,"route":"direct"}));
+    let loaded = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+    assert_eq!(loaded["profiles"][0]["name"], "Новый");
+    assert_eq!(loaded["search"], "");
+    assert_eq!(loaded["favorites_only"], false);
+    assert!(loaded["pending"].is_null());
+    assert_eq!(loaded["sources_total"], 1);
+    app.close();
+    server.join().expect("fixture");
+    assert!(
+        app.snapshots
+            .iter()
+            .all(|v| !v.contains("import-password") && !v.contains("fixture-secret"))
+    );
+}
+
+#[test]
+fn automatic_port_avoids_occupied_default_and_remains_stable_on_reload() {
+    let occupied = TcpListener::bind("127.0.0.1:10808").ok();
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    let ready = app.wait(|v| v["ready"] == true);
+    let port = ready["port"].as_u64().expect("порт");
+    assert!((1..=65535).contains(&port));
+    if occupied.is_some() {
+        assert_ne!(port, 10808);
+    }
+    assert_eq!(ready["listen_address"], format!("127.0.0.1:{port}"));
+    let probe =
+        TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port as u16)).expect("порт доступен");
+    app.send(json!({"command":"reload"}));
+    assert_eq!(app.wait(|v| v["ready"] == true)["port"], port);
+    app.close();
+    drop(probe);
+}
+
+#[test]
+fn import_source_partial_requires_review_and_failed_fetch_keeps_sources() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec![
+        "trojan://partial-password@example.invalid:443#Частичный\nunknown://broken",
+    ]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_source","name":"Частичный","url":url,"local_exception":true,"route":"direct"}));
+    let partial = app.wait(|v| !v["pending"].is_null() && v["busy"] == false);
+    assert_eq!(partial["pending"]["accepted"], 1);
+    assert_eq!(partial["pending"]["rejected"], 1);
+    assert_eq!(partial["total"], 0);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["total"] == 1);
+    let refused = TcpListener::bind("127.0.0.1:0").expect("адрес");
+    let url = format!(
+        "http://{}/failed-secret",
+        refused.local_addr().expect("адрес")
+    );
+    drop(refused);
+    app.send(json!({"command":"import_source","name":"Недоступный","url":url,"local_exception":true,"route":"direct"}));
+    let failed = app.wait(|v| v["error"] == "fetch" && v["busy"] == false);
+    assert_eq!(failed["sources_total"], 2);
+    assert_eq!(failed["total"], 0);
+    app.send(json!({"command":"select_source","id":partial["source_id"]}));
+    assert_eq!(
+        app.wait(|v| v["total"] == 1)["profiles"][0]["name"],
+        "Частичный"
+    );
+    app.close();
+    server.join().expect("fixture");
+}
+
+#[test]
+fn automatic_port_collision_reselects_and_fixed_override_reports_busy() {
+    for automatic in [true, false] {
+        let directory = Directory::new();
+        let (url, server) = fixture(vec!["trojan://port-password@example.invalid:443#Порт"]);
+        let fixed = TcpListener::bind("127.0.0.1:0").expect("порт");
+        let port = fixed.local_addr().expect("адрес").port();
+        let config = if automatic {
+            directory.config()
+        } else {
+            directory
+                .config()
+                .with_listen_port(std::num::NonZeroU16::new(port).expect("порт"))
+        };
+        let mut app = Harness::new(config);
+        let ready = app.wait(|v| v["ready"] == true);
+        let occupied = if automatic {
+            TcpListener::bind((
+                std::net::Ipv4Addr::LOCALHOST,
+                ready["port"].as_u64().expect("порт") as u16,
+            ))
+            .expect("коллизия")
+        } else {
+            fixed
+        };
+        app.send(json!({"command":"import_source","name":"Порт","url":url,"local_exception":true,"route":"direct"}));
+        let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+        app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+        app.wait(|v| v["can_connect"] == true);
+        app.send(json!({"command":"connect"}));
+        if automatic {
+            let failed = app.wait(|v| v["error"] == "engine_missing" && v["can_stop"] == false);
+            assert_ne!(failed["port"], ready["port"]);
+        } else {
+            let failed = app.wait(|v| v["error"] == "listen_port_busy");
+            assert_eq!(failed["port"], port);
+            assert_eq!(failed["can_stop"], false);
+        }
+        assert!(occupied.local_addr().is_ok());
+        app.close();
+        server.join().expect("fixture");
+    }
 }

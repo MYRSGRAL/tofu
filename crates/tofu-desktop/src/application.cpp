@@ -134,6 +134,8 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     }
     QApplication application(argc, argv);
     application.setApplicationName(QStringLiteral("tofu"));
+    application.setDesktopFileName(QStringLiteral("cloud.highpriority.tofu.local"));
+    application.setWindowIcon(QIcon(QStringLiteral(":/icons/tofu.svg")));
     application.setOrganizationDomain(QStringLiteral("highpriority.cloud"));
     const auto runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     const QFileInfo runtimeInfo(runtime);
