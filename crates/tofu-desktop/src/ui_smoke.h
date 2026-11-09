@@ -96,9 +96,10 @@ inline bool perform(QQuickWindow* window, const QJsonObject& action)
             || point.x() >= window->width() || point.y() >= window->height()) return false;
         QMouseEvent press(QEvent::MouseButtonPress, point, window->mapToGlobal(point),
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        // Qt 6.4 разделяет QEventPoint: release нельзя создавать до доставки press.
+        QCoreApplication::sendEvent(window, &press);
         QMouseEvent release(QEvent::MouseButtonRelease, point, window->mapToGlobal(point),
                             Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-        QCoreApplication::sendEvent(window, &press);
         QCoreApplication::sendEvent(window, &release);
         return true;
     }
