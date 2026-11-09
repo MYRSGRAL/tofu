@@ -146,6 +146,26 @@ fn reserved_path_escape_does_not_collapse_different_options() {
 }
 
 #[test]
+fn unknown_json_numbers_never_round_to_the_same_identity() {
+    for future in [
+        "18446744073709551616",
+        "{\"array\":[18446744073709551616]}",
+        "1.0000000000000000000000000000000001",
+    ] {
+        let first = vmess(&format!(
+            "{{\"add\":\"example.org\",\"port\":443,\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"future\":{future}}}"
+        ));
+        let changed = future
+            .replace("18446744073709551616", "18446744073709551617")
+            .replace("0001", "0002");
+        let second = vmess(&format!(
+            "{{\"add\":\"example.org\",\"port\":443,\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"future\":{changed}}}"
+        ));
+        assert_ne!(material(&first), material(&second));
+    }
+}
+
+#[test]
 fn vmess_keeps_nested_duplicate_keys_and_their_relative_order() {
     let profile = |future: &str, name: &str| {
         vmess(&format!(

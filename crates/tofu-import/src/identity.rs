@@ -1,6 +1,6 @@
 use crate::{Credentials, ParsedServer, Protocol, SecretText, Security, Transport};
 use percent_encoding::percent_decode_str;
-use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 use std::fmt;
 
@@ -35,56 +35,65 @@ fn field(out: &mut Vec<u8>, bytes: &[u8]) {
 enum IdentityNode {
     Object(Vec<(String, IdentityNode)>),
     Array(Vec<IdentityNode>),
+    Number(String),
     Scalar(Value),
 }
 
-impl<'de> Deserialize<'de> for IdentityNode {
+struct RawFields<'a>(Vec<(String, &'a serde_json::value::RawValue)>);
+
+impl<'de> Deserialize<'de> for RawFields<'de> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct NodeVisitor;
-        impl<'de> Visitor<'de> for NodeVisitor {
-            type Value = IdentityNode;
+        struct FieldsVisitor;
+        impl<'de> Visitor<'de> for FieldsVisitor {
+            type Value = RawFields<'de>;
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("JSON")
+                formatter.write_str("JSON-объект")
             }
             fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
                 let mut fields = Vec::new();
                 while let Some(entry) = map.next_entry()? {
                     fields.push(entry);
                 }
-                Ok(IdentityNode::Object(fields))
-            }
-            fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
-                let mut values = Vec::new();
-                while let Some(value) = seq.next_element()? {
-                    values.push(value);
-                }
-                Ok(IdentityNode::Array(values))
-            }
-            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::Bool(value)))
-            }
-            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::from(value)))
-            }
-            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::from(value)))
-            }
-            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
-                serde_json::Number::from_f64(value)
-                    .map(|number| IdentityNode::Scalar(Value::Number(number)))
-                    .ok_or_else(|| E::custom("Некорректное число JSON"))
-            }
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::String(value.to_owned())))
-            }
-            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::String(value)))
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(IdentityNode::Scalar(Value::Null))
+                Ok(RawFields(fields))
             }
         }
-        deserializer.deserialize_any(NodeVisitor)
+        deserializer.deserialize_map(FieldsVisitor)
+    }
+}
+
+fn parse_json(text: &str, depth: usize) -> Result<IdentityNode, IdentityError> {
+    if depth > crate::MAX_JSON_DEPTH {
+        return Err(IdentityError);
+    }
+    // RawValue сохраняет токен числа и повторы ключей; borrowed children не
+    // копируют исходные поддеревья при ограниченном обходе по глубине.
+    let raw: &serde_json::value::RawValue =
+        serde_json::from_str(text).map_err(|_| IdentityError)?;
+    let text = raw.get().trim();
+    match text.as_bytes().first().copied() {
+        Some(b'{') => {
+            let fields: RawFields<'_> = serde_json::from_str(text).map_err(|_| IdentityError)?;
+            let nodes = fields
+                .0
+                .into_iter()
+                .map(|(key, value)| Ok((key, parse_json(value.get(), depth + 1)?)))
+                .collect::<Result<Vec<_>, IdentityError>>()?;
+            Ok(IdentityNode::Object(nodes))
+        }
+        Some(b'[') => {
+            let values: Vec<&serde_json::value::RawValue> =
+                serde_json::from_str(text).map_err(|_| IdentityError)?;
+            Ok(IdentityNode::Array(
+                values
+                    .into_iter()
+                    .map(|value| parse_json(value.get(), depth + 1))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
+        Some(b'-' | b'0'..=b'9') => Ok(IdentityNode::Number(text.to_owned())),
+        _ => Ok(IdentityNode::Scalar(
+            serde_json::from_str(text).map_err(|_| IdentityError)?,
+        )),
     }
 }
 
@@ -108,6 +117,10 @@ fn canonical_json(value: &IdentityNode, out: &mut Vec<u8>) -> Result<(), Identit
             for value in values {
                 canonical_json(value, out)?;
             }
+        }
+        IdentityNode::Number(text) => {
+            out.push(b'v');
+            field(out, text.as_bytes());
         }
         IdentityNode::Scalar(value) => {
             out.push(b'v');
@@ -169,8 +182,7 @@ impl ParsedServer {
             },
         );
         if self.protocol == Protocol::Vmess {
-            let mut value: IdentityNode =
-                serde_json::from_str(self.parameters.expose()).map_err(|_| IdentityError)?;
+            let mut value = parse_json(self.parameters.expose(), 0)?;
             let IdentityNode::Object(object) = &mut value else {
                 return Err(IdentityError);
             };

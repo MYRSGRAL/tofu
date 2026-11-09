@@ -9,7 +9,9 @@ Intel Core Ultra 7 258V, Rust 1.85.1, системный SQLite 3.53.4.
 transport/security и все query/VMess-параметры. URI fragment и VMess `ps`
 исключены. Порядок уникальных JSON/query ключей нормализован; повторные вложенные
 JSON-ключи сохраняются вместе с порядком повторов, а не сворачиваются в последнее
-значение. VMess endpoint/port/UUID нормализованы по разобранной модели.
+значение. Неизвестные JSON-числа сохраняют исходный токен без округления в f64;
+эквивалентные разные числовые записи могут консервативно различаться.
+VMess endpoint/port/UUID нормализованы по разобранной модели.
 Отсутствующий и явно заданный default могут различаться консервативно.
 
 URI path включён без декодирования reserved-разделителей: `/a%2Fb` не равен
@@ -46,13 +48,13 @@ parsed server внутри согласованной транзакции и в
 
 ## Проверки
 
-- На Rust 1.85.1 прошли 137 Rust-тестов и 4 doctest; fmt,
+- На Rust 1.85.1 прошли 138 Rust-тестов и 4 doctest; fmt,
   workspace clippy `--all-targets -- -D warnings`, release build и Android
   `aarch64-linux-android` workspace compile-check. Два environment-dependent
   теста прежнего FetchHost/Secret Service остаются ignored в hermetic прогоне.
-- Importer: восемь тестов identity/display name для шести протоколов,
+- Importer: девять тестов identity/display name для шести протоколов,
   переименования, endpoint/credentials/options, query encoding/order, VMess
-  recursive order/duplicates, legacy SS, reserved path escape, Unicode/controls
+  recursive order/duplicates, точность больших чисел и дробей, legacy SS, reserved path escape, Unicode/controls
   и ограничения имени 512 байт. Raw source не изменяется.
 - Repository: переименование/перестановка, дубликаты и первая запись,
   изменение identity, исчезновение/возврат/удаление избранного, source isolation,
