@@ -29,6 +29,8 @@ ApplicationWindow {
         revision: 0, status: "Disconnected", selected_profile: null,
         probe_custom: false, probe_expected_status: 204, probe_result: null,
         tcp_busy: false, tcp_name: null, tcp_result: null,
+        tcp_invalidated: false, network_observed: false,
+        network_routes: false, network_resolver: false, network_manager: false,
         selected_name: "", engine: "xray", active_name: "", active_engine: "", port: 10808, can_connect: false, can_stop: false})
     readonly property bool activeConnection: ["Preparing", "Starting", "Checking", "Connected", "Limited", "Stopping", "CleanupError"].indexOf(state.status) >= 0
     readonly property bool canEditProbe: state.ready && !state.busy && !state.can_stop
@@ -123,6 +125,14 @@ ApplicationWindow {
         return tr("Проверено: ", "Checked: ")
             + new Date(result.checked_at_ms).toLocaleString(Qt.locale(language === "ru" ? "ru_RU" : "en_US"))
     }
+    function networkObservationText() {
+        const available = tr("доступно", "available")
+        const unavailable = tr("недоступно", "unavailable")
+        return tr("Наблюдение за изменениями: маршруты — ", "Change monitoring: routes — ")
+            + (state.network_routes ? available : unavailable)
+            + "; DNS — " + (state.network_resolver ? available : unavailable)
+            + "; NetworkManager — " + (state.network_manager ? available : unavailable)
+    }
     function reviewText(row) {
         const reasons = {
             malformed_uri: ["Некорректная ссылка", "Malformed URI"],
@@ -178,6 +188,7 @@ ApplicationWindow {
             check_timeout: ["Истекло время проверки доступа через прокси.", "The connectivity check through the proxy timed out."],
             check_transport: ["Не удалось выполнить запрос через прокси: ошибка транспорта.", "The request through the proxy failed with a transport error."],
             check_failed: ["Прокси работает, но доступность интернета не подтверждена.", "The proxy is running, but internet access is unconfirmed."],
+            network_changed: ["Обнаружено изменение сети. Прежняя HTTPS-проверка больше не актуальна; прокси-ядро продолжает работать с ограниченным статусом. Переподключитесь для новой HTTPS-проверки.", "A network change was detected. The previous HTTPS check is no longer current; the proxy engine keeps running with limited status. Reconnect for a new HTTPS check."],
             tcp_failed: ["Не удалось выполнить TCP-проверку. Повторите попытку.", "Could not complete the TCP check. Try again."],
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
@@ -318,9 +329,14 @@ ApplicationWindow {
                                 text: window.tr("Проверка активной сессии: ", "Active session check: ") + window.probeResultText(window.state.probe_result)
                             }
                             SmallLabel {
+                                visible: window.state.can_stop && !!window.state.probe_result && !window.state.probe_result.network_observed
+                                Layout.fillWidth: true
+                                text: window.tr("Во время HTTPS-проверки наблюдение за изменениями сети было неполным. Её результат относится к моменту проверки.", "Network change monitoring was incomplete during the HTTPS check. Its result applies to the time of the check.")
+                            }
+                            SmallLabel {
                                 Layout.fillWidth: true
                                 text: window.state.status === "Limited"
-                                    ? window.tr("Прокси-ядро работает, но проверка доступа не пройдена. Доступность интернета не подтверждена.", "The proxy engine is running, but the connectivity check failed. Internet access is unconfirmed.")
+                                    ? window.tr("Прокси-ядро работает, но доступность интернета не подтверждена. Переподключитесь для новой HTTPS-проверки.", "The proxy engine is running, but internet access is unconfirmed. Reconnect for a new HTTPS check.")
                                     : window.tr("Настройте SOCKS5 в нужном приложении. Это подключение не является TUN или системным VPN.", "Configure SOCKS5 in your application. This connection is not TUN or a system VPN.")
                             }
                             RowLayout {
@@ -406,6 +422,27 @@ ApplicationWindow {
                                 visible: !!window.state.tcp_result
                                 text: window.tcpCheckedAtText(window.state.tcp_result)
                             }
+                            PlainLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_invalidated
+                                text: window.tr("Обнаружено изменение сети: TCP-проверка отменена, прежний результат сброшен. Запустите проверку заново вручную.", "A network change was detected: the TCP check was cancelled and the previous result cleared. Run a new check manually.")
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: !!window.state.tcp_result && !window.state.tcp_result.network_observed
+                                text: window.tr("Во время TCP-проверки наблюдение за изменениями сети было неполным. Её результат относится к моменту проверки.", "Network change monitoring was incomplete during the TCP check. Its result applies to the time of the check.")
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: window.state.ready
+                                font.pixelSize: 11
+                                text: window.networkObservationText()
+                            }
+                            SmallLabel {
+                                Layout.fillWidth: true
+                                visible: window.state.ready && !window.state.network_observed
+                                text: window.tr("Часть изменений сети может не отслеживаться. При смене сети повторите TCP-проверку вручную; для новой HTTPS-проверки переподключитесь.", "Some network changes may go undetected. After a network change, rerun the TCP check manually; reconnect for a new HTTPS check.")
+                            }
                             SmallLabel {
                                 Layout.fillWidth: true
                                 font.pixelSize: 11
@@ -414,7 +451,7 @@ ApplicationWindow {
                             SmallLabel {
                                 Layout.fillWidth: true
                                 font.pixelSize: 11
-                                text: window.tr("Не проверяет аутентификацию, HTTPS или скорость. Изменения сети не отслеживаются; история пока не сохраняется.", "Does not test authentication, HTTPS or throughput. Network changes are not tracked; history is not saved yet.")
+                                text: window.tr("Не проверяет аутентификацию, HTTPS или скорость. История пока не сохраняется. Автоматических проверок и переподключений нет.", "Does not test authentication, HTTPS or throughput. History is not saved yet. No automatic checks or reconnections.")
                             }
                         }
                     }

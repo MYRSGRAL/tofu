@@ -7,16 +7,19 @@ import json
 import logging
 import os
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from engine_compile import UUID
-from engine_host import https_server, peer
-from engine_smoke import run_sandbox
+from engine_host import HttpsHandler, https_server, peer
+from engine_smoke import links, run_sandbox
 
 LOG = logging.getLogger("desktop-smoke")
 
@@ -36,6 +39,28 @@ class Fixture(BaseHTTPRequestHandler):
         return
 
 
+class ProbeGate:
+    def __init__(self) -> None:
+        self.received = threading.Event()
+        self.release = threading.Event()
+        self.completed = threading.Event()
+        self.timed_out = threading.Event()
+
+
+class HeldHttpsHandler(HttpsHandler):
+    gate: ProbeGate
+
+    def do_GET(self) -> None:
+        self.gate.received.set()
+        try:
+            if not self.gate.release.wait(timeout=35):
+                self.gate.timed_out.set()
+                return
+            super().do_GET()
+        finally:
+            self.gate.completed.set()
+
+
 def free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -46,6 +71,138 @@ def step(
     when: dict[str, object], command: str, **arguments: object
 ) -> dict[str, object]:
     return {"when": when, "command": {"command": command, **arguments}}
+
+
+TRACE_LIMIT = 500_000
+NETWORK_HOST_NAMESPACE: int | None = None
+
+
+def guard_network() -> None:
+    if (
+        NETWORK_HOST_NAMESPACE is None
+        or os.stat("/proc/self/ns/net").st_ino == NETWORK_HOST_NAMESPACE
+        or links() != {"lo"}
+    ):
+        raise RuntimeError("Нужен новый пустой network namespace")
+
+
+def read_trace(path: Path) -> list[dict[str, Any]]:
+    """Читаем только ограниченный metadata trace, включая ещё не завершённый файл."""
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read(TRACE_LIMIT + 1)
+    except FileNotFoundError:
+        return []
+    if len(payload) > TRACE_LIMIT:
+        raise RuntimeError("Trace превысил лимит")
+    return [json.loads(line) for line in payload.split(b"\n")[:-1] if line]
+
+
+def core_processes(engines: Path) -> dict[int, str]:
+    """PID и starttime различают тот же процесс и повторное использование PID."""
+    processes = {}
+    for directory in Path("/proc").iterdir():
+        if not directory.name.isdecimal():
+            continue
+        try:
+            executable = os.readlink(directory / "exe")
+            if executable != "/memfd:tofu-engine (deleted)" and not Path(
+                executable
+            ).is_relative_to(engines):
+                continue
+            fields = (directory / "stat").read_text().rsplit(")", 1)[1].split()
+            if fields[0] != "Z":
+                processes[int(directory.name)] = fields[19]
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+    return processes
+
+
+def invalidate_network(
+    trace: Path,
+    engines: Path,
+    baseline: dict[int, str],
+    done: threading.Event,
+    proof: list[bool],
+    failures: list[Exception],
+    gate: ProbeGate | None = None,
+) -> None:
+    route_added = False
+    current: dict[int, str] = {}
+    try:
+        deadline = time.monotonic() + 35
+        while not done.wait(0.01):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Не получено доказательство network invalidation")
+            events = read_trace(trace)
+            if not route_added:
+                if gate is None:
+                    ready = any(
+                        event.get("status") == "Connected"
+                        and event.get("probe_present") is True
+                        and event.get("tcp_status") == "reachable"
+                        and not event.get("tcp_busy")
+                        for event in events
+                    )
+                else:
+                    ready = gate.received.is_set() and any(
+                        event.get("status") == "Checking"
+                        and event.get("probe_present") is False
+                        for event in events
+                    )
+                    if any(event.get("status") == "Connected" for event in events):
+                        raise RuntimeError(
+                            "Удерживаемая HTTPS-проверка завершилась раньше события"
+                        )
+                if not ready:
+                    continue
+                current = {
+                    pid: started
+                    for pid, started in core_processes(engines).items()
+                    if baseline.get(pid) != started
+                }
+                if len(current) != 1:
+                    raise RuntimeError(
+                        "Не найден единственный процесс клиентского ядра"
+                    )
+                guard_network()
+                subprocess.run(
+                    ["ip", "route", "add", "198.18.254.0/24", "dev", "lo"],
+                    check=True,
+                    capture_output=True,
+                    timeout=5,
+                )
+                route_added = True
+            if any(
+                event.get("status") == "Limited"
+                and event.get("error") == "network_changed"
+                for event in events
+            ):
+                alive = core_processes(engines)
+                if any(alive.get(pid) != started for pid, started in current.items()):
+                    raise RuntimeError("При инвалидации завершилось клиентское ядро")
+                if gate is not None:
+                    gate.release.set()
+                    if not gate.completed.wait(timeout=2) or gate.timed_out.is_set():
+                        raise RuntimeError(
+                            "Удерживаемый HTTPS handler не отправил поздний ответ"
+                        )
+                proof.append(True)
+                return
+    except Exception as error:
+        failures.append(error)
+    finally:
+        if route_added:
+            try:
+                guard_network()
+                subprocess.run(
+                    ["ip", "route", "del", "198.18.254.0/24", "dev", "lo"],
+                    check=True,
+                    capture_output=True,
+                    timeout=5,
+                )
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                failures.append(error)
 
 
 def run_case(
@@ -63,7 +220,13 @@ def run_case(
     expected_state: str = "Limited",
     ca: Path | None = None,
     tcp_status: str | None = None,
+    network_invalidate: bool = False,
+    gate: ProbeGate | None = None,
 ) -> dict[str, object]:
+    if network_invalidate and (namespace or engines is None):
+        raise ValueError("Network fixture требует внешний изолированный worker")
+    if network_invalidate:
+        guard_network()
     endpoint = free_port()
     bodies = [
         f"trojan://invented-secret@127.0.0.1:{endpoint}#Москва • TLS",
@@ -146,30 +309,41 @@ def run_case(
                     "can_stop": True,
                 }
                 if probe_url is not None:
-                    steps.append(step(stop_when, "check_tcp"))
+                    if gate is None:
+                        steps.append(step(stop_when, "check_tcp"))
                     stop_when = {
                         **stop_when,
                         "tcp_status": "reachable",
                         "tcp_busy": False,
                     }
-                    frozen = step(
-                        stop_when,
-                        "set_probe_target",
-                        url="https://mutation.invalid/never-request?secret=not-sent",
-                        expected_status=201,
-                    )
-                    frozen["capture"] = True
-                    steps.append(frozen)
-                    stop_when = {
-                        **stop_when,
-                        "error": "busy",
-                        "probe_expected_status": expected_status,
-                    }
+                    if network_invalidate:
+                        stop_when = {
+                            "status": "Limited",
+                            "error": "network_changed",
+                            "can_stop": True,
+                            "probe_result": None,
+                            "tcp_result": None,
+                            "tcp_busy": False,
+                        }
+                    if not network_invalidate:
+                        frozen = step(
+                            stop_when,
+                            "set_probe_target",
+                            url="https://mutation.invalid/never-request?secret=not-sent",
+                            expected_status=201,
+                        )
+                        frozen["capture"] = True
+                        steps.append(frozen)
+                        stop_when = {
+                            **stop_when,
+                            "error": "busy",
+                            "probe_expected_status": expected_status,
+                        }
                 steps.extend(
                     [
                         {
                             **step(stop_when, "stop"),
-                            "capture": probe_url is None,
+                            "capture": probe_url is None or network_invalidate,
                         },
                         step({"status": "Disconnected", "can_stop": False}, "shutdown"),
                     ]
@@ -212,12 +386,46 @@ def run_case(
             ]
             if engines is not None:
                 command.extend(["--engine-dir", str(engines)])
-            if ca is None:
-                run_sandbox(command, timeout=45)
-            else:
-                with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca)}):
+            done = threading.Event()
+            proof: list[bool] = []
+            failures: list[Exception] = []
+            watcher = None
+            if network_invalidate:
+                assert engines is not None
+                trace.write_bytes(b"")
+                watcher = threading.Thread(
+                    target=invalidate_network,
+                    args=(
+                        trace,
+                        engines,
+                        core_processes(engines),
+                        done,
+                        proof,
+                        failures,
+                        gate,
+                    ),
+                    daemon=True,
+                )
+                watcher.start()
+            try:
+                if ca is None:
                     run_sandbox(command, timeout=45)
-        events = [json.loads(line) for line in trace.read_text().splitlines()]
+                else:
+                    with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca)}):
+                        run_sandbox(command, timeout=45)
+            finally:
+                done.set()
+                if gate is not None:
+                    gate.release.set()
+                if watcher is not None:
+                    watcher.join(timeout=6)
+                    if watcher.is_alive():
+                        raise RuntimeError("Поток network fixture не завершился")
+                if failures:
+                    raise RuntimeError("Network fixture не пройден") from failures[0]
+            if network_invalidate and not proof:
+                raise RuntimeError("Нет подтверждения сохранения ядра после смены сети")
+        events = read_trace(trace)
         if not events or not events[-1].get("closed"):
             raise RuntimeError("Нет подтверждения closed после cleanup")
         if not screenshot.is_file() or screenshot.stat().st_size < 1000:
@@ -239,6 +447,8 @@ def run_case(
             "tcp_busy",
             "tcp_status",
             "step",
+            "can_stop",
+            "probe_present",
         }
         if any(set(event) - allowed for event in events):
             raise RuntimeError("Trace содержит поля вне разрешённых metadata")
@@ -265,11 +475,36 @@ def run_case(
                 for event in events[observed + 1 :]
             ):
                 raise RuntimeError("После Stop не наблюдалось Disconnected")
-            if probe_url is not None and not any(
-                event.get("error") == "busy" for event in events
+            if (
+                probe_url is not None
+                and not network_invalidate
+                and not any(event.get("error") == "busy" for event in events)
             ):
                 raise RuntimeError("Активная сессия не отклонила изменение endpoint")
+        if network_invalidate and not any(
+            event.get("status") == "Limited"
+            and event.get("error") == "network_changed"
+            and event.get("can_stop") is True
+            and event.get("probe_present") is False
+            and event.get("tcp_status") is None
+            for event in events
+        ):
+            raise RuntimeError("Trace не подтвердил очистку результатов network event")
+        if gate is not None and any(
+            event.get("status") == "Connected" for event in events
+        ):
+            raise RuntimeError("Поздний HTTPS-ответ восстановил Connected")
         return {
+            **(
+                {"checking_cancelled": True, "late_response_ignored": True}
+                if gate is not None
+                else {}
+            ),
+            **(
+                {"network_invalidated": True, "core_kept_alive": True}
+                if network_invalidate
+                else {}
+            ),
             "case": name,
             "events": len(events),
             "closed": True,
@@ -278,7 +513,7 @@ def run_case(
                 {
                     "engine": engine,
                     "expected_status": expected_status,
-                    "status": expected_state,
+                    "status": "Limited" if network_invalidate else expected_state,
                 }
                 if probe_url is not None
                 else {}
@@ -290,7 +525,57 @@ def run_case(
         thread.join(timeout=5)
 
 
-def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, object]]:
+def run_checking_case(
+    binary: Path,
+    engines: Path,
+    output: Path,
+    engine: str,
+    port: int,
+    https: ThreadingHTTPServer,
+    workspace: Path,
+) -> dict[str, object]:
+    gate = ProbeGate()
+    handler = https.RequestHandlerClass
+    https.RequestHandlerClass = type(
+        "HeldProbeFixture", (HeldHttpsHandler,), {"gate": gate}
+    )
+    checking_output = output / "checking"
+    checking_output.mkdir(exist_ok=True)
+    try:
+        result = run_case(
+            binary,
+            engines,
+            checking_output,
+            f"network-{engine}-checking",
+            False,
+            engine,
+            False,
+            network_invalidate=True,
+            gate=gate,
+            profile=f"vless://{UUID}@127.0.0.1:{port}#Тестовый сервер",
+            probe_url=f"https://127.0.0.1:{https.server_port}/",
+            expected_state="Checking",
+            ca=workspace / "health.ca.pem",
+        )
+        if (
+            not gate.received.is_set()
+            or not gate.completed.is_set()
+            or gate.timed_out.is_set()
+        ):
+            raise RuntimeError("HTTPS fixture не подтвердил удержание и поздний ответ")
+        LOG.info(
+            "network-%s-checking: Checking → Limited → late HTTPS → Stop → closed",
+            engine,
+        )
+        return result
+    finally:
+        gate.release.set()
+        https.RequestHandlerClass = handler
+
+
+def run_health(
+    binary: Path, engines: Path, output: Path, *, network_invalidate: bool = False
+) -> list[dict[str, object]]:
     results = []
     with tempfile.TemporaryDirectory(prefix="tofu-gui-health-") as temporary:
         workspace = Path(temporary)
@@ -312,7 +597,9 @@ def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, obje
                         ("unexpected-200", "/ok200", 204, "Limited"),
                         ("custom-200", "/ok200", 200, "Connected"),
                     ):
-                        name = f"health-{engine}-{suffix}"
+                        if network_invalidate and suffix != "204":
+                            continue
+                        name = f"{'network' if network_invalidate else 'health'}-{engine}-{suffix}"
                         https.requested.clear()
                         results.append(
                             run_case(
@@ -322,7 +609,8 @@ def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, obje
                                 name,
                                 False,
                                 engine,
-                                True,
+                                not network_invalidate,
+                                network_invalidate=network_invalidate,
                                 profile=f"vless://{UUID}@127.0.0.1:{port}#Тестовый сервер",
                                 probe_url=f"https://127.0.0.1:{https.server_port}{path}",
                                 expected_status=status,
@@ -332,7 +620,19 @@ def run_health(binary: Path, engines: Path, output: Path) -> list[dict[str, obje
                         )
                         if not https.requested.is_set():
                             raise RuntimeError("HTTPS fixture не получил проверку")
-                        LOG.info("%s: %s → Stop → Disconnected → closed", name, state)
+                        LOG.info(
+                            "%s: %s → Stop → Disconnected → closed",
+                            name,
+                            "Connected → Limited/network_changed"
+                            if network_invalidate
+                            else state,
+                        )
+                    if network_invalidate:
+                        results.append(
+                            run_checking_case(
+                                binary, engines, output, engine, port, https, workspace
+                            )
+                        )
     return results
 
 
@@ -412,9 +712,55 @@ def run_tcp(
             raise RuntimeError("TCP fixture не завершился")
 
 
+def network_worker(
+    binary: Path, engines: Path, output: Path, host_namespace: int
+) -> list[dict[str, object]]:
+    global NETWORK_HOST_NAMESPACE
+    NETWORK_HOST_NAMESPACE = host_namespace
+    guard_network()
+    subprocess.run(
+        ["ip", "link", "set", "lo", "up"],
+        check=True,
+        capture_output=True,
+        timeout=5,
+    )
+    with (
+        tempfile.TemporaryDirectory(prefix="tofu-network-runtime-") as runtime,
+        tempfile.TemporaryDirectory(prefix="tofu-r-", dir="/tmp") as alias,
+    ):
+        os.chmod(runtime, 0o700)
+        # Bind сохраняет короткий AF_UNIX path; Qt отвергает symlink runtime.
+        guard_network()
+        subprocess.run(
+            ["mount", "--bind", runtime, alias],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "QT_QPA_PLATFORM": "offscreen",
+                    "QT_QUICK_BACKEND": "software",
+                    "QT_QUICK_CONTROLS_STYLE": "Basic",
+                    "XDG_RUNTIME_DIR": alias,
+                },
+            ):
+                return run_health(binary, engines, output, network_invalidate=True)
+        finally:
+            subprocess.run(
+                ["umount", alias],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--worker-namespace", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--engine-dir", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -430,6 +776,7 @@ def main() -> int:
             "xray",
             "sing-box",
             "health",
+            "network",
             "tcp",
             "tcp-basic",
             "all",
@@ -451,6 +798,44 @@ def main() -> int:
     )
     output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    if arguments.case == "network":
+        if engines is None:
+            parser.error("Для network нужен --engine-dir")
+        if arguments.worker_namespace is None:
+            run_sandbox(
+                [
+                    "unshare",
+                    "--user",
+                    "--map-root-user",
+                    "--net",
+                    "--pid",
+                    "--fork",
+                    "--mount",
+                    "--mount-proc",
+                    "--keep-caps",
+                    "--kill-child",
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    str(binary),
+                    "--engine-dir",
+                    str(engines),
+                    "--output",
+                    str(output),
+                    "--case",
+                    "network",
+                    "--worker-namespace",
+                    str(os.stat("/proc/self/ns/net").st_ino),
+                ],
+                timeout=120,
+            )
+            return 0
+        results = network_worker(binary, engines, output, arguments.worker_namespace)
+        (output / "results.json").write_text(
+            json.dumps(results, ensure_ascii=False, indent=2) + "\n"
+        )
+        return 0
+    if arguments.worker_namespace is not None:
+        parser.error("Worker доступен только для network")
     cases = (
         ("profiles", "partial", "xray", "sing-box", "health", "tcp")
         if arguments.case == "all"
