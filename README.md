@@ -100,12 +100,21 @@ flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --l
 ```
 
 The engine directory contains verified `xray-26.10.31/xray` and/or
-`sing-box-1.14.4/sing-box`; binaries are not bundled. `--listen-port PORT` changes
-the local SOCKS port (default 10808). Configure that SOCKS proxy explicitly in the
+`sing-box-1.14.4/sing-box`; binaries are not bundled. The GUI automatically chooses
+a free loopback TCP/UDP port; copy the address from **Settings → Connection**.
+`--listen-port PORT` remains a diagnostic fixed-port override. Configure that SOCKS proxy explicitly in the
 application that should use it. The GUI does not enable TUN or system proxy.
 
-Open **Settings → Subscriptions → Add**, paste a subscription, refresh it and approve
-any partial import. Return home, choose a server and press the central button.
+Install a user menu entry for launching without a terminal or root:
+
+```sh
+python tools/install_desktop.py --binary /permanent/path/tofu-desktop --engine-dir /absolute/path/to/engines
+```
+
+Keep the executable at that permanent path outside a temporary build directory.
+Open **Settings → Subscriptions → Add** and paste a link; loading starts immediately.
+Review and approve JSON or partial imports. The optional name and local HTTP-source
+exception are under advanced options. Return home, choose a server and press the central button.
 `Limited` means the core is running but the
 HTTPS check failed. Data lives under `$XDG_DATA_HOME/tofu` or `~/.local/share/tofu`;
 `--data-dir PATH` selects a private directory. The master key stays in Secret Service.
@@ -273,8 +282,12 @@ Input is a subscription body, not a download URL. The CLI only prints counts,
 protocols and static issue codes/line numbers; exit 0 means an analysis report
 was produced, including partial/rejected records. It never activates a profile.
 Limits: 8 MiB input, 32 MiB decoded, 20,000 URI records, 64 KiB per URI, JSON depth 64.
-Native JSON is retained opaque after syntax validation; managed outbound extraction
-remain pending. The separate compiler checks URI capabilities; the host still needs
+Xray JSON objects/arrays retain their source for review and extract VLESS and
+Shadowsocks outbounds into managed profiles. Source routes/DNS/inbounds are never
+executed. Unknown options block compilation; unsupported protocols appear in the
+report. Other JSON remains opaque. Downloads use `Happ/1.0 tofu/<version>` for
+Remnawave JSON compatibility; provider response rules can override the format.
+The separate compiler checks profile capabilities; the host still needs
 to run the pinned engine's config-check before activation. Fatal errors preserve input
 bytes in the library API; an oversized/broken stream is explicitly marked incomplete.
 See [import evidence and limitations](docs/validation/2026-11-09-subscription-import.md).
