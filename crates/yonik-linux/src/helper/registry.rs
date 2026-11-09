@@ -1,12 +1,19 @@
 //! Системный allowlist: пути и параметры запуска не поступают от клиента.
 
-use std::{fs::File, io::Read, os::unix::fs::MetadataExt, str::FromStr};
+use std::{
+    fs::{File, Metadata},
+    io::Read,
+    os::unix::fs::MetadataExt,
+    str::FromStr,
+    sync::{Mutex, Weak},
+};
 
 use rustix::fs::{Mode, OFlags, open, openat};
 use serde::Deserialize;
 use yonik_engine::Engine;
 
-use crate::host::{BinarySnapshot, HostError, Sha256};
+use super::memory::{ByteBudget, executable_budget};
+use crate::host::{BinarySnapshot, HostError, Sha256, SharedImage};
 
 const MAX_MANIFEST: u64 = 4096;
 const FILE_FLAGS: OFlags = OFlags::RDONLY
@@ -26,6 +33,7 @@ pub enum RegistryError {
     InvalidBinary,
     Snapshot,
     MissingEngine,
+    Capacity,
 }
 impl std::fmt::Display for RegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -37,6 +45,7 @@ impl std::fmt::Display for RegistryError {
             Self::HashMismatch => "SHA-256 системного ядра не совпадает",
             Self::InvalidBinary => "Некорректный бинарник системного ядра",
             Self::Snapshot => "Не удалось создать неизменяемый снимок системного ядра",
+            Self::Capacity => "Исчерпан бюджет памяти системных ядер",
             Self::MissingEngine => "Ядро отсутствует в системном реестре",
         })
     }
@@ -82,6 +91,8 @@ impl InstalledEngine {
 
 /// Манифест проверен целиком; бинарник проверяется при создании snapshot.
 /// Один и тот же snapshot передаётся version/config-check/start без чтения пути.
+/// Вызывающий код переиспользует один registry: живые snapshots делят sealed inode.
+/// Разные registry могут хранить разные images, но используют общий процессный бюджет.
 pub struct TrustedRegistry {
     directory: File,
     entries: Vec<InstalledEntry>,
@@ -90,6 +101,42 @@ pub struct TrustedRegistry {
 struct InstalledEntry {
     engine: InstalledEngine,
     hash: Sha256,
+    cache: Mutex<Option<CachedImage>>,
+}
+
+struct CachedImage {
+    source: SourceIdentity,
+    image: Weak<SharedImage>,
+}
+
+#[derive(PartialEq, Eq)]
+struct SourceIdentity {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    uid: u32,
+    mode: u32,
+    nlink: u64,
+    mtime: i64,
+    mtime_nsec: i64,
+    ctime: i64,
+    ctime_nsec: i64,
+}
+impl From<Metadata> for SourceIdentity {
+    fn from(metadata: Metadata) -> Self {
+        Self {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            len: metadata.len(),
+            uid: metadata.uid(),
+            mode: metadata.mode(),
+            nlink: metadata.nlink(),
+            mtime: metadata.mtime(),
+            mtime_nsec: metadata.mtime_nsec(),
+            ctime: metadata.ctime(),
+            ctime_nsec: metadata.ctime_nsec(),
+        }
+    }
 }
 
 impl std::fmt::Debug for TrustedRegistry {
@@ -111,26 +158,51 @@ impl TrustedRegistry {
         Self::load(directory, 0)
     }
 
-    /// Проверяет выбранный бинарник и копирует его из того же проверенного FD.
+    /// Проверяет исходник; живой immutable snapshot переиспользуется при том же identity.
     pub fn snapshot(&self, engine: Engine) -> Result<BinarySnapshot, RegistryError> {
         self.snapshot_for_uid(engine, 0)
     }
 
     fn snapshot_for_uid(&self, engine: Engine, uid: u32) -> Result<BinarySnapshot, RegistryError> {
+        self.snapshot_with_budget(engine, uid, executable_budget())
+    }
+
+    fn snapshot_with_budget(
+        &self,
+        engine: Engine,
+        uid: u32,
+        budget: &ByteBudget,
+    ) -> Result<BinarySnapshot, RegistryError> {
         let entry = self
             .entries
             .iter()
             .find(|entry| entry.engine.engine() == engine)
             .ok_or(RegistryError::MissingEngine)?;
+        // Один miss на запись: параллельные запросы разделяют уже sealed inode.
+        let mut cache = entry.cache.lock().map_err(|_| RegistryError::Unavailable)?;
         directory_metadata(&self.directory, uid)?;
         let source = child(&self.directory, entry.engine.filename(), FILE_FLAGS)?;
-        regular_metadata(&source, uid, BinarySnapshot::MAX_SIZE, true)?;
-        BinarySnapshot::load_file(source, entry.hash, engine).map_err(|error| match error {
-            HostError::BinaryHash => RegistryError::HashMismatch,
-            HostError::InvalidBinary => RegistryError::InvalidBinary,
-            HostError::Snapshot => RegistryError::Snapshot,
-            _ => RegistryError::Unavailable,
-        })
+        let metadata = source.metadata().map_err(|_| RegistryError::Unavailable)?;
+        validate_regular_metadata(&metadata, uid, BinarySnapshot::MAX_SIZE, true)?;
+        let identity = SourceIdentity::from(metadata);
+        if let Some(cached) = cache.as_ref() {
+            if cached.source == identity {
+                if let Some(image) = cached.image.upgrade() {
+                    return BinarySnapshot::from_image(image, entry.hash, engine)
+                        .map_err(snapshot_error);
+                }
+            }
+        }
+        let lease = budget
+            .reserve(identity.len as usize)
+            .map_err(|_| RegistryError::Capacity)?;
+        let snapshot = BinarySnapshot::load_budgeted(source, entry.hash, engine, lease)
+            .map_err(snapshot_error)?;
+        *cache = Some(CachedImage {
+            source: identity,
+            image: snapshot.weak_image(),
+        });
+        Ok(snapshot)
     }
 
     fn load(directory: File, uid: u32) -> Result<Self, RegistryError> {
@@ -163,6 +235,7 @@ impl TrustedRegistry {
             entries.push(InstalledEntry {
                 engine: entry.engine,
                 hash,
+                cache: Mutex::new(None),
             });
         }
         Ok(Self { directory, entries })
@@ -172,6 +245,16 @@ impl TrustedRegistry {
     #[cfg(test)]
     fn for_test(directory: File, expected_uid: u32) -> Result<Self, RegistryError> {
         Self::load(directory, expected_uid)
+    }
+}
+
+fn snapshot_error(error: HostError) -> RegistryError {
+    match error {
+        HostError::BinaryHash => RegistryError::HashMismatch,
+        HostError::InvalidBinary => RegistryError::InvalidBinary,
+        HostError::Snapshot => RegistryError::Snapshot,
+        HostError::ResourceLimit => RegistryError::Capacity,
+        _ => RegistryError::Unavailable,
     }
 }
 
@@ -196,6 +279,15 @@ fn regular_metadata(
     executable: bool,
 ) -> Result<(), RegistryError> {
     let metadata = file.metadata().map_err(|_| RegistryError::Unavailable)?;
+    validate_regular_metadata(&metadata, uid, max_size, executable)
+}
+
+fn validate_regular_metadata(
+    metadata: &Metadata,
+    uid: u32,
+    max_size: u64,
+    executable: bool,
+) -> Result<(), RegistryError> {
     if !metadata.is_file()
         || metadata.uid() != uid
         || metadata.nlink() != 1
@@ -314,6 +406,142 @@ mod tests {
                 ELF
             );
         }
+    }
+
+    #[test]
+    fn weak_cache_reuses_inode_and_releases_the_last_lease() {
+        let fixture = Fixture::new();
+        let registry = fixture.registry().unwrap();
+        let budget = crate::helper::memory::ByteBudget::new(ELF.len());
+        let first = registry
+            .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+            .unwrap();
+        let second = registry
+            .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+            .unwrap();
+        assert_eq!(
+            first.file.metadata().unwrap().ino(),
+            second.file.metadata().unwrap().ino()
+        );
+        assert_eq!(
+            first.file.metadata().unwrap().dev(),
+            second.file.metadata().unwrap().dev()
+        );
+        assert_eq!(budget.used(), ELF.len());
+        let weak = first.weak_image();
+        drop(first);
+        assert_eq!(budget.used(), ELF.len());
+        drop(second);
+        assert_eq!(budget.used(), 0);
+        assert!(weak.upgrade().is_none());
+        let third = registry
+            .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+            .unwrap();
+        assert_eq!(budget.used(), ELF.len());
+        drop(third);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn concurrent_cache_misses_allocate_one_image() {
+        let fixture = Fixture::new();
+        let registry = fixture.registry().unwrap();
+        let budget = crate::helper::memory::ByteBudget::new(ELF.len());
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let mut tasks = Vec::new();
+            for _ in 0..8 {
+                tasks.push(scope.spawn(|| {
+                    barrier.wait();
+                    registry
+                        .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+                        .unwrap()
+                }));
+            }
+            let snapshots: Vec<_> = tasks.into_iter().map(|task| task.join().unwrap()).collect();
+            let first = snapshots[0].file.metadata().unwrap();
+            for snapshot in &snapshots {
+                let metadata = snapshot.file.metadata().unwrap();
+                assert_eq!((metadata.dev(), metadata.ino()), (first.dev(), first.ino()));
+            }
+            assert_eq!(budget.used(), ELF.len());
+        });
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn budget_is_shared_between_registries_and_rejects_before_copy() {
+        let fixture = Fixture::new();
+        let first_registry = fixture.registry().unwrap();
+        let second_registry = fixture.registry().unwrap();
+        let budget = crate::helper::memory::ByteBudget::new(ELF.len());
+        let first = first_registry
+            .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+            .unwrap();
+        assert_eq!(
+            second_registry
+                .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+                .err(),
+            Some(RegistryError::Capacity)
+        );
+        drop(first);
+        assert_eq!(budget.used(), 0);
+        assert!(
+            second_registry
+                .snapshot_with_budget(Engine::Xray, fixture.uid(), &budget)
+                .is_ok()
+        );
+        let small = crate::helper::memory::ByteBudget::new(ELF.len() - 1);
+        assert_eq!(
+            first_registry
+                .snapshot_with_budget(Engine::Xray, fixture.uid(), &small)
+                .err(),
+            Some(RegistryError::Capacity)
+        );
+        assert_eq!(small.used(), 0);
+    }
+
+    #[test]
+    fn live_cache_never_bypasses_source_trust_or_replacement_hash() {
+        let fixture = Fixture::new();
+        let registry = fixture.registry().unwrap();
+        let mut image = registry
+            .snapshot_for_uid(Engine::Xray, fixture.uid())
+            .unwrap();
+        fixture.mode("xray", 0o722);
+        assert_eq!(
+            registry.snapshot_for_uid(Engine::Xray, fixture.uid()).err(),
+            Some(RegistryError::UnsafeEntry)
+        );
+        fixture.mode("xray", 0o700);
+        fixture.mode("", 0o770);
+        assert_eq!(
+            registry.snapshot_for_uid(Engine::Xray, fixture.uid()).err(),
+            Some(RegistryError::UnsafeEntry)
+        );
+        fixture.mode("", 0o700);
+        fs::rename(fixture.0.join("xray"), fixture.0.join("old")).unwrap();
+        fixture.binary("xray", b"\x7fELFchanged");
+        assert_eq!(
+            registry.snapshot_for_uid(Engine::Xray, fixture.uid()).err(),
+            Some(RegistryError::HashMismatch)
+        );
+        assert_eq!(bytes(&mut image), ELF);
+        fixture.binary("xray", ELF);
+        let replacement = registry
+            .snapshot_for_uid(Engine::Xray, fixture.uid())
+            .unwrap();
+        assert_ne!(
+            image.file.metadata().unwrap().ino(),
+            replacement.file.metadata().unwrap().ino()
+        );
+        let mut changed = ELF.to_vec();
+        *changed.last_mut().unwrap() ^= 1;
+        fixture.binary("xray", &changed);
+        assert_eq!(
+            registry.snapshot_for_uid(Engine::Xray, fixture.uid()).err(),
+            Some(RegistryError::HashMismatch)
+        );
     }
 
     #[test]

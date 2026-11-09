@@ -1,11 +1,18 @@
 //! Одноразовые artifacts. Выдача artifact ещё не подтверждает применение сети.
 
-use std::{collections::HashMap, future::Future, num::NonZeroU64, sync::Mutex, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    num::NonZeroU64,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use tokio::{sync::Semaphore, time::Instant};
 use yonik_application::{ConfigDigest, EnvironmentStamp};
 use zbus::{Connection, Message};
 
+use super::memory::{ByteBudget, ByteLease, MAX_RETAINED_CONFIG_BYTES, Reclaimer, config_budget};
 use super::{AuthorizationError, NetworkAction, PeerAuthorizer, Prompt};
 use crate::Cancellation;
 
@@ -18,10 +25,35 @@ const FACTORY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Реализация вычисляет SHA-256 текущих bytes, а не возвращает сохранённый digest.
 /// Доверенный factory обязан выполнить config-check до передачи artifact.
-pub trait PreparedArtifact {
+pub trait PreparedArtifact: Send + 'static {
     fn current_digest(&self) -> ConfigDigest;
     /// Размер конфигурационного payload; память sealed binary учитывается отдельно.
     fn byte_len(&self) -> usize;
+    /// Удерживаемая ёмкость payload; artifact после factory должен быть immutable.
+    fn retained_bytes(&self) -> usize;
+}
+
+/// Сохраняет бюджет вместе с выданными данными до их освобождения.
+/// Не предоставляет unwrapping/Clone/DerefMut, освобождающие учёт раньше данных.
+pub struct ClaimedArtifact<A> {
+    artifact: A,
+    memory: ByteLease,
+}
+impl<A> std::ops::Deref for ClaimedArtifact<A> {
+    type Target = A;
+    fn deref(&self) -> &A {
+        &self.artifact
+    }
+}
+impl<A> AsRef<A> for ClaimedArtifact<A> {
+    fn as_ref(&self) -> &A {
+        &self.artifact
+    }
+}
+impl<A> std::fmt::Debug for ClaimedArtifact<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ClaimedArtifact(<скрыто>)")
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,7 +148,7 @@ impl std::fmt::Display for PreparedError {
 impl std::error::Error for PreparedError {}
 
 struct Entry<A> {
-    artifact: A,
+    artifact: ClaimedArtifact<A>,
     uid: u32,
     sender: String,
     context: PreparedContext,
@@ -133,10 +165,12 @@ struct State<A> {
 /// Один store и одна polkit connection на dispatcher. Ограничивает работу до auth.
 pub struct PreparedRequests<A: PreparedArtifact> {
     authorizer: PeerAuthorizer,
-    state: Mutex<State<A>>,
+    state: Arc<Mutex<State<A>>>,
     in_flight: Semaphore,
+    config_memory: ByteBudget,
+    _reclaim: Arc<Reclaimer>,
     #[cfg(test)]
-    clock_offset_ms: std::sync::atomic::AtomicU64,
+    clock_offset_ms: Arc<std::sync::atomic::AtomicU64>,
 }
 impl<A: PreparedArtifact> std::fmt::Debug for PreparedRequests<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -145,20 +179,48 @@ impl<A: PreparedArtifact> std::fmt::Debug for PreparedRequests<A> {
 }
 impl<A: PreparedArtifact> PreparedRequests<A> {
     pub async fn system(cancel: Cancellation) -> Result<Self, PreparedError> {
-        Ok(Self::with_authorizer(PeerAuthorizer::system(cancel).await?))
+        Self::with_authorizer(PeerAuthorizer::system(cancel).await?)
     }
-    fn with_authorizer(authorizer: PeerAuthorizer) -> Self {
-        Self {
+    fn with_authorizer(authorizer: PeerAuthorizer) -> Result<Self, PreparedError> {
+        Self::with_budget(authorizer, config_budget().clone())
+    }
+    fn with_budget(
+        authorizer: PeerAuthorizer,
+        config_memory: ByteBudget,
+    ) -> Result<Self, PreparedError> {
+        let state = Arc::new(Mutex::new(State {
+            entries: HashMap::<PreparedHandle, Entry<A>>::new(),
+            reservations: HashMap::new(),
+            next: 0,
+        }));
+        let weak = Arc::downgrade(&state);
+        #[cfg(test)]
+        let clock_offset_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        #[cfg(test)]
+        let clock = clock_offset_ms.clone();
+        let reclaim: Arc<Reclaimer> = Arc::new(move || {
+            let now = Instant::now();
+            #[cfg(test)]
+            let now = now + Duration::from_millis(clock.load(std::sync::atomic::Ordering::Relaxed));
+            if let Some(state) = weak.upgrade() {
+                // Чужой store может сейчас выполнять claim: не ждём его lock.
+                if let Ok(mut state) = state.try_lock() {
+                    state.entries.retain(|_, entry| entry.expires > now);
+                }
+            }
+        });
+        config_memory
+            .register(&reclaim)
+            .map_err(|_| PreparedError::Capacity)?;
+        Ok(Self {
             authorizer,
-            state: Mutex::new(State {
-                entries: HashMap::new(),
-                reservations: HashMap::new(),
-                next: 0,
-            }),
+            state,
+            config_memory,
+            _reclaim: reclaim,
             in_flight: Semaphore::new(MAX_IN_FLIGHT),
             #[cfg(test)]
-            clock_offset_ms: std::sync::atomic::AtomicU64::new(0),
-        }
+            clock_offset_ms,
+        })
     }
     pub fn connection(&self) -> &Connection {
         &self.authorizer.connection
@@ -196,6 +258,15 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
             .try_acquire()
             .map_err(|_| PreparedError::Capacity)?;
         let sender = super::sender(message)?;
+        {
+            let mut state = self.state.lock().map_err(|_| PreparedError::Unavailable)?;
+            state.entries.retain(|_, entry| entry.expires > self.now());
+        }
+        // Максимальная ёмкость нужна до factory; после проверки освобождаем излишек.
+        let mut memory = self
+            .config_memory
+            .reserve(MAX_RETAINED_CONFIG_BYTES)
+            .map_err(|_| PreparedError::Capacity)?;
         let reservation = {
             let mut state = self.state.lock().map_err(|_| PreparedError::Unavailable)?;
             state.entries.retain(|_, entry| entry.expires > self.now());
@@ -238,6 +309,13 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
         if artifact.byte_len() > MAX_ARTIFACT_BYTES {
             return Err(PreparedError::ArtifactTooLarge);
         }
+        let retained = artifact.retained_bytes();
+        if retained < artifact.byte_len() || retained > MAX_RETAINED_CONFIG_BYTES {
+            return Err(PreparedError::ArtifactTooLarge);
+        }
+        memory
+            .resize(retained)
+            .map_err(|_| PreparedError::Capacity)?;
         let digest = artifact.current_digest();
         let bytes = artifact.byte_len();
         // Проверка liveness после продолжительного config-check, без повторного auth.
@@ -263,7 +341,7 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
         state.entries.insert(
             handle,
             Entry {
-                artifact,
+                artifact: ClaimedArtifact { artifact, memory },
                 uid: peer.uid(),
                 sender: peer.sender().to_owned(),
                 context,
@@ -284,7 +362,7 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
         prompt: Prompt,
         cancel: Cancellation,
         context: F,
-    ) -> Result<A, PreparedError>
+    ) -> Result<ClaimedArtifact<A>, PreparedError>
     where
         F: FnOnce() -> Result<PreparedContext, PreparedError>,
     {
@@ -321,6 +399,7 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
         if current? != entry.context
             || entry.artifact.byte_len() != entry.bytes
             || entry.bytes > MAX_ARTIFACT_BYTES
+            || entry.artifact.artifact.retained_bytes() != entry.artifact.memory.bytes()
             || entry.artifact.current_digest() != entry.digest
         {
             return Err(PreparedError::Stale);

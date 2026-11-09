@@ -4,10 +4,17 @@
 //! `PeerIdentity` — снимок, а не разрешение на будущий Apply: перед каждым
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
+pub(crate) mod memory;
+pub use memory::{
+    MAX_CONFIG_MEMORY_BYTES, MAX_CONFIG_STORES, MAX_EXECUTABLE_BYTES, MAX_RETAINED_CONFIG_BYTES,
+    MemoryUsage, memory_usage,
+};
+
 mod prepared;
 pub use prepared::{
-    MAX_ARTIFACT_BYTES, MAX_IN_FLIGHT, MAX_PENDING, MAX_PENDING_PER_PEER, PREPARED_TTL,
-    PreparedArtifact, PreparedContext, PreparedError, PreparedHandle, PreparedRequests,
+    ClaimedArtifact, MAX_ARTIFACT_BYTES, MAX_IN_FLIGHT, MAX_PENDING, MAX_PENDING_PER_PEER,
+    PREPARED_TTL, PreparedArtifact, PreparedContext, PreparedError, PreparedHandle,
+    PreparedRequests,
 };
 
 mod registry;

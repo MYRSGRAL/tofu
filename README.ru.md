@@ -252,8 +252,13 @@ sender сырых ответов. После решения повторно с�
 `PreparedRequests<A>` привязывает проверенный artifact к peer и поколению,
 заново проверяет polkit на prepare/claim и выдаёт artifact однократно.
 Настоящий `CheckedConfig` предоставляет SHA-256 текущих bytes. Pending-операции,
-payload и TTL ограничены; для памяти executable snapshots нужен общий бюджет
-до подключения production service. [Контракт Prepare/claim](docs/specs/helper-prepared-requests.md).
+payload и TTL ограничены; память executable snapshots учитывается общим бюджетом, описанным ниже. [Контракт Prepare/claim](docs/specs/helper-prepared-requests.md).
+
+Общий процессный бюджет учитывает конфигурационные buffers и helper snapshots.
+Выданный artifact сохраняет lease; weak-cache реестра разделяет sealed inode,
+а при нехватке бюджета освобождаются expired pending из связанных stores.
+Учёт не является измерением RSS или завершённым G-POWER.
+[Контракт памяти](docs/specs/helper-memory-budget.md).
 
 ### Журнал управляемых сетевых ресурсов
 

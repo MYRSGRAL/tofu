@@ -161,6 +161,33 @@ class InstallDesktopTests(unittest.TestCase):
                 self.assertFalse(legacy_entry.exists())
                 self.assertFalse(legacy_icon.exists())
 
+    def test_legacy_access_time_change_does_not_block_migration(self) -> None:
+        entry, icon = self.legacy_launcher()
+        pending = {entry, icon}
+        lstat = Path.lstat
+
+        def before_first_read(path: Path, **kwargs: bool) -> os.stat_result:
+            metadata = lstat(path, **kwargs)
+            if path not in pending:
+                return metadata
+            pending.remove(path)
+            # На relatime чтение меняет atime; моделируем это и на noatime.
+            fields = list(metadata)
+            fields[stat.ST_ATIME] -= 1
+            return os.stat_result(
+                fields,
+                {
+                    "st_atime_ns": metadata.st_atime_ns - 1_000_000_000,
+                    "st_mtime_ns": metadata.st_mtime_ns,
+                    "st_ctime_ns": metadata.st_ctime_ns,
+                },
+            )
+
+        with patch.object(Path, "lstat", before_first_read):
+            self.assertTrue(self.install().exists())
+        self.assertFalse(entry.exists())
+        self.assertFalse(icon.exists())
+
     def test_legacy_survives_partial_write_and_retry_migrates(self) -> None:
         legacy_entry, legacy_icon = self.legacy_launcher()
         original = legacy_entry.read_bytes()

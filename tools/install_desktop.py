@@ -56,6 +56,21 @@ def render_entry(binary: Path, engine_dir: Path, icon_hash: str) -> str:
     )
 
 
+def stable_metadata(metadata: os.stat_result) -> tuple[int, ...]:
+    """atime меняется от нашего чтения; остальные поля проверяем с точностью ns."""
+    return (
+        metadata.st_mode,
+        metadata.st_ino,
+        metadata.st_dev,
+        metadata.st_nlink,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
 def read_owned_file(path: Path) -> bytes | None:
     """Не читаем чужие файлы, специальные файлы и ссылки в месте установки."""
     try:
@@ -70,7 +85,7 @@ def read_owned_file(path: Path) -> bytes | None:
         raise ValueError(f"Нельзя изменять чужой файл или ссылку: {path}")
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, "rb") as source:
-        if os.fstat(source.fileno()) != metadata:
+        if stable_metadata(os.fstat(source.fileno())) != stable_metadata(metadata):
             raise ValueError(f"Файл изменился при проверке: {path}")
         return source.read()
 
@@ -117,7 +132,7 @@ def legacy_snapshot(
                 continue
             data = read_owned_file(path)
             if data is not None:
-                if metadata != path.lstat():
+                if stable_metadata(metadata) != stable_metadata(path.lstat()):
                     return []
                 snapshots.append((path, data, metadata))
         if not snapshots or snapshots[0][0] != entry:
@@ -140,7 +155,9 @@ def remove_legacy(snapshots: list[tuple[Path, bytes, os.stat_result]]) -> None:
     """Повторная проверка пары перед удалением исключает подмену при установке."""
     for path, data, metadata in snapshots:
         try:
-            unchanged = read_owned_file(path) == data and path.lstat() == metadata
+            unchanged = read_owned_file(path) == data and stable_metadata(
+                path.lstat()
+            ) == stable_metadata(metadata)
         except (OSError, ValueError):
             unchanged = False
         if not unchanged:
@@ -148,7 +165,9 @@ def remove_legacy(snapshots: list[tuple[Path, bytes, os.stat_result]]) -> None:
             return
     for path, data, metadata in reversed(snapshots):
         try:
-            unchanged = read_owned_file(path) == data and path.lstat() == metadata
+            unchanged = read_owned_file(path) == data and stable_metadata(
+                path.lstat()
+            ) == stable_metadata(metadata)
         except (OSError, ValueError):
             unchanged = False
         if not unchanged:

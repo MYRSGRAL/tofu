@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs,
-    io::Read,
+    io::{Read, Write},
     num::{NonZeroU16, NonZeroU64},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -35,6 +35,25 @@ const LOCAL_ENV: EnvironmentStamp = EnvironmentStamp {
     authorized: true,
 };
 
+// Ограничение проверяется до reserve/extend, включая отдельную крупную запись.
+struct ConfigBuffer(Vec<u8>);
+impl Write for ConfigBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let remaining = crate::helper::MAX_ARTIFACT_BYTES.saturating_sub(self.0.len());
+        if bytes.len() > remaining {
+            return Err(std::io::Error::other("Превышен размер конфигурации"));
+        }
+        self.0
+            .try_reserve(bytes.len())
+            .map_err(|_| std::io::Error::other("Недостаточно памяти для конфигурации"))?;
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub struct CheckedConfig {
     binary: BinarySnapshot,
     bytes: Vec<u8>,
@@ -49,6 +68,9 @@ impl crate::helper::PreparedArtifact for CheckedConfig {
     }
     fn byte_len(&self) -> usize {
         self.bytes.len()
+    }
+    fn retained_bytes(&self) -> usize {
+        self.bytes.capacity()
     }
 }
 impl std::fmt::Debug for CheckedConfig {
@@ -67,10 +89,11 @@ impl CheckedConfig {
         }
         let port = config.listen_port();
         let probe_port = config.probe_port();
-        let mut bytes = Vec::new();
+        let mut output = ConfigBuffer(Vec::new());
         config
-            .write_sensitive(&mut bytes)
+            .write_sensitive(&mut output)
             .map_err(|_| HostError::ConfigRejected)?;
+        let bytes = output.0;
         let probe_access = config.into_probe_access();
         process::verify_version(&binary, cancel).await?;
         process::config_check(&binary, &bytes, cancel).await?;

@@ -124,6 +124,9 @@ impl PreparedArtifact for Artifact {
     fn byte_len(&self) -> usize {
         self.0.lock().unwrap().len()
     }
+    fn retained_bytes(&self) -> usize {
+        self.0.lock().unwrap().capacity()
+    }
 }
 fn context() -> PreparedContext {
     PreparedContext::new(
@@ -170,7 +173,7 @@ async fn claimed(
     handle: PreparedHandle,
     stream: &mut MessageStream,
     authority: &Connection,
-) -> Result<Artifact, PreparedError> {
+) -> Result<ClaimedArtifact<Artifact>, PreparedError> {
     let (_owner, cancel) = cancellation();
     let (result, ()) = tokio::join!(
         store.claim_for_apply(message, handle, Prompt::Never, cancel, || Ok(context())),
@@ -188,7 +191,11 @@ async fn fresh_auth_revoke_challenge_replay_and_wrong_unique_peer() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     let handle = prepared(&store, &incoming, &mut stream, &authority).await;
     for challenge in [false, true] {
         let (_owner, cancel) = cancellation();
@@ -243,7 +250,11 @@ async fn stale_context_digest_ttl_and_forget_invalidate() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     for field in 0..5 {
         let handle = prepared(&store, &incoming, &mut stream, &authority).await;
         let mut current = context();
@@ -316,7 +327,11 @@ async fn caps_and_cancel_reclaim_slots_before_work() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     for _ in 0..MAX_PENDING_PER_PEER {
         prepared(&store, &incoming, &mut stream, &authority).await;
     }
@@ -365,7 +380,11 @@ async fn simultaneous_claims_release_exactly_once() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     let handle = prepared(&store, &incoming, &mut stream, &authority).await;
     let (_owner, cancel) = cancellation();
     let server = async {
@@ -410,7 +429,11 @@ async fn global_and_inflight_limits_expiry_reclaim() {
         mut stream,
         incoming: _incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     let mut server_stream = MessageStream::from(store.connection());
     let mut peers = Vec::new();
     let mut messages = Vec::new();
@@ -475,7 +498,11 @@ async fn factory_failure_size_disconnect_and_forget_during_work() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::with_authorizer(helper);
+    let store = PreparedRequests::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     for oversized in [false, true] {
         let (_owner, cancel) = cancellation();
         let operation = store.prepare(&incoming, Prompt::Never, cancel, || async {
@@ -512,9 +539,22 @@ async fn factory_failure_size_disconnect_and_forget_during_work() {
     let (result, ()) = tokio::join!(operation, auth(&mut stream, &authority, true, false));
     assert_eq!(result.unwrap_err(), PreparedError::Stale);
     let prior = prepared(&store, &incoming, &mut stream, &authority).await;
+    let daemon = zbus::fdo::DBusProxy::new(store.connection()).await.unwrap();
+    let peer_name = peer.unique_name().unwrap().as_str().to_owned();
+    let mut disappeared = daemon
+        .receive_name_owner_changed_with_args(&[(0, peer_name.as_str()), (2, "")])
+        .await
+        .unwrap();
     let (_owner, cancel) = cancellation();
     let operation = store.prepare(&incoming, Prompt::Never, cancel, || async {
         peer.close().await.unwrap();
+        // close() не является барьером обработки disconnect самим bus daemon.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), disappeared.next())
+                .await
+                .unwrap()
+                .is_some()
+        );
         Ok((artifact(), context()))
     });
     let (result, ()) = tokio::join!(operation, auth(&mut stream, &authority, true, false));
@@ -548,7 +588,11 @@ async fn denied_and_cancelled_auth_never_run_factory_and_reclaim_reservation() {
         mut stream,
         incoming,
     } = Fixture::new().await;
-    let store = PreparedRequests::<Artifact>::with_authorizer(helper);
+    let store = PreparedRequests::<Artifact>::with_budget(
+        helper,
+        ByteBudget::new(super::super::MAX_CONFIG_MEMORY_BYTES),
+    )
+    .unwrap();
     let (_owner, cancel) = cancellation();
     let operation = store.prepare(&incoming, Prompt::Never, cancel, || async {
         panic!("Отказ до factory")
@@ -585,4 +629,126 @@ async fn denied_and_cancelled_auth_never_run_factory_and_reclaim_reservation() {
     assert_eq!(result.unwrap_err(), PreparedError::Cancelled);
     assert!(store.state.lock().unwrap().reservations.is_empty());
     prepared(&store, &incoming, &mut stream, &authority).await;
+}
+
+#[tokio::test]
+async fn shared_payload_budget_follows_claimed_owner_and_reclaims_on_drop() {
+    let first = Fixture::new().await;
+    let mut second = Fixture::new().await;
+    let pool = ByteBudget::new(MAX_RETAINED_CONFIG_BYTES);
+    let store = PreparedRequests::with_budget(first.helper, pool.clone()).unwrap();
+    let other = PreparedRequests::with_budget(second.helper, pool.clone()).unwrap();
+    let mut stream = first.stream;
+    let handle = prepared(&store, &first.incoming, &mut stream, &first.authority).await;
+    let held = pool.used();
+    assert!(held > 0);
+    let owned = claimed(
+        &store,
+        &first.incoming,
+        handle,
+        &mut stream,
+        &first.authority,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pool.used(), held);
+    let (_owner, cancel) = cancellation();
+    assert_eq!(
+        other
+            .prepare(&second.incoming, Prompt::Never, cancel, || async {
+                panic!("Общий бюджет проверяется до auth/factory")
+            })
+            .await
+            .unwrap_err(),
+        PreparedError::Capacity
+    );
+    drop(owned);
+    assert_eq!(pool.used(), 0);
+    let handle = prepared(
+        &other,
+        &second.incoming,
+        &mut second.stream,
+        &second.authority,
+    )
+    .await;
+    assert!(pool.used() > 0);
+    other
+        .forget_peer(second.peer.unique_name().unwrap().as_str())
+        .unwrap();
+    assert_eq!(pool.used(), 0);
+    assert_eq!(
+        claimed(
+            &other,
+            &second.incoming,
+            handle,
+            &mut second.stream,
+            &second.authority
+        )
+        .await
+        .unwrap_err(),
+        PreparedError::InvalidHandle
+    );
+}
+
+#[tokio::test]
+async fn payload_reservation_released_on_factory_failure_and_cancellation() {
+    let mut fixture = Fixture::new().await;
+    let pool = ByteBudget::new(MAX_RETAINED_CONFIG_BYTES);
+    let store = PreparedRequests::<Artifact>::with_budget(fixture.helper, pool.clone()).unwrap();
+    let (_owner, cancel) = cancellation();
+    let (result, ()) = tokio::join!(
+        store.prepare(&fixture.incoming, Prompt::Never, cancel, || async {
+            assert_eq!(pool.used(), MAX_RETAINED_CONFIG_BYTES);
+            Err(PreparedError::Unavailable)
+        }),
+        auth(&mut fixture.stream, &fixture.authority, true, false)
+    );
+    assert_eq!(result, Err(PreparedError::Unavailable));
+    assert_eq!(pool.used(), 0);
+    let (owner, cancel) = cancellation();
+    let (entered, wait) = tokio::sync::oneshot::channel();
+    let operation = store.prepare(&fixture.incoming, Prompt::Never, cancel, || async {
+        entered.send(()).unwrap();
+        std::future::pending::<Result<(Artifact, PreparedContext), PreparedError>>().await
+    });
+    let driver = async {
+        auth(&mut fixture.stream, &fixture.authority, true, false).await;
+        wait.await.unwrap();
+        assert_eq!(pool.used(), MAX_RETAINED_CONFIG_BYTES);
+        owner.send_replace(true);
+    };
+    let (result, ()) = tokio::join!(operation, driver);
+    assert_eq!(result, Err(PreparedError::Cancelled));
+    assert_eq!(pool.used(), 0);
+}
+
+#[tokio::test]
+async fn expired_payload_is_reclaimed_before_reserve_in_same_or_other_store() {
+    for other_store in [false, true] {
+        let mut first = Fixture::new().await;
+        let mut second = Fixture::new().await;
+        let pool = ByteBudget::new(MAX_RETAINED_CONFIG_BYTES);
+        let one = PreparedRequests::with_budget(first.helper, pool.clone()).unwrap();
+        let two = PreparedRequests::with_budget(second.helper, pool.clone()).unwrap();
+        prepared(&one, &first.incoming, &mut first.stream, &first.authority).await;
+        assert!(pool.used() > 0);
+        assert!(pool.reserve(MAX_RETAINED_CONFIG_BYTES).is_err());
+        one.clock_offset_ms
+            .store(61_000, std::sync::atomic::Ordering::Relaxed);
+        if other_store {
+            prepared(
+                &two,
+                &second.incoming,
+                &mut second.stream,
+                &second.authority,
+            )
+            .await;
+            assert!(one.state.lock().unwrap().entries.is_empty());
+            assert_eq!(two.state.lock().unwrap().entries.len(), 1);
+        } else {
+            prepared(&one, &first.incoming, &mut first.stream, &first.authority).await;
+            assert_eq!(one.state.lock().unwrap().entries.len(), 1);
+        }
+        assert!(pool.used() > 0);
+    }
 }

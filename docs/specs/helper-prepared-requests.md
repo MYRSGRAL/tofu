@@ -35,7 +35,8 @@ SOCKS не является подходящим контекстом управ
 
 ## Claim перед Apply
 
-`claim_for_apply` заново проверяет ManageNetwork. Reader актуального контекста
+`claim_for_apply` возвращает `ClaimedArtifact<A>`, удерживающий память вместе с данными,
+и заново проверяет ManageNetwork. Reader актуального контекста
 вызывается после polkit, чтобы время диалога не закрепляло старые поколения.
 Затем проверяются TTL, UID и unique sender, session/generation/environment,
 размер и SHA-256 текущих bytes. Artifact выдаётся только один раз под lock.
@@ -62,10 +63,10 @@ Trusted caller обязан сериализовать claim, эффекты и 
 CheckAuthorization у того же pinned authority. Поздний allow не становится
 разрешением; удалённая отмена остаётся best effort с отдельным deadline 250 мс.
 
-Размер payload не является полной оценкой памяти artifact: CheckedConfig также
-удерживает sealed binary с отдельным пределом 128 MiB. До включения production
-service нужны общий бюджет/переиспользование исполняемых snapshots и G-POWER.
-Текущие slot limits не выдаются за проверенный продуктовый бюджет памяти.
+Payload и executable images имеют [общий процессный бюджет](helper-memory-budget.md).
+Перед factory резервируется retained ёмкость, claim передаёт RAII-владельца,
+а weak-cache реестра разделяет неизменяемый image. Учёт не является измерением RSS
+или подтверждением G-POWER.
 
 ## Приёмка
 
