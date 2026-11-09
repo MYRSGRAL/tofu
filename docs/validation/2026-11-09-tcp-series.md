@@ -72,3 +72,13 @@ Native GUI, G-UI/G-POWER, пакет из 10000 проверок, полная H
 DNS/Fake-IP/epoch provenance и полный G-PROBE остаются открытыми. Выбранная
 компоновка А ещё ожидает toolkit-замеров в разблокированной сессии. Результаты
 и собственные screenshots находятся в `local/validation/tcp-series-*`, вне Git.
+
+## Release-кандидат
+
+Rust 1.85.1 release GUI собран; на текущих Qt 6.11.2/GCC 16 остаётся системное
+предупреждение QChar SFINAE, Rust/clippy ошибок нет. Повторный offscreen smoke
+release прошёл literal/refused с тремя EOF. Бинарник сохранён в
+`local/artifacts/tofu-desktop-bc7e0af/` с SHA-256 manifest и ldd, отсутствующих
+библиотек нет. Это кандидат текущего функционального прототипа, а не новый дизайн А.
+Генерируемый qmlls.ini исключён из Git и удаляется перед очисткой собственного
+build-каталога, чтобы не оставлять устаревшие ссылки IDE на transient paths.
