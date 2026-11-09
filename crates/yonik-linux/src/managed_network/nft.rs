@@ -281,6 +281,7 @@ impl NftExecutor {
             id,
             Resource::NftTable { table_id, family },
         )?;
+        journal.require_reconciliation(self.owner, id)?;
         if journal
             .records()
             .iter()
@@ -318,6 +319,7 @@ impl NftExecutor {
             return Err(NftError::Invalid);
         };
         let table = Table::new(self.owner, scope, id, table_id, family);
+        journal.require_reconciliation(self.owner, id)?;
         let handle = match self.observe(&table).await? {
             Observation::Absent => {
                 return journal

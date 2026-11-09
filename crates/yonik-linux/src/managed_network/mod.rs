@@ -332,6 +332,20 @@ impl Journal {
     pub fn needs_reconciliation(&self, id: u64) -> bool {
         !self.reconciled.contains(&id)
     }
+    /// Старое подтверждение не переживает новую сверку: ошибка или отмена
+    /// наблюдения должна оставить неизвестное, а не прежнее applied-состояние.
+    pub fn require_reconciliation(
+        &mut self,
+        ownership: Ownership,
+        id: u64,
+    ) -> Result<(), JournalError> {
+        self.check(ownership)?;
+        if !self.document.records.iter().any(|record| record.id == id) {
+            return Err(JournalError::Missing);
+        }
+        self.reconciled.remove(&id);
+        Ok(())
+    }
     fn check(&self, ownership: Ownership) -> Result<(), JournalError> {
         if self.poisoned {
             return Err(JournalError::UncertainWrite);

@@ -352,3 +352,46 @@ async fn cleanup_replay_is_rejected_before_starting_any_command() {
     drop(journal);
     std::fs::remove_dir_all(path).unwrap();
 }
+
+#[tokio::test]
+async fn cancelled_generic_recheck_revokes_old_confirmation() {
+    use futures_util::FutureExt;
+    let netns = File::open("/proc/thread-self/ns/net").unwrap();
+    let current = namespace(&netns).unwrap();
+    let owner = Ownership::new(1000, 7, 9, current.0, current.1).unwrap();
+    let gate = Arc::new(Semaphore::new(1));
+    let mut executor = NftExecutor {
+        executable: File::open("/dev/null").unwrap(),
+        netns,
+        owner,
+        gate: Arc::clone(&gate),
+    };
+    let path = std::env::temp_dir().join(format!(
+        "yonik-nft-cancelled-recheck-{}",
+        std::process::id()
+    ));
+    let mut journal = Journal::open(&path, owner).unwrap();
+    journal
+        .intent(
+            owner,
+            Scope::Session,
+            2,
+            Resource::NftTable {
+                table_id: 5,
+                family: NftFamily::Inet,
+            },
+        )
+        .unwrap();
+    journal.reconcile(owner, 2, Reconciled::Owned).unwrap();
+    assert!(!journal.needs_reconciliation(2));
+    let _busy = gate.acquire().await.unwrap();
+    assert!(
+        executor
+            .ensure_table(&mut journal, Scope::Session, 2, 5, NftFamily::Inet)
+            .now_or_never()
+            .is_none()
+    );
+    assert!(journal.needs_reconciliation(2));
+    drop(journal);
+    std::fs::remove_dir_all(path).unwrap();
+}
