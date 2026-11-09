@@ -62,6 +62,9 @@ as passed. [Evidence and adapter requirements](docs/validation/2026-11-09-native
 
 ### Native Linux GUI
 
+The test suite also requires `dbus-daemon` for its private bus; it never changes
+the host's D-Bus services. Runtime monitoring reports missing services explicitly.
+
 The prototype requires Qt 6 Base/Declarative (Quick, Controls, Widgets, Network,
 DBus and QML development tools), a C++ compiler and system SQLite. GUI dependencies
 are behind the optional `gui` feature; ordinary workspace and Android checks do not
@@ -109,10 +112,20 @@ Names use the native systemd-resolved Varlink API; literals need no resolver.
 Missing resolver support is explicit, with no external DNS fallback. QUIC or an
 unknown transport reports “not applicable”. Cancel stops only TCP; Stop/Quit also
 cancel it. A result is tied to the selected source/profile/revision and timestamp.
-This is one historical measurement; network changes and result history are not
-tracked yet. It does not prove proxy authentication, HTTPS access or throughput.
+This is one historical measurement. Observed network changes cancel pending TCP
+checks and remove old results; result history is not saved. It does not prove
+proxy authentication, HTTPS access or throughput.
 
 [TCP checks and evidence](docs/validation/2026-11-09-tcp-probe.md).
+
+Linux now observes route/address changes through netlink and DNS/network service
+changes through system D-Bus. The GUI reports unavailable sources explicitly.
+Results carry a process-local network generation; late replies from an older
+generation cannot restore a successful status. A network change invalidates the
+HTTPS proof and leaves the running core in `Limited`; reconnect manually to check
+again. It does not launch automatic probes or reconnects. This observer is not yet
+the atomic NetworkHost snapshot/apply contract required for TUN.
+[Network observation and remaining limits](docs/validation/2026-11-09-network-observation.md).
 
 A stdin-only diagnostic example checks one accepted record by index and emits
 only counts, status and durations: `cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
