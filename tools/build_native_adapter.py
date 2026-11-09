@@ -1,4 +1,4 @@
-"""Закреплённая локальная сборка sing-box с патчем strict_complete_dns."""
+"""Закреплённая сборка sing-box с DNS provenance и direct resolution pin."""
 
 from __future__ import annotations
 
@@ -22,6 +22,10 @@ DEFAULT_ROOT = TRANSIENT / "tofu-native-adapter"
 DEFAULT_PATCH = (
     Path(__file__).resolve().parents[1]
     / "adapters/sing-box/v1.14.4/strict-complete-dns.patch"
+)
+EXTRA_PATCHES = (
+    (DEFAULT_PATCH.with_name("resolution-provenance.patch"), "dns_provenance"),
+    (DEFAULT_PATCH.with_name("resolution-pin.patch"), "pin_resolution"),
 )
 LOG = logging.getLogger("tofu.native_adapter")
 COMMAND_TIMEOUT = 180
@@ -195,13 +199,24 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
     if dirty.strip():
         raise BuildError(f"Исходник должен быть чистым: {source}")
     modules = {name: sha256(source / name) for name in ("go.mod", "go.sum")}
-    patch_digest = sha256(patch)
-    runner.run(["git", "apply", "--check", str(patch)], source)
-    runner.run(["git", "apply", str(patch)], source)
-    if sha256(patch) != patch_digest:
-        raise BuildError("Патч изменился во время применения")
-    if modules != {name: sha256(source / name) for name in modules}:
-        raise BuildError("Патч изменяет go.mod/go.sum")
+    patches = [(patch, "strict_complete_dns"), *EXTRA_PATCHES]
+    patch_records = []
+    for index, (path, feature) in enumerate(patches):
+        path = path.resolve(strict=True)
+        digest = sha256(path)
+        runner.run(["git", "apply", "--check", str(path)], source)
+        runner.run(["git", "apply", str(path)], source)
+        if sha256(path) != digest:
+            raise BuildError("Патч изменился во время применения")
+        if modules != {name: sha256(source / name) for name in modules}:
+            raise BuildError("Патч изменяет go.mod/go.sum")
+        patch_records.append(
+            {
+                "name": DEFAULT_PATCH.name if index == 0 else path.name,
+                "sha256": digest,
+                "feature": feature,
+            }
+        )
     raw_tags = (source / "release/DEFAULT_BUILD_TAGS_OTHERS").read_text().strip()
     tags = re.split(r"[,\s]+", raw_tags)
     if not raw_tags or any(not re.fullmatch(r"[A-Za-z0-9_]+", tag) for tag in tags):
@@ -230,6 +245,11 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
     finally:
         if modules != {name: sha256(source / name) for name in modules}:
             raise BuildError("go.mod/go.sum изменились при сборке")
+    if any(
+        sha256(path) != record["sha256"]
+        for (path, _), record in zip(patches, patch_records, strict=True)
+    ):
+        raise BuildError("Патч изменился во время сборки")
     if not binary.is_file() or binary.is_symlink():
         raise BuildError("Go не создал ожидаемый бинарник")
     manifest = {
@@ -237,7 +257,8 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
         "source_url": SOURCE_URL,
         "source_tag": SOURCE_TAG,
         "source_commit": head,
-        "patch_sha256": patch_digest,
+        "patch_sha256": patch_records[0]["sha256"],
+        "patches": patch_records,
         "binary_sha256": sha256(binary),
         "go_version": go_version,
         "go_env": go_env,
@@ -248,7 +269,7 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
         "build_tags": tags,
         "build_args": args,
         "module_sha256": modules,
-        "adapter_features": {"strict_complete_dns": True},
+        "adapter_features": {feature: True for _, feature in patches},
         "strictDNSGate": False,
         "strict_dns_gate": False,
         "bit_reproducibility_verified": False,

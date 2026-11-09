@@ -34,6 +34,11 @@ class BuilderTests(unittest.TestCase):
         (self.source / "go.sum").write_text("fixture\n")
         self.patch_file = self.base / "adapter.patch"
         self.patch_file.write_bytes(builder.DEFAULT_PATCH.read_bytes())
+        self.extra_patches = []
+        for name in ("dns_provenance", "pin_resolution"):
+            path = self.base / f"{name}.patch"
+            path.write_text(f"synthetic canonical {name} patch")
+            self.extra_patches.append((path, name))
         self.output = self.base / "output"
         self.head = builder.SOURCE_COMMIT
         self.dirty = ""
@@ -75,8 +80,13 @@ class BuilderTests(unittest.TestCase):
         return ""
 
     def build(self) -> Path:
-        with patch.object(
-            builder.Runner, "run", autospec=True, side_effect=self.fake_run
+        with (
+            patch.object(
+                builder.Runner, "run", autospec=True, side_effect=self.fake_run
+            ),
+            patch.object(
+                builder, "EXTRA_PATCHES", tuple(self.extra_patches), create=True
+            ),
         ):
             return builder.build(self.root, self.output, self.patch_file)
 
@@ -197,6 +207,25 @@ class BuilderTests(unittest.TestCase):
         self.assertFalse(manifest["strict_dns_gate"])
         self.assertIn("-mod=readonly", manifest["build_args"])
         self.assertEqual(manifest["build_args"][-1], "./cmd/sing-box")
+
+    def test_manifest_binds_complete_ordered_patch_chain(self) -> None:
+        manifest = json.loads(self.build().read_text())
+        expected = [self.patch_file, *(path for path, _ in self.extra_patches)]
+        self.assertEqual(
+            [entry["sha256"] for entry in manifest["patches"]],
+            [builder.sha256(path) for path in expected],
+        )
+        self.assertEqual(
+            [
+                command[-1]
+                for command in self.commands
+                if command[:3] == ["git", "apply", "--check"]
+            ],
+            [str(path) for path in expected],
+        )
+        self.assertTrue(manifest["adapter_features"]["dns_provenance"])
+        self.assertTrue(manifest["adapter_features"]["pin_resolution"])
+        self.assertFalse(manifest["strict_dns_gate"])
 
     def test_failed_go_does_not_publish_manifest(self) -> None:
         self.fail_go = True
