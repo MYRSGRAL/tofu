@@ -2,8 +2,8 @@ use std::{
     fs::{self, File},
     io::Write,
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
-    process::Stdio,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
@@ -31,10 +31,30 @@ impl Drop for Fixture {
         fs::remove_dir_all(&self.0).expect("Удалить собственный fixture");
     }
 }
-fn snapshot(path: &str) -> BinarySnapshot {
+fn snapshot(path: impl AsRef<Path>) -> BinarySnapshot {
+    let path = path.as_ref();
     let bytes = fs::read(path).unwrap();
     let hash = Sha256(Hasher::digest(bytes).into());
-    BinarySnapshot::load(std::path::Path::new(path), hash, Engine::Xray).unwrap()
+    BinarySnapshot::load(path, hash, Engine::Xray).unwrap()
+}
+
+fn blocked_stdin_image() -> (Fixture, BinarySnapshot) {
+    let directory = Fixture::new();
+    let path = directory.0.join("host-fixture");
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/engines/host_fixture.rs");
+    assert!(
+        Command::new(compiler)
+            .arg("--edition=2021")
+            .arg(source)
+            .arg("-o")
+            .arg(&path)
+            .status()
+            .expect("собрать собственный ELF fixture")
+            .success()
+    );
+    let image = snapshot(&path);
+    (directory, image)
 }
 
 #[tokio::test]
@@ -78,10 +98,10 @@ fn fifo_and_oversized_regular_file_are_rejected_before_reading() {
 
 #[tokio::test]
 async fn cancellation_of_blocked_stdin_kills_and_reaps_owned_child() {
-    let image = snapshot("/usr/bin/sleep");
+    let (_fixture, image) = blocked_stdin_image();
     let mut child = image
         .command()
-        .arg("30")
+        .arg("block-stdin")
         .stdin(Stdio::piped())
         .spawn()
         .unwrap();
@@ -132,8 +152,8 @@ async fn checked_config_cannot_bind_metadata_of_another_engine() {
 #[tokio::test]
 async fn foreign_listener_is_not_owned_by_process() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let image = snapshot("/usr/bin/sleep");
-    let mut child = image.command().arg("30").spawn().unwrap();
+    let (_fixture, image) = blocked_stdin_image();
+    let mut child = image.command().arg("block-stdin").spawn().unwrap();
     assert!(
         !super::session::listener_owned(child.id().unwrap(), listener.local_addr().unwrap().port())
             .unwrap()
@@ -143,8 +163,8 @@ async fn foreign_listener_is_not_owned_by_process() {
 
 #[tokio::test]
 async fn core_has_its_own_process_group_for_terminal_signal_isolation() {
-    let image = snapshot("/usr/bin/sleep");
-    let mut child = image.command().arg("30").spawn().unwrap();
+    let (_fixture, image) = blocked_stdin_image();
+    let mut child = image.command().arg("block-stdin").spawn().unwrap();
     let pid = rustix::process::Pid::from_raw(i32::try_from(child.id().unwrap()).unwrap()).unwrap();
     let group = rustix::process::getpgid(Some(pid)).unwrap();
     process::terminate(&mut child).await.unwrap();

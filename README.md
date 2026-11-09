@@ -82,7 +82,9 @@ The test suite also requires `dbus-daemon` for its private bus; it never changes
 the host's D-Bus services. Runtime monitoring reports missing services explicitly.
 
 The prototype requires Qt 6 Base/Declarative (Quick, Controls, Widgets, Network,
-DBus and QML development tools), a C++ compiler and system SQLite. GUI dependencies
+DBus and QML development tools), a C++ compiler, system SQLite and a compatible
+linker (`lld`, `gold` or `mold`; CI installs `lld`). CXX-Qt selects one when GNU
+ld.bfd is the system default. GUI dependencies
 are behind the optional `gui` feature; ordinary workspace and Android checks do not
 build Qt. CXX-Qt is pinned to 0.10.0, with matching CXX/cxx-gen ABI versions.
 
