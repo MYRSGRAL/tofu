@@ -45,6 +45,29 @@ jobs:
           "$RUNNER_TEMP/tofu-lint/bin/ruff" format --check tools
           "$RUNNER_TEMP/tofu-lint/bin/ruff" check tools
           python3 -m unittest discover -s tools/tests -v
+  native_adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Собрать закреплённый native adapter и проверить DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          tofu_native_root="$RUNNER_TEMP/tofu-native-adapter"
+          python3 tools/build_native_adapter.py --build-root "$tofu_native_root" --output-dir "$RUNNER_TEMP/tofu-native-artifact"
+          export GOTOOLCHAIN=local GOENV=off GOWORK=off
+          export GOCACHE="$tofu_native_root/build-native-adapter-cache/go-build"
+          export GOMODCACHE="$tofu_native_root/build-native-adapter-cache/go-mod"
+          export GOTMPDIR="$tofu_native_root/build-native-adapter-cache/go-tmp"
+          export TMPDIR="$tofu_native_root/build-native-adapter-cache/tmp"
+          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly ./dns ./route ./route/rule ./option
+          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly -race ./dns -run TestStrictComplete -count=1
+          flock -s "$tofu_native_root" git -C "$tofu_native_root/build-source-sing-box" diff --exit-code -- go.mod go.sum
   desktop:
     runs-on: ubuntu-latest
     env:

@@ -82,6 +82,11 @@ DeadlineExceeded; отдельный native packet-drop timeout в эту мат
 Пройдены Go tests ./dns ./route ./route/rule ./option, targeted strict race tests,
 gofmt, 48 Python unittest и Ruff 0.17.4. Rust/Qt source и зависимости не менялись;
 этот этап не повторял GUI/power/Android Rust acceptance из предыдущих проверок.
+В CI добавлен отдельный `native_adapter`: закреплённый setup-go/Go 1.27.1,
+сборка с manifest, Go unit/race и проверка неизменности зависимостей. Cache/tmp
+в RUNNER_TEMP, команды удерживают flock. Shell проверен bash -n, job прошёл
+независимое статическое ревью. Нативная namespace-матрица остаётся локальной;
+добавление job не означает успешный запуск GitHub Actions при billing lock.
 Локальные evidence: `local/validation/strict-dns-adapter/native-first/result.json`
 и соседние config/log/observation файлы; build/race/unit logs сохраняются отдельно.
 
