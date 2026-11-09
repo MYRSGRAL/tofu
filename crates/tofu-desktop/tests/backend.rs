@@ -340,7 +340,10 @@ fn tcp_check_is_separate_from_session_and_bound_to_selected_profile() {
         "invalid_input"
     );
     app.send(json!({"command":"check_tcp"}));
-    app.wait(|v| v["error"] == "profile_required");
+    // Готовность наблюдателя может инвалидировать уже принятую команду.
+    let missing = app.wait(|v| v["error"] == "profile_required" || v["error"] == "cancelled");
+    assert_eq!(missing["tcp_busy"], false);
+    assert!(missing["tcp_result"].is_null());
     app.send(json!({"command":"add_source","name":"TCP fixture","url":url,"local_exception":true,"route":"direct"}));
     app.wait(|v| v["source_id"].is_number());
     app.send(json!({"command":"refresh"}));
