@@ -14,7 +14,7 @@ const DATAGRAM_LIMIT: usize = 65_536;
 const ENTRY_LIMIT: usize = 4_096;
 const CACHE_LIMIT: usize = 4 * 1024 * 1024;
 // RTNLGRP_LINK, IPV4_IFADDR/ROUTE/RULE, IPV6_IFADDR/ROUTE/RULE, NEXTHOP.
-const GROUPS: u32 =
+pub(super) const GROUPS: u32 =
     (1 << 0) | (1 << 4) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 10) | (1 << 18) | (1 << 31);
 
 fn open_socket() -> std::io::Result<AsyncFd<OwnedFd>> {
@@ -263,7 +263,7 @@ fn append_canonical(target: &mut Vec<u8>, kind: u16, bytes: &[u8]) {
     target.extend_from_slice(bytes);
 }
 
-fn attributes(mut bytes: &[u8]) -> Result<Vec<(u16, &[u8])>, ()> {
+pub(super) fn attributes(mut bytes: &[u8]) -> Result<Vec<(u16, &[u8])>, ()> {
     let mut result = Vec::new();
     while !bytes.is_empty() {
         if bytes.len() < 4 {

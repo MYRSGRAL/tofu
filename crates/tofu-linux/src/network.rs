@@ -1,7 +1,18 @@
 //! Событийное наблюдение окружения. Не применяет маршруты, DNS или TUN.
 
 mod bus;
+mod lookup;
+mod read;
 mod route;
+mod topology;
+pub use lookup::{
+    KernelRoute, LookupIncomplete, RouteKind, RouteQuery, TransportProtocol, lookup_route,
+};
+pub use read::{NetworkAttribute, NetworkNamespace, NetworkReadError};
+pub use topology::{
+    IpPrefix, LinuxAddress, LinuxLink, LinuxNexthop, LinuxRoute, LinuxRule, LinuxTopology,
+    NexthopMember, RouteNexthop, read_topology,
+};
 
 use std::fmt;
 use tokio::sync::watch;
