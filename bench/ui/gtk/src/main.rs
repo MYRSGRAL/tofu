@@ -142,7 +142,7 @@ fn build(harness: ui_bench_model::Harness) -> Result<gtk::Window, Box<dyn Error>
     let applying = Rc::new(Cell::new(false));
     let cancelled = Rc::new(Cell::new(false));
     let window = gtk::Window::builder()
-        .title("Tofu · GTK4 benchmark")
+        .title("Yonik · GTK4 benchmark")
         .default_width(800)
         .default_height(640)
         .build();
@@ -153,7 +153,7 @@ fn build(harness: ui_bench_model::Harness) -> Result<gtk::Window, Box<dyn Error>
     root.set_margin_end(20);
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     header.set_height_request(38);
-    let title = gtk::Label::new(Some("TOFU"));
+    let title = gtk::Label::new(Some("YONIK"));
     title.add_css_class("title");
     header.append(&title);
     header.append(&gtk::Label::new(Some("Серверы")));
@@ -435,7 +435,7 @@ fn build(harness: ui_bench_model::Harness) -> Result<gtk::Window, Box<dyn Error>
     let (ui_tx, ui_rx) = async_channel::unbounded();
     let completion = ui_tx.clone();
     std::thread::Builder::new()
-        .name("tofu-bench-bridge".into())
+        .name("yonik-bench-bridge".into())
         .spawn(move || {
             while let Ok(event) = harness.events.recv() {
                 if ui_tx.send_blocking(UiMessage::Backend(event)).is_err() {
@@ -576,7 +576,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let rows = match (args.next().as_deref(), args.next(), args.next()) {
         (None, None, None) => 1000,
         (Some("--rows"), Some(rows), None) => rows.parse::<usize>()?,
-        _ => return Err("Использование: tofu-bench-gtk [--rows ЧИСЛО]".into()),
+        _ => return Err("Использование: yonik-bench-gtk [--rows ЧИСЛО]".into()),
     };
     if rows > 100_000 {
         return Err("Допускается не более 100000 строк".into());

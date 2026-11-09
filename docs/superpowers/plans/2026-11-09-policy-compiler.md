@@ -16,7 +16,7 @@
 4. Domain rules нормализуются одинаково, native ingress guard блокирует raw
    Unicode/невалидные/неполные DNS-имена, чтобы не провалиться в default.
    Xray IPOnDemand не используется как замена общего fail-closed контракта.
-5. Добавить ограниченный JSON policy input и подключить к tofu-compile/tofu-local;
+5. Добавить ограниченный JSON policy input и подключить к yonik-compile/yonik-local;
    HTTPS probe через выбранный outbound не должен попасть в DIRECT/BLOCK policy.
    Сначала тесты D-cases, затем код. Настоящие ядра проверят rule order,
    exact/suffix boundaries, IP4/6, protected unavailable, user/preset/default,

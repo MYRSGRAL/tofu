@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/tofu-domain", "crates/tofu-application", "crates/tofu-import", "crates/tofu-engine", "crates/tofu-linux", "crates/tofu-subscription", "crates/tofu-desktop"]
+members = ["crates/yonik-domain", "crates/yonik-application", "crates/yonik-import", "crates/yonik-engine", "crates/yonik-linux", "crates/yonik-subscription", "crates/yonik-desktop"]
 resolver = "3"
 
 [workspace.package]

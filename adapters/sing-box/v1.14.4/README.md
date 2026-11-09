@@ -14,7 +14,7 @@ fail explicitly. Proxy/custom handlers are unsupported in this mode.
 
 This is an experimental integration component. It does not implement trusted network/policy
 leases, safe Fake-IP reuse, system DNS ownership, TUN or full G-DNS.
-The tofu compiler keeps mixed DNS/Fake-IP disabled. The application and policy
+The yonik compiler keeps mixed DNS/Fake-IP disabled. The application and policy
 remain Rust; this patch changes only native engine DNS result handling.
 
 Build and run the isolated positive/negative controls from the repository root:
@@ -48,7 +48,7 @@ fallback. Внутренние speculative `evaluate` DNS DSL этим флаг�
 
 Это экспериментальная интеграция, а не готовый строгий DNS. Полная lease с сетевыми/policy epochs, lifecycle Fake-IP, владение системным DNS
 и TUN ещё не реализованы.
-Основная часть tofu остаётся на Rust. Сборка не заменяет используемый приложением
+Основная часть yonik остаётся на Rust. Сборка не заменяет используемый приложением
 официальный бинарник и не включает смешанную DNS/Fake-IP capability.
 
 Цепочка дополнительно сохраняет provenance исходного ответа и через

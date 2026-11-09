@@ -1,6 +1,6 @@
 use crate::bridge_impl::BenchBridgeRust;
 
-#[cxx_qt::bridge(namespace = "tofu_bench")]
+#[cxx_qt::bridge(namespace = "yonik_bench")]
 pub mod ffi {
     #[namespace = ""]
     unsafe extern "C++" {

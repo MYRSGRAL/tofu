@@ -15,7 +15,7 @@ from pathlib import Path
 from engine_smoke import FIXTURES, install_signal_handlers, links, run_sandbox
 from traffic_echo import PAYLOAD_SIZE, RESPONSE_PREFIX, echo_servers, receive_exact
 
-LOG = logging.getLogger("tofu.traffic")
+LOG = logging.getLogger("yonik.traffic")
 TARGETS = [(socket.AF_INET, "198.18.0.2"), (socket.AF_INET6, "2001:db8:746f::2")]
 
 
@@ -42,7 +42,9 @@ def probe(family: int, address: str, kind: int) -> None:
 
 
 def counters() -> tuple[int, int]:
-    stats = json.loads(ip("-j", "-s", "link", "show", "dev", "tofu-test"))[0]["stats64"]
+    stats = json.loads(ip("-j", "-s", "link", "show", "dev", "yonik-test"))[0][
+        "stats64"
+    ]
     return stats["rx"]["packets"], stats["tx"]["packets"]
 
 
@@ -60,23 +62,23 @@ def worker(binary: Path, engine: str, host_namespace: int) -> None:
             ) as process:
                 try:
                     deadline = time.monotonic() + 5
-                    while "tofu-test" not in links():
+                    while "yonik-test" not in links():
                         if process.poll() is not None:
                             raise RuntimeError("Ядро завершилось до создания TUN")
                         if time.monotonic() >= deadline:
                             raise TimeoutError("TUN не создан за 5 секунд")
                         time.sleep(0.05)
-                    ip("address", "replace", "198.18.0.1/30", "dev", "tofu-test")
+                    ip("address", "replace", "198.18.0.1/30", "dev", "yonik-test")
                     ip(
                         "-6",
                         "address",
                         "replace",
                         "2001:db8:746f::1/126",
                         "dev",
-                        "tofu-test",
+                        "yonik-test",
                         "nodad",
                     )
-                    ip("link", "set", "tofu-test", "up")
+                    ip("link", "set", "yonik-test", "up")
                     for family, address in TARGETS:
                         routes = json.loads(
                             ip(
@@ -87,7 +89,7 @@ def worker(binary: Path, engine: str, host_namespace: int) -> None:
                                 address,
                             )
                         )
-                        if routes[0].get("dev") != "tofu-test":
+                        if routes[0].get("dev") != "yonik-test":
                             raise RuntimeError("Тестовый маршрут обходит TUN")
                         for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
                             before = counters()

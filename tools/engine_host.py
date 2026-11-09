@@ -24,7 +24,7 @@ from pathlib import Path
 from engine_compile import UUID, stop, wait_listener
 from engine_smoke import install_signal_handlers, links, run_sandbox
 
-LOG = logging.getLogger("tofu.host")
+LOG = logging.getLogger("yonik.host")
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = f"vless://{UUID}@127.0.0.1:24443"
 
@@ -72,7 +72,7 @@ def https_server(
             "-days",
             "1",
             "-subj",
-            "/CN=tofu-test-ca",
+            "/CN=yonik-test-ca",
             "-keyout",
             str(ca_key),
             "-out",
@@ -85,7 +85,7 @@ def https_server(
             "rsa:2048",
             "-nodes",
             "-subj",
-            "/CN=tofu-test",
+            "/CN=yonik-test",
             "-keyout",
             str(key),
             "-out",
@@ -519,7 +519,7 @@ def main() -> int:
     if args.worker is not None:
         worker(args)
         return 0
-    with tempfile.TemporaryDirectory(prefix="tofu-host-") as directory:
+    with tempfile.TemporaryDirectory(prefix="yonik-host-") as directory:
         fake = Path(directory) / "fake-core"
         subprocess.run(
             ["rustc", str(ROOT / "tests/engines/host_fixture.rs"), "-o", str(fake)],

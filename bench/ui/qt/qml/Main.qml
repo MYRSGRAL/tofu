@@ -3,7 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import tofu.benchmark
+import yonik.benchmark
 
 ApplicationWindow {
     id: root
@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 800
     minimumHeight: 640
     visible: true
-    title: "Tofu · Qt Quick"
+    title: "Yonik · Qt Quick"
     color: "#191919"
     font.family: "Noto Sans"
     font.pixelSize: 14
@@ -109,7 +109,7 @@ ApplicationWindow {
             Layout.minimumHeight: 38
             Layout.preferredHeight: 38
             Layout.maximumHeight: 38
-            Text { text: "TOFU"; color: "#c3a6ef"; font.family: "Noto Sans"; font.pixelSize: 14; font.bold: true }
+            Text { text: "YONIK"; color: "#c3a6ef"; font.family: "Noto Sans"; font.pixelSize: 14; font.bold: true }
             Text { text: "Серверы"; color: "#eeeeee"; font.family: "Noto Sans"; font.pixelSize: 14; Layout.leftMargin: 16 }
             Item { Layout.fillWidth: true }
             Text { text: "Qt Quick · " + root.snapshot.total; color: "#b2b2b2"; font.family: "Noto Sans"; font.pixelSize: 14 }

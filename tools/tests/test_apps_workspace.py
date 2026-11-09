@@ -32,7 +32,7 @@ apps.main()
         for event in (signal.SIGINT, signal.SIGTERM):
             with (
                 self.subTest(event=event),
-                tempfile.TemporaryDirectory(prefix="tofu-apps-test-") as directory,
+                tempfile.TemporaryDirectory(prefix="yonik-apps-test-") as directory,
             ):
                 root = Path(directory)
                 process = subprocess.Popen(

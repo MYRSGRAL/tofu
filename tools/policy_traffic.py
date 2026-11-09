@@ -1,7 +1,7 @@
 """Нативные доказательства policy routing; только синтетика в user/net/mount namespace.
 
 Запускать под flock корня transient-каталога, задав TMPDIR внутри этого корня.
-Аргументы: tofu-compile tofu-local xray sing-box. Rust этот инструмент не собирает.
+Аргументы: yonik-compile yonik-local xray sing-box. Rust этот инструмент не собирает.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from engine_host import Events, arguments, environment, https_server, once, peer
 from engine_smoke import install_signal_handlers, links, run_sandbox
 from traffic_echo import receive_exact
 
-LOG = logging.getLogger("tofu.policy")
+LOG = logging.getLogger("yonik.policy")
 PROFILE = f"vless://{UUID}@127.0.0.1:24443".encode()
 DIGESTS = {
     "xray": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
@@ -327,7 +327,7 @@ def compile_config(
     else:
         user = inbound["users"][0]
         credentials = user["username"], user["password"]
-    if credentials[0] != "tofu-health" or len(credentials[1]) != 64:
+    if credentials[0] != "yonik-health" or len(credentials[1]) != 64:
         raise RuntimeError("Нет отдельной случайной авторизации health SOCKS")
     config_path = workspace / f"{engine}-client.json"
     write_json(config_path, config)
@@ -677,7 +677,7 @@ def main() -> int:
     for engine, binary in [("xray", args.xray), ("sing-box", args.sing_box)]:
         if hashlib.sha256(binary.read_bytes()).hexdigest() != DIGESTS[engine]:
             raise RuntimeError(f"Не совпадает SHA256 тестового ядра {engine}")
-    with tempfile.TemporaryDirectory(prefix="tofu-policy-") as directory:
+    with tempfile.TemporaryDirectory(prefix="yonik-policy-") as directory:
         run_sandbox(
             [
                 "unshare",

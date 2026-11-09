@@ -31,7 +31,7 @@ def observed_run(elapsed: float, alive: bool = True) -> dict:
         return ["198.18.0.2"]
 
     with (
-        tempfile.TemporaryDirectory(prefix="tofu-dns-observation-") as directory,
+        tempfile.TemporaryDirectory(prefix="yonik-dns-observation-") as directory,
         patch.object(probe, "markers", return_value=contextlib.nullcontext([])),
         patch.object(probe, "engine_process", side_effect=process),
         patch.object(probe, "wait_listener"),

@@ -2016,11 +2016,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
-name = "tofu-application"
+name = "yonik-application"
 version = "0.1.0"
 
 [[package]]
-name = "tofu-desktop"
+name = "yonik-desktop"
 version = "0.1.0"
 dependencies = [
  "cxx",
@@ -2033,24 +2033,24 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "tofu-application",
- "tofu-domain",
- "tofu-engine",
- "tofu-import",
- "tofu-linux",
+ "yonik-application",
+ "yonik-domain",
+ "yonik-engine",
+ "yonik-import",
+ "yonik-linux",
  "tokio",
  "zeroize",
 ]
 
 [[package]]
-name = "tofu-domain"
+name = "yonik-domain"
 version = "0.1.0"
 dependencies = [
  "idna",
 ]
 
 [[package]]
-name = "tofu-engine"
+name = "yonik-engine"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
@@ -2058,13 +2058,13 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "tofu-domain",
- "tofu-import",
+ "yonik-domain",
+ "yonik-import",
  "url",
 ]
 
 [[package]]
-name = "tofu-import"
+name = "yonik-import"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
@@ -2075,7 +2075,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tofu-linux"
+name = "yonik-linux"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
@@ -2090,20 +2090,20 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tofu-application",
- "tofu-engine",
- "tofu-import",
- "tofu-subscription",
+ "yonik-application",
+ "yonik-engine",
+ "yonik-import",
+ "yonik-subscription",
  "tokio",
  "zbus",
  "zeroize",
 ]
 
 [[package]]
-name = "tofu-subscription"
+name = "yonik-subscription"
 version = "0.1.0"
 dependencies = [
- "tofu-import",
+ "yonik-import",
 ]
 
 [[package]]

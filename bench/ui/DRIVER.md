@@ -6,7 +6,7 @@ Python 3.12+, Linux `/proc`, активная разблокированная W
 
 ```sh
 python tools/ui_benchmark.py \
-  --binary /absolute/path/to/tofu-bench-gtk \
+  --binary /absolute/path/to/yonik-bench-gtk \
   --rows 1000 \
   --output /absolute/path/to/results/gtk-1000-run1 \
   --idle-seconds 900 \

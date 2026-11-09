@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Установка пользовательского пункта меню tofu без запуска приложения."""
+"""Установка пользовательского пункта меню yonik без запуска приложения."""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-APP_ID = "cloud.highpriority.tofu.local"
+APP_ID = "cloud.highpriority.yonik.local"
+LEGACY_APP_ID = "cloud.highpriority.tofu.local"
 DEFAULT_ICON = (
-    Path(__file__).resolve().parents[1] / "crates/tofu-desktop/assets/tofu.svg"
+    Path(__file__).resolve().parents[1] / "crates/yonik-desktop/assets/yonik.svg"
 )
 
 
@@ -44,14 +45,14 @@ def render_entry(binary: Path, engine_dir: Path, icon_hash: str) -> str:
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
-        "Name=tofu\n"
+        "Name=yonik\n"
         f"Exec={exec_argument(binary)} --engine-dir {exec_argument(engine_dir)}\n"
         f"Icon={APP_ID}\n"
         "Terminal=false\n"
         "StartupNotify=true\n"
         "Categories=Network;\n"
-        "X-Tofu-Managed=true\n"
-        f"X-Tofu-Icon-SHA256={icon_hash}\n"
+        "X-Yonik-Managed=true\n"
+        f"X-Yonik-Icon-SHA256={icon_hash}\n"
     )
 
 
@@ -82,7 +83,7 @@ def ensure_directory(path: Path) -> None:
 
 
 def atomic_write(path: Path, data: bytes, previous: bytes | None) -> None:
-    descriptor, temporary = tempfile.mkstemp(prefix=".tofu-", dir=path.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=".yonik-", dir=path.parent)
     temporary_path = Path(temporary)
     try:
         with os.fdopen(descriptor, "wb") as destination:
@@ -99,6 +100,65 @@ def atomic_write(path: Path, data: bytes, previous: bytes | None) -> None:
             os.replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def legacy_snapshot(
+    applications: Path, icon_directory: Path
+) -> list[tuple[Path, bytes, os.stat_result]]:
+    """Чужой или изменённый старый launcher не препятствует новой установке."""
+    entry = applications / f"{LEGACY_APP_ID}.desktop"
+    icon = icon_directory / f"{LEGACY_APP_ID}.svg"
+    try:
+        snapshots = []
+        for path in (entry, icon):
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                continue
+            data = read_owned_file(path)
+            if data is not None:
+                if metadata != path.lstat():
+                    return []
+                snapshots.append((path, data, metadata))
+        if not snapshots or snapshots[0][0] != entry:
+            return []
+        configuration = configparser.ConfigParser(interpolation=None, strict=True)
+        configuration.read_string(snapshots[0][1].decode("utf-8"))
+        section = configuration["Desktop Entry"]
+        if section.get("X-Tofu-Managed") != "true":
+            return []
+        if len(snapshots) == 2 and section.get("X-Tofu-Icon-SHA256") != (
+            hashlib.sha256(snapshots[1][1]).hexdigest()
+        ):
+            return []
+        return snapshots
+    except (OSError, ValueError, KeyError, configparser.Error):
+        return []
+
+
+def remove_legacy(snapshots: list[tuple[Path, bytes, os.stat_result]]) -> None:
+    """Повторная проверка пары перед удалением исключает подмену при установке."""
+    for path, data, metadata in snapshots:
+        try:
+            unchanged = read_owned_file(path) == data and path.lstat() == metadata
+        except (OSError, ValueError):
+            unchanged = False
+        if not unchanged:
+            logging.warning("Старый launcher изменился, сохранён: %s", path)
+            return
+    for path, data, metadata in reversed(snapshots):
+        try:
+            unchanged = read_owned_file(path) == data and path.lstat() == metadata
+        except (OSError, ValueError):
+            unchanged = False
+        if not unchanged:
+            logging.warning("Старый launcher изменился, сохранён: %s", path)
+            return
+        # Entry удаляем последним: после сбоя он остаётся маркером владения,
+        # даже если старая иконка уже удалена. Повтор завершит очистку пары.
+        # Ошибка удаления возвращается вызывающему: повтор сможет завершить
+        # миграцию, а успешная установка не оставляет управляемый дубликат меню.
+        path.unlink()
 
 
 def install_desktop(
@@ -140,28 +200,30 @@ def install_desktop(
         ensure_directory(icon_directory)
     entry = applications / f"{APP_ID}.desktop"
     installed_icon = icon_directory / f"{APP_ID}.svg"
+    legacy = legacy_snapshot(applications, icon_directory)
     old_entry = read_owned_file(entry)
     old_icon = read_owned_file(installed_icon)
     if old_entry is not None:
         configuration = configparser.ConfigParser(interpolation=None, strict=True)
         configuration.read_string(old_entry.decode("utf-8"))
         section = configuration["Desktop Entry"]
-        if section.get("X-Tofu-Managed") != "true":
-            raise ValueError(f"Существующий пункт меню не управляется tofu: {entry}")
+        if section.get("X-Yonik-Managed") != "true":
+            raise ValueError(f"Существующий пункт меню не управляется yonik: {entry}")
         if (
             old_icon is not None
-            and section.get("X-Tofu-Icon-SHA256")
+            and section.get("X-Yonik-Icon-SHA256")
             != hashlib.sha256(old_icon).hexdigest()
             and old_icon != icon_data
         ):
             raise ValueError(f"Существующая иконка изменена извне: {installed_icon}")
     elif old_icon is not None and old_icon != icon_data:
-        raise ValueError(f"Существующая иконка не управляется tofu: {installed_icon}")
+        raise ValueError(f"Существующая иконка не управляется yonik: {installed_icon}")
     # После сбоя между двумя atomic_write наша точная иконка уже на месте,
     # а entry ещё старый/отсутствует. Повтор завершает установку; чужие bytes
     # по-прежнему запрещены. Ссылки/владелец проверяются read_owned_file выше.
     atomic_write(installed_icon, icon_data, old_icon)
     atomic_write(entry, entry_data, old_entry)
+    remove_legacy(legacy)
     return entry
 
 
@@ -177,7 +239,7 @@ def main() -> int:
     except (OSError, ValueError, KeyError, configparser.Error, ET.ParseError) as error:
         logging.error("Установка пункта меню не выполнена: %s", error)
         return 1
-    logging.info("Пункт меню tofu установлен: %s", entry)
+    logging.info("Пункт меню yonik установлен: %s", entry)
     return 0
 
 

@@ -21,7 +21,7 @@ import build_native_adapter as builder  # noqa: E402
 
 class BuilderTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="tofu-builder-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="yonik-builder-test-")
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
         self.root = self.base / "build"

@@ -17,7 +17,7 @@ from pathlib import Path
 from engine_smoke import install_signal_handlers, links, run_sandbox
 from traffic_echo import PAYLOAD_SIZE, RESPONSE_PREFIX, echo_servers, receive_exact
 
-LOG = logging.getLogger("tofu.compile")
+LOG = logging.getLogger("yonik.compile")
 UUID = "00112233-4455-6677-8899-aabbccddeeff"
 
 
@@ -299,9 +299,9 @@ def tls_traffic(compiler: Path, binary: Path, engine: str, workspace: Path) -> N
         try:
             wait_listener(peer, 24443)
             for name, trusted, allowed in [
-                ("tofu.test", True, True),
+                ("yonik.test", True, True),
                 ("wrong.test", True, False),
-                ("tofu.test", False, False),
+                ("yonik.test", False, False),
             ]:
                 config = workspace / f"{engine}-tls-client.json"
                 config.write_bytes(
@@ -352,7 +352,7 @@ def main() -> int:
     parser.add_argument("--workspace", type=Path)
     args = parser.parse_args()
     if args.worker is None:
-        with tempfile.TemporaryDirectory(prefix="tofu-compile-") as directory:
+        with tempfile.TemporaryDirectory(prefix="yonik-compile-") as directory:
             run_sandbox(
                 [
                     "unshare",
@@ -395,9 +395,9 @@ def main() -> int:
             "-days",
             "1",
             "-subj",
-            "/CN=tofu.test",
+            "/CN=yonik.test",
             "-addext",
-            "subjectAltName=DNS:tofu.test",
+            "subjectAltName=DNS:yonik.test",
             "-keyout",
             str(args.workspace / "key.pem"),
             "-out",

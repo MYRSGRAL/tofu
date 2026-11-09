@@ -290,7 +290,7 @@ fn launch(rows: usize, stdin: bool) -> Harness {
     let actor_stop = Arc::clone(&stopped);
     let actor_output = output.clone();
     let spawned = thread::Builder::new()
-        .name("tofu-bench-data".into())
+        .name("yonik-bench-data".into())
         .spawn(move || {
             if rows > MAX_ROWS {
                 fail(&actor_output);
@@ -323,7 +323,7 @@ fn launch(rows: usize, stdin: bool) -> Harness {
         let stdin_commands = commands.clone();
         let input_stop = Arc::clone(&stopped);
         let spawned = thread::Builder::new()
-            .name("tofu-bench-input".into())
+            .name("yonik-bench-input".into())
             .spawn(move || {
                 read_commands(io::stdin().lock(), &stdin_commands, &input_stop);
             });

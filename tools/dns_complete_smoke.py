@@ -30,12 +30,12 @@ PATCH = (
     Path(__file__).resolve().parents[1]
     / "adapters/sing-box/v1.14.4/strict-complete-dns.patch"
 )
-LOG = logging.getLogger("tofu.complete-dns")
+LOG = logging.getLogger("yonik.complete-dns")
 _WORKER_BOOTSTRAP = """
 import logging, runpy, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-m = runpy.run_path(sys.argv[1], run_name="tofu_complete_dns_worker")
+m = runpy.run_path(sys.argv[1], run_name="yonik_complete_dns_worker")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 m["install_signal_handlers"]()
 m["worker"](Path(sys.argv[2]), Path(sys.argv[3]), int(sys.argv[4]), Path(sys.argv[5]))

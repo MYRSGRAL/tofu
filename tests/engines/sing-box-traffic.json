@@ -1,7 +1,7 @@
 {
   "log": {"level": "warn"},
   "inbounds": [{
-    "type": "tun", "tag": "tun", "interface_name": "tofu-test",
+    "type": "tun", "tag": "tun", "interface_name": "yonik-test",
     "address": ["198.18.0.1/30", "2001:db8:746f::1/126"],
     "mtu": 1500, "auto_route": false
   }],

@@ -92,7 +92,7 @@ class OracleTests(unittest.TestCase):
 
 class ChildTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory(prefix="tofu-ui-driver-test-")
+        self.directory = tempfile.TemporaryDirectory(prefix="yonik-ui-driver-test-")
         self.root = Path(self.directory.name)
         self.children: list[bench.Child] = []
 

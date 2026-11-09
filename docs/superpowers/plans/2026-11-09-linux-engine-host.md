@@ -3,7 +3,7 @@
 Основание: EngineHost, PreparedPlan, FR-03/04/10. Пользователь разрешил
 автономную реализацию существующей спецификации, проверки и merge после review.
 
-1. tofu-linux — отдельный Linux-only host; portable crates сохраняют Android
+1. yonik-linux — отдельный Linux-only host; portable crates сохраняют Android
    compile-check. Tokio runtime принадлежит оболочке. Reqwest/rustls выполняет
    HTTPS через явный SOCKS5h, без env proxy, redirects и direct fallback.
 2. Пользователь указывает путь ELF ядра и ожидаемый SHA-256. Открыть regular file
@@ -21,7 +21,7 @@
    PID ядра: пересечение inode из /proc/PID/fd с /proc/PID/net/tcp. Перед/после
    HTTPS перепроверить владельца и состояние процесса. Connected только после
    HTTPS 2xx; timeout/HTTP отказ — Limited, процесс остаётся для использования.
-6. CLI tofu-local читает URI/Base64 импорт из stdin, выбирает сервер,
+6. CLI yonik-local читает URI/Base64 импорт из stdin, выбирает сервер,
    по умолчанию отклоняет частичный импорт. --accept-partial вместе с явным
    --server разрешает только выбранную распознанную запись и сообщает число ошибок;
    показывает только безопасные NDJSON состояния. --once проверяет и останавливает;
