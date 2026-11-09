@@ -104,3 +104,8 @@ dial. Не исправляет stale/disable-expire semantics, CNAME/negative T
 отдельный UDP resolver path и недостаточные TTL исходного LookupIP. Следующий
 патч должен переносить error и проверенный набор без нового DNS до dial, сохраняя
 Host/SNI; отрицательный TTL и backend limitations нельзя подменить константой.
+
+Этот документ фиксирует первый standalone-патч и сборочный инструмент на
+коммите e5d3eec. Текущий builder дополнен цепочкой provenance/direct pin;
+[следующий этап и его ограничения](2026-11-09-resolution-pin.md) не меняют
+приведённые здесь исторические SHA/evidence.
