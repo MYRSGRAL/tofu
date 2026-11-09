@@ -191,6 +191,7 @@ impl fmt::Debug for KernelRoute {
 }
 
 /// Только RTM_GETROUTE; не отправляет пакет и не проверяет достижимость или bind.
+/// Требует Tokio runtime с включёнными I/O и time.
 pub async fn lookup_route(
     query: RouteQuery,
     cancel: &mut Cancellation,

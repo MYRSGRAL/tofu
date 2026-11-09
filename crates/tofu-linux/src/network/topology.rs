@@ -170,12 +170,14 @@ impl LinuxTopology {
             + self.rules.iter().map(|v| v.unknown.len()).sum::<usize>()
             + self.nexthops.iter().map(|v| v.unknown.len()).sum::<usize>()
     }
+    /// Неинтерпретированные атрибуты, не проверка целостности ссылок или lease Apply.
     pub fn incomplete(&self) -> bool {
         self.unsupported_count() != 0
     }
 }
 
 /// Ограничение действует на все запросы целиком, без автоматических повторов.
+/// Требует Tokio runtime с включёнными I/O и time; не выполняет Apply.
 pub async fn read_topology(
     cancel: &mut Cancellation,
     timeout: Duration,

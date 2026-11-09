@@ -127,6 +127,23 @@ again. It does not launch automatic probes or reconnects. This observer is not y
 the atomic NetworkHost snapshot/apply contract required for TUN.
 [Network observation and remaining limits](docs/validation/2026-11-09-network-observation.md).
 
+The Linux library also exposes bounded read-only `read_topology` and `lookup_route`
+APIs. They read links, addresses, routes from all tables, policy rules and nexthop
+objects, or ask the kernel for a route with explicit UID/mark/source and TCP/UDP
+selectors. Unknown attributes remain visible as incomplete interpretation. These
+facts do not authorize Apply, prove reachability or enable private VPN binding.
+DNS/ResolverHost and the privileged network lifecycle remain pending.
+
+For explicit diagnostics, using the build directory above:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --locked -p tofu-linux --example network_inspect
+printf '%s\n' '{"op":"snapshot"}' | flock -s "$tofu_build" "$tofu_build/target/debug/examples/network_inspect"
+```
+
+This CLI outputs network addresses and selectors intentionally; ordinary Debug
+output is redacted. [Topology/route-get evidence and limits](docs/validation/2026-11-09-network-topology.md).
+
 A stdin-only diagnostic example checks one accepted record by index and emits
 only counts, status and durations: `cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
 Pipe local profile text into stdin; subscription URLs and credentials must stay
