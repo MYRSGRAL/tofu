@@ -81,3 +81,7 @@ allow/deny/challenge, фиксированные subject/action/flags, исче�
 [D-Bus specification](https://dbus.freedesktop.org/doc/dbus-specification.html)
 и исходники закреплённого zbus4.4.0. Сам компонент не заменяет изолированную
 приёмку сервиса/политик установки и полного NetworkHost.
+
+Доверие к установленным исполняемым файлам описано отдельно в
+[контракте системного реестра](helper-trusted-registry.md). Оно не заменяет
+проверку polkit и не разрешает сетевой эффект само по себе.
