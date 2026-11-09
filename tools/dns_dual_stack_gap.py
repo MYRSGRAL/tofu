@@ -106,6 +106,10 @@ def native_config() -> dict:
             "rules": [
                 {"action": "resolve", "server": "fixture", "strategy": "prefer_ipv4"},
                 {
+                    "ip_cidr": ["198.51.101.0/24", "2001:db8:ffff::/48"],
+                    "action": "reject",
+                },
+                {
                     "ip_cidr": [f"{IPV4}/32", f"{IPV6}/128"],
                     "action": "route",
                     "outbound": "marker",
@@ -143,11 +147,12 @@ def worker(host_namespace: int, binary: Path, output: Path) -> None:
             ["ip", "addr", "add", address, "dev", "lo"], check=True, timeout=3
         )
     cases: list[dict] = []
-    for label, good_a, good_aaaa in [
-        ("both_servfail", False, False),
-        ("both_valid", True, True),
-        ("a_valid_aaaa_servfail", True, False),
-        ("aaaa_valid_a_servfail", False, True),
+    for label, good_a, good_aaaa, higher_block in [
+        ("both_servfail", False, False, False),
+        ("both_valid", True, True, False),
+        ("a_valid_aaaa_servfail", True, False, False),
+        ("aaaa_valid_a_servfail", False, True, False),
+        ("higher_aaaa_block", True, True, True),
     ]:
         directory = output / label
         directory.mkdir(parents=True, exist_ok=True)
@@ -158,7 +163,7 @@ def worker(host_namespace: int, binary: Path, output: Path) -> None:
             if qtype == 1 and good_a:
                 return Reply(addresses=(IPV4,))
             if qtype == 28 and good_aaaa:
-                return Reply(addresses=(IPV6,))
+                return Reply(addresses=("2001:db8:ffff::10" if higher_block else IPV6,))
             return Reply(rcode=2)
 
         with DnsFixture(answer) as fixture, marker_servers() as received:
@@ -172,7 +177,7 @@ def worker(host_namespace: int, binary: Path, output: Path) -> None:
             records = list(fixture.records)
             destinations = list(received)
         counts = Counter(record["qtype"] for record in records)
-        expected_marker = good_a or good_aaaa
+        expected_marker = (good_a or good_aaaa) and not higher_block
         partial = good_a != good_aaaa
         observed = (
             marker == expected_marker
@@ -192,7 +197,7 @@ def worker(host_namespace: int, binary: Path, output: Path) -> None:
             "engine_reaped": reaped,
             "socks_error": error,
             "expected_under_strict_dual_stack_contract": "block"
-            if not (good_a and good_aaaa)
+            if not (good_a and good_aaaa) or higher_block
             else "connect",
             "contract_mismatch": partial and marker,
             "observation_matches_reproduction": observed,

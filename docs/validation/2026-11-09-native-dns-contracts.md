@@ -25,7 +25,8 @@ Native config-check обязателен. Процесс должен быть �
 ## Неполный набор A/AAAA — sing-box
 
 `tools/dns_dual_stack_gap.py`: локальный UDP resolver и native route.resolve с
-двумя семействами. Каждое семейство реально запрошено ровно один раз.
+двумя семействами. Перед разрешающим правилом стоят старшие блокирующие
+CIDR для обоих семейств. Каждое семейство реально запрошено ровно один раз.
 
 | DNS outcomes | Фактический результат |
 | --- | --- |
@@ -33,13 +34,16 @@ Native config-check обязателен. Процесс должен быть �
 | A valid, AAAA valid | Успешный marker |
 | A valid, AAAA SERVFAIL | Успешный IPv4 marker |
 | A SERVFAIL, AAAA valid | Успешный IPv6 marker |
+| A valid, AAAA входит в старший BLOCK CIDR | Нет marker, несмотря на разрешённый A |
 
-Последние два случая противоречат требованию D-05 о полном обязательном наборе.
+Два partial случая противоречат требованию D-05: ошибочное семейство не исключает старшее блокирующее условие.
+Последний контроль показывает, что успешный AAAA под старшим CIDR меняет решение
+на BLOCK при том же разрешённом IPv4.
 Aggregate resolve error прерывает route, но ошибка одного семейства скрывается
 успешным результатом другого. См. [client](https://github.com/SagerNet/sing-box/blob/v1.14.4/dns/client.go#L474-L497)
 и [router](https://github.com/SagerNet/sing-box/blob/v1.14.4/dns/router.go#L1000-L1019).
 
-Evidence: `local/validation/native-dns-contracts/dual-stack/result.json`, четыре
+Evidence: `local/validation/native-dns-contracts/dual-stack/higher-cidr/result.json`, пять
 native config/log рядом. `gate_supported:false`, `mismatch_reproduced` означает
 успешное воспроизведение ограничения, а не прохождение продуктового gate.
 
