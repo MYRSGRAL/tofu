@@ -27,10 +27,14 @@ desktop-приложения, установщика и рабочего сет�
   loopback SOCKS, проверка TLS и явные ошибки неподдерживаемых параметров.
 - Linux host `tofu-local`: проверяет immutable snapshot ядра и конфигурацию,
   обслуживает локальный SOCKS, проверяет HTTPS через него и завершает/reap процесс.
+- IDNA exact/suffix правила и общая DNS-модель с явным разрешением,
+  неоднозначностью, TTL/поколениями и привязкой fake mapping к сессии.
+- Нативные доменные или явно IP-only политики proxy/direct/block с приоритетами,
+  блокировкой недоступных приватных назначений и авторизованным health listener.
 
 Rust-библиотека рассчитывает политику; изолированные стенды дают описанные ниже
-ограниченные сетевые доказательства. Домены, DNS/Fake-IP,
-сетевые обновления подписок, хранение, компиляцию политики для ядер, helper, GUI и трей ещё предстоит
+ограниченные сетевые доказательства. Полный mixed domain/CIDR DNS/Fake-IP тракт,
+сетевые обновления подписок, хранение, TUN-интеграцию политики, helper, GUI и трей ещё предстоит
 реализовать. Выбор GUI toolkit остаётся открытым.
 
 `tofu-application` реализует начальный цикл подключения, проверки и остановки.
@@ -43,7 +47,7 @@ Host обязан выбрать уникальный controller ID, пока в
 
 ### Разработка
 
-Rust 1.85+ (edition 2024). Domain/application используют только std; у импортера
+Rust 1.85+ (edition 2024). Application использует только std, нормализация доменов — IDNA; у импортера
 стандартные библиотеки Base64, URL/IDNA и JSON. Linux host использует Tokio,
 reqwest/rustls, SHA-256 и безопасные rustix syscalls. Cargo.lock фиксирует MSRV-совместимые версии.
 Сборки размещаются вне checkout. На рабочей машине проекта:
@@ -180,6 +184,50 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$to
 ```
 
 [Результаты и оставшаяся работа](docs/validation/2026-11-09-linux-engine-host.md).
+
+### Политика маршрутизации
+
+Оба CLI принимают вместе `--policy FILE --policy-mode names|ip-only --probe-port PORT`.
+Режим `names` поддерживает exact/suffix домены и действие по умолчанию; сочетания
+CIDR/LAN с обязательным DNS отклоняются. `ip-only` поддерживает CIDR/LAN и блокирует
+доменные SOCKS-запросы до маршрутизации. Доменное правило не теряется молча.
+Атрибуция процесса через локальный SOCKS и привязка доступного приватного VPN пока
+не доказаны и дают явную ошибку. Отключённые личные правила/пресеты не влияют на маршрут.
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 --policy examples/policy-names.json --policy-mode names --probe-port 10809 < local/subscription.txt
+```
+
+[Доменный пример](examples/policy-names.json) и [IP-only пример](examples/policy-ip-only.json)
+содержат документационные назначения: замените их своими правилами. Schema version 1:
+`default_action`, `user_rules`, `preset_rules`, `lan`, `private_networks`, `private_domains`.
+Правило содержит `id`, `action`, необязательные `enabled` и `conditions` с массивами
+`domain`, `domain_suffix`, `ip_cidr`, `executable_paths`. Значения назначения объединены
+ИЛИ, источник и назначение — И. Личные правила идут перед пресетами. Недоступные
+приватные сети/зоны блокируются раньше LAN и личных правил. `available: true` не
+разрешает использовать VPN: нужна будущая подтверждённая NetworkHost binding.
+
+Лимиты: 2 MiB JSON, 10 000 правил, 100 000 значений селекторов. Неизвестные/повторные
+поля, повторные ID в группе, неверные имена/CIDR отклоняются. Политика нормализует
+IDNA, регистр и root-dot; нативный SOCKS ingress принимает канонические ASCII/punycode
+имена. Raw Unicode/root-dot/невалидные wire-имена блокируются, чтобы не попасть в fallback.
+
+Отдельный health listener требует случайный пароль 256 бит, доступный только host
+и чувствительному конфигу. Анонимный доступ для обхода правил закрыт. HTTPS проверяется
+через proxy даже при default DIRECT/BLOCK. Известные защищённые адреса/зоны endpoint
+отклоняются до запроса. Системные маршруты и DNS не меняются.
+
+Общая модель покрывает решения D-01…D-07. Нативное смешение domain/CIDR всё ещё
+заблокировано gate: воспроизводимый Xray `IPOnDemand` после SERVFAIL проваливается
+к младшему доменному правилу. Такое поведение не принимается за требуемый fail-closed.
+
+```sh
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/policy_traffic.py "$tofu_build/target/release/tofu-compile" "$tofu_build/target/release/tofu-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/dns_policy_gap.py /абсолютный/путь/к/xray
+```
+
+Вторая команда намеренно воспроизводит проблему upstream на синтетических данных;
+её exit 0 не означает пройденный G-DNS. [Результаты и ограничения политики](docs/validation/2026-11-09-policy-routing.md).
 
 ### Документация и лицензия
 

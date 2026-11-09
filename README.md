@@ -26,10 +26,14 @@ application, installer or production network adapter yet.
   with a loopback SOCKS listener, TLS verification and explicit unsupported-option errors.
 - Linux `tofu-local` host: verifies an immutable engine snapshot, runs config-check,
   serves local SOCKS, checks HTTPS through that outbound, and stops/reaps the core.
+- IDNA exact/suffix rules and a portable DNS decision model with explicit resolution,
+  ambiguity, TTL/generation checks and session-bound fake mappings.
+- Native domain-only or explicit IP-only policies with ordered proxy/direct/block,
+  protected unavailable destinations and an authenticated outbound-only health listener.
 
 The Rust library calculates policy; the isolated suites provide the specific
-network evidence described below. Domain
-matching, DNS/Fake-IP, network subscription updates, storage, policy-to-engine compilation, helper,
+network evidence described below. Full mixed domain/CIDR DNS/Fake-IP execution,
+network subscription updates, storage, TUN policy integration, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
 
 `tofu-application` currently implements the initial connect/check/stop loop.
@@ -42,7 +46,7 @@ checked artifact. This does not replace OS authorization or atomic host-side App
 
 ### Development
 
-Rust 1.85+ (edition 2024). Domain/application remain std-only; the importer uses
+Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses
 Base64, URL/IDNA and JSON libraries. The Linux host uses Tokio, reqwest/rustls,
 SHA-256 and safe rustix syscalls. Cargo.lock pins MSRV-compatible dependencies.
 Build artifacts belong outside the checkout. On the project development host:
@@ -177,6 +181,50 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$to
 ```
 
 [Host evidence and remaining work](docs/validation/2026-11-09-linux-engine-host.md).
+
+### Routing policy
+
+Both CLIs accept `--policy FILE --policy-mode names|ip-only --probe-port PORT`
+together. `names` supports exact/suffix domain rules and a default action; it rejects
+CIDR/LAN combinations requiring real DNS. `ip-only` supports CIDR/LAN rules and blocks
+domain SOCKS destinations before routing. It does not silently discard domain rules.
+Process attribution through local SOCKS and available private-VPN bindings are not yet
+proven and fail explicitly. Disabled user/preset rules have no routing effect.
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /absolute/path/to/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 --policy examples/policy-names.json --policy-mode names --probe-port 10809 < local/subscription.txt
+```
+
+[Names example](examples/policy-names.json) and [IP-only example](examples/policy-ip-only.json)
+use documentation destinations: edit them for your own rules. Schema version 1:
+`default_action`, `user_rules`, `preset_rules`, `lan`, `private_networks`, `private_domains`.
+Rules have `id`, `action`, optional `enabled` and `conditions` containing `domain`,
+`domain_suffix`, `ip_cidr`, `executable_paths` arrays. Destination values are OR;
+source and destination groups are AND. User order precedes presets. Protected unavailable
+networks/zones precede LAN and user rules. `available: true` is not an authorization
+to use a VPN: native compilation requires a future verified NetworkHost binding.
+
+Limits: 2 MiB JSON, 10,000 rules, 100,000 selector values. Unknown/duplicate fields,
+duplicate IDs within a group and invalid names/CIDRs fail. Policy names normalize IDNA,
+case and the root dot; the native SOCKS ingress accepts canonical ASCII/punycode names.
+Raw Unicode/root-dot/invalid wire names are rejected to prevent fallback around rules.
+
+The separate health listener requires a random 256-bit password held only by the host
+and sensitive compiled config. Ordinary applications cannot use it anonymously to bypass
+rules. HTTPS checks always select proxy, even with default DIRECT/BLOCK. Known protected
+probe addresses/zones are rejected before sending a request. No system routes/DNS change.
+
+The portable evaluator covers the D-01…D-07 decision cases. Native mixed domain/CIDR
+execution is still gated: a reproducible pinned Xray `IPOnDemand` SERVFAIL case falls
+through to a younger domain rule. This is not accepted as the required fail-closed behavior.
+
+```sh
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/policy_traffic.py "$tofu_build/target/release/tofu-compile" "$tofu_build/target/release/tofu-local" /absolute/path/to/xray /absolute/path/to/sing-box
+flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/dns_policy_gap.py /absolute/path/to/xray
+```
+
+The second command intentionally reproduces an upstream semantic gap using synthetic
+data; its exit 0 does not mean G-DNS passes. [Policy evidence and limitations](docs/validation/2026-11-09-policy-routing.md).
 
 ### Documentation and license
 
