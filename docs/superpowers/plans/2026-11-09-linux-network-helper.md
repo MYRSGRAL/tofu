@@ -45,15 +45,15 @@ nftables, systemd-resolved. Новые зависимости требуют о�
 
 | Путь | Ответственность |
 | --- | --- |
-| `crates/tofu-linux/src/managed_network/` | Журнал, проверка/сверка владения и последовательность эффектов |
-| `crates/tofu-linux/tests/network_journal.rs` | Настоящие filesystem recovery/permission/lock проверки |
-| `crates/tofu-linux/src/network/` | Существующий read-only topology/lookup; отдельные типизированные write-операции |
-| `crates/tofu-linux/src/resolver/` | Существующие snapshots; отдельный owned resolved-adapter |
-| `crates/tofu-linux/src/helper/` | Версионный D-Bus DTO, peer/polkit, immutable handles, trusted registry |
-| `crates/tofu-linux/src/bin/tofu-network-helper.rs` | Системный процесс; без UI и универсального запуска команд |
+| `crates/yonik-linux/src/managed_network/` | Журнал, проверка/сверка владения и последовательность эффектов |
+| `crates/yonik-linux/tests/network_journal.rs` | Настоящие filesystem recovery/permission/lock проверки |
+| `crates/yonik-linux/src/network/` | Существующий read-only topology/lookup; отдельные типизированные write-операции |
+| `crates/yonik-linux/src/resolver/` | Существующие snapshots; отдельный owned resolved-adapter |
+| `crates/yonik-linux/src/helper/` | Версионный D-Bus DTO, peer/polkit, immutable handles, trusted registry |
+| `crates/yonik-linux/src/bin/yonik-network-helper.rs` | Системный процесс; без UI и универсального запуска команд |
 | `packaging/linux/` | Фиксированные D-Bus/polkit/systemd файлы и registry установки |
 | `tools/network_helper_smoke.py` | Полная изолированная проверка Apply/rollback/recovery |
-| `crates/tofu-desktop/src/backend/` | Последующее подключение controller к подтверждённому helper state |
+| `crates/yonik-desktop/src/backend/` | Последующее подключение controller к подтверждённому helper state |
 
 ## Проверка ревью
 
@@ -92,10 +92,10 @@ nftables, systemd-resolved. Новые зависимости требуют о�
 - [ ] GREEN: реальные файловые тесты, MSRV fmt/clippy, review и атомарный commit.
 
 Команды компонента: под BSD lock корня
-`/var/tmp/codex-myrs/transient/tofu-network-journal`, с
-`CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/tofu-network-journal/target`:
-`cargo +1.85.1 test -p tofu-linux --test network_journal --locked` и
-`cargo +1.85.1 clippy -p tofu-linux --all-targets --locked -- -D warnings`.
+`/var/tmp/codex-myrs/transient/yonik-network-journal`, с
+`CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/yonik-network-journal/target`:
+`cargo +1.85.1 test -p yonik-linux --test network_journal --locked` и
+`cargo +1.85.1 clippy -p yonik-linux --all-targets --locked -- -D warnings`.
 Ожидаются PASS и отсутствие предупреждений соответственно. Временную сборку
 очистить после сохранения необходимых evidence вне TTL-каталога.
 

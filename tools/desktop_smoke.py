@@ -149,7 +149,7 @@ def core_processes(engines: Path) -> dict[int, str]:
             continue
         try:
             executable = os.readlink(directory / "exe")
-            if executable != "/memfd:tofu-engine (deleted)" and not Path(
+            if executable != "/memfd:yonik-engine (deleted)" and not Path(
                 executable
             ).is_relative_to(engines):
                 continue
@@ -302,7 +302,7 @@ def run_case(
     trace = output / f"{name}.jsonl"
     screenshot = output / f"{name}.png"
     try:
-        with tempfile.TemporaryDirectory(prefix=f"tofu-gui-{name}-") as temporary:
+        with tempfile.TemporaryDirectory(prefix=f"yonik-gui-{name}-") as temporary:
             root = Path(temporary)
             steps: list[dict[str, Any]] = [
                 step(
@@ -429,6 +429,16 @@ def run_case(
                                     {
                                         "when": stop_when,
                                         "capture_name": f"{name}-diagnostics.png",
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "homeButton",
+                                        },
+                                    },
+                                    {
+                                        "when": stop_when,
+                                        "ui_when": {
+                                            "window": {"page": 2, "settingsSection": ""}
+                                        },
                                         "ui": {
                                             "action": "click",
                                             "object": "homeButton",
@@ -712,7 +722,7 @@ def run_health(
     binary: Path, engines: Path, output: Path, *, network_invalidate: bool = False
 ) -> list[dict[str, object]]:
     results = []
-    with tempfile.TemporaryDirectory(prefix="tofu-gui-health-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="yonik-gui-health-") as temporary:
         workspace = Path(temporary)
         with https_server(workspace, "health", 0, "127.0.0.1") as https:
             for engine, directory in (
@@ -861,8 +871,8 @@ def network_worker(
         timeout=5,
     )
     with (
-        tempfile.TemporaryDirectory(prefix="tofu-network-runtime-") as runtime,
-        tempfile.TemporaryDirectory(prefix="tofu-r-", dir="/tmp") as alias,
+        tempfile.TemporaryDirectory(prefix="yonik-network-runtime-") as runtime,
+        tempfile.TemporaryDirectory(prefix="yonik-r-", dir="/tmp") as alias,
     ):
         os.chmod(runtime, 0o700)
         # Bind сохраняет короткий AF_UNIX path; Qt отвергает symlink runtime.

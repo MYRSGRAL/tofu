@@ -7,7 +7,7 @@
 #include <QVariant>
 #include <atomic>
 
-namespace tofu_bench {
+namespace yonik_bench {
 namespace {
 QQuickWindow* window = nullptr;
 std::atomic<std::int32_t> requested{0};
@@ -33,7 +33,7 @@ void exit_application()
 int run_application()
 {
     int argc = 1;
-    char name[] = "tofu-bench-qt";
+    char name[] = "yonik-bench-qt";
     char* argv[] = {name, nullptr};
     QGuiApplication app(argc, argv);
     QGuiApplication::setQuitOnLastWindowClosed(false);
@@ -42,7 +42,7 @@ int run_application()
     QGuiApplication::setFont(font);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QQmlApplicationEngine engine;
-    engine.loadFromModule("tofu.benchmark", "Main");
+    engine.loadFromModule("yonik.benchmark", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
     if (!window) return 1;

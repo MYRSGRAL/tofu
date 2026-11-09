@@ -29,7 +29,7 @@ class DesktopTcpSeriesFixtureTests(unittest.TestCase):
                         connections.append(str(args[3]))
             return {"case": args[3], "status": status}
 
-        with tempfile.TemporaryDirectory(prefix="tofu-tcp-series-test-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="yonik-tcp-series-test-") as temporary:
             with patch.object(desktop_smoke, "run_case", side_effect=fake_gui):
                 results = desktop_smoke.run_tcp(
                     Path("unused-gui"), Path(temporary), native_dns=True, namespace=True

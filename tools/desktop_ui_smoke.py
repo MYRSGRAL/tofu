@@ -41,220 +41,360 @@ def ui(
 
 
 def script(url: str, width: int, height: int) -> list[dict[str, object]]:
-    return [
-        ui(
-            "resize",
-            when={"ready": True},
-            expect={"window": {"width": 520, "height": 800}},
-            width=width,
-            height=height,
-        ),
-        ui(
-            "click",
-            "settingsButton",
-            expect={"mainConnectButton": {"enabled": False}},
-            capture="home-empty.png",
-        ),
-        ui(
-            "click",
-            "proxyCopyButton",
-            expect={"proxyAddress": {"text": {"contains": "127.0.0.1:"}}},
-            capture="settings-connection.png",
-        ),
-        ui("click", "settingsAppearanceButton"),
+    steps = [ui("resize", when={"ready": True}, width=width, height=height)]
+
+    page = 0
+    settings_origin = 0
+    settings_section = ""
+    source_options = False
+
+    def click(target: str, **kwargs: Any) -> None:
+        nonlocal page, settings_origin, settings_section, source_options
+        steps.append(ui("click", target, **kwargs))
+        if target == "settingsButton":
+            settings_origin, page, settings_section = page, 2, ""
+        elif target == "homeButton":
+            if page == 2:
+                if settings_section:
+                    settings_section = ""
+                else:
+                    page = settings_origin
+            elif source_options:
+                source_options = False
+            else:
+                page = 0
+        elif target == "serverPickerButton":
+            page = 1
+        elif target.startswith("settings") and target.endswith("Button"):
+            settings_section = target
+        elif target == "sourceOptionsButton":
+            source_options = not source_options
+        elif target == "sourceAddConfirmButton":
+            page = 1
+
+    def check(expect: dict[str, object], **kwargs: Any) -> None:
+        target = "homeButton" if page == 2 else "settingsButton"
+        steps.append(ui("key", target, key="Tab", expect=expect, **kwargs))
+
+    def navigate(destination: int, **kwargs: Any) -> None:
+        # Модель выбирает только пользовательские кнопки; состояние окна
+        # дополнительно проверяется smoke driver после каждого перехода.
+        first = True
+        while page != destination:
+            target = (
+                "serverPickerButton" if page == 0 and destination == 1 else "homeButton"
+            )
+            click(target, **(kwargs if first else {}))
+            first = False
+        if first and kwargs:
+            expect = {"window": {"page": destination}, **kwargs.pop("expect", {})}
+            check(expect, **kwargs)
+        else:
+            check({"window": {"page": destination}})
+
+    # Шестерёнка помнит исходную страницу, Back сначала закрывает подраздел.
+    for origin in (0, 1):
+        navigate(origin)
+        click("settingsButton")
+        check({"window": {"page": 2, "settingsSection": ""}})
+        click("settingsAboutButton")
+        click("homeButton")
+        check({"window": {"page": 2, "settingsSection": ""}})
+        click("homeButton")
+        check({"window": {"page": origin}})
+    navigate(0)
+    click("serverPickerButton", capture="home-empty.png")
+    click("addSourceButton")
+    steps.append(
+        ui("text", "sourceUrlInput", value="https://cancel.invalid/?ui-secret=hidden")
+    )
+    click("sourceAdvancedButton")
+    click("sourceHwidChoice")
+    click("revealSourceUrl")
+    click("sourceAddCancelButton")
+    check({"window": {"page": 1}, "addSourceDialog": {"visible": False}})
+    navigate(1)
+    click("addSourceButton")
+    check(
+        {
+            "sourceUrlInput": {"text": ""},
+            "sourceHwidChoice": {"checked": False},
+            "revealSourceUrl": {"checked": False},
+        }
+    )
+    steps.append(ui("key", "sourceUrlInput", key="Escape"))
+    navigate(
+        1,
+        expect={"window": {"page": 1}, "addSourceDialog": {"visible": False}},
+    )
+    steps.append(ui("clipboard", value=url))
+    click("pasteSourceButton")
+    click(
+        "sourceAddCancelButton",
+        expect={"sourceUrlInput": {"text": url}, "window": {"page": 1}},
+        capture="paste-preview.png",
+    )
+    click("pasteSourceButton", expect={"window": {"page": 1}})
+    click("sourceAdvancedButton")
+    steps.append(ui("text", "sourceNameInput", value="Тест А"))
+    click("sourceLocalException")
+    click("sourceHwidChoice")
+    click("sourceAddConfirmButton")
+    click(
+        "discardRefreshButton",
+        when={"pending": True, "busy": False},
+        expect={
+            "refreshReviewDialog": {"visible": True},
+            "sourceUrlInput": {"text": ""},
+            "window": {"page": 1},
+        },
+        capture="import-review.png",
+    )
+    click(
+        "refreshSourceButton",
+        when={"pending": False, "busy": False, "profiles_count": 0},
+    )
+    click("approveRefreshButton", when={"pending": True, "busy": False})
+    click(
+        "sourceOptionsButton",
+        when={"pending": False, "busy": False, "profiles_count": 2},
+    )
+    click(
+        "subscriptionHwidChoice", expect={"subscriptionHwidChoice": {"checked": True}}
+    )
+    click(
+        "approveRefreshButton",
+        when={"pending": True, "busy": False, "source_hwid_enabled": False},
+    )
+    click(
+        "subscriptionHwidChoice",
+        when={"pending": False, "busy": False},
+        expect={"subscriptionHwidChoice": {"checked": False}},
+    )
+    click(
+        "approveRefreshButton",
+        when={"pending": True, "busy": False, "source_hwid_enabled": True},
+    )
+    click(
+        "renameSourceButton",
+        when={"pending": False, "busy": False, "profiles_count": 2},
+    )
+    steps.append(ui("text", "renameSourceInput", value="Переименованная А"))
+    click("renameSourceConfirmButton")
+    steps.append(
         ui(
             "key",
-            "languageChoice",
-            expect={"window": {"settingsSection": "appearance"}},
-            key="Down",
-        ),
-        ui("key", "languageChoice", key="Enter"),
-        ui(
-            "key",
-            "languageChoice",
-            expect={"window": {"language": "en"}},
-            key="Up",
-            capture="settings-en.png",
-        ),
-        ui("key", "languageChoice", key="Enter"),
-        ui(
-            "click",
-            "settingsSubscriptionsButton",
-            expect={"window": {"language": "ru"}},
-        ),
-        ui("click", "addSourceButton"),
-        ui(
-            "text",
-            "sourceUrlInput",
-            expect={"addSourceDialog": {"visible": True}},
-            value="https://cancel.invalid/?ui-secret=hidden",
-        ),
-        ui("click", "revealSourceUrl"),
-        ui("click", "sourceAddCancelButton"),
-        ui("click", "addSourceButton", expect={"addSourceDialog": {"visible": False}}),
-        ui(
-            "key",
-            "sourceAdvancedButton",
-            key="Enter",
-            expect={
-                "sourceUrlInput": {"text": ""},
-                "revealSourceUrl": {"checked": False},
+            "sourceOptionsButton",
+            key="Escape",
+            when={
+                "source_name": "Переименованная А",
+                "source_hwid_enabled": True,
+                "profiles_count": 2,
             },
-        ),
-        ui("text", "sourceNameInput", value="Тест А"),
-        ui("text", "sourceUrlInput", value=url),
+            expect={"profileSourceFilter": {"currentText": "Переименованная А"}},
+        )
+    )
+    source_options = False
+    click("sourceOptionsButton", expect={"window": {"sourceOptions": False}})
+    click("homeButton", expect={"window": {"sourceOptions": True}})
+    click(
+        "refreshSourceButton",
+        expect={"window": {"sourceOptions": False}},
+        capture="servers.png",
+    )
+    # Пока сервер держит ответ, навигация остаётся доступной, Cancel сохраняет профили.
+    navigate(0, when={"busy": True})
+    click("settingsButton")
+    navigate(1)
+    click(
+        "cancelSourceRefreshButton",
+        when={"busy": True},
+        expect={"cancelSourceRefreshButton": {"visible": True, "enabled": True}},
+        capture="refresh-cancel.png",
+    )
+    steps.append(
         ui(
-            "click",
-            "sourceLocalException",
-            expect={"sourceLocalException": {"checked": False}},
-        ),
-        ui(
-            "click",
-            "sourceAddConfirmButton",
-            expect={"sourceLocalException": {"checked": True}},
-        ),
-        ui(
-            "click",
-            "discardRefreshButton",
-            when={"pending": True, "busy": False},
-            expect={
-                "refreshReviewDialog": {"visible": True},
-                "sourceUrlInput": {"text": ""},
-            },
-            capture="import-review.png",
-        ),
-        ui(
-            "click",
-            "refreshSourceButton",
-            when={"pending": False, "busy": False, "profiles_count": 0},
-            expect={
-                "refreshReviewDialog": {"visible": False},
-                "subscriptionFeedback": {"visible": False},
-            },
-        ),
-        ui("click", "approveRefreshButton", when={"pending": True, "busy": False}),
-        ui(
-            "click",
-            "subscriptionServersButton",
-            when={"profiles_count": 2, "busy": False, "pending": False},
-            expect={"subscriptionFeedback": {"visible": False}},
-        ),
-        ui(
-            "click",
-            "favorite_1",
-            expect={"window": {"page": 1}},
-            capture="picker-ru.png",
-        ),
-        ui(
-            "text", "profileSearch", expect={"favorite_1": {"text": "★"}}, value="Plain"
-        ),
-        ui("key", "profileSearch", key="Enter"),
-        ui(
-            "text",
+            "input",
             "profileSearch",
-            when={"profiles_count": 1},
-            capture="picker-search.png",
-            value="",
-        ),
-        ui("key", "profileSearch", key="Enter"),
-        ui("click", "profileSelect_1", when={"profiles_count": 2}),
-        ui(
-            "key",
-            "mainConnectButton",
-            when={"selected_profile": 1, "can_connect": True},
-            expect={"window": {"page": 0}, "mainServerName": {"text": "Москва • TLS"}},
-            capture="home-selected.png",
-            key="Enter",
-        ),
-        ui(
-            "click",
-            "settingsButton",
-            when={"error": "engine_missing", "can_stop": False},
-            expect={
-                "mainStatusLabel": {"text": "Ошибка подключения"},
-                "mainErrorLabel": {"visible": True},
-            },
-            capture="home-error.png",
-        ),
-        ui("click", "settingsDiagnosticsButton"),
-        ui("wheel", "diagnosticsScroll", delta=-1200),
+            value="Plain",
+            when={"busy": False, "profiles_count": 2, "pending": False},
+        )
+    )
+    click("clearSearchButton", when={"profiles_count": 1}, capture="search.png")
+    steps.append(
+        ui("input", "profileSearch", value="нет-совпадений", when={"profiles_count": 2})
+    )
+    click(
+        "emptyProfilesAction", when={"profiles_count": 0}, capture="filtered-empty.png"
+    )
+    click("profileSelect_1", when={"profiles_count": 2})
+    click(
+        "serversConnectButton",
+        when={"selected_profile": 1, "can_connect": True},
+        expect={"window": {"page": 1, "selectionConfirmed": True}},
+    )
+    navigate(0, when={"error": "engine_missing", "can_stop": False})
+    click(
+        "settingsButton",
+        expect={"mainErrorLabel": {"visible": True}},
+        capture="connection-error.png",
+    )
+    click("settingsConnectionButton")
+    click(
+        "proxyCopyButton", expect={"proxyAddress": {"text": {"contains": "127.0.0.1:"}}}
+    )
+    click("homeButton")
+    click("settingsDiagnosticsButton", expect={"window": {"settingsSection": ""}})
+    steps.append(ui("wheel", "diagnosticsScroll", delta=-1200))
+    steps.append(
         ui(
             "wheel",
             "diagnosticsScroll",
-            expect={"diagnosticsScroll": {"atEnd": True, "moving": False}},
             delta=1200,
-            capture="settings-scroll-bottom.png",
-        ),
-        ui(
-            "click",
-            "tcpCheckButton",
-            expect={
-                "window": {"settingsSection": "diagnostics"},
-                "diagnosticsScroll": {"atStart": True, "moving": False},
-            },
-        ),
+            expect={"diagnosticsScroll": {"atEnd": True, "moving": False}},
+            capture="diagnostics-bottom.png",
+        )
+    )
+    click(
+        "tcpCheckButton",
+        expect={"diagnosticsScroll": {"atStart": True, "moving": False}},
+    )
+    steps.append(
         ui(
             "text",
             "probeUrlInput",
+            value="https://health.invalid/private?ui-secret=hidden",
             when={
                 "tcp_status": "reachable",
                 "tcp_samples_count": 3,
                 "tcp_samples_requested": 3,
                 "tcp_busy": False,
             },
-            capture="settings-tcp.png",
-            value="https://health.invalid/private?ui-secret=hidden",
-        ),
-        ui("value", "probeExpectedStatus", value=200),
-        ui("click", "revealProbeUrl", expect={"revealProbeUrl": {"checked": False}}),
-        ui(
-            "click",
-            "applyProbeTargetButton",
-            expect={"revealProbeUrl": {"checked": True}},
-        ),
-        ui(
-            "click",
-            "settingsAppearanceButton",
-            when={"probe_custom": True, "probe_expected_status": 200},
-        ),
-        ui("click", "settingsDiagnosticsButton"),
+            capture="tcp.png",
+        )
+    )
+    steps.append(ui("value", "probeExpectedStatus", value=200))
+    click("revealProbeUrl")
+    click("applyProbeTargetButton")
+    click("homeButton", when={"probe_custom": True, "probe_expected_status": 200})
+    click("settingsAppearanceButton")
+    steps.append(
         ui(
             "key",
-            "probeExpectedStatus",
-            key="Tab",
-            expect={"probeExpectedStatus": {"value": 200}},
-        ),
+            "languageChoice",
+            key="Down",
+        )
+    )
+    steps.append(ui("key", "languageChoice", key="Enter"))
+    steps.append(
         ui(
-            "click",
-            "resetProbeTargetButton",
-            when={"probe_custom": True, "probe_expected_status": 200},
-            expect={
-                "probeUrlInput": {"text": ""},
-                "revealProbeUrl": {"checked": False},
-            },
-        ),
+            "key",
+            "languageChoice",
+            key="Escape",
+            expect={"window": {"language": "en"}},
+            capture="appearance.png",
+        )
+    )
+    settings_section = ""  # Escape возвращает из Appearance в корень настроек.
+    click("settingsAboutButton", expect={"window": {"settingsSection": ""}})
+    navigate(
+        0,
+        expect={"buildIdLabel": {"visible": True, "text": {"contains": "0.1.0"}}},
+        capture="about-build.png",
+    )
+    click("settingsButton")
+    click("settingsDiagnosticsButton")
+    click(
+        "resetProbeTargetButton",
+        when={"probe_custom": True, "probe_expected_status": 200},
+        expect={
+            "probeExpectedStatus": {"value": 200},
+            "probeUrlInput": {"text": ""},
+            "revealProbeUrl": {"checked": False},
+        },
+    )
+    navigate(1, when={"probe_custom": False, "probe_expected_status": 204})
+    # Изменение параметров проверки очищает прошлую ошибку соединения;
+    # повторная попытка создаёт её заново перед проверкой независимых scopes.
+    navigate(0)
+    click("mainConnectButton")
+    navigate(1, when={"connection_error": "engine_missing"})
+    click("refreshSourceButton")
+    navigate(
+        0,
+        when={"busy": False, "source_error": "fetch", "profiles_count": 2},
+        expect={
+            "window": {"sourceError": "fetch", "connectionError": "engine_missing"}
+        },
+    )
+    navigate(1, expect={"mainErrorLabel": {"visible": True}})
+    # Ошибочный импорт сохраняет фильтр прежнего источника.
+    steps.append(ui("input", "profileSearch", value="нет-совпадений"))
+    navigate(0, when={"profiles_count": 0})
+    navigate(1)
+    click("addSourceButton")
+    steps.append(ui("text", "sourceUrlInput", value="not-a-url"))
+    click("sourceAddConfirmButton")
+    check(
+        {"window": {"page": 1}, "profileSearch": {"text": "нет-совпадений"}},
+        when={"source_error": "invalid_input", "sources_total": 1, "profiles_count": 0},
+    )
+    # Второй источник добавляется через карточку Home; импорт сбрасывает фильтр.
+    navigate(0)
+    navigate(1)
+    click("addSourceButton")
+    steps.append(ui("text", "sourceUrlInput", value=url + "-second"))
+    click("sourceAdvancedButton")
+    steps.append(ui("text", "sourceNameInput", value="Тест Б"))
+    click("sourceLocalException")
+    click("sourceAddConfirmButton")
+    click(
+        "approveRefreshButton",
+        when={"pending": True, "busy": False},
+        expect={"window": {"page": 1}, "profileSearch": {"text": ""}},
+    )
+    steps.append(
         ui(
-            "click",
-            "settingsAppearanceButton",
-            when={"probe_custom": False, "probe_expected_status": 204},
-        ),
-        ui("key", "languageChoice", key="Down"),
-        ui("key", "languageChoice", key="Enter"),
-        ui("click", "homeButton", expect={"window": {"language": "en"}}),
-        ui(
-            "click",
-            "serverPickerButton",
-            expect={"window": {"page": 0}},
-            capture="home-en.png",
-        ),
-        ui("key", "profileSearch", expect={"window": {"page": 1}}, key="Escape"),
+            "key",
+            "profileSourceFilter",
+            key="Up",
+            when={"sources_total": 2, "pending": False, "busy": False},
+        )
+    )
+    steps.append(ui("key", "profileSourceFilter", key="Enter"))
+    click(
+        "sourceOptionsButton",
+        when={
+            "source_name": "Переименованная А",
+            "profiles_count": 2,
+            "source_hwid_enabled": True,
+        },
+    )
+    click("deleteSourceButton")
+    click("deleteSourceCancelButton", expect={"deleteSourceDialog": {"visible": True}})
+    click("deleteSourceButton", when={"sources_total": 2, "profiles_count": 2})
+    click("deleteSourceConfirmButton")
+    click(
+        "deleteSourceButton",
+        when={"sources_total": 1, "source_name": "Тест Б", "profiles_count": 2},
+        capture="source-survivor.png",
+    )
+    click("deleteSourceConfirmButton")
+    click(
+        "emptyProfilesAction",
+        when={"sources_total": 0, "profiles_count": 0},
+        capture="servers-empty.png",
+    )
+    click("sourceAddCancelButton", expect={"addSourceDialog": {"visible": True}})
+    steps.append(
         {
             "when": {},
-            "ui_when": {"window": {"page": 0}},
+            "ui_when": {"window": {"page": 1}, "addSourceDialog": {"visible": False}},
             "command": {"command": "shutdown"},
-            "capture_name": "home-final.png",
-        },
-    ]
+            "capture_name": "final.png",
+        }
+    )
+    return steps
 
 
 def execute(
@@ -308,7 +448,7 @@ def execute(
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
     try:
-        code = process.wait(timeout=40)
+        code = process.wait(timeout=60)
     finally:
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
@@ -388,16 +528,43 @@ def run(
     tcp = threading.Thread(target=accept_tcp, daemon=True)
     tcp.start()
     body = f"trojan://invented-secret@127.0.0.1:{port}#Москва • TLS\nsocks5://invented:password@192.0.2.1:1080#<b>Plain text</b>\nunknown://not-supported".encode()
-    handler = type("UiFixture", (Fixture,), {"body": body})
+    captured_hwids: list[str | None] = []
+    slow_started = threading.Event()
+    slow_release = threading.Event()
+    slow_finished = threading.Event()
+
+    class UiFixture(Fixture):
+        def do_GET(self) -> None:
+            captured_hwids.append(self.headers.get("x-hwid"))
+            if len(captured_hwids) == 5:
+                slow_started.set()
+                try:
+                    if not slow_release.wait(timeout=65):
+                        failures.append("slow fixture deadline")
+                finally:
+                    slow_finished.set()
+                return
+            if len(captured_hwids) == 6:
+                self.send_error(503)
+                return
+            super().do_GET()
+
+    UiFixture.body = body
+    handler = UiFixture
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     http = threading.Thread(target=server.serve_forever, daemon=True)
     http.start()
     try:
-        with tempfile.TemporaryDirectory(prefix="tofu-ui-actions-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="yonik-ui-actions-") as temporary:
             steps = script(
                 f"http://127.0.0.1:{server.server_port}/subscription", width, height
             )
             events = execute(binary, Path(temporary), steps, output, scale)
+        if not slow_started.is_set():
+            raise RuntimeError("Отмена не достигла HTTP fixture")
+        slow_release.set()
+        if not slow_finished.wait(timeout=3):
+            raise RuntimeError("Не завершился отменённый HTTP fixture")
         rejected = []
         for label, bad_step in (
             ("missing-control", ui("click", "doesNotExist", when={"ready": True})),
@@ -408,10 +575,23 @@ def run(
                     "capture_name": "../outside.png",
                 },
             ),
+            *(
+                (f"removed-{name}", ui("click", name, when={"ready": True}))
+                for name in (
+                    "connectionNavButton",
+                    "serversNavButton",
+                    "homeAddSourceButton",
+                    "homeServersButton",
+                    "reducedMotionChoice",
+                    "homeFavoritesButton",
+                    "favorite_1",
+                    "settingsSubscriptionsButton",
+                )
+            ),
         ):
             negative_output = output / label
             negative_output.mkdir()
-            with tempfile.TemporaryDirectory(prefix="tofu-ui-invalid-") as temporary:
+            with tempfile.TemporaryDirectory(prefix="yonik-ui-invalid-") as temporary:
                 execute(
                     binary,
                     Path(temporary),
@@ -423,12 +603,28 @@ def run(
             if (output / "outside.png").exists():
                 raise RuntimeError("Capture вышел за пределы собственного каталога")
             rejected.append(label)
+        if (
+            len(captured_hwids) != 7
+            or not captured_hwids[0]
+            or captured_hwids[2] is not None
+            or captured_hwids[0] != captured_hwids[1]
+            or captured_hwids[0] != captured_hwids[3]
+            or captured_hwids[0] != captured_hwids[4]
+            or captured_hwids[0] != captured_hwids[5]
+            or captured_hwids[6] is not None
+        ):
+            raise RuntimeError("HWID opt-in/toggle wire sequence не совпадает")
+        saved_trace = (output / "trace.jsonl").read_text()
+        if any(value and value in saved_trace for value in captured_hwids):
+            raise RuntimeError("HWID попал в GUI trace")
         if failures or len(accepted) != 3:
             raise RuntimeError(f"TCP fixture: EOF={len(accepted)}, failures={failures}")
         result = {
             "steps": len(steps),
             "events": len(events),
             "tcp_eof": len(accepted),
+            "hwid_requests": len(captured_hwids),
+            "cancelled_http_requests": int(slow_started.is_set()),
             "width": width,
             "height": height,
             "scale": scale,
@@ -442,6 +638,9 @@ def run(
         )
         return result
     finally:
+        slow_release.set()
+        if slow_started.is_set() and not slow_finished.wait(timeout=3):
+            failures.append("slow fixture cleanup")
         server.shutdown()
         server.server_close()
         http.join(timeout=3)
@@ -456,8 +655,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--width", default=520, type=int, choices=range(520, 1601))
-    parser.add_argument("--height", default=800, type=int, choices=range(640, 1401))
+    parser.add_argument("--width", default=420, type=int, choices=range(380, 1601))
+    parser.add_argument("--height", default=760, type=int, choices=range(600, 1401))
     parser.add_argument("--scale", default="1", choices=("1", "1.25", "1.5", "2"))
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

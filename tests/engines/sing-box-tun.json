@@ -3,7 +3,7 @@
   "inbounds": [{
     "type": "tun",
     "tag": "tun",
-    "interface_name": "tofu-test",
+    "interface_name": "yonik-test",
     "address": ["198.18.0.1/30", "fd00:746f:6675::1/126"],
     "mtu": 1500,
     "auto_route": false

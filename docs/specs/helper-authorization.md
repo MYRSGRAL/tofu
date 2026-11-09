@@ -1,6 +1,6 @@
 # Авторизация системного network helper
 
-Контракт реализуемого компонента `tofu_linux::helper`; основание —
+Контракт реализуемого компонента `yonik_linux::helper`; основание —
 [границы Linux](platforms.md#2-linux-границы-доверия) и
 [план helper](../superpowers/plans/2026-11-09-linux-network-helper.md).
 Компонент не запускает engine, не применяет сеть и не устанавливает системный сервис.
@@ -20,7 +20,8 @@
 зафиксированному unique name.
 
 Доступны только действия `cloud.highpriority.tofu.manage-network` и
-`cloud.highpriority.tofu.unlock-network`. Polkit subject — `system-bus-name`
+`cloud.highpriority.tofu.unlock-network`. Эти legacy-идентификаторы сохранены
+при переименовании UI в yonik как совместимый контракт авторизации. Polkit subject — `system-bus-name`
 с именем настоящего отправителя. Details пусты: клиент не задаёт shell/path,
 сообщение диалога, действие polkit либо чужой subject.
 

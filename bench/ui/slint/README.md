@@ -1,7 +1,7 @@
 # Slint benchmark
 
 Самостоятельный участник workspace `bench/ui`, общий actor — `ui-bench-model`.
-Запуск: `tofu-bench-slint --rows 1000` или `--rows 10000`.
+Запуск: `yonik-bench-slint --rows 1000` или `--rows 10000`.
 Команды JSONL и поля отчёта описаны в `../PROTOCOL.md`.
 
 Slint **1.18.1**, backend **winit**, renderer **femtovg / OpenGL** явно выбраны
@@ -12,7 +12,7 @@ Slint **1.18.1**, backend **winit**, renderer **femtovg / OpenGL** явно вы
 строки поиска и избранного по 40 px, viewport списка 320 px, footer 40 px. `ListView` виртуализирует страницу общего actor до 200 строк.
 
 Поиск, сортировка, избранное, выбор и страницы отправляются actor; оболочка
-только отображает snapshot. Единственный `tofu-bench-bridge` блокируется на
+только отображает snapshot. Единственный `yonik-bench-bridge` блокируется на
 `recv`, доставляет события через `Weak::upgrade_in_event_loop`, без polling.
 Snapshot и scroll обрабатываются последовательно по кадрам. Отчёт `frame`
 выдаётся из публичного `RenderingState::AfterRendering`: отрисовка уже выполнена,

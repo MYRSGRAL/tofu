@@ -1,6 +1,6 @@
-# tofu — адаптеры Linux и Android
+# yonik — адаптеры Linux и Android
 
-Проект [tofu](README.md) развивается с открытым исходным кодом (open source). Linux — первая платформа, Android — следующий этап.
+Проект [yonik](README.md) развивается с открытым исходным кодом (open source). Linux — первая платформа, Android — следующий этап.
 
 ## 1. Linux: процессы и права
 

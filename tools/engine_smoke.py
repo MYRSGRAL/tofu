@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-LOG = logging.getLogger("tofu.smoke")
+LOG = logging.getLogger("yonik.smoke")
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "engines"
 
 
@@ -86,7 +86,7 @@ def worker(binary: Path, engine: str, host_namespace: int) -> None:
         ) as process:
             try:
                 deadline = time.monotonic() + 5
-                while "tofu-test" not in links():
+                while "yonik-test" not in links():
                     if process.poll() is not None:
                         raise RuntimeError("Ядро завершилось до создания TUN")
                     if time.monotonic() >= deadline:

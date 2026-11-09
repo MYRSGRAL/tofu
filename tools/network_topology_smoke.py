@@ -19,7 +19,7 @@ from typing import Any
 from engine_smoke import install_signal_handlers, run_sandbox
 
 MAX_OUTPUT = 16 * 1024 * 1024
-LOG = logging.getLogger("tofu.topology-smoke")
+LOG = logging.getLogger("yonik.topology-smoke")
 
 # Worker вызывается только launcher внутри unshare. Публичного CLI-пути с
 # переданным пользователем «host inode» нет: такая цифра не доказывает изоляцию.
@@ -27,7 +27,7 @@ _WORKER_BOOTSTRAP = """
 import json, logging, runpy, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-module = runpy.run_path(sys.argv[1], run_name="tofu_topology_worker")
+module = runpy.run_path(sys.argv[1], run_name="yonik_topology_worker")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 module["install_signal_handlers"]()
 module["worker"](Path(sys.argv[2]), tuple(json.loads(sys.argv[4])), Path(sys.argv[3]))
@@ -289,17 +289,17 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
 
     try:
         mutate("link", "set", "lo", "up")
-        for name in ("tofu-a", "tofu-b"):
+        for name in ("yonik-a", "yonik-b"):
             mutate("link", "add", name, "type", "dummy")
             owned.add(name)
             mutate("link", "set", name, "up")
-        mutate("link", "add", "tofu-v0", "type", "veth", "peer", "name", "tofu-v1")
-        owned.update(("tofu-v0", "tofu-v1"))
-        for name in ("tofu-v0", "tofu-v1"):
+        mutate("link", "add", "yonik-v0", "type", "veth", "peer", "name", "yonik-v1")
+        owned.update(("yonik-v0", "yonik-v1"))
+        for name in ("yonik-v0", "yonik-v1"):
             mutate("link", "set", name, "up")
-        for name, address in (("tofu-a", "192.0.2.1/24"), ("tofu-b", "192.0.3.1/24")):
+        for name, address in (("yonik-a", "192.0.2.1/24"), ("yonik-b", "192.0.3.1/24")):
             mutate("address", "add", address, "dev", name)
-        for table, dev in (("100", "tofu-a"), ("200", "tofu-b")):
+        for table, dev in (("100", "yonik-a"), ("200", "yonik-b")):
             mutate("route", "add", "198.51.100.0/24", "dev", dev, "table", table)
         mutate(
             "rule",
@@ -340,14 +340,14 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
             "via",
             "192.0.2.2",
             "dev",
-            "tofu-a",
+            "yonik-a",
             "weight",
             "1",
             "nexthop",
             "via",
             "192.0.3.2",
             "dev",
-            "tofu-b",
+            "yonik-b",
             "weight",
             "2",
         )
@@ -359,12 +359,12 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
             "via",
             "192.0.2.2",
             "dev",
-            "tofu-a",
+            "yonik-a",
             optional=True,
         )
         report["availability"]["nexthop_objects"] = nexthops
         if nexthops:
-            mutate("nexthop", "add", "id", "11", "via", "192.0.3.2", "dev", "tofu-b")
+            mutate("nexthop", "add", "id", "11", "via", "192.0.3.2", "dev", "yonik-b")
             mutate("nexthop", "add", "id", "12", "group", "10/11")
             mutate("route", "add", "198.19.0.0/24", "nhid", "12")
         ipv6 = (
@@ -374,8 +374,10 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
         )
         report["availability"]["ipv6"] = ipv6
         if ipv6:
-            mutate("-6", "address", "add", "2001:db8:1::1/64", "dev", "tofu-a", "nodad")
-            mutate("-6", "route", "add", "2001:db8:2::/64", "dev", "tofu-a")
+            mutate(
+                "-6", "address", "add", "2001:db8:1::1/64", "dev", "yonik-a", "nodad"
+            )
+            mutate("-6", "route", "add", "2001:db8:2::/64", "dev", "yonik-a")
         value = snapshot()
         selected = {r["priority"]: r for r in value["rules"] if r["family"] == 2}
         if (
@@ -428,10 +430,10 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
             lookup("nexthop-group", "198.19.0.8")
         if ipv6:
             lookup("ipv6", "2001:db8:2::8", source="2001:db8:1::1")
-        mutate("link", "set", "tofu-a", "mtu", "1400")
+        mutate("link", "set", "yonik-a", "mtu", "1400")
         mutate("route", "del", "198.51.100.0/24", "table", "100")
-        mutate("link", "del", "tofu-v0")
-        owned.difference_update(("tofu-v0", "tofu-v1"))
+        mutate("link", "del", "yonik-v0")
+        owned.difference_update(("yonik-v0", "yonik-v1"))
         value = snapshot()
         if any(
             r["table"] == 100 and r["destination"] == "198.51.100.0/24"

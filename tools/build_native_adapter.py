@@ -18,7 +18,7 @@ SOURCE_URL = "https://github.com/SagerNet/sing-box.git"
 SOURCE_TAG = "v1.14.4"
 SOURCE_COMMIT = "c005f35300ce76427dc285481ec5695f5b179cd2"
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
-DEFAULT_ROOT = TRANSIENT / "tofu-native-adapter"
+DEFAULT_ROOT = TRANSIENT / "yonik-native-adapter"
 DEFAULT_PATCH = (
     Path(__file__).resolve().parents[1]
     / "adapters/sing-box/v1.14.4/strict-complete-dns.patch"
@@ -27,7 +27,7 @@ EXTRA_PATCHES = (
     (DEFAULT_PATCH.with_name("resolution-provenance.patch"), "dns_provenance"),
     (DEFAULT_PATCH.with_name("resolution-pin.patch"), "pin_resolution"),
 )
-LOG = logging.getLogger("tofu.native_adapter")
+LOG = logging.getLogger("yonik.native_adapter")
 COMMAND_TIMEOUT = 180
 BUILD_TIMEOUT = 900
 

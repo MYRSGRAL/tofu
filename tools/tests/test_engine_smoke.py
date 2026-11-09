@@ -33,7 +33,7 @@ class CleanupTests(unittest.TestCase):
         ]:
             with (
                 self.subTest(event=event, startup=startup),
-                tempfile.TemporaryDirectory(prefix="tofu-signal-") as directory,
+                tempfile.TemporaryDirectory(prefix="yonik-signal-") as directory,
             ):
                 ready = Path(directory) / "ready"
                 child = (

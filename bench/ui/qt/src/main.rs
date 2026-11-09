@@ -58,7 +58,7 @@ mod bridge_impl {
             self.as_mut().rust_mut().commands = Some(harness.commands);
             let qt_thread = self.qt_thread();
             if let Err(error) = thread::Builder::new()
-                .name("tofu-bench-bridge".into())
+                .name("yonik-bench-bridge".into())
                 .spawn(move || {
                     for event in harness.events {
                         if qt_thread
@@ -191,7 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [flag, rows] if flag == "--rows" && matches!(rows.as_str(), "1000" | "10000") => {
             rows.parse()?
         }
-        _ => return Err("Использование: tofu-bench-qt --rows 1000|10000".into()),
+        _ => return Err("Использование: yonik-bench-qt --rows 1000|10000".into()),
     };
     bridge_impl::configure(rows).map_err(|_| "Конфигурация уже задана")?;
     let status = bridge::ffi::run_application();

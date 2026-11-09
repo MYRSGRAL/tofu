@@ -1,7 +1,7 @@
 # Сравнение Linux UI
 
 Изолированный стенд Qt Quick/CXX-Qt, GTK4 и Slint на общем Rust actor. Он не
-заменяет действующий GUI tofu и не использует реальные профили, SQLite, keyring
+заменяет действующий GUI yonik и не использует реальные профили, SQLite, keyring
 или proxy core. Состав окна и обмен JSONL описаны в [PROTOCOL.md](PROTOCOL.md).
 
 Production MSRV остаётся прежним. Для стенда используется Rust 1.97.0: версии
@@ -14,9 +14,9 @@ CXX-Qt нужен совместимый linker: lld/gold/mold вместо GNU 
 Сборочный каталог должен находиться вне checkout, под общим lock корня задачи:
 
 ```sh
-mkdir -p /var/tmp/codex-myrs/transient/tofu-ui-comparison
-flock -s /var/tmp/codex-myrs/transient/tofu-ui-comparison \
-  env CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/tofu-ui-comparison/target \
+mkdir -p /var/tmp/codex-myrs/transient/yonik-ui-comparison
+flock -s /var/tmp/codex-myrs/transient/yonik-ui-comparison \
+  env CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/yonik-ui-comparison/target \
   CARGO_BUILD_JOBS=2 cargo +1.97.0 build --manifest-path bench/ui/Cargo.toml \
   --release --bins --locked
 ```

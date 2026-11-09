@@ -21,18 +21,164 @@ import install_desktop as installer  # noqa: E402
 
 class InstallDesktopTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="tofu-launcher-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="yonik-launcher-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.data = self.root / "xdg"
-        self.binary = self.root / "tofu"
+        self.binary = self.root / "yonik"
         self.binary.write_text("#!/bin/sh\nexit 0\n")
         self.binary.chmod(0o755)
+        self.icon = self.root / "yonik.svg"
+        self.icon.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
         self.engines = self.root / "engines"
         self.engines.mkdir()
 
     def install(self) -> Path:
-        return installer.install_desktop(self.binary, self.engines, data_home=self.data)
+        return installer.install_desktop(
+            self.binary, self.engines, self.icon, data_home=self.data
+        )
+
+    def legacy_launcher(self) -> tuple[Path, Path]:
+        entry = self.install()
+        icon = self.data / f"icons/hicolor/scalable/apps/{installer.APP_ID}.svg"
+        legacy_entry = entry.with_name(f"{installer.LEGACY_APP_ID}.desktop")
+        legacy_icon = icon.with_name(f"{installer.LEGACY_APP_ID}.svg")
+        legacy_entry.write_text(
+            entry.read_text().replace("yonik", "tofu").replace("X-Yonik-", "X-Tofu-")
+        )
+        legacy_icon.write_bytes(icon.read_bytes())
+        entry.unlink()
+        icon.unlink()
+        return legacy_entry, legacy_icon
+
+    def test_managed_legacy_migrates_and_repeat_has_one_menu_entry(self) -> None:
+        legacy_entry, legacy_icon = self.legacy_launcher()
+        entry = self.install()
+        self.assertIn("Name=yonik\n", entry.read_text())
+        self.assertIn("X-Yonik-Managed=true\n", entry.read_text())
+        self.assertFalse(legacy_entry.exists())
+        self.assertFalse(legacy_icon.exists())
+        self.install()
+        self.assertEqual(list(entry.parent.glob("*.desktop")), [entry])
+
+    def test_foreign_legacy_preserved_without_blocking_install(self) -> None:
+        for content in (b"foreign", b"[Desktop Entry]\nName=tofu\n"):
+            with self.subTest(content=content):
+                entry, icon = self.legacy_launcher()
+                entry.write_bytes(content)
+                old_icon = icon.read_bytes()
+                self.assertTrue(self.install().exists())
+                self.assertEqual(entry.read_bytes(), content)
+                self.assertEqual(icon.read_bytes(), old_icon)
+
+    def test_altered_legacy_icon_preserves_pair(self) -> None:
+        entry, icon = self.legacy_launcher()
+        original = entry.read_bytes()
+        icon.write_bytes(b"foreign icon")
+        self.assertTrue(self.install().exists())
+        self.assertEqual(entry.read_bytes(), original)
+        self.assertEqual(icon.read_bytes(), b"foreign icon")
+
+    def test_legacy_replacement_during_install_preserved(self) -> None:
+        for change in ("content", "inode", "symlink"):
+            with self.subTest(change=change):
+                entry, icon = self.legacy_launcher()
+                original = entry.read_bytes()
+                write = installer.atomic_write
+
+                def replace_entry(
+                    path: Path, data: bytes, previous: bytes | None
+                ) -> None:
+                    write(path, data, previous)
+                    if path.suffix == ".desktop":
+                        replacement = self.root / "replacement.desktop"
+                        replacement.write_bytes(original)
+                        if change == "content":
+                            entry.write_bytes(b"foreign")
+                        elif change == "inode":
+                            os.replace(replacement, entry)
+                        else:
+                            entry.unlink()
+                            entry.symlink_to(replacement)
+
+                with patch.object(installer, "atomic_write", replace_entry):
+                    self.assertTrue(self.install().exists())
+                self.assertTrue(entry.exists())
+                self.assertTrue(icon.exists())
+                if entry.is_symlink():
+                    entry.unlink()
+
+    def test_legacy_icon_symlink_and_hardlink_preserved(self) -> None:
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind=kind):
+                entry, icon = self.legacy_launcher()
+                original = entry.read_bytes()
+                foreign = self.root / f"foreign-{kind}.svg"
+                foreign.write_bytes(icon.read_bytes())
+                icon.unlink()
+                if kind == "symlink":
+                    icon.symlink_to(foreign)
+                else:
+                    os.link(foreign, icon)
+                self.assertTrue(self.install().exists())
+                self.assertEqual(entry.read_bytes(), original)
+                self.assertTrue(icon.exists())
+                icon.unlink()
+
+    def test_legacy_icon_changed_during_install_preserves_pair(self) -> None:
+        entry, icon = self.legacy_launcher()
+        original = entry.read_bytes()
+        write = installer.atomic_write
+
+        def replace_icon(path: Path, data: bytes, previous: bytes | None) -> None:
+            write(path, data, previous)
+            if path.suffix == ".desktop":
+                icon.write_bytes(b"foreign")
+
+        with patch.object(installer, "atomic_write", replace_icon):
+            self.assertTrue(self.install().exists())
+        self.assertEqual(entry.read_bytes(), original)
+        self.assertEqual(icon.read_bytes(), b"foreign")
+
+    def test_legacy_cleanup_failure_can_be_retried(self) -> None:
+        for fail_target in ("entry", "icon"):
+            with self.subTest(fail_target=fail_target):
+                legacy_entry, legacy_icon = self.legacy_launcher()
+                unlink = Path.unlink
+                blocked = legacy_entry if fail_target == "entry" else legacy_icon
+
+                def fail_legacy(path: Path, missing_ok: bool = False) -> None:
+                    if path == blocked:
+                        raise PermissionError("Удаление запрещено")
+                    unlink(path, missing_ok=missing_ok)
+
+                with patch.object(Path, "unlink", fail_legacy):
+                    with self.assertRaises(PermissionError):
+                        self.install()
+                self.assertTrue(legacy_entry.exists())
+                self.assertEqual(legacy_icon.exists(), fail_target == "icon")
+                self.install()
+                self.assertFalse(legacy_entry.exists())
+                self.assertFalse(legacy_icon.exists())
+
+    def test_legacy_survives_partial_write_and_retry_migrates(self) -> None:
+        legacy_entry, legacy_icon = self.legacy_launcher()
+        original = legacy_entry.read_bytes()
+        write = installer.atomic_write
+
+        def fail_entry(path: Path, data: bytes, previous: bytes | None) -> None:
+            if path.suffix == ".desktop":
+                raise OSError("Ошибка записи entry")
+            write(path, data, previous)
+
+        with patch.object(installer, "atomic_write", fail_entry):
+            with self.assertRaises(OSError):
+                self.install()
+        self.assertEqual(legacy_entry.read_bytes(), original)
+        self.assertTrue(legacy_icon.exists())
+        self.assertTrue(self.install().exists())
+        self.assertFalse(legacy_entry.exists())
+        self.assertFalse(legacy_icon.exists())
 
     def test_install_and_managed_update_preserve_artifacts(self) -> None:
         before = self.binary.stat()
@@ -52,7 +198,7 @@ class InstallDesktopTests(unittest.TestCase):
 
     def test_xdg_environment_is_used(self) -> None:
         with patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)}):
-            entry = installer.install_desktop(self.binary, self.engines)
+            entry = installer.install_desktop(self.binary, self.engines, self.icon)
         self.assertEqual(entry.parent, self.data / "applications")
 
     def test_foreign_entry_and_icon_preserved(self) -> None:
@@ -147,7 +293,7 @@ class InstallDesktopTests(unittest.TestCase):
         self.assertFalse(self.data.exists())
 
     def test_percent_in_binary_rejected_before_installation(self) -> None:
-        self.binary = self.root / "tofu %f"
+        self.binary = self.root / "yonik %f"
         self.binary.write_text("#!/bin/sh\nexit 0\n")
         self.binary.chmod(0o755)
         with self.assertRaisesRegex(ValueError, "GIO"):
@@ -157,7 +303,7 @@ class InstallDesktopTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("gio"), "GIO не установлен")
     def test_gio_launch_preserves_literal_arguments(self) -> None:
         output = self.root / "arguments.json"
-        self.binary = self.root / 'tofu space "quote" $d `tick` \\ slash'
+        self.binary = self.root / 'yonik space "quote" $d `tick` \\ slash'
         self.engines = self.root / 'engine space %u "quote" $d `tick` \\ slash'
         self.engines.mkdir()
         self.binary.write_text(
@@ -180,7 +326,7 @@ class InstallDesktopTests(unittest.TestCase):
             [str(self.binary), "--engine-dir", str(self.engines)],
         )
         self.assertIn(
-            hashlib.sha256(installer.DEFAULT_ICON.read_bytes()).hexdigest(),
+            hashlib.sha256(self.icon.read_bytes()).hexdigest(),
             entry.read_text(),
         )
 

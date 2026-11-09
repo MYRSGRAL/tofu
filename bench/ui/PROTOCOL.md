@@ -11,8 +11,8 @@ Secret Service, SQLite, proxy core или сетевых запросов. Эт�
 - `pub fn start(rows: usize) -> Harness`, Harness содержит
   `pub events: std::sync::mpsc::Receiver<Event>` и
   `pub commands: std::sync::mpsc::Sender<Command>`.
-- Отдельный actor `tofu-bench-data`, stdin reader `tofu-bench-input`.
-  Shell создаёт один `tofu-bench-bridge`, блокирующий recv и передающий события
+- Отдельный actor `yonik-bench-data`, stdin reader `yonik-bench-input`.
+  Shell создаёт один `yonik-bench-bridge`, блокирующий recv и передающий события
   в GUI event loop без polling. Actor даёт начальный Snapshot revision=1.
 - `Event::{Snapshot(Snapshot),Control(Control)}`; Control::{Scroll(usize),Hide,Show,Quit}.
 - `Snapshot` Clone/Serialize: revision:u64,total:usize,offset:usize,search:String,

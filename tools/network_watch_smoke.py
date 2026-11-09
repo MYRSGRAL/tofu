@@ -19,7 +19,7 @@ from typing import Any
 from dns_fixture import verify_namespace
 from engine_smoke import install_signal_handlers, run_sandbox
 
-LOG = logging.getLogger("tofu.network-smoke")
+LOG = logging.getLogger("yonik.network-smoke")
 MAX_LINE = 1024
 MAX_RECORDS = 512
 FIELDS = {"epoch", "routes", "resolver", "manager", "exhausted", "closed"}
@@ -169,8 +169,8 @@ def worker(binary: Path, host_inode: int, evidence: Path) -> None:
                 raise
             report["changes"].append({"step": name, "before": before, "after": after})
 
-        change("link-add", "link", "add", "tofu-fixture", "type", "dummy")
-        change("link-change", "link", "set", "tofu-fixture", "mtu", "1400")
+        change("link-add", "link", "add", "yonik-fixture", "type", "dummy")
+        change("link-change", "link", "set", "yonik-fixture", "mtu", "1400")
         change("address4-add", "addr", "add", "192.0.2.1/32", "dev", "lo")
         change(
             "route4-add",
@@ -232,7 +232,7 @@ def worker(binary: Path, host_inode: int, evidence: Path) -> None:
             "100",
         )
         change("address4-delete", "addr", "del", "192.0.2.1/32", "dev", "lo")
-        change("link-delete", "link", "del", "tofu-fixture")
+        change("link-delete", "link", "del", "yonik-fixture")
         change("nexthop-add", "nexthop", "add", "id", "41", "blackhole", optional=True)
         if "nexthop-add" not in report["skipped"]:
             change("nexthop-delete", "nexthop", "del", "id", "41")

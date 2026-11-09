@@ -17,7 +17,7 @@ from engine_smoke import FIXTURES, install_signal_handlers, links, run_sandbox
 from engine_traffic import TARGETS, counters, ip
 from traffic_echo import echo_servers
 
-LOG = logging.getLogger("tofu.apps")
+LOG = logging.getLogger("yonik.apps")
 PROBE = Path(__file__).resolve().with_name("app_probe.py")
 
 
@@ -83,29 +83,29 @@ def worker(binary: Path, engine: str, host_namespace: int, work_dir: Path) -> No
             ) as process:
                 try:
                     deadline = time.monotonic() + 5
-                    while "tofu-test" not in links():
+                    while "yonik-test" not in links():
                         if process.poll() is not None:
                             raise RuntimeError("Ядро завершилось до создания TUN")
                         if time.monotonic() >= deadline:
                             raise TimeoutError("TUN не создан")
                         time.sleep(0.05)
-                    ip("address", "replace", "198.18.0.1/30", "dev", "tofu-test")
+                    ip("address", "replace", "198.18.0.1/30", "dev", "yonik-test")
                     ip(
                         "-6",
                         "address",
                         "replace",
                         "2001:db8:746f::1/126",
                         "dev",
-                        "tofu-test",
+                        "yonik-test",
                         "nodad",
                     )
-                    ip("link", "set", "tofu-test", "up")
+                    ip("link", "set", "yonik-test", "up")
                     for index, (_, address) in enumerate(TARGETS):
                         family = "6" if index else "4"
                         route = json.loads(
                             ip("-j", "-" + family, "route", "get", address)
                         )
-                        if route[0].get("dev") != "tofu-test":
+                        if route[0].get("dev") != "yonik-test":
                             raise RuntimeError("Маршрут обходит TUN")
                         for transport in ("tcp", "udp"):
                             before = counters()

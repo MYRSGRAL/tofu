@@ -3,7 +3,7 @@
   "inbounds": [{
     "tag": "tun",
     "protocol": "tun",
-    "settings": {"name": "tofu-test", "mtu": 1500}
+    "settings": {"name": "yonik-test", "mtu": 1500}
   }],
   "outbounds": [{"tag": "block", "protocol": "blackhole"}]
 }

@@ -1,6 +1,6 @@
-# tofu — источники и проверенные факты
+# yonik — источники и проверенные факты
 
-Проект [tofu](README.md) развивается с открытым исходным кодом (open source). Linux — первая платформа, Android — следующий этап.
+Проект [yonik](README.md) развивается с открытым исходным кодом (open source). Linux — первая платформа, Android — следующий этап.
 
 Проверено 8 ноября 2026 года. Использованы первичные источники. Документация `latest` может описывать более новые возможности, чем выбранный стабильный выпуск; они не становятся частью compatibility manifest автоматически.
 
@@ -37,7 +37,7 @@
 | S-29 | [Xray 26.10.31 router config](https://github.com/XTLS/Xray-core/blob/v26.10.31/infra/conf/router.go) | Наличие поля process и его передачи в routing rule у версии-кандидата; не доказательство полноты распознавания |
 | S-30 | [Desktop Entry Specification](https://specifications.freedesktop.org/desktop-entry/latest/) | Метаданные Linux-приложений, Exec и D-Bus activation; desktop entry сам по себе не идентифицирует поток |
 | S-31 | [Лицензия sing-box 1.14.4](https://github.com/SagerNet/sing-box/blob/v1.14.4/LICENSE) | GPLv3-or-later и отдельное уведомление об имени/ассоциации |
-| S-32 | [Лицензия Xray-core 26.10.31](https://github.com/XTLS/Xray-core/blob/v26.10.31/LICENSE) | MPL 2.0; лицензия tofu не переименовывает upstream-лицензию |
+| S-32 | [Лицензия Xray-core 26.10.31](https://github.com/XTLS/Xray-core/blob/v26.10.31/LICENSE) | MPL 2.0; лицензия yonik не переименовывает upstream-лицензию |
 | S-33 | [GPLv3: текст и сводка GitHub Choose a License](https://choosealicense.com/licenses/gpl-3.0/) | Условия открытой передачи исходников/изменений, notices и частного использования; не готовый аудит всех зависимостей |
 
 ## Граница уверенности

@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace tofu_bench {
+namespace yonik_bench {
 int run_application();
 void request_frame(std::int32_t token);
 void exit_application();

@@ -1,0 +1,11 @@
+[package]
+name = "yonik-subscription"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+yonik-import = { path = "../yonik-import" }
+
+[lints]
+workspace = true

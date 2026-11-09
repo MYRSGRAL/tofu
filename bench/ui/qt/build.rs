@@ -1,6 +1,6 @@
 fn main() {
     use cxx_qt_build::{CxxQtBuilder, QmlModule};
-    CxxQtBuilder::new_qml_module(QmlModule::new("tofu.benchmark").qml_file("qml/Main.qml"))
+    CxxQtBuilder::new_qml_module(QmlModule::new("yonik.benchmark").qml_file("qml/Main.qml"))
         .file("src/bridge.rs")
         .cpp_file("src/application.cpp")
         .include_dir("src")

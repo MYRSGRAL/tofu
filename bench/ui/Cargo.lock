@@ -4739,7 +4739,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
-name = "tofu-bench-gtk"
+name = "yonik-bench-gtk"
 version = "0.1.0"
 dependencies = [
  "async-channel",
@@ -4748,7 +4748,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tofu-bench-qt"
+name = "yonik-bench-qt"
 version = "0.1.0"
 dependencies = [
  "cxx",
@@ -4761,7 +4761,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tofu-bench-slint"
+name = "yonik-bench-slint"
 version = "0.1.0"
 dependencies = [
  "slint",

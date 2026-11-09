@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         [flag, value] if flag == "--rows" && (value == "1000" || value == "10000") => {
             value.parse()?
         }
-        _ => return Err("Использование: tofu-bench-slint [--rows 1000|10000]".into()),
+        _ => return Err("Использование: yonik-bench-slint [--rows 1000|10000]".into()),
     };
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -229,7 +229,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     })?;
     let weak = app.as_weak();
     std::thread::Builder::new()
-        .name("tofu-bench-bridge".into())
+        .name("yonik-bench-bridge".into())
         .spawn(move || {
             while let Ok(event) = harness.events.recv() {
                 if weak

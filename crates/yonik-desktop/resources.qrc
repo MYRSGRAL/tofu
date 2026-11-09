@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="yonik.svg">assets/yonik.svg</file>
+  </qresource>
+  <qresource prefix="/fonts">
+    <file alias="Onest.ttf">../../design/assets/fonts/Onest.ttf</file>
+    <file alias="Unbounded.ttf">../../design/assets/fonts/Unbounded.ttf</file>
+  </qresource>
+  <qresource prefix="/licenses">
+    <file alias="Onest-OFL.txt">../../design/assets/fonts/Onest-OFL.txt</file>
+    <file alias="Unbounded-OFL.txt">../../design/assets/fonts/Unbounded-OFL.txt</file>
+  </qresource>
+</RCC>

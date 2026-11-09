@@ -1,6 +1,8 @@
-# tofu
+# yonik
 
-[English](README.md) · [Русский](README.ru.md)
+[English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
+
+[План завершения и текущая готовность](docs/PLAN.md).
 
 Нативный прокси-клиент с открытым исходным кодом. Сначала Linux
 (CachyOS/Arch, KDE Plasma, Wayland), затем Android. Запланированы Xray-core и
@@ -26,7 +28,7 @@ GUI управляет подписками и локальными SOCKS-сес
 - Ограниченный URI/Base64 импорт VLESS, VMess, Trojan, Shadowsocks, HTTP CONNECT и SOCKS5.
 - Строгая компиляция одного сервера для Xray 26.10.31 и sing-box 1.14.4:
   loopback SOCKS, проверка TLS и явные ошибки неподдерживаемых параметров.
-- Linux host `tofu-local`: проверяет immutable snapshot ядра и конфигурацию,
+- Linux host `yonik-local`: проверяет immutable snapshot ядра и конфигурацию,
   обслуживает локальный SOCKS, проверяет HTTPS через него и завершает/reap процесс.
 - IDNA exact/suffix правила и общая DNS-модель с явным разрешением,
   неоднозначностью, TTL/поколениями и привязкой fake mapping к сессии.
@@ -47,7 +49,7 @@ Rust-библиотека рассчитывает политику; изоли�
 helper и редактор маршрутизации ещё предстоит реализовать. Приёмка desktop/трея
 на живом KDE Wayland и окончательное визуальное решение остаются открытыми.
 
-`tofu-application` реализует начальный цикл подключения, проверки и остановки.
+`yonik-application` реализует начальный цикл подключения, проверки и остановки.
 Host обязан выбрать уникальный controller ID, пока возможны callbacks старого
 экземпляра. I/O, recovery, перенастройка и сохранение состояния ещё не
 реализованы; состояние reducer само по себе не доказывает исправность сети.
@@ -73,8 +75,12 @@ Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop eng
 [интерактивных вариантов](design/ui-variants.html) выбран А с большой кнопкой по центру.
 [Изолированный стенд Qt/GTK4/Slint](bench/ui/README.md) отделён от приложения;
 замеры реальных окон и выбор toolkit ещё впереди. Нативный Qt-прототип уже
-реализует А: карточка сервера, центральная кнопка connect/stop, статус, отдельные
-выбор серверов и настройки. Шрифты Onest/Unbounded и OFL-лицензии встроены.
+реализует А: карточка сервера, центральная кнопка connect/stop и статус.
+Карточка открывает **Серверы**, шестерёнка справа сверху — **Настройки**.
+«Назад» возвращает на предыдущий уровень. Дополнительных кнопок, бейджа режима
+и сводки подписки на главном экране нет.
+Начальный размер окна — 420×760 логических пикселей, минимальный — 380×600.
+Шрифты Onest/Unbounded и OFL-лицензии встроены.
 Рабочий UI не ждёт benchmark или системного TUN. [Направление UI](docs/specs/ui-direction.md).
 [Контракт главного экрана/backend](docs/specs/ui-backend-contract.md).
 [Реализация и проверки нативного А](docs/validation/2026-11-09-ui-a-native.md).
@@ -94,10 +100,10 @@ QML build tools), C++ compiler, системный SQLite и совместим�
 0.10.0 с согласованными версиями ABI CXX/cxx-gen.
 
 ```sh
-tofu_build=/var/tmp/codex-myrs/transient/tofu-dev
-mkdir -p "$tofu_build"
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --locked -p tofu-desktop --features gui --release
-"$tofu_build/target/release/tofu-desktop" --engine-dir /абсолютный/путь/к/engines
+yonik_build=/var/tmp/codex-myrs/transient/yonik-dev
+mkdir -p "$yonik_build"
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo build --locked -p yonik-desktop --features gui --release
+"$yonik_build/target/release/yonik-desktop" --engine-dir /абсолютный/путь/к/engines
 ```
 
 Каталог ядер содержит проверенные `xray-26.10.31/xray` и/или
@@ -109,27 +115,44 @@ flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --l
 Для запуска из меню установите пользовательский ярлык (без root и терминала при запуске):
 
 ```sh
-python tools/install_desktop.py --binary /постоянный/путь/tofu-desktop --engine-dir /абсолютный/путь/к/engines
+python tools/install_desktop.py --binary /постоянный/путь/yonik-desktop --engine-dir /абсолютный/путь/к/engines
 ```
 
 Бинарник должен оставаться по указанному пути вне временного build-каталога.
-В **Настройки → Подписки → Добавить** вставьте ссылку: загрузка начинается сразу.
+В **Серверы → Добавить** вставьте ссылку: загрузка начинается сразу.
+Все подписки и их серверы находятся в разделе **Серверы**. Выбранную подписку
+можно обновить, отменить её текущую загрузку, а через **Ещё** — переименовать
+или удалить с подтверждением. Элементов управления избранным в текущем GUI нет.
 Подтвердите JSON или частичный импорт после просмотра отчёта. Имя и разрешение
 локального HTTP-источника находятся в дополнительных параметрах формы.
 Вернитесь на главный экран, выберите сервер и нажмите центральную
 кнопку. `Limited` означает, что ядро работает,
 но HTTPS-проверка не прошла. Данные находятся в `$XDG_DATA_HOME/tofu` либо
-`~/.local/share/tofu`; `--data-dir PATH` выбирает приватный каталог. Master key
+`~/.local/share/tofu`; `--data-dir PATH` выбирает приватный каталог.
+Имя каталога `tofu` и идентичность Secret Service сохранены
+для совместимости с существующими зашифрованными данными. Master key
 остаётся в Secret Service. При недоступном ключе plaintext fallback отсутствует.
 URL подписок не передаются аргументами командной строки.
 
+Если провайдер требует HWID, включите **ID устройства** в дополнительных
+параметрах добавления или в **Серверы → Ещё** выбранной подписки. Опция выключена
+по умолчанию. При включении провайдеру отправляется случайный стабильный ID
+этой подписки; идентификаторы оборудования не читаются. ID хранится зашифрованно
+и сохраняется после отключения опции и перезапуска. Изменение настройки сразу
+повторяет загрузку. Лимит устройств показывается отдельной ошибкой; приложение
+не создаёт новый ID для обхода лимита. HWID относится к загрузке подписки.
+
+В **О приложении** и заголовке окна отображается идентификатор сборки. При
+обновлении завершите прежний экземпляр через меню трея: обычное закрытие окна
+может лишь скрыть его, а повторный запуск поднимет уже работающий экземпляр.
+
 Закрытие скрывает окно при доступном трее, иначе запрашивает безопасное завершение.
 Выход ждёт очистку сессии; команды трея проходят через тот же controller.
-Сейчас доступны connect/disconnect/restore/quit; меню избранного в трее,
+Сейчас доступны connect/disconnect/restore/quit;
 маршрутизация, постоянные GUI preferences и полная приёмка T-01…T-04 ещё впереди.
 [Проверки GUI и оставшиеся gates](docs/validation/2026-11-09-native-desktop.md).
 
-В настройках проверки можно задать свой HTTPS URL и ожидаемый статус 200–299;
+В **Настройки → Диагностика** можно задать свой HTTPS URL и ожидаемый статус 200–299;
 по умолчанию требуется ровно 204. GUI проверяет TLS, не следует редиректам и
 использует timeout 5 секунд. Настройка действует на следующий Connect в текущем
 сеансе; при активном ядре изменение запрещено. URL скрыт по умолчанию и не
@@ -139,7 +162,7 @@ TCP-задержка хоста или непрерывная гарантия �
 
 [Проверки настраиваемого HTTPS endpoint](docs/validation/2026-11-09-configurable-health.md).
 
-В обзоре **Проверить TCP** измеряет выбранный сервер отдельно от HTTPS.
+В **Настройки → Диагностика** действие **Проверить TCP** измеряет выбранный сервер отдельно от HTTPS.
 DNS разрешается один раз, затем выполняются три прямые TCP-пробы к одному
 выигравшему IP, порту и IPv6 scope. Сокеты сразу закрываются без аутентификации
 и payload. Показано медианное время трёх успешных проб без DNS и ожидания гонки
@@ -180,8 +203,8 @@ ResolverHost Apply и привилегированный жизненный ци
 Для явной диагностики в build-каталоге из примера выше:
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo build --locked -p tofu-linux --example network_inspect
-printf '%s\n' '{"op":"snapshot"}' | flock -s "$tofu_build" "$tofu_build/target/debug/examples/network_inspect"
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo build --locked -p yonik-linux --example network_inspect
+printf '%s\n' '{"op":"snapshot"}' | flock -s "$yonik_build" "$yonik_build/target/debug/examples/network_inspect"
 ```
 
 CLI намеренно выводит адреса и селекторы сети; обычный Debug скрывает содержимое.
@@ -194,7 +217,7 @@ Dump требует API systemd v259+, поток — v258+ и авториза�
 пример `resolver_inspect` выводит только счётчики и известные режимы:
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --locked -p tofu-linux --example resolver_inspect -- snapshot
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --locked -p yonik-linux --example resolver_inspect -- snapshot
 ```
 
 Для явно запрошенного потока используется `watch`; интерактивная авторизация
@@ -206,13 +229,13 @@ DNS, namespace или G-DNS. Наблюдатель GUI выше пока не �
 
 Диагностический пример читает профили только из stdin, проверяет одну принятую
 запись по индексу и выводит только счётчики/status/durations:
-`cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
+`cargo run --locked -p yonik-linux --example tcp_probe -- 0`.
 Подавайте текст через stdin; URL подписки и credentials не передавайте через argv
 или логи. SIGINT/SIGTERM отменяют измерение.
 
 ### Авторизация сетевого helper
 
-`tofu_linux::helper::PeerAuthorizer` проверяет credentials отправителя и
+`yonik_linux::helper::PeerAuthorizer` проверяет credentials отправителя и
 фиксированное действие polkit, закрепляет root-owned authority и проверяет
 sender сырых ответов. После решения повторно сверяет peer и authority,
 ограничивает число проверок и отменяет запрос у исходного владельца authority.
@@ -222,7 +245,7 @@ sender сырых ответов. После решения повторно с�
 
 ### Журнал управляемых сетевых ресурсов
 
-`tofu_linux::managed_network` предоставляет ограниченный устойчивый журнал
+`yonik_linux::managed_network` предоставляет ограниченный устойчивый журнал
 владения для будущего привилегированного сетевого helper. Он записывает intent
 до эффекта, требует явной сверки с ОС после открытия и сохраняет неочищенные
 ресурсы. Сессионные ресурсы и публичная блокировка kill switch имеют разный срок
@@ -242,11 +265,11 @@ Cargo.lock фиксирует MSRV-совместимые версии.
 Сборки размещаются вне checkout. На рабочей машине проекта:
 
 ```sh
-tofu_build=/var/tmp/codex-myrs/transient/tofu-dev
-mkdir -p "$tofu_build"
+yonik_build=/var/tmp/codex-myrs/transient/yonik-dev
+mkdir -p "$yonik_build"
 cargo fmt --all -- --check
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo test --workspace --locked
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo clippy --workspace --all-targets --locked -- -D warnings
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo test --workspace --locked
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
 Для smoke-тестов нужны Linux, Python 3.12+, `ip`, `unshare`, `/dev/net/tun`,
@@ -272,10 +295,10 @@ Smoke проверяет конфигурацию и lifecycle интерфей�
 Для начальной проверки атрибуции есть отдельный стенд:
 
 ```sh
-tofu_apps=/var/tmp/codex-myrs/transient/tofu-apps
-mkdir -p "$tofu_apps"
-flock -s "$tofu_apps" python tools/engine_apps.py xray /абсолютный/путь/к/xray --work-dir "$tofu_apps"
-flock -s "$tofu_apps" python tools/engine_apps.py sing-box /абсолютный/путь/к/sing-box --work-dir "$tofu_apps"
+yonik_apps=/var/tmp/codex-myrs/transient/yonik-apps
+mkdir -p "$yonik_apps"
+flock -s "$yonik_apps" python tools/engine_apps.py xray /абсолютный/путь/к/xray --work-dir "$yonik_apps"
+flock -s "$yonik_apps" python tools/engine_apps.py sing-box /абсолютный/путь/к/sing-box --work-dir "$yonik_apps"
 ```
 
 Он проверяет точные executable-пути последовательных TCP/UDP IPv4/IPv6 потоков
@@ -288,7 +311,7 @@ flock -s "$tofu_apps" python tools/engine_apps.py sing-box /абсолютный
 ### Диагностика offline-импорта
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-import < local/subscription.txt
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --quiet --locked -p yonik-import < local/subscription.txt
 ```
 
 На входе тело подписки, не URL загрузки. CLI выводит только счётчики, протоколы,
@@ -298,7 +321,7 @@ flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --qui
 Xray JSON object/array сохраняется для review; VLESS и Shadowsocks outbounds
 извлекаются в управляемые профили. Исходные маршруты/DNS/inbounds не исполняются.
 Неизвестные параметры блокируют компиляцию, неподдерживаемые протоколы показываются
-в отчёте. Прочий JSON остаётся opaque. Загрузчик использует `Happ/1.0 tofu/<version>`
+в отчёте. Прочий JSON остаётся opaque. Загрузчик использует `Happ/1.0 yonik/<version>`
 для JSON-совместимости Remnawave; правила провайдера могут переопределить ответ.
 Отдельный компилятор проверяет возможности профилей;
 host всё ещё обязан выполнить config-check закреплённым ядром до активации. Фатальные ошибки
@@ -308,7 +331,7 @@ host всё ещё обязан выполнить config-check закреплё
 ### Компиляция одного сервера
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-engine --bin tofu-compile -- xray --server 0 < local/profile.txt
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --quiet --locked -p yonik-engine --bin yonik-compile -- xray --server 0 < local/profile.txt
 ```
 
 Обычный вывод — метаданные (`compiled_not_checked`), а не результат подключения.
@@ -330,7 +353,7 @@ VLESS у Xray запрещён; тесты на приватных IP разре
 Синтетические config-check, TCP/UDP IPv4/IPv6 и отрицательные проверки TLS:
 
 ```sh
-flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_compile.py "$tofu_build/target/debug/tofu-compile" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
+flock -s "$yonik_build" env TMPDIR="$yonik_build" python tools/engine_compile.py "$yonik_build/target/debug/yonik-compile" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
 ```
 
 Нужен `openssl` в дополнение к namespace-инструментам и закреплённые версии ядер.
@@ -344,7 +367,7 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_compile.py "
 Xray Linux amd64, использованного в тестах:
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 < local/subscription.txt
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --quiet --locked -p yonik-linux --bin yonik-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 < local/subscription.txt
 ```
 
 Host копирует и хеширует ELF regular file в sealed memory snapshot; version,
@@ -364,7 +387,7 @@ HTTPS endpoint, `--check-status` задаёт ожидаемый статус 20
 Автоматического recovery и постоянного supervisor пока нет; SIGKILL host не позволяет
 выполнить cleanup. Локальный CLI ещё не является полным production EngineHost.
 
-Частичный импорт по умолчанию отклоняется. После просмотра отчёта `tofu-import`
+Частичный импорт по умолчанию отклоняется. После просмотра отчёта `yonik-import`
 флаги `--accept-partial --server N` явно выбирают одну распознанную запись и сообщают
 число отклонённых; неподдерживаемые параметры выбранной записи не разрешаются.
 Native JSON пока не поддерживается. Индексы считаются среди распознанных записей
@@ -374,14 +397,14 @@ Native JSON пока не поддерживается. Индексы счит�
 Изолированные тесты host (также нужны `rustc`, `openssl`, PID/mount namespaces):
 
 ```sh
-flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$tofu_build/target/debug/tofu-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
+flock -s "$yonik_build" env TMPDIR="$yonik_build" python tools/engine_host.py "$yonik_build/target/debug/yonik-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
 ```
 
 [Результаты и оставшаяся работа](docs/validation/2026-11-09-linux-engine-host.md).
 
 ### Библиотека подписок
 
-`tofu-subscription` подготавливает неизменяемый отчёт до согласия на сохранение.
+`yonik-subscription` подготавливает неизменяемый отчёт до согласия на сохранение.
 Linux `SubscriptionService` связывает его с `FetchHost` и
 `EncryptedSubscriptionRepository`: новая загрузка, отмена и смена источника
 инвалидируют старый результат; SQLite сверяет поколение источника и revision
@@ -428,7 +451,7 @@ CIDR/LAN с обязательным DNS отклоняются. `ip-only` по�
 не доказаны и дают явную ошибку. Отключённые личные правила/пресеты не влияют на маршрут.
 
 ```sh
-flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --quiet --locked -p tofu-linux --bin tofu-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 --policy examples/policy-names.json --policy-mode names --probe-port 10809 < local/subscription.txt
+flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --quiet --locked -p yonik-linux --bin yonik-local -- xray --binary /абсолютный/путь/к/xray --sha256 cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1 --server 0 --policy examples/policy-names.json --policy-mode names --probe-port 10809 < local/subscription.txt
 ```
 
 [Доменный пример](examples/policy-names.json) и [IP-only пример](examples/policy-ip-only.json)
@@ -455,8 +478,8 @@ IDNA, регистр и root-dot; нативный SOCKS ingress принима�
 к младшему доменному правилу. Такое поведение не принимается за требуемый fail-closed.
 
 ```sh
-flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/policy_traffic.py "$tofu_build/target/release/tofu-compile" "$tofu_build/target/release/tofu-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
-flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/dns_policy_gap.py /абсолютный/путь/к/xray
+flock -s "$yonik_build" env TMPDIR="$yonik_build" python tools/policy_traffic.py "$yonik_build/target/release/yonik-compile" "$yonik_build/target/release/yonik-local" /абсолютный/путь/к/xray /абсолютный/путь/к/sing-box
+flock -s "$yonik_build" env TMPDIR="$yonik_build" python tools/dns_policy_gap.py /абсолютный/путь/к/xray
 ```
 
 Вторая команда намеренно воспроизводит проблему upstream на синтетических данных;

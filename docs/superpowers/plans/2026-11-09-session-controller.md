@@ -2,7 +2,7 @@
 
 Основание: architecture.md §5–7, data-and-contracts.md §5.
 
-1. Создать tofu-application без ОС/GUI/runtime и сторонних зависимостей.
+1. Создать yonik-application без ОС/GUI/runtime и сторонних зависимостей.
 2. Проверить тестами последовательность Preparing → Starting → Checking →
    Connected/Limited, запрет Connected по одному запуску, busy и неверные события.
 3. Каждое принятое событие получает новый opaque token; stale callbacks

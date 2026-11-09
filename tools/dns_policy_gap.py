@@ -19,7 +19,7 @@ from pathlib import Path
 from engine_smoke import install_signal_handlers, run_sandbox
 from traffic_echo import receive_exact
 
-LOG = logging.getLogger("tofu.dns-gap")
+LOG = logging.getLogger("yonik.dns-gap")
 SHA = "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
 MARKER = b"DNS_FAIL_OPEN_CONFIRMED"
 
@@ -229,7 +229,7 @@ def main() -> None:
             raise RuntimeError("Нет workspace синтетического стенда")
         worker(args.worker, binary, args.workspace)
         return
-    with tempfile.TemporaryDirectory(prefix="tofu-dns-gap-") as workspace:
+    with tempfile.TemporaryDirectory(prefix="yonik-dns-gap-") as workspace:
         run_sandbox(
             [
                 "unshare",

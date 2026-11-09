@@ -26,7 +26,7 @@ from engine_smoke import install_signal_handlers, run_sandbox
 from network_topology_smoke import bounded_run, guard_namespace, namespace
 from traffic_echo import receive_exact
 
-LOG = logging.getLogger("tofu.resolution-pin")
+LOG = logging.getLogger("yonik.resolution-pin")
 PATCH_ROOT = Path(__file__).resolve().parents[1] / "adapters/sing-box/v1.14.4"
 PATCHES = (
     ("strict-complete-dns.patch", "strict_complete_dns"),
@@ -38,7 +38,7 @@ _WORKER_BOOTSTRAP = """
 import json, logging, runpy, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-m = runpy.run_path(sys.argv[1], run_name="tofu_resolution_pin_worker")
+m = runpy.run_path(sys.argv[1], run_name="yonik_resolution_pin_worker")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 m["install_signal_handlers"]()
 m["worker"](Path(sys.argv[2]), Path(sys.argv[3]), tuple(json.loads(sys.argv[4])), Path(sys.argv[5]))

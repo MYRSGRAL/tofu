@@ -8,7 +8,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 
-RESPONSE_PREFIX = b"tofu-tun:"
+RESPONSE_PREFIX = b"yonik-tun:"
 PAYLOAD_SIZE = 32
 
 
