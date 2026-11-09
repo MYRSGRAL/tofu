@@ -29,6 +29,7 @@ fn rule(id: u64, paths: &[&str], networks: &[&str], action: Action) -> Rule {
         conditions: Conditions {
             executables: paths.iter().map(|p| (*p).to_owned()).collect(),
             destinations: networks.iter().map(|p| cidr(p)).collect(),
+            domains: Vec::new(),
         },
         action,
     }
@@ -63,6 +64,7 @@ fn private_network_cannot_escape_to_lan_user_or_preset() {
     policy.private_networks.push(PrivateNetwork {
         network: cidr("10.0.0.0/24"),
         available: false,
+        vpn: tofu_domain::VpnId::new(1).unwrap(),
     });
     policy.lan.push(cidr("10.0.0.0/24"));
     policy.user_rules.push(rule(1, &[], &[], Action::Proxy));
@@ -87,10 +89,12 @@ fn overlapping_private_networks_block_if_any_required_route_is_missing() {
         PrivateNetwork {
             network: cidr("10.0.0.0/8"),
             available: true,
+            vpn: tofu_domain::VpnId::new(1).unwrap(),
         },
         PrivateNetwork {
             network: cidr("10.1.0.0/16"),
             available: false,
+            vpn: tofu_domain::VpnId::new(1).unwrap(),
         },
     ]);
     assert_eq!(

@@ -1,4 +1,4 @@
-use crate::Cidr;
+use crate::{Cidr, DomainPattern, VpnId};
 use std::net::IpAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,19 +43,13 @@ pub struct Flow<'a> {
 pub struct Conditions {
     pub executables: Vec<String>,
     pub destinations: Vec<Cidr>,
+    pub domains: Vec<DomainPattern>,
 }
 
 impl Conditions {
-    fn matches(&self, flow: &Flow<'_>) -> bool {
-        (self.executables.is_empty()
-            || flow
-                .executable
-                .is_some_and(|path| self.executables.iter().any(|p| p == path)))
-            && (self.destinations.is_empty()
-                || self
-                    .destinations
-                    .iter()
-                    .any(|cidr| cidr.contains(flow.destination)))
+    pub(crate) fn matches_source(&self, executable: Option<&str>) -> bool {
+        self.executables.is_empty()
+            || executable.is_some_and(|path| self.executables.iter().any(|p| p == path))
     }
 }
 
@@ -71,11 +65,13 @@ pub struct Rule {
 pub struct PrivateNetwork {
     pub network: Cidr,
     pub available: bool,
+    pub vpn: VpnId,
 }
 
 #[derive(Debug, Default)]
 pub struct Policy {
     pub private_networks: Vec<PrivateNetwork>,
+    pub private_domains: Vec<crate::PrivateDomain>,
     pub lan: Vec<Cidr>,
     pub user_rules: Vec<Rule>,
     pub preset_rules: Vec<Rule>,
@@ -85,6 +81,7 @@ pub struct Policy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleOrigin {
     PrivateNetwork,
+    PrivateDomain,
     Lan,
     User(u64),
     Preset(u64),
@@ -98,51 +95,22 @@ pub struct Decision {
 }
 
 impl Policy {
-    /// Расчёт политики, не доказательство фактического пути пакета.
-    /// Служебные исключения и подтверждение приватных маршрутов выполняет host.
+    /// Совместимый расчёт для literal IP без имени. Для DNS/fake и кода отказа
+    /// используйте evaluate_destination; неоднозначность здесь даёт Block.
     pub fn evaluate(&self, flow: &Flow<'_>) -> Decision {
-        let mut private_match = false;
-        for private in &self.private_networks {
-            if private.network.contains(flow.destination) {
-                private_match = true;
-                // Пересечение с недоступной защищённой сетью не разрешает обход.
-                if !private.available {
-                    return Decision {
-                        action: Route::Block,
-                        origin: RuleOrigin::PrivateNetwork,
-                    };
-                }
-            }
-        }
-        if private_match {
-            return Decision {
-                action: Route::PrivateVpn,
+        let request = crate::DestinationFlow {
+            executable: flow.executable,
+            destination: crate::Destination::Ip {
+                address: flow.destination,
+                name: None,
+            },
+        };
+        match self.evaluate_destination(&request, &crate::EvaluationContext::default()) {
+            crate::Evaluation::Decided { decision, .. } => decision,
+            _ => Decision {
+                action: Route::Block,
                 origin: RuleOrigin::PrivateNetwork,
-            };
-        }
-        if self.lan.iter().any(|cidr| cidr.contains(flow.destination)) {
-            return Decision {
-                action: Route::Direct,
-                origin: RuleOrigin::Lan,
-            };
-        }
-        for (rules, origin) in [
-            (&self.user_rules, RuleOrigin::User as fn(u64) -> RuleOrigin),
-            (&self.preset_rules, RuleOrigin::Preset),
-        ] {
-            if let Some(rule) = rules
-                .iter()
-                .find(|rule| rule.enabled && rule.conditions.matches(flow))
-            {
-                return Decision {
-                    action: rule.action.into(),
-                    origin: origin(rule.id),
-                };
-            }
-        }
-        Decision {
-            action: self.default_action.into(),
-            origin: RuleOrigin::Default,
+            },
         }
     }
 }

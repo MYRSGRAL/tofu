@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use tofu_application::{
     ConfigDigest, EnvironmentStamp, Event, Fault, Outcome, Session, State, Token,
 };
-use tofu_engine::CompiledConfig;
+use tofu_engine::{CompiledConfig, ProbeAccess};
 use tokio::{
     process::Child,
     time::{sleep, timeout},
@@ -36,6 +36,8 @@ pub struct CheckedConfig {
     bytes: Vec<u8>,
     digest: ConfigDigest,
     port: NonZeroU16,
+    probe_port: NonZeroU16,
+    probe_access: ProbeAccess,
 }
 impl std::fmt::Debug for CheckedConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -52,10 +54,12 @@ impl CheckedConfig {
             return Err(HostError::ConfigRejected);
         }
         let port = config.listen_port();
+        let probe_port = config.probe_port();
         let mut bytes = Vec::new();
         config
             .write_sensitive(&mut bytes)
             .map_err(|_| HostError::ConfigRejected)?;
+        let probe_access = config.into_probe_access();
         process::verify_version(&binary, cancel).await?;
         process::config_check(&binary, &bytes, cancel).await?;
         let digest = ConfigDigest::new(Sha256::digest(&bytes).into());
@@ -64,6 +68,8 @@ impl CheckedConfig {
             bytes,
             digest,
             port,
+            probe_port,
+            probe_access,
         })
     }
 }
@@ -76,6 +82,8 @@ pub struct LocalSession {
     child: Option<Child>,
     binary: Option<BinarySnapshot>,
     port: Option<NonZeroU16>,
+    probe_port: Option<NonZeroU16>,
+    probe_access: ProbeAccess,
 }
 impl std::fmt::Debug for LocalSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -96,6 +104,8 @@ impl LocalSession {
             child: None,
             binary: None,
             port: None,
+            probe_port: None,
+            probe_access: ProbeAccess::default(),
         })
     }
     pub fn state(&self) -> State {
@@ -141,6 +151,8 @@ impl LocalSession {
             _ => return Err(HostError::State),
         };
         self.port = Some(checked.port);
+        self.probe_port = Some(checked.probe_port);
+        self.probe_access = checked.probe_access;
         self.binary = Some(checked.binary);
         let result = async {
             let binary = self.binary.as_ref().ok_or(HostError::State)?;
@@ -150,7 +162,7 @@ impl LocalSession {
             let readiness = async {
                 loop {
                     if child.try_wait().map_err(|_| HostError::Process)?.is_some() { return Err(HostError::EngineExited); }
-                    if listener_owned(child.id().ok_or(HostError::EngineExited)?, checked.port.get())? { return Ok(()); }
+                    if listeners_owned(child.id().ok_or(HostError::EngineExited)?, checked.port.get(), checked.probe_port.get())? { return Ok(()); }
                     sleep(Duration::from_millis(50)).await;
                 }
             };
@@ -179,9 +191,16 @@ impl LocalSession {
             return Err(HostError::State);
         }
         cancel.check()?;
+        if !self
+            .probe_access
+            .allows_host(target.url.host_str().ok_or(HostError::ProbeTarget)?)
+        {
+            return Err(HostError::ProbeTarget);
+        }
         let port = self.port.ok_or(HostError::State)?.get();
+        let probe_port = self.probe_port.ok_or(HostError::State)?.get();
         let child = self.child.as_mut().ok_or(HostError::State)?;
-        if let Err(error) = verify_listener(child, port) {
+        if let Err(error) = verify_listener(child, port, probe_port) {
             self.fail().await?;
             return Err(error);
         }
@@ -189,11 +208,11 @@ impl LocalSession {
             biased;
             status = child.wait() => { let _ = status.map_err(|_| HostError::Process)?; Err(HostError::EngineExited) },
             _ = cancel.cancelled() => Err(HostError::Cancelled),
-            result = probe::probe(port, target) => Ok(result),
+            result = probe::probe(probe_port, target, self.probe_access.auth()) => Ok(result),
         };
         match result {
             Ok(result) => {
-                if let Err(error) = verify_listener(child, port) {
+                if let Err(error) = verify_listener(child, port, probe_port) {
                     self.fail().await?;
                     return Err(error);
                 }
@@ -236,6 +255,8 @@ impl LocalSession {
         self.child = None;
         self.binary = None;
         self.port = None;
+        self.probe_port = None;
+        self.probe_access = ProbeAccess::default();
         self.accept(Event::CleanupConfirmed)
     }
     pub async fn stop(&mut self) -> Result<(), HostError> {
@@ -248,15 +269,19 @@ impl LocalSession {
     }
 }
 
-fn verify_listener(child: &mut Child, port: u16) -> Result<(), HostError> {
+fn verify_listener(child: &mut Child, port: u16, probe_port: u16) -> Result<(), HostError> {
     if child.try_wait().map_err(|_| HostError::Process)?.is_some() {
         return Err(HostError::EngineExited);
     }
-    if listener_owned(child.id().ok_or(HostError::EngineExited)?, port)? {
+    if listeners_owned(child.id().ok_or(HostError::EngineExited)?, port, probe_port)? {
         Ok(())
     } else {
         Err(HostError::Listener)
     }
+}
+
+fn listeners_owned(pid: u32, port: u16, probe_port: u16) -> Result<bool, HostError> {
+    Ok(listener_owned(pid, port)? && (port == probe_port || listener_owned(pid, probe_port)?))
 }
 
 pub(super) fn listener_owned(pid: u32, port: u16) -> Result<bool, HostError> {

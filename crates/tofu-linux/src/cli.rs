@@ -8,7 +8,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use tofu_engine::{Engine, compile};
+use tofu_engine::{Engine, PolicyMode, compile, compile_policy, policy_input::read_policy};
 use tofu_import::import_reader;
 use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, HostError, LocalSession, ProbeResult, ProbeTarget,
@@ -25,6 +25,7 @@ struct Arguments {
     target: ProbeTarget,
     once: bool,
     accept_partial: bool,
+    policy: Option<(PathBuf, PolicyMode, NonZeroU16)>,
 }
 
 fn arguments() -> Result<Arguments, &'static str> {
@@ -59,6 +60,9 @@ fn arguments() -> Result<Arguments, &'static str> {
             "--listen-port",
             "--check-url",
             "--check-timeout",
+            "--policy",
+            "--policy-mode",
+            "--probe-port",
         ]
         .contains(&key)
         {
@@ -100,6 +104,21 @@ fn arguments() -> Result<Arguments, &'static str> {
         Duration::from_secs(seconds),
     )
     .map_err(|_| "Некорректный HTTPS endpoint или timeout")?;
+    let policy = match (
+        options.get("--policy"),
+        text("--policy-mode")?,
+        text("--probe-port")?,
+    ) {
+        (None, None, None) => None,
+        (Some(path), Some(mode), Some(port)) => Some((
+            PathBuf::from(path),
+            mode.parse().map_err(|_| "Нужен режим names или ip-only")?,
+            port.parse().map_err(|_| "Некорректный порт проверки")?,
+        )),
+        _ => {
+            return Err("Нужны вместе --policy FILE --policy-mode names|ip-only --probe-port PORT");
+        }
+    };
     Ok(Arguments {
         engine,
         binary,
@@ -109,6 +128,7 @@ fn arguments() -> Result<Arguments, &'static str> {
         target,
         once,
         accept_partial,
+        policy,
     })
 }
 
@@ -180,7 +200,26 @@ pub fn main() -> ExitCode {
             return Err("Есть отклонённые записи: проверьте tofu-import; явный выбор требует --accept-partial --server N".into());
         }
         let server = report.servers.get(args.server).ok_or("Индекс вне списка")?;
-        let config = compile(server, args.engine, args.port).map_err(|e| e.to_string())?;
+        let config = if let Some((path, mode, probe_port)) = &args.policy {
+            use std::os::unix::fs::OpenOptionsExt;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+                .open(path)
+                .map_err(|_| "Не удалось открыть политику")?;
+            if !file
+                .metadata()
+                .map_err(|_| "Не удалось проверить файл политики")?
+                .is_file()
+            {
+                return Err("Политика должна быть обычным файлом".into());
+            }
+            let policy = read_policy(file).map_err(|e| e.to_string())?;
+            compile_policy(server, args.engine, args.port, *probe_port, &policy, *mode)
+                .map_err(|e| e.to_string())?
+        } else {
+            compile(server, args.engine, args.port).map_err(|e| e.to_string())?
+        };
         if !report.issues.is_empty() {
             emit(json!({"event":"partial_import","parsed":report.servers.len(),"rejected":report.issues.len(),"server_index":args.server})).map_err(|e| e.to_string())?;
         }

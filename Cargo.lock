@@ -818,6 +818,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]
@@ -1000,13 +1001,20 @@ version = "0.1.0"
 [[package]]
 name = "tofu-domain"
 version = "0.1.0"
+dependencies = [
+ "idna",
+]
 
 [[package]]
 name = "tofu-engine"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "getrandom 0.2.17",
+ "rustix",
+ "serde",
  "serde_json",
+ "tofu-domain",
  "tofu-import",
  "url",
 ]

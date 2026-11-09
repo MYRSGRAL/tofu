@@ -1,0 +1,302 @@
+use std::net::IpAddr;
+
+use crate::{Cidr, Decision, DomainName, Policy, Route, RuleOrigin};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VpnId(std::num::NonZeroU64);
+impl VpnId {
+    pub fn new(value: u64) -> Option<Self> {
+        std::num::NonZeroU64::new(value).map(Self)
+    }
+    pub fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+#[derive(Debug)]
+pub struct PrivateDomain {
+    pub domain: crate::DomainPattern,
+    pub vpn: VpnId,
+    pub available: bool,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// Host не переиспользует epochs, пока жив хотя бы один ответ/mapping,
+/// включая restart и persistent cache. engine обозначает сессию, не версию ядра.
+pub struct DnsEpoch {
+    pub network: u64,
+    pub engine: u64,
+    pub resolver: u64,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolverPath {
+    Policy,
+    Vpn(VpnId),
+}
+#[derive(Debug, Clone, Copy)]
+pub struct AnswerSet<'a> {
+    pub addresses: &'a [IpAddr],
+    /// Все разрешённые семейства завершились ответом или NODATA, не timeout.
+    pub complete: bool,
+    pub expires_at: u64,
+    pub epoch: DnsEpoch,
+    pub path: ResolverPath,
+}
+#[derive(Debug, Clone, Copy)]
+pub enum Resolution<'a> {
+    Missing,
+    Failed,
+    Answer(AnswerSet<'a>),
+}
+#[derive(Debug)]
+pub struct FakeMapping {
+    pub address: IpAddr,
+    pub name: DomainName,
+    pub epoch: DnsEpoch,
+    pub expires_at: u64,
+}
+#[derive(Debug)]
+pub enum Destination<'a> {
+    Ip {
+        address: IpAddr,
+        name: Option<&'a DomainName>,
+    },
+    Name {
+        name: &'a DomainName,
+        resolution: Resolution<'a>,
+    },
+    Fake {
+        address: IpAddr,
+        mapping: Option<&'a FakeMapping>,
+        resolution: Resolution<'a>,
+    },
+}
+#[derive(Debug)]
+pub struct DestinationFlow<'a> {
+    pub executable: Option<&'a str>,
+    pub destination: Destination<'a>,
+}
+#[derive(Debug, Default)]
+pub struct EvaluationContext<'a> {
+    pub now: u64,
+    pub epoch: DnsEpoch,
+    pub fake_pools: &'a [Cidr],
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyFault {
+    DnsPolicyUnresolved,
+    DnsPolicyAmbiguous,
+    UnknownFakeMapping,
+    WrongResolver,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Evaluation {
+    Decided {
+        decision: Decision,
+        vpn: Option<VpnId>,
+    },
+    NeedResolution(ResolverPath),
+    Rejected(PolicyFault),
+}
+
+fn decided(action: Route, origin: RuleOrigin, vpn: Option<VpnId>) -> Evaluation {
+    Evaluation::Decided {
+        decision: Decision { action, origin },
+        vpn,
+    }
+}
+fn unresolved() -> Evaluation {
+    Evaluation::Rejected(PolicyFault::DnsPolicyUnresolved)
+}
+fn ambiguous() -> Evaluation {
+    Evaluation::Rejected(PolicyFault::DnsPolicyAmbiguous)
+}
+
+enum Addresses<'a> {
+    Literal(&'a [IpAddr]),
+    Lookup(Resolution<'a>, ResolverPath),
+}
+impl<'a> Addresses<'a> {
+    fn get(&self, context: &EvaluationContext<'_>) -> Result<&'a [IpAddr], Evaluation> {
+        match self {
+            Self::Literal(addresses) => Ok(addresses),
+            Self::Lookup(Resolution::Missing, path) => Err(Evaluation::NeedResolution(*path)),
+            Self::Lookup(Resolution::Failed, _) => Err(unresolved()),
+            Self::Lookup(Resolution::Answer(answer), path) => {
+                if answer.epoch != context.epoch || answer.expires_at <= context.now {
+                    return Err(Evaluation::NeedResolution(*path));
+                }
+                if answer.path != *path {
+                    return Err(Evaluation::Rejected(PolicyFault::WrongResolver));
+                }
+                if !answer.complete
+                    || answer.addresses.is_empty()
+                    || answer.addresses.len() > 64
+                    || answer.addresses.iter().any(|address| {
+                        context
+                            .fake_pools
+                            .iter()
+                            .any(|pool| pool.contains(address.to_canonical()))
+                    })
+                {
+                    return Err(unresolved());
+                }
+                Ok(answer.addresses)
+            }
+        }
+    }
+}
+
+impl Policy {
+    /// Выбор пути без I/O. NeedResolution — запрос host, а не разрешение
+    /// продолжить младшие правила. Ответы/время/поколения сообщает доверенный host.
+    pub fn evaluate_destination(
+        &self,
+        flow: &DestinationFlow<'_>,
+        context: &EvaluationContext<'_>,
+    ) -> Evaluation {
+        let literal;
+        let (name, resolution) = match &flow.destination {
+            Destination::Ip { address, name } => {
+                if context
+                    .fake_pools
+                    .iter()
+                    .any(|pool| pool.contains(address.to_canonical()))
+                {
+                    return Evaluation::Rejected(PolicyFault::UnknownFakeMapping);
+                }
+                literal = Some([address.to_canonical()]);
+                (*name, Resolution::Missing)
+            }
+            Destination::Name { name, resolution } => {
+                literal = None;
+                (Some(*name), *resolution)
+            }
+            Destination::Fake {
+                address,
+                mapping,
+                resolution,
+            } => {
+                let Some(mapping) = mapping.filter(|mapping| {
+                    mapping.address.to_canonical() == address.to_canonical()
+                        && mapping.epoch == context.epoch
+                        && mapping.expires_at > context.now
+                        && context
+                            .fake_pools
+                            .iter()
+                            .any(|pool| pool.contains(address.to_canonical()))
+                }) else {
+                    return Evaluation::Rejected(PolicyFault::UnknownFakeMapping);
+                };
+                literal = None;
+                (Some(&mapping.name), *resolution)
+            }
+        };
+        let mut zone_owner = None;
+        let mut zone_available = true;
+        for zone in &self.private_domains {
+            if name.is_some_and(|name| zone.domain.matches(name)) {
+                if zone_owner.is_some_and(|id| id != zone.vpn) {
+                    return ambiguous();
+                }
+                zone_owner = Some(zone.vpn);
+                zone_available &= zone.available;
+            }
+        }
+        if !zone_available {
+            return decided(Route::Block, RuleOrigin::PrivateDomain, None);
+        }
+        let path = zone_owner.map_or(ResolverPath::Policy, ResolverPath::Vpn);
+        let facts = match &literal {
+            Some(addresses) => Addresses::Literal(addresses),
+            None => Addresses::Lookup(resolution, path),
+        };
+        if !self.private_networks.is_empty() || zone_owner.is_some() {
+            let addresses = match facts.get(context) {
+                Ok(addresses) => addresses,
+                Err(result) => return result,
+            };
+            let mut owner = None;
+            let mut public = false;
+            let mut available = true;
+            for address in addresses {
+                let mut private = false;
+                for network in &self.private_networks {
+                    if network.network.contains(address.to_canonical()) {
+                        private = true;
+                        if owner.is_some_and(|id| id != network.vpn) {
+                            return ambiguous();
+                        }
+                        owner = Some(network.vpn);
+                        available &= network.available;
+                    }
+                }
+                public |= !private;
+            }
+            if owner.is_some() && public {
+                return ambiguous();
+            }
+            if let (Some(zone), Some(network)) = (zone_owner, owner) {
+                if zone != network {
+                    return ambiguous();
+                }
+            }
+            if let Some(vpn) = owner.or(zone_owner) {
+                return decided(
+                    if available {
+                        Route::PrivateVpn
+                    } else {
+                        Route::Block
+                    },
+                    if zone_owner.is_some() {
+                        RuleOrigin::PrivateDomain
+                    } else {
+                        RuleOrigin::PrivateNetwork
+                    },
+                    available.then_some(vpn),
+                );
+            }
+        }
+        if !self.lan.is_empty() {
+            let addresses = match facts.get(context) {
+                Ok(addresses) => addresses,
+                Err(result) => return result,
+            };
+            if self.lan.iter().any(|cidr| {
+                addresses
+                    .iter()
+                    .any(|address| cidr.contains(address.to_canonical()))
+            }) {
+                return decided(Route::Direct, RuleOrigin::Lan, None);
+            }
+        }
+        for (rules, origin) in [
+            (&self.user_rules, RuleOrigin::User as fn(u64) -> RuleOrigin),
+            (&self.preset_rules, RuleOrigin::Preset),
+        ] {
+            for rule in rules {
+                let condition = &rule.conditions;
+                if !rule.enabled || !condition.matches_source(flow.executable) {
+                    continue;
+                }
+                let mut matches = condition.destinations.is_empty() && condition.domains.is_empty()
+                    || name.is_some_and(|name| {
+                        condition.domains.iter().any(|domain| domain.matches(name))
+                    });
+                if !matches && !condition.destinations.is_empty() {
+                    let addresses = match facts.get(context) {
+                        Ok(addresses) => addresses,
+                        Err(result) => return result,
+                    };
+                    matches = condition.destinations.iter().any(|cidr| {
+                        addresses
+                            .iter()
+                            .any(|address| cidr.contains(address.to_canonical()))
+                    });
+                }
+                if matches {
+                    return decided(rule.action.into(), origin(rule.id), None);
+                }
+            }
+        }
+        decided(self.default_action.into(), RuleOrigin::Default, None)
+    }
+}

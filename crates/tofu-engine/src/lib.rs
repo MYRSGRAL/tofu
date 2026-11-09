@@ -1,6 +1,11 @@
 //! Строгий компилятор одного proxy outbound. Не запускает ядро и не меняет сеть.
 
 mod options;
+pub mod policy_input;
+mod routing;
+pub use routing::{
+    PolicyCapability, PolicyCompileError, PolicyMode, ProbeAccess, ProbeCredentials, compile_policy,
+};
 
 use std::{
     fmt,
@@ -56,6 +61,8 @@ pub struct CompiledConfig {
     value: Value,
     engine: Engine,
     port: NonZeroU16,
+    probe_port: NonZeroU16,
+    probe_access: ProbeAccess,
 }
 impl CompiledConfig {
     pub fn engine(&self) -> Engine {
@@ -63,6 +70,15 @@ impl CompiledConfig {
     }
     pub fn listen_port(&self) -> NonZeroU16 {
         self.port
+    }
+    pub fn probe_port(&self) -> NonZeroU16 {
+        self.probe_port
+    }
+    pub fn probe_auth(&self) -> Option<&ProbeCredentials> {
+        self.probe_access.auth()
+    }
+    pub fn into_probe_access(self) -> ProbeAccess {
+        self.probe_access
     }
     pub fn write_sensitive(&self, writer: impl Write) -> Result<(), serde_json::Error> {
         serde_json::to_writer(writer, &self.value)
@@ -81,14 +97,7 @@ pub fn compile(
     engine: Engine,
     port: NonZeroU16,
 ) -> Result<CompiledConfig, CompileError> {
-    let host = server.endpoint().host();
-    let listener_address = host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<IpAddr>()
-            .is_ok_and(|ip| ip.to_canonical() == IpAddr::V4(Ipv4Addr::LOCALHOST));
-    if server.endpoint().port() == port.get() && listener_address {
-        return Err(CompileError::ListenerConflict);
-    }
+    validate_listener(server, port)?;
     let options = options::validate(server, engine)?;
     validate_credentials(server, engine)?;
     let value = match engine {
@@ -109,7 +118,21 @@ pub fn compile(
         value,
         engine,
         port,
+        probe_port: port,
+        probe_access: ProbeAccess::default(),
     })
+}
+
+fn validate_listener(server: &ParsedServer, port: NonZeroU16) -> Result<(), CompileError> {
+    let host = server.endpoint().host();
+    let listener_address = host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.to_canonical() == IpAddr::V4(Ipv4Addr::LOCALHOST));
+    if server.endpoint().port() == port.get() && listener_address {
+        return Err(CompileError::ListenerConflict);
+    }
+    Ok(())
 }
 
 fn validate_credentials(server: &ParsedServer, engine: Engine) -> Result<(), CompileError> {
