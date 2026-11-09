@@ -97,9 +97,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends build-essential lld pkg-config qt6-base-dev qt6-declarative-dev libsqlite3-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qtqml-models
       - name: Подготовить окружение Qt
+        id: qt_environment
         run: |
-          mkdir -m 700 "$RUNNER_TEMP/yonik-runtime"
-          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/yonik-runtime" >> "$GITHUB_ENV"
+          # Полный путь UNIX-сокета с SHA-256 должен быть короче 107 байт.
+          yonik_runtime="$(mktemp -d /tmp/yonik-qt-XXXXXX)"
+          printf 'runtime=%s\n' "$yonik_runtime" >> "$GITHUB_OUTPUT"
+          printf 'XDG_RUNTIME_DIR=%s\n' "$yonik_runtime" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/yonik-target" >> "$GITHUB_ENV"
           rustup toolchain install 1.85.1 --profile minimal --component clippy
       - name: Проверить и собрать настоящий GUI
@@ -123,3 +126,9 @@ jobs:
           path: ${{ runner.temp }}/gui-ui-a*/
           retention-days: 3
           if-no-files-found: ignore
+      - name: Удалить собственный runtime-каталог Qt
+        if: ${{ always() && steps.qt_environment.outputs.runtime != '' }}
+        env:
+          YONIK_TEST_RUNTIME: ${{ steps.qt_environment.outputs.runtime }}
+        run: |
+          rmdir -- "$YONIK_TEST_RUNTIME"
