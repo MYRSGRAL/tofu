@@ -1,0 +1,286 @@
+diff --git a/adapter/dns.go b/adapter/dns.go
+index 8119097..ce8ea1f 100644
+--- a/adapter/dns.go
++++ b/adapter/dns.go
+@@ -32,6 +32,7 @@ type DNSClient interface {
+ }
+ 
+ type DNSQueryOptions struct {
++	StrictComplete         bool
+ 	Transport              DNSTransport
+ 	Strategy               C.DomainStrategy
+ 	LookupStrategy         C.DomainStrategy
+diff --git a/dns/client.go b/dns/client.go
+index 51cedd6..93872f9 100644
+--- a/dns/client.go
++++ b/dns/client.go
+@@ -26,6 +26,7 @@ import (
+ )
+ 
+ var (
++	errIncompleteResponse     = E.New("incomplete required DNS families")
+ 	ErrNoRawSupport           = E.New("no raw query support by current transport")
+ 	ErrNotCached              = E.New("not cached")
+ 	ErrResponseRejected       = E.New("response rejected")
+@@ -491,6 +492,9 @@ func (c *Client) Lookup(ctx context.Context, transport adapter.DNSTransport, dom
+ 		return nil
+ 	})
+ 	err := group.Run(ctx)
++	if options.StrictComplete && err != nil {
++		return nil, E.Cause1(errIncompleteResponse, err)
++	}
+ 	if len(response4) == 0 && len(response6) == 0 {
+ 		return nil, err
+ 	}
+diff --git a/dns/router.go b/dns/router.go
+index 40107d9..66087b9 100644
+--- a/dns/router.go
++++ b/dns/router.go
+@@ -1013,6 +1013,9 @@ func (r *Router) lookupWithRules(ctx context.Context, rules []adapter.DNSRule, d
+ 		return err
+ 	})
+ 	err := group.Run(ctx)
++	if options.StrictComplete && err != nil {
++		return nil, err
++	}
+ 	if len(response4) == 0 && len(response6) == 0 {
+ 		return nil, err
+ 	}
+@@ -1333,7 +1336,7 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 				dnsOptions.Strategy = r.defaultDomainStrategy
+ 			}
+ 			responseAddrs, err = r.client.Lookup(dnsCtx, transport, domain, dnsOptions, responseCheck)
+-			if responseCheck == nil || err == nil {
++			if errors.Is(err, errIncompleteResponse) || responseCheck == nil || err == nil {
+ 				break
+ 			}
+ 			printResult()
+diff --git a/dns/strict_complete_test.go b/dns/strict_complete_test.go
+new file mode 100644
+index 0000000..bacc7a6
+--- /dev/null
++++ b/dns/strict_complete_test.go
+@@ -0,0 +1,179 @@
++package dns
++
++import (
++	"context"
++	"net/netip"
++	"sync/atomic"
++	"testing"
++
++	mDNS "github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	C "github.com/sagernet/sing-box/constant"
++	"github.com/sagernet/sing-box/log"
++	"github.com/sagernet/sing-box/option"
++	R "github.com/sagernet/sing-box/route/rule"
++	"github.com/sagernet/sing/common/json"
++	"github.com/stretchr/testify/require"
++)
++
++type strictCompleteTransport struct {
++	fakeDNSTransport
++	fail4, fail6, empty4, empty6 bool
++	queries4, queries6           atomic.Int32
++}
++
++func (t *strictCompleteTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
++	q := message.Question[0]
++	var fail, empty bool
++	var address netip.Addr
++	if q.Qtype == mDNS.TypeA {
++		t.queries4.Add(1)
++		fail, empty = t.fail4, t.empty4
++		address = netip.MustParseAddr("192.0.2.1")
++	} else {
++		t.queries6.Add(1)
++		fail, empty = t.fail6, t.empty6
++		address = netip.MustParseAddr("2001:db8::1")
++	}
++	if fail {
++		return nil, context.DeadlineExceeded
++	}
++	if empty {
++		return FixedResponseStatus(message, mDNS.RcodeSuccess), nil
++	}
++	return FixedResponse(message.Id, q, []netip.Addr{address}, 300), nil
++}
++
++func (t *strictCompleteTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(*mDNS.Msg, error)) {
++	callback(t.Exchange(ctx, message))
++}
++
++func strictCompleteRouter(transport adapter.DNSTransport) *Router {
++	return &Router{
++		ctx: context.Background(), logger: log.NewNOPFactory().Logger(),
++		transport: &fakeDNSTransportManager{transports: map[string]adapter.DNSTransport{"final": transport}, defaultTransport: transport},
++		client:    NewClient(ClientOptions{Context: context.Background(), DisableCache: true, Logger: log.NewNOPFactory().Logger()}),
++	}
++}
++
++func TestStrictCompleteLookup(t *testing.T) {
++	cases := []struct {
++		name                         string
++		fail4, fail6, empty4, empty6 bool
++		strategy                     C.DomainStrategy
++		want4, want6                 int32
++		count                        int
++		alwaysError                  bool
++	}{
++		{name: "success", want4: 1, want6: 1, count: 2},
++		{name: "A_failure", fail4: true, want4: 1, want6: 1, count: 1},
++		{name: "AAAA_failure", fail6: true, want4: 1, want6: 1, count: 1},
++		{name: "both_failure", fail4: true, fail6: true, want4: 1, want6: 1, alwaysError: true},
++		{name: "A_NODATA", empty4: true, want4: 1, want6: 1, count: 1},
++		{name: "AAAA_NODATA", empty6: true, want4: 1, want6: 1, count: 1},
++		{name: "both_NODATA", empty4: true, empty6: true, want4: 1, want6: 1},
++		{name: "IPv4_only", fail6: true, strategy: C.DomainStrategyIPv4Only, want4: 1, count: 1},
++		{name: "IPv6_only", fail4: true, strategy: C.DomainStrategyIPv6Only, want6: 1, count: 1},
++		{name: "IPv4_only_failure", fail4: true, strategy: C.DomainStrategyIPv4Only, want4: 1, alwaysError: true},
++		{name: "IPv6_only_failure", fail6: true, strategy: C.DomainStrategyIPv6Only, want6: 1, alwaysError: true},
++	}
++	for _, path := range []string{"client", "rules", "legacy", "explicit"} {
++		for _, strict := range []bool{false, true} {
++			for _, tc := range cases {
++				mode := "default"
++				if strict {
++					mode = "strict"
++				}
++				t.Run(path+"/"+mode+"/"+tc.name, func(t *testing.T) {
++					transport := &strictCompleteTransport{fail4: tc.fail4, fail6: tc.fail6, empty4: tc.empty4, empty6: tc.empty6}
++					transport.tag = "final"
++					router := strictCompleteRouter(transport)
++					options := adapter.DNSQueryOptions{StrictComplete: strict, Strategy: tc.strategy}
++					var addresses []netip.Addr
++					var err error
++					switch path {
++					case "client":
++						addresses, err = router.client.Lookup(context.Background(), transport, "strict.example", options, nil)
++					case "rules":
++						addresses, err = router.lookupWithRules(context.Background(), nil, "strict.example", options)
++					default:
++						router.legacyDNSMode = path == "legacy"
++						if path == "explicit" {
++							options.Transport = transport
++						}
++						addresses, err = router.Lookup(context.Background(), "strict.example", options)
++					}
++					requiredFailure := (tc.want4 > 0 && tc.fail4) || (tc.want6 > 0 && tc.fail6)
++					wantError := tc.alwaysError || (strict && requiredFailure) || ((path == "legacy" || path == "explicit") && tc.count == 0)
++					if wantError {
++						require.Error(t, err)
++						require.Empty(t, addresses)
++					} else {
++						require.NoError(t, err)
++						require.Len(t, addresses, tc.count)
++					}
++					require.Equal(t, tc.want4, transport.queries4.Load())
++					require.Equal(t, tc.want6, transport.queries6.Load())
++				})
++			}
++		}
++	}
++}
++
++func TestStrictCompleteLegacyDoesNotFallThrough(t *testing.T) {
++	for _, strict := range []bool{false, true} {
++		t.Run(map[bool]string{false: "default", true: "strict"}[strict], func(t *testing.T) {
++			primary := &strictCompleteTransport{fail6: true}
++			primary.tag = "primary"
++			fallback := &strictCompleteTransport{}
++			fallback.tag = "final"
++			router := strictCompleteRouter(fallback)
++			router.transport.(*fakeDNSTransportManager).transports["primary"] = primary
++			rawRule := routeRule("primary", false)
++			rawRule.DefaultOptions.IPCIDR = []string{"198.51.100.0/24"}
++			router.rules = raceTestRules(t, []option.DNSRule{rawRule})
++			router.legacyDNSMode = true
++			addresses, err := router.Lookup(context.Background(), "strict.example", adapter.DNSQueryOptions{StrictComplete: strict})
++			if strict {
++				require.Error(t, err)
++				require.Empty(t, addresses)
++				require.Zero(t, fallback.queries4.Load()+fallback.queries6.Load())
++			} else {
++				require.NoError(t, err)
++				require.Len(t, addresses, 2)
++				require.EqualValues(t, 2, fallback.queries4.Load()+fallback.queries6.Load())
++			}
++		})
++	}
++}
++
++func TestStrictCompleteResolveOption(t *testing.T) {
++	for _, raw := range []string{`{"action":"resolve"}`, `{"action":"resolve","strict_complete":true}`} {
++		var options option.RuleAction
++		require.NoError(t, json.Unmarshal([]byte(raw), &options))
++		action, err := R.NewRuleAction(log.NewNOPFactory().Logger(), options)
++		require.NoError(t, err)
++		require.Equal(t, options.ResolveOptions.StrictComplete, action.(*R.RuleActionResolve).StrictComplete)
++		require.Equal(t, raw != `{"action":"resolve"}`, options.ResolveOptions.StrictComplete)
++	}
++}
++
++func TestStrictCompleteSingleFamilyPreservesAddressLimitFallback(t *testing.T) {
++	for _, strategy := range []C.DomainStrategy{C.DomainStrategyIPv4Only, C.DomainStrategyIPv6Only} {
++		primary := &strictCompleteTransport{}
++		primary.tag = "primary"
++		fallback := &strictCompleteTransport{}
++		fallback.tag = "final"
++		router := strictCompleteRouter(fallback)
++		router.transport.(*fakeDNSTransportManager).transports["primary"] = primary
++		rawRule := routeRule("primary", false)
++		rawRule.DefaultOptions.IPCIDR = []string{"198.51.100.0/24", "2001:db8:ffff::/48"}
++		router.rules = raceTestRules(t, []option.DNSRule{rawRule})
++		router.legacyDNSMode = true
++		addresses, err := router.Lookup(context.Background(), "strict.example", adapter.DNSQueryOptions{StrictComplete: true, Strategy: strategy})
++		require.NoError(t, err)
++		require.Len(t, addresses, 1)
++		require.EqualValues(t, 1, primary.queries4.Load()+primary.queries6.Load())
++		require.EqualValues(t, 1, fallback.queries4.Load()+fallback.queries6.Load())
++	}
++}
+diff --git a/option/rule_action.go b/option/rule_action.go
+index 33ddd2b..7294aa2 100644
+--- a/option/rule_action.go
++++ b/option/rule_action.go
+@@ -272,6 +272,7 @@ type RouteActionSniff struct {
+ }
+ 
+ type RouteActionResolve struct {
++	StrictComplete         bool                  `json:"strict_complete,omitempty"`
+ 	Server                 string                `json:"server,omitempty" reference:"dns_server"`
+ 	Timeout                badoption.Duration    `json:"timeout,omitempty"`
+ 	Strategy               DomainStrategy        `json:"strategy,omitempty"`
+diff --git a/route/route.go b/route/route.go
+index bf25bae..063880d 100644
+--- a/route/route.go
++++ b/route/route.go
+@@ -933,6 +933,7 @@ func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundCon
+ 		}
+ 		addresses, err := r.dns.Lookup(adapter.WithContext(ctx, metadata), metadata.Destination.Fqdn, adapter.DNSQueryOptions{
+ 			Transport:              transport,
++			StrictComplete:         action.StrictComplete,
+ 			Strategy:               action.Strategy,
+ 			DisableCache:           action.DisableCache,
+ 			DisableOptimisticCache: action.DisableOptimisticCache,
+diff --git a/route/rule/rule_action.go b/route/rule/rule_action.go
+index 6fd1707..faa7636 100644
+--- a/route/rule/rule_action.go
++++ b/route/rule/rule_action.go
+@@ -87,6 +87,7 @@ func NewRuleAction(logger logger.ContextLogger, action option.RuleAction) (adapt
+ 		return sniffAction, sniffAction.build()
+ 	case C.RuleActionTypeResolve:
+ 		return &RuleActionResolve{
++			StrictComplete:         action.ResolveOptions.StrictComplete,
+ 			Server:                 action.ResolveOptions.Server,
+ 			Timeout:                time.Duration(action.ResolveOptions.Timeout),
+ 			Strategy:               C.DomainStrategy(action.ResolveOptions.Strategy),
+@@ -529,6 +530,7 @@ func (r *RuleActionSniff) String() string {
+ }
+ 
+ type RuleActionResolve struct {
++	StrictComplete         bool
+ 	Server                 string
+ 	Timeout                time.Duration
+ 	Strategy               C.DomainStrategy
