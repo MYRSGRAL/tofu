@@ -60,13 +60,18 @@ route и dial и повторную выдачу Fake-IP до исходного
 DNS/Fake-IP режим остаётся выключенным; G-DNS не объявляется пройденным.
 [Evidence и требования адаптера](docs/validation/2026-11-09-native-dns-contracts.md).
 
-Экспериментальный opt-in патч закреплённого sing-box отклоняет неполный результат
-обязательных A/AAAA. Официальный бинарник, patched default/false и строгий режим
-прошли 92 изолированных native-сценария (184 попытки SOCKS/TCP). NODATA и
-односемейный lookup отличаются от частичной ошибки. Builder сохраняет source,
-patch/binary digests и параметры сборки; desktop engine не заменяется.
-TTL lease, привязка route/dial и Fake-IP lifecycle ещё не реализованы, поэтому
-смешанный DNS/Fake-IP остаётся выключен. [Патч, сборка и ограничения](adapters/sing-box/v1.14.4/README.md).
+Закреплённый sing-box получил экспериментальные DNS provenance и direct TCP/UDP
+`pin_resolution`: исходные TTL CNAME/NODATA, метаданные выбранного ответа и
+привязку адресов при retry/UDP write. Изолированная матрица прошла 62 сценария;
+сетевые/policy epochs, proxy/Xray parity и Fake-IP lifecycle остаются открытыми.
+Compiler по-прежнему отклоняет mixed DNS/Fake-IP; desktop engine не заменяется.
+[Сборка и ограничения](adapters/sing-box/v1.14.4/README.md),
+[проверки resolution pin](docs/validation/2026-11-09-resolution-pin.md).
+
+Для переработки UI выбраны почти чёрная тема, лавандовый акцент и простой экран
+подключения. Все настройки уходят в отдельный раздел. Далее — замеры toolkit и
+варианты дизайна; текущий GUI остаётся функциональным прототипом.
+[Направление UI](docs/specs/ui-direction.md).
 
 ## Разработка
 

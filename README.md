@@ -58,13 +58,18 @@ route-to-dial address changes and Fake-IP reuse before the original TTL expires.
 These results keep mixed DNS/Fake-IP execution disabled; they do not mark G-DNS
 as passed. [Evidence and adapter requirements](docs/validation/2026-11-09-native-dns-contracts.md).
 
-An experimental opt-in patch for pinned sing-box now rejects incomplete required
-A/AAAA results. The official binary, patched default/false and strict mode passed
-92 isolated native scenarios (184 SOCKS/TCP attempts). NODATA and single-family
-lookups are distinct from partial failure. The build tool records source, patch,
-binary digests and build settings; it does not replace the desktop engine.
-TTL leases, route-to-dial binding and Fake-IP lifecycle remain open, so mixed
-DNS/Fake-IP stays disabled. [Patch, build and limitations](adapters/sing-box/v1.14.4/README.md).
+Pinned sing-box now has experimental DNS provenance and direct TCP/UDP
+`pin_resolution`: original CNAME/NODATA TTLs, selected response metadata and address
+binding through retries and UDP writes. The isolated suite passed 62 scenarios;
+network/policy epochs, proxy/Xray parity and Fake-IP lifecycle remain open.
+The compiler keeps mixed DNS/Fake-IP disabled and the desktop engine is unchanged.
+[Build and limits](adapters/sing-box/v1.14.4/README.md),
+[resolution pin evidence](docs/validation/2026-11-09-resolution-pin.md).
+
+The UI redesign direction is a nearly black theme with lavender accents and a
+simple connect screen. All configuration moves to Settings. Toolkit measurements
+and design variants come next; the current GUI remains a functional prototype.
+[UI direction](docs/specs/ui-direction.md).
 
 ## Development
 

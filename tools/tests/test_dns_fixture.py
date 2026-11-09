@@ -9,8 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dns_fixture import (  # noqa: E402
+    Cname,
     DnsFixture,
     Reply,
+    Soa,
     decode_name,
     dns_query,
     make_response,
@@ -76,6 +78,60 @@ class DnsWireTests(unittest.TestCase):
         invalid = packet[:6] + struct.pack("!H", 65) + packet[8:]
         with self.assertRaises(ValueError):
             response_addresses(invalid, b"\x12\x34", "fixture.test", 1)
+
+    def test_cname_owner_and_ttls_are_preserved(self) -> None:
+        packet = make_response(
+            query(), Reply(("198.51.100.10",), ttl=30, cname=Cname("target.test", 1))
+        )
+        ttls: list[int] = []
+        self.assertEqual(
+            response_addresses(packet, b"\x12\x34", "fixture.test", 1, ttls),
+            ["198.51.100.10"],
+        )
+        self.assertEqual(ttls, [1, 30])
+        self.assertEqual(struct.unpack_from("!H", packet, 6)[0], 2)
+        loop = make_response(query(), Reply(cname=Cname("fixture.test", 1)))
+        with self.assertRaises(ValueError):
+            response_addresses(loop, b"\x12\x34", "fixture.test", 1)
+        for ttl in (-1, 2**32):
+            with self.assertRaises(ValueError):
+                make_response(query(), Reply(cname=Cname("target.test", ttl)))
+
+    def test_soa_keeps_wire_ttl_and_minimum_separate(self) -> None:
+        packet = make_response(query(), Reply(soa=Soa("test", 30, 5)))
+        self.assertEqual(struct.unpack_from("!H", packet, 8)[0], 1)
+        _, offset = decode_name(packet, 12)
+        owner, offset = decode_name(packet, offset + 4)
+        self.assertEqual(owner, "test")
+        kind, qclass, ttl, size = struct.unpack_from("!HHIH", packet, offset)
+        self.assertEqual((kind, qclass, ttl), (6, 1, 30))
+        payload = offset + 10
+        _, next_offset = decode_name(packet, payload)
+        _, next_offset = decode_name(packet, next_offset)
+        self.assertEqual(
+            struct.unpack_from("!IIIII", packet, next_offset), (1, 60, 30, 3600, 5)
+        )
+        self.assertEqual(next_offset + 20, payload + size)
+        self.assertEqual(response_addresses(packet, b"\x12\x34", "fixture.test", 1), [])
+        with self.assertRaises(ValueError):
+            make_response(query(), Reply(soa=Soa("test", 30, -1)))
+
+    def test_invalid_opcode_and_reserved_bit_are_available_negative_controls(
+        self,
+    ) -> None:
+        for reply in (
+            Reply(("198.51.100.10",), opcode=2),
+            Reply(("198.51.100.10",), reserved=True),
+        ):
+            packet = make_response(query(), reply)
+            flags = struct.unpack_from("!H", packet, 2)[0]
+            self.assertEqual((flags >> 11) & 15, reply.opcode)
+            self.assertEqual(bool(flags & 0x40), reply.reserved)
+            with self.assertRaises(ValueError):
+                response_addresses(packet, b"\x12\x34", "fixture.test", 1)
+        for opcode in (-1, 16):
+            with self.assertRaises(ValueError):
+                make_response(query(), Reply(opcode=opcode))
 
     def test_udp_fixture_records_question_and_stops(self) -> None:
         with DnsFixture(

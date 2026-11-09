@@ -1,0 +1,1036 @@
+diff --git a/adapter/dns_resolution_pin.go b/adapter/dns_resolution_pin.go
+new file mode 100644
+index 0000000..62219a5
+--- /dev/null
++++ b/adapter/dns_resolution_pin.go
+@@ -0,0 +1,128 @@
++package adapter
++
++import (
++	"context"
++	"fmt"
++	"net/netip"
++	"strings"
++	"time"
++
++	"github.com/miekg/dns"
++	M "github.com/sagernet/sing/common/metadata"
++)
++
++// ResolutionPin фиксирует только DNS-ответ и TTL. Это не lease сети или политики.
++// Поля закрыты: вызывающий не может изменить выданное доказательство.
++type ResolutionPin struct {
++	destination M.Socksaddr
++	addresses   map[netip.Addr]struct{}
++	deadlines   []time.Time
++}
++
++func NewResolutionPin(destination M.Socksaddr, result DNSLookupResult) (*ResolutionPin, error) {
++	if !destination.IsDomain() || len(result.Addresses) == 0 || len(result.Addresses) > 64 || len(result.Families) == 0 || len(result.Families) > 2 {
++		return nil, fmt.Errorf("pin_resolution: invalid DNS proof")
++	}
++	pin := &ResolutionPin{destination: destination, addresses: make(map[netip.Addr]struct{}, len(result.Addresses))}
++	for _, address := range result.Addresses {
++		if !address.IsValid() || address.Is4In6() {
++			return nil, fmt.Errorf("pin_resolution: invalid address")
++		}
++		pin.addresses[address] = struct{}{}
++	}
++	if len(pin.addresses) != len(result.Addresses) {
++		return nil, fmt.Errorf("pin_resolution: duplicate address")
++	}
++	proved := make(map[netip.Addr]struct{}, len(result.Addresses))
++	types := make(map[uint16]bool)
++	for _, proof := range result.Families {
++		if canonicalPinName(proof.QuestionName) != canonicalPinName(destination.Fqdn) || proof.CanonicalName == "" || proof.Deadline.IsZero() || types[proof.QueryType] || (proof.QueryType != dns.TypeA && proof.QueryType != dns.TypeAAAA) || proof.NoData != (len(proof.Addresses) == 0) {
++			return nil, fmt.Errorf("pin_resolution: incomplete DNS proof")
++		}
++		types[proof.QueryType] = true
++		pin.deadlines = append(pin.deadlines, proof.Deadline)
++		for _, address := range proof.Addresses {
++			if (proof.QueryType == dns.TypeA) != address.Is4() {
++				return nil, fmt.Errorf("pin_resolution: address family mismatch")
++			}
++			if _, ok := pin.addresses[address]; !ok {
++				return nil, fmt.Errorf("pin_resolution: unproved address")
++			}
++			if _, ok := proved[address]; ok {
++				return nil, fmt.Errorf("pin_resolution: duplicate proof")
++			}
++			proved[address] = struct{}{}
++		}
++	}
++	if len(proved) != len(pin.addresses) {
++		return nil, fmt.Errorf("pin_resolution: unproved address set")
++	}
++	return pin, pin.fresh(time.Now())
++}
++
++func canonicalPinName(name string) string { return strings.ToLower(dns.Fqdn(name)) }
++
++func (p *ResolutionPin) fresh(now time.Time) error {
++	for _, deadline := range p.deadlines {
++		if !now.Before(deadline) {
++			return fmt.Errorf("pin_resolution: DNS proof expired; new flow required")
++		}
++	}
++	return nil
++}
++
++func (p *ResolutionPin) ValidateMetadata(metadata *InboundContext) error {
++	if p == nil {
++		return nil
++	}
++	if canonicalPinName(metadata.Destination.Fqdn) != canonicalPinName(p.destination.Fqdn) || metadata.Destination.Addr.IsValid() || metadata.Destination.Port != p.destination.Port || len(metadata.DestinationAddresses) != len(p.addresses) {
++		return fmt.Errorf("pin_resolution: destination overridden")
++	}
++	seen := make(map[netip.Addr]bool, len(p.addresses))
++	for _, address := range metadata.DestinationAddresses {
++		if _, ok := p.addresses[address]; !ok || seen[address] {
++			return fmt.Errorf("pin_resolution: address set overridden")
++		}
++		seen[address] = true
++	}
++	return p.fresh(time.Now())
++}
++
++func (p *ResolutionPin) ValidateDestination(destination M.Socksaddr) error {
++	if p == nil {
++		return nil
++	}
++	if destination.IsDomain() || destination.Port != p.destination.Port {
++		return fmt.Errorf("pin_resolution: unpinned destination")
++	}
++	if _, ok := p.addresses[destination.Addr]; !ok {
++		return fmt.Errorf("pin_resolution: unpinned address")
++	}
++	return p.fresh(time.Now())
++}
++
++type resolutionPinKey struct{}
++
++func ContextWithResolutionPin(ctx context.Context, pin *ResolutionPin) context.Context {
++	return context.WithValue(ctx, resolutionPinKey{}, pin)
++}
++
++func ResolutionPinFromContext(ctx context.Context) *ResolutionPin {
++	pin, _ := ctx.Value(resolutionPinKey{}).(*ResolutionPin)
++	return pin
++}
++
++func ValidateResolutionDial(ctx context.Context, destination M.Socksaddr) error {
++	return ResolutionPinFromContext(ctx).ValidateDestination(destination)
++}
++
++// Deadline ограничивает ожидание установки соединения самым ранним TTL семейства.
++func (p *ResolutionPin) Deadline() time.Time {
++	var earliest time.Time
++	for _, deadline := range p.deadlines {
++		if earliest.IsZero() || deadline.Before(earliest) {
++			earliest = deadline
++		}
++	}
++	return earliest
++}
+diff --git a/adapter/dns_resolution_pin_test.go b/adapter/dns_resolution_pin_test.go
+new file mode 100644
+index 0000000..5774bf9
+--- /dev/null
++++ b/adapter/dns_resolution_pin_test.go
+@@ -0,0 +1,98 @@
++package adapter
++
++import (
++	"github.com/miekg/dns"
++	M "github.com/sagernet/sing/common/metadata"
++	"net/netip"
++	"testing"
++	"time"
++)
++
++func testPin(t *testing.T) (*ResolutionPin, *InboundContext, DNSLookupResult) {
++	t.Helper()
++	address := netip.MustParseAddr("192.0.2.1")
++	target := M.Socksaddr{Fqdn: "Example.org", Port: 443}
++	result := DNSLookupResult{Addresses: []netip.Addr{address}, Families: []DNSResponseProof{{QuestionName: "example.org.", CanonicalName: "example.org.", QueryType: dns.TypeA, Addresses: []netip.Addr{address}, Deadline: time.Now().Add(time.Hour)}}}
++	pin, err := NewResolutionPin(target, result)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return pin, &InboundContext{Destination: target, DestinationAddresses: append([]netip.Addr(nil), result.Addresses...)}, result
++}
++
++func TestResolutionPinImmutableAndExact(t *testing.T) {
++	pin, metadata, result := testPin(t)
++	result.Addresses[0] = netip.MustParseAddr("192.0.2.2")
++	result.Families[0].Addresses[0] = result.Addresses[0]
++	result.Families[0].Deadline = time.Time{}
++	if err := pin.ValidateMetadata(metadata); err != nil {
++		t.Fatal(err)
++	}
++	if err := pin.ValidateDestination(M.SocksaddrFrom(metadata.DestinationAddresses[0], 443)); err != nil {
++		t.Fatal(err)
++	}
++	for _, mutate := range []func(*InboundContext){
++		func(m *InboundContext) { m.Destination.Fqdn = "other.org" },
++		func(m *InboundContext) { m.Destination.Port++ },
++		func(m *InboundContext) { m.DestinationAddresses = []netip.Addr{netip.MustParseAddr("192.0.2.2")} },
++		func(m *InboundContext) { m.DestinationAddresses = nil },
++	} {
++		copy := *metadata
++		mutate(&copy)
++		if pin.ValidateMetadata(&copy) == nil {
++			t.Fatal("accepted mutation")
++		}
++	}
++	for _, target := range []M.Socksaddr{{Fqdn: "example.org", Port: 443}, M.SocksaddrFrom(metadata.DestinationAddresses[0], 80), M.SocksaddrFrom(netip.MustParseAddr("192.0.2.2"), 443)} {
++		if pin.ValidateDestination(target) == nil {
++			t.Fatal("accepted unpinned target")
++		}
++	}
++}
++
++func TestResolutionPinDeadlineBoundary(t *testing.T) {
++	pin, _, _ := testPin(t)
++	deadline := pin.deadlines[0]
++	if pin.fresh(deadline.Add(-time.Nanosecond)) != nil {
++		t.Fatal("expired early")
++	}
++	if pin.fresh(deadline) == nil || pin.fresh(deadline.Add(time.Nanosecond)) == nil {
++		t.Fatal("accepted expired proof")
++	}
++	pin.deadlines = append(pin.deadlines, deadline.Add(-time.Hour))
++	if pin.fresh(deadline.Add(-time.Minute)) == nil {
++		t.Fatal("ignored NODATA/family deadline")
++	}
++}
++
++func TestResolutionPinDefaultUnchanged(t *testing.T) {
++	var pin *ResolutionPin
++	if pin.ValidateDestination(M.Socksaddr{}) != nil || pin.ValidateMetadata(nil) != nil {
++		t.Fatal("changed default")
++	}
++}
++
++func TestResolutionPinRejectsIncompleteProof(t *testing.T) {
++	for _, name := range []string{"wrong question", "missing deadline", "expired deadline", "missing family", "unproved address", "NODATA with address"} {
++		t.Run(name, func(t *testing.T) {
++			_, metadata, result := testPin(t)
++			switch name {
++			case "wrong question":
++				result.Families[0].QuestionName = "other.org."
++			case "missing deadline":
++				result.Families[0].Deadline = time.Time{}
++			case "expired deadline":
++				result.Families[0].Deadline = time.Now().Add(-time.Second)
++			case "missing family":
++				result.Families = nil
++			case "unproved address":
++				result.Families[0].Addresses = []netip.Addr{netip.MustParseAddr("192.0.2.9")}
++			case "NODATA with address":
++				result.Families[0].NoData = true
++			}
++			if _, err := NewResolutionPin(metadata.Destination, result); err == nil {
++				t.Fatal("accepted invalid proof")
++			}
++		})
++	}
++}
+diff --git a/adapter/inbound.go b/adapter/inbound.go
+index 3027f1e..fe9b8a9 100644
+--- a/adapter/inbound.go
++++ b/adapter/inbound.go
+@@ -90,6 +90,7 @@ type InboundContext struct {
+ 	FallbackNetworkType []C.InterfaceType
+ 	FallbackDelay       time.Duration
+ 
++	ResolutionPin                       *ResolutionPin
+ 	DestinationAddresses                []netip.Addr
+ 	DNSResponse                         *dns.Msg
+ 	NamedDNSResponses                   map[string]*dns.Msg
+diff --git a/common/dialer/default.go b/common/dialer/default.go
+index 75fac2f..3bb2eac 100644
+--- a/common/dialer/default.go
++++ b/common/dialer/default.go
+@@ -278,9 +278,9 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
+ 			switch N.NetworkName(network) {
+ 			case N.NetworkUDP:
+ 				if !address.IsIPv6() {
+-					return d.udpDialer4.DialContext(ctx, network, address.String())
++					return dialPinnedContext(ctx, &d.udpDialer4, network, address.String())
+ 				} else {
+-					return d.udpDialer6.DialContext(ctx, network, address.String())
++					return dialPinnedContext(ctx, &d.udpDialer6, network, address.String())
+ 				}
+ 			}
+ 			if !address.IsIPv6() {
+diff --git a/common/dialer/default_parallel_interface.go b/common/dialer/default_parallel_interface.go
+index 14bde1a..b9888f6 100644
+--- a/common/dialer/default_parallel_interface.go
++++ b/common/dialer/default_parallel_interface.go
+@@ -35,7 +35,7 @@ func (d *DefaultDialer) dialParallelInterface(ctx context.Context, dialer net.Di
+ 		if defaultInterface == nil || iif.Index != defaultInterface.Index {
+ 			perNetDialer.Control = control.Append(perNetDialer.Control, control.BindToInterface(nil, iif.Name, iif.Index))
+ 		}
+-		conn, err := perNetDialer.DialContext(ctx, network, addr)
++		conn, err := dialPinnedContext(ctx, &perNetDialer, network, addr)
+ 		if err != nil {
+ 			return nil, false, E.Cause(err, "dial ", iif.Name, " (", iif.Index, ")")
+ 		}
+@@ -57,7 +57,7 @@ func (d *DefaultDialer) dialParallelInterface(ctx context.Context, dialer net.Di
+ 		if defaultInterface == nil || iif.Index != defaultInterface.Index {
+ 			perNetDialer.Control = control.Append(perNetDialer.Control, control.BindToInterface(nil, iif.Name, iif.Index))
+ 		}
+-		conn, err := perNetDialer.DialContext(ctx, network, addr)
++		conn, err := dialPinnedContext(ctx, &perNetDialer, network, addr)
+ 		if err != nil {
+ 			select {
+ 			case results <- dialResult{error: E.Cause(err, "dial ", iif.Name, " (", iif.Index, ")"), primary: primary}:
+@@ -130,7 +130,7 @@ func (d *DefaultDialer) dialParallelInterfaceFastFallback(ctx context.Context, d
+ 		if defaultInterface == nil || iif.Index != defaultInterface.Index {
+ 			perNetDialer.Control = control.Append(perNetDialer.Control, control.BindToInterface(nil, iif.Name, iif.Index))
+ 		}
+-		conn, err := perNetDialer.DialContext(ctx, network, addr)
++		conn, err := dialPinnedContext(ctx, &perNetDialer, network, addr)
+ 		if err != nil {
+ 			return nil, false, E.Cause(err, "dial ", iif.Name, " (", iif.Index, ")")
+ 		}
+@@ -153,7 +153,7 @@ func (d *DefaultDialer) dialParallelInterfaceFastFallback(ctx context.Context, d
+ 		if defaultInterface == nil || iif.Index != defaultInterface.Index {
+ 			perNetDialer.Control = control.Append(perNetDialer.Control, control.BindToInterface(nil, iif.Name, iif.Index))
+ 		}
+-		conn, err := perNetDialer.DialContext(ctx, network, addr)
++		conn, err := dialPinnedContext(ctx, &perNetDialer, network, addr)
+ 		if err != nil {
+ 			select {
+ 			case results <- dialResult{error: E.Cause(err, "dial ", iif.Name, " (", iif.Index, ")"), primary: primary}:
+diff --git a/common/dialer/default_parallel_network.go b/common/dialer/default_parallel_network.go
+index 006e574..43c9839 100644
+--- a/common/dialer/default_parallel_network.go
++++ b/common/dialer/default_parallel_network.go
+@@ -6,6 +6,7 @@ import (
+ 	"net/netip"
+ 	"time"
+ 
++	"github.com/sagernet/sing-box/adapter"
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing/common"
+ 	E "github.com/sagernet/sing/common/exceptions"
+@@ -26,6 +27,9 @@ func DialSerialNetwork(ctx context.Context, dialer N.Dialer, network string, des
+ 	var errors []error
+ 	if parallelDialer, isParallel := dialer.(ParallelInterfaceDialer); isParallel {
+ 		for _, address := range destinationAddresses {
++			if err := adapter.ValidateResolutionDial(ctx, M.SocksaddrFrom(address, destination.Port)); err != nil {
++				return nil, err
++			}
+ 			conn, err := parallelDialer.DialParallelInterface(ctx, network, M.SocksaddrFrom(address, destination.Port), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+ 			if err == nil {
+ 				return conn, nil
+@@ -34,6 +38,9 @@ func DialSerialNetwork(ctx context.Context, dialer N.Dialer, network string, des
+ 		}
+ 	} else {
+ 		for _, address := range destinationAddresses {
++			if err := adapter.ValidateResolutionDial(ctx, M.SocksaddrFrom(address, destination.Port)); err != nil {
++				return nil, err
++			}
+ 			conn, err := dialer.DialContext(ctx, network, M.SocksaddrFrom(address, destination.Port))
+ 			if err == nil {
+ 				return conn, nil
+@@ -142,6 +149,9 @@ func ListenSerialNetworkPacket(ctx context.Context, dialer N.Dialer, destination
+ 	var errors []error
+ 	if parallelDialer, isParallel := dialer.(ParallelInterfaceDialer); isParallel {
+ 		for _, address := range destinationAddresses {
++			if err := adapter.ValidateResolutionDial(ctx, M.SocksaddrFrom(address, destination.Port)); err != nil {
++				return nil, netip.Addr{}, err
++			}
+ 			conn, err := parallelDialer.ListenSerialInterfacePacket(ctx, M.SocksaddrFrom(address, destination.Port), strategy, interfaceType, fallbackInterfaceType, fallbackDelay)
+ 			if err == nil {
+ 				return conn, address, nil
+@@ -150,6 +160,9 @@ func ListenSerialNetworkPacket(ctx context.Context, dialer N.Dialer, destination
+ 		}
+ 	} else {
+ 		for _, address := range destinationAddresses {
++			if err := adapter.ValidateResolutionDial(ctx, M.SocksaddrFrom(address, destination.Port)); err != nil {
++				return nil, netip.Addr{}, err
++			}
+ 			conn, err := dialer.ListenPacket(ctx, M.SocksaddrFrom(address, destination.Port))
+ 			if err == nil {
+ 				return conn, address, nil
+diff --git a/common/dialer/resolution_pin.go b/common/dialer/resolution_pin.go
+new file mode 100644
+index 0000000..fd5d556
+--- /dev/null
++++ b/common/dialer/resolution_pin.go
+@@ -0,0 +1,57 @@
++package dialer
++
++import (
++	"context"
++	"net"
++	"syscall"
++
++	"github.com/sagernet/sing-box/adapter"
++	M "github.com/sagernet/sing/common/metadata"
++)
++
++func dialPinnedContext(ctx context.Context, dialer *net.Dialer, network, address string) (net.Conn, error) {
++	if err := adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address)); err != nil {
++		return nil, err
++	}
++	guarded := pinNetDialer(ctx, *dialer)
++	conn, err := guarded.DialContext(ctx, network, address)
++	if err != nil {
++		if pinErr := adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address)); pinErr != nil {
++			return nil, pinErr
++		}
++	}
++	return conn, err
++}
++
++// ControlContext повторяет проверку после потенциально медленных bind/control hooks,
++// непосредственно перед connect; каждый системный fallback получает свой guard.
++func pinNetDialer(ctx context.Context, dialer net.Dialer) net.Dialer {
++	pin := adapter.ResolutionPinFromContext(ctx)
++	if pin == nil {
++		return dialer
++	}
++	deadline := pin.Deadline()
++	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
++		deadline = ctxDeadline
++	}
++	if dialer.Deadline.IsZero() || deadline.Before(dialer.Deadline) {
++		dialer.Deadline = deadline
++	}
++	originalContext, original := dialer.ControlContext, dialer.Control
++	dialer.ControlContext = func(ctx context.Context, network, address string, conn syscall.RawConn) error {
++		if err := adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address)); err != nil {
++			return err
++		}
++		if originalContext != nil {
++			if err := originalContext(ctx, network, address, conn); err != nil {
++				return err
++			}
++		} else if original != nil {
++			if err := original(network, address, conn); err != nil {
++				return err
++			}
++		}
++		return adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address))
++	}
++	return dialer
++}
+diff --git a/common/dialer/resolution_pin_test.go b/common/dialer/resolution_pin_test.go
+new file mode 100644
+index 0000000..a8f2643
+--- /dev/null
++++ b/common/dialer/resolution_pin_test.go
+@@ -0,0 +1,136 @@
++package dialer
++
++import (
++	"context"
++	"errors"
++	"github.com/database64128/tfo-go/v2"
++	"github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	M "github.com/sagernet/sing/common/metadata"
++	"net"
++	"net/netip"
++	"strings"
++	"syscall"
++	"testing"
++	"time"
++)
++
++func pinContext(t *testing.T) (context.Context, M.Socksaddr, []netip.Addr, time.Time) {
++	t.Helper()
++	addresses := []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")}
++	target := M.Socksaddr{Fqdn: "example.org", Port: 443}
++	deadline := time.Now().Add(100 * time.Millisecond)
++	pin, err := adapter.NewResolutionPin(target, adapter.DNSLookupResult{Addresses: addresses, Families: []adapter.DNSResponseProof{{QuestionName: "example.org.", CanonicalName: "example.org.", Addresses: addresses, QueryType: dns.TypeA, Deadline: deadline}}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	return adapter.ContextWithResolutionPin(context.Background(), pin), target, addresses, deadline
++}
++
++type retryPinDialer struct {
++	calls    int
++	deadline time.Time
++}
++
++func (d *retryPinDialer) DialContext(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
++	d.calls++
++	<-time.After(time.Until(d.deadline))
++	return nil, errors.New("synthetic first attempt failure")
++}
++func (d *retryPinDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
++	panic("unused")
++}
++
++func TestResolutionPinStopsExpiredRetry(t *testing.T) {
++	ctx, target, addresses, deadline := pinContext(t)
++	d := &retryPinDialer{deadline: deadline}
++	_, err := DialSerialNetwork(ctx, d, "tcp", target, addresses, nil, nil, nil, 0)
++	if err == nil || !strings.Contains(err.Error(), "expired") || d.calls != 1 {
++		t.Fatalf("calls=%d err=%v", d.calls, err)
++	}
++	_, err = DialSerialNetwork(ctx, d, "tcp", target, addresses, nil, nil, nil, 0)
++	if err == nil || d.calls != 1 {
++		t.Fatalf("expired first dial calls=%d err=%v", d.calls, err)
++	}
++}
++
++func TestResolutionPinStopsDelayedTFO(t *testing.T) {
++	ctx, target, addresses, deadline := pinContext(t)
++	conn, err := DialSlowContext(&tfo.Dialer{}, ctx, "", "tcp", M.SocksaddrFrom(addresses[0], target.Port))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	<-time.After(time.Until(deadline))
++	n, err := conn.Write([]byte("must not be sent"))
++	if n != 0 || err == nil || !strings.Contains(err.Error(), "expired") {
++		t.Fatalf("n=%d err=%v", n, err)
++	}
++}
++
++func TestResolutionPinStopsUnpinnedActualDial(t *testing.T) {
++	ctx, _, _, _ := pinContext(t)
++	_, err := dialPinnedContext(ctx, &net.Dialer{}, "tcp", "192.0.2.9:443")
++	if err == nil || !strings.Contains(err.Error(), "unpinned") {
++		t.Fatal(err)
++	}
++}
++
++func TestResolutionPinRechecksAfterSlowControlHook(t *testing.T) {
++	ctx, _, addresses, deadline := pinContext(t)
++	calls := 0
++	guarded := pinNetDialer(ctx, net.Dialer{Control: func(string, string, syscall.RawConn) error { calls++; <-time.After(time.Until(deadline)); return nil }})
++	err := guarded.ControlContext(ctx, "tcp4", M.SocksaddrFrom(addresses[0], 443).String(), nil)
++	if calls != 1 || err == nil || !strings.Contains(err.Error(), "expired") {
++		t.Fatalf("calls=%d err=%v", calls, err)
++	}
++}
++
++func TestResolutionPinClampsConnectDeadline(t *testing.T) {
++	ctx, _, _, deadline := pinContext(t)
++	if got := pinNetDialer(ctx, net.Dialer{}).Deadline; !got.Equal(deadline) {
++		t.Fatalf("deadline=%v want=%v", got, deadline)
++	}
++	earlier := deadline.Add(-time.Minute)
++	if got := pinNetDialer(ctx, net.Dialer{Deadline: earlier}).Deadline; !got.Equal(earlier) {
++		t.Fatalf("overrode earlier dialer deadline: %v", got)
++	}
++	ctx, cancel := context.WithDeadline(ctx, earlier)
++	defer cancel()
++	if got := pinNetDialer(ctx, net.Dialer{}).Deadline; !got.Equal(earlier) {
++		t.Fatalf("ignored context deadline: %v", got)
++	}
++}
++
++func TestResolutionPinPreservesControlContextPrecedence(t *testing.T) {
++	ctx, _, addresses, _ := pinContext(t)
++	calls := 0
++	guarded := pinNetDialer(ctx, net.Dialer{Control: func(string, string, syscall.RawConn) error {
++		t.Fatal("Control called despite ControlContext")
++		return nil
++	}, ControlContext: func(context.Context, string, string, syscall.RawConn) error { calls++; return nil }})
++	if err := guarded.ControlContext(ctx, "tcp4", M.SocksaddrFrom(addresses[0], 443).String(), nil); err != nil || calls != 1 {
++		t.Fatalf("calls=%d err=%v", calls, err)
++	}
++}
++
++func TestResolutionPinBoundsWholeTFOEstablishmentContext(t *testing.T) {
++	ctx, target, addresses, deadline := pinContext(t)
++	for _, dialDeadline := range []time.Time{{}, deadline.Add(-20 * time.Millisecond)} {
++		conn, err := DialSlowContext(&tfo.Dialer{Dialer: net.Dialer{Deadline: dialDeadline}}, ctx, "", "tcp", M.SocksaddrFrom(addresses[0], target.Port))
++		if err != nil {
++			t.Fatal(err)
++		}
++		slow := conn.(*slowOpenConn)
++		got, present := slow.ctx.Deadline()
++		want := deadline
++		if !dialDeadline.IsZero() {
++			want = dialDeadline
++		}
++		if !present || !got.Equal(want) {
++			conn.Close()
++			t.Fatalf("TFO initial Write has no full establishment deadline: got=%v present=%v want=%v", got, present, want)
++		}
++		conn.Close()
++	}
++}
+diff --git a/common/dialer/resolve.go b/common/dialer/resolve.go
+index 8fa48f6..9383ac5 100644
+--- a/common/dialer/resolve.go
++++ b/common/dialer/resolve.go
+@@ -99,6 +99,9 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
+ 	if !destination.IsDomain() {
+ 		return d.dialer.DialContext(ctx, network, destination)
+ 	}
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		return nil, E.New("pin_resolution: second DNS lookup forbidden")
++	}
+ 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+ 	addresses, err := d.router.Lookup(ctx, destination.Fqdn, d.queryOptions)
+ 	if err != nil {
+@@ -119,6 +122,9 @@ func (d *resolveDialer) ListenPacket(ctx context.Context, destination M.Socksadd
+ 	if !destination.IsDomain() {
+ 		return d.dialer.ListenPacket(ctx, destination)
+ 	}
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		return nil, E.New("pin_resolution: second DNS lookup forbidden")
++	}
+ 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+ 	addresses, err := d.router.Lookup(ctx, destination.Fqdn, d.queryOptions)
+ 	if err != nil {
+@@ -147,6 +153,9 @@ func (d *resolveParallelNetworkDialer) DialParallelInterface(ctx context.Context
+ 	if !destination.IsDomain() {
+ 		return d.dialer.DialContext(ctx, network, destination)
+ 	}
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		return nil, E.New("pin_resolution: second DNS lookup forbidden")
++	}
+ 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+ 	addresses, err := d.router.Lookup(ctx, destination.Fqdn, d.queryOptions)
+ 	if err != nil {
+@@ -170,6 +179,9 @@ func (d *resolveParallelNetworkDialer) ListenSerialInterfacePacket(ctx context.C
+ 	if !destination.IsDomain() {
+ 		return d.dialer.ListenPacket(ctx, destination)
+ 	}
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		return nil, E.New("pin_resolution: second DNS lookup forbidden")
++	}
+ 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
+ 	addresses, err := d.router.Lookup(ctx, destination.Fqdn, d.queryOptions)
+ 	if err != nil {
+diff --git a/common/dialer/tfo.go b/common/dialer/tfo.go
+index c72c394..ded2518 100644
+--- a/common/dialer/tfo.go
++++ b/common/dialer/tfo.go
+@@ -9,6 +9,7 @@ import (
+ 	"sync/atomic"
+ 	"time"
+ 
++	"github.com/sagernet/sing-box/adapter"
+ 	"github.com/sagernet/sing-box/common/listener"
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/bufio"
+@@ -34,15 +35,30 @@ type slowOpenConn struct {
+ }
+ 
+ func DialSlowContext(dialer *tfo.Dialer, ctx context.Context, netns string, network string, destination M.Socksaddr) (net.Conn, error) {
++	if err := adapter.ValidateResolutionDial(ctx, destination); err != nil {
++		return nil, err
++	}
+ 	if dialer.DisableTFO || N.NetworkName(network) != N.NetworkTCP {
+ 		switch N.NetworkName(network) {
+ 		case N.NetworkTCP, N.NetworkUDP:
+-			return dialer.Dialer.DialContext(ctx, network, destination.String())
++			return dialPinnedContext(ctx, &dialer.Dialer, network, destination.String())
+ 		default:
+ 			return dialer.Dialer.DialContext(ctx, network, destination.AddrString())
+ 		}
+ 	}
+-	dialCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		guarded := *dialer
++		guarded.Dialer = pinNetDialer(ctx, guarded.Dialer)
++		dialer = &guarded
++	}
++	var dialCtx context.Context
++	var cancel context.CancelFunc
++	if adapter.ResolutionPinFromContext(ctx) != nil {
++		// TFO может отправить SYN только в initial Write: deadline нужен и ему.
++		dialCtx, cancel = context.WithDeadline(context.WithoutCancel(ctx), dialer.Dialer.Deadline)
++	} else {
++		dialCtx, cancel = context.WithCancel(context.WithoutCancel(ctx))
++	}
+ 	return &slowOpenConn{
+ 		dialer:      dialer,
+ 		ctx:         dialCtx,
+@@ -88,8 +104,22 @@ func (c *slowOpenConn) Write(b []byte) (n int, err error) {
+ 		return 0, os.ErrClosed
+ 	default:
+ 	}
++	if adapter.ResolutionPinFromContext(c.ctx) != nil {
++		defer c.cancel() // После establishment TTL не ограничивает TCP-сессию.
++	}
++	pinRejected := false
+ 	conn, err := listener.ListenNetworkNamespace[net.Conn](c.ctx, c.netns, func() (net.Conn, error) {
+-		return c.dialer.DialContext(c.ctx, c.network, c.destination.String(), b)
++		if err := adapter.ValidateResolutionDial(c.ctx, c.destination); err != nil {
++			pinRejected = true
++			return nil, err
++		}
++		conn, err := c.dialer.DialContext(c.ctx, c.network, c.destination.String(), b)
++		if err != nil {
++			if pinErr := adapter.ValidateResolutionDial(c.ctx, c.destination); pinErr != nil {
++				return nil, pinErr
++			}
++		}
++		return conn, err
+ 	})
+ 	if err != nil {
+ 		c.err = err
+@@ -103,7 +133,9 @@ func (c *slowOpenConn) Write(b []byte) (n int, err error) {
+ 			c.conn.Store(conn.(*net.TCPConn))
+ 		}
+ 	}
+-	n = len(b)
++	if !pinRejected && (err == nil || adapter.ResolutionPinFromContext(c.ctx) == nil) {
++		n = len(b)
++	}
+ 	close(c.create)
+ 	return
+ }
+diff --git a/option/rule_action.go b/option/rule_action.go
+index 7294aa2..15c67e0 100644
+--- a/option/rule_action.go
++++ b/option/rule_action.go
+@@ -272,6 +272,7 @@ type RouteActionSniff struct {
+ }
+ 
+ type RouteActionResolve struct {
++	PinResolution          bool                  `json:"pin_resolution,omitempty"`
+ 	StrictComplete         bool                  `json:"strict_complete,omitempty"`
+ 	Server                 string                `json:"server,omitempty" reference:"dns_server"`
+ 	Timeout                badoption.Duration    `json:"timeout,omitempty"`
+diff --git a/route/conn.go b/route/conn.go
+index cff6b13..b474415 100644
+--- a/route/conn.go
++++ b/route/conn.go
+@@ -101,6 +101,14 @@ func (m *ConnectionManager) TrackPacketConn(conn net.PacketConn) net.PacketConn
+ 
+ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+ 	ctx = adapter.WithContext(ctx, &metadata)
++	if metadata.ResolutionPin != nil {
++		if err := metadata.ResolutionPin.ValidateMetadata(&metadata); err != nil {
++			N.CloseOnHandshakeFailure(conn, onClose, err)
++			return
++		}
++		ctx = adapter.ContextWithResolutionPin(ctx, metadata.ResolutionPin)
++	}
++
+ 	var (
+ 		remoteConn net.Conn
+ 		err        error
+@@ -163,6 +171,14 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
+ 
+ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dialer, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+ 	ctx = adapter.WithContext(ctx, &metadata)
++	if metadata.ResolutionPin != nil {
++		if err := metadata.ResolutionPin.ValidateMetadata(&metadata); err != nil {
++			N.CloseOnHandshakeFailure(conn, onClose, err)
++			return
++		}
++		ctx = adapter.ContextWithResolutionPin(ctx, metadata.ResolutionPin)
++	}
++
+ 	var (
+ 		remotePacketConn   net.PacketConn
+ 		remoteConn         net.Conn
+@@ -228,6 +244,13 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
+ 			return
+ 		}
+ 	}
++	if metadata.ResolutionPin != nil {
++		guard := &pinnedPacketConn{conn: remotePacketConn, pin: metadata.ResolutionPin}
++		if metadata.UDPConnect {
++			guard.connected = M.SocksaddrFromNet(remoteConn.RemoteAddr())
++		}
++		remotePacketConn = guard
++	}
+ 	err = N.ReportPacketConnHandshakeSuccess(conn, remotePacketConn)
+ 	if err != nil {
+ 		err = E.Cause(err, "report handshake success")
+diff --git a/route/resolution_pin.go b/route/resolution_pin.go
+new file mode 100644
+index 0000000..0a928a2
+--- /dev/null
++++ b/route/resolution_pin.go
+@@ -0,0 +1,34 @@
++package route
++
++import (
++	"fmt"
++	"github.com/sagernet/sing-box/adapter"
++	M "github.com/sagernet/sing/common/metadata"
++	"net"
++	"time"
++)
++
++type pinnedPacketConn struct {
++	conn      net.PacketConn
++	pin       *adapter.ResolutionPin
++	connected M.Socksaddr
++}
++
++func (c *pinnedPacketConn) WriteTo(payload []byte, destination net.Addr) (int, error) {
++	target := M.SocksaddrFromNet(destination)
++	if c.connected.IsValid() && c.connected != target {
++		return 0, fmt.Errorf("pin_resolution: connected UDP destination overridden")
++	}
++	if err := c.pin.ValidateDestination(target); err != nil {
++		return 0, err
++	}
++	return c.conn.WriteTo(payload, destination)
++}
++func (c *pinnedPacketConn) ReadFrom(payload []byte) (int, net.Addr, error) {
++	return c.conn.ReadFrom(payload)
++}
++func (c *pinnedPacketConn) Close() error                       { return c.conn.Close() }
++func (c *pinnedPacketConn) LocalAddr() net.Addr                { return c.conn.LocalAddr() }
++func (c *pinnedPacketConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
++func (c *pinnedPacketConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
++func (c *pinnedPacketConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
+diff --git a/route/resolution_pin_test.go b/route/resolution_pin_test.go
+new file mode 100644
+index 0000000..8b199f3
+--- /dev/null
++++ b/route/resolution_pin_test.go
+@@ -0,0 +1,124 @@
++package route
++
++import (
++	"context"
++	"github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	"github.com/sagernet/sing-box/log"
++	R "github.com/sagernet/sing-box/route/rule"
++	"github.com/sagernet/sing/common/buf"
++	"github.com/sagernet/sing/common/bufio"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++	"net"
++	"net/netip"
++	"strings"
++	"testing"
++	"time"
++)
++
++type countingPacketConn struct{ writes int }
++
++func (c *countingPacketConn) WriteTo(p []byte, _ net.Addr) (int, error) {
++	c.writes++
++	return len(p), nil
++}
++func (c *countingPacketConn) ReadFrom([]byte) (int, net.Addr, error) { panic("unused") }
++func (c *countingPacketConn) Close() error                           { return nil }
++func (c *countingPacketConn) LocalAddr() net.Addr                    { return &net.UDPAddr{} }
++func (c *countingPacketConn) SetDeadline(time.Time) error            { return nil }
++func (c *countingPacketConn) SetReadDeadline(time.Time) error        { return nil }
++func (c *countingPacketConn) SetWriteDeadline(time.Time) error       { return nil }
++func (c *countingPacketConn) Upstream() any                          { return c }
++
++func TestPinnedPacketConnPerDatagram(t *testing.T) {
++	address := netip.MustParseAddr("192.0.2.1")
++	deadline := time.Now().Add(100 * time.Millisecond)
++	pin, err := adapter.NewResolutionPin(M.Socksaddr{Fqdn: "example.org", Port: 443}, adapter.DNSLookupResult{Addresses: []netip.Addr{address}, Families: []adapter.DNSResponseProof{{QuestionName: "example.org.", CanonicalName: "example.org.", Addresses: []netip.Addr{address}, QueryType: dns.TypeA, Deadline: deadline}}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	raw := &countingPacketConn{}
++	conn := &pinnedPacketConn{conn: raw, pin: pin}
++	target := net.UDPAddrFromAddrPort(netip.AddrPortFrom(address, 443))
++	if n, err := conn.WriteTo([]byte("valid"), target); n != 5 || err != nil {
++		t.Fatalf("n=%d err=%v", n, err)
++	}
++	if _, err := conn.WriteTo([]byte("wrong"), &net.UDPAddr{IP: net.ParseIP("192.0.2.2"), Port: 443}); err == nil {
++		t.Fatal("accepted other target")
++	}
++	if _, ok := any(conn).(interface{ Upstream() any }); ok {
++		t.Fatal("raw socket unwrap exposed")
++	}
++	<-time.After(time.Until(deadline))
++	if n, err := conn.WriteTo([]byte("expired"), target); n != 0 || err == nil || !strings.Contains(err.Error(), "expired") {
++		t.Fatalf("n=%d err=%v", n, err)
++	}
++	if raw.writes != 1 {
++		t.Fatalf("writes=%d", raw.writes)
++	}
++}
++
++type pinDNSRouter struct {
++	adapter.DNSRouter
++	calls   int
++	options adapter.DNSQueryOptions
++	result  adapter.DNSLookupResult
++}
++
++func (d *pinDNSRouter) LookupWithProvenance(ctx context.Context, domain string, options adapter.DNSQueryOptions) (adapter.DNSLookupResult, error) {
++	d.calls++
++	d.options = options
++	return d.result, nil
++}
++
++func TestResolveActionPinsAndForbidsSecondLookup(t *testing.T) {
++	address := netip.MustParseAddr("192.0.2.1")
++	dnsRouter := &pinDNSRouter{result: adapter.DNSLookupResult{Addresses: []netip.Addr{address}, Families: []adapter.DNSResponseProof{{QuestionName: "example.org.", CanonicalName: "alias.org.", Addresses: []netip.Addr{address}, QueryType: dns.TypeA, Deadline: time.Now().Add(time.Hour)}}}}
++	router := &Router{dns: dnsRouter, logger: log.NewNOPFactory().Logger()}
++	metadata := &adapter.InboundContext{Destination: M.Socksaddr{Fqdn: "EXAMPLE.org.", Port: 443}}
++	action := &R.RuleActionResolve{PinResolution: true}
++	if err := router.actionResolve(context.Background(), metadata, action); err != nil {
++		t.Fatal(err)
++	}
++	if !dnsRouter.options.StrictComplete || !dnsRouter.options.RequireProvenance || dnsRouter.calls != 1 || metadata.ResolutionPin == nil || metadata.Destination.Fqdn != "EXAMPLE.org." {
++		t.Fatalf("options=%+v metadata=%+v", dnsRouter.options, metadata)
++	}
++	dnsRouter.result.Addresses[0] = netip.MustParseAddr("192.0.2.9")
++	if err := metadata.ResolutionPin.ValidateMetadata(metadata); err != nil {
++		t.Fatal(err)
++	}
++	if err := router.actionResolve(context.Background(), metadata, action); err == nil || dnsRouter.calls != 1 {
++		t.Fatalf("second lookup calls=%d err=%v", dnsRouter.calls, err)
++	}
++}
++
++func TestPinnedUDPAfterNATWithoutBatchEscape(t *testing.T) {
++	address := netip.MustParseAddr("192.0.2.1")
++	target := M.Socksaddr{Fqdn: "example.org", Port: 443}
++	pin, err := adapter.NewResolutionPin(target, adapter.DNSLookupResult{Addresses: []netip.Addr{address}, Families: []adapter.DNSResponseProof{{QuestionName: "example.org.", CanonicalName: "example.org.", Addresses: []netip.Addr{address}, QueryType: dns.TypeA, Deadline: time.Now().Add(time.Hour)}}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	raw := &countingPacketConn{}
++	guard := &pinnedPacketConn{conn: raw, pin: pin}
++	nat := bufio.NewNATPacketConn(bufio.NewPacketConn(guard), M.SocksaddrFrom(address, 443), target)
++	payload := buf.As([]byte("valid"))
++	if err := nat.WritePacket(payload, target); err != nil {
++		t.Fatal(err)
++	}
++	if raw.writes != 1 {
++		t.Fatalf("writes=%d", raw.writes)
++	}
++	writer := N.UnwrapPacketWriter(nat)
++	if _, ok := writer.(N.PacketBatchWriter); ok {
++		t.Fatal("batch writer exposed")
++	}
++	if _, ok := writer.(N.ConnectedPacketBatchWriter); ok {
++		t.Fatal("connected batch writer exposed")
++	}
++	guard.connected = M.SocksaddrFrom(address, 443)
++	if _, err := guard.WriteTo([]byte("wrong port"), net.UDPAddrFromAddrPort(netip.AddrPortFrom(address, 80))); err == nil {
++		t.Fatal("accepted connected UDP mismatch")
++	}
++}
+diff --git a/route/route.go b/route/route.go
+index 063880d..41b458c 100644
+--- a/route/route.go
++++ b/route/route.go
+@@ -153,6 +153,21 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
+ 		buf.ReleaseMulti(buffers)
+ 		return err
+ 	}
++	if metadata.ResolutionPin != nil {
++		if err := metadata.ResolutionPin.ValidateMetadata(&metadata); err != nil {
++			buf.ReleaseMulti(buffers)
++			return err
++		}
++		target := chain[len(chain)-1]
++		_, customTCP := target.(adapter.ConnectionHandler)
++		_, customUDP := target.(adapter.PacketConnectionHandler)
++		if target.Type() != C.TypeDirect || customTCP || customUDP {
++			buf.ReleaseMulti(buffers)
++			return E.New("pin_resolution: unsupported outbound; direct native dialer required")
++		}
++		ctx = adapter.ContextWithResolutionPin(ctx, metadata.ResolutionPin)
++	}
++
+ 	for _, buffer := range buffers {
+ 		conn = bufio.NewCachedConn(conn, buffer)
+ 	}
+@@ -318,6 +333,21 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
+ 		N.ReleaseMultiPacketBuffer(packetBuffers)
+ 		return err
+ 	}
++	if metadata.ResolutionPin != nil {
++		if err := metadata.ResolutionPin.ValidateMetadata(&metadata); err != nil {
++			N.ReleaseMultiPacketBuffer(packetBuffers)
++			return err
++		}
++		target := chain[len(chain)-1]
++		_, customTCP := target.(adapter.ConnectionHandler)
++		_, customUDP := target.(adapter.PacketConnectionHandler)
++		if target.Type() != C.TypeDirect || customTCP || customUDP {
++			N.ReleaseMultiPacketBuffer(packetBuffers)
++			return E.New("pin_resolution: unsupported outbound; direct native dialer required")
++		}
++		ctx = adapter.ContextWithResolutionPin(ctx, metadata.ResolutionPin)
++	}
++
+ 	for _, buffer := range packetBuffers {
+ 		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
+ 		N.PutPacketBuffer(buffer)
+@@ -931,18 +961,45 @@ func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundCon
+ 				return E.New("DNS server not found: ", action.Server)
+ 			}
+ 		}
+-		addresses, err := r.dns.Lookup(adapter.WithContext(ctx, metadata), metadata.Destination.Fqdn, adapter.DNSQueryOptions{
++		options := adapter.DNSQueryOptions{
+ 			Transport:              transport,
+-			StrictComplete:         action.StrictComplete,
++			StrictComplete:         action.StrictComplete || action.PinResolution,
+ 			Strategy:               action.Strategy,
+ 			DisableCache:           action.DisableCache,
+ 			DisableOptimisticCache: action.DisableOptimisticCache,
+ 			RewriteTTL:             action.RewriteTTL,
+ 			Timeout:                action.Timeout,
+ 			ClientSubnet:           action.ClientSubnet,
+-		})
+-		if err != nil {
+-			return err
++		}
++		var addresses []netip.Addr
++		if action.PinResolution {
++			if metadata.ResolutionPin != nil {
++				return E.New("pin_resolution: repeated resolution requires new flow")
++			}
++			provenanceRouter, ok := r.dns.(adapter.DNSRouterWithProvenance)
++			if !ok {
++				return E.New("pin_resolution: DNS provenance unsupported")
++			}
++			options.RequireProvenance = true
++			result, err := provenanceRouter.LookupWithProvenance(adapter.WithContext(ctx, metadata), metadata.Destination.Fqdn, options)
++			if err != nil {
++				return err
++			}
++			pin, err := adapter.NewResolutionPin(metadata.Destination, result)
++			if err != nil {
++				return err
++			}
++			metadata.ResolutionPin = pin
++			addresses = append([]netip.Addr(nil), result.Addresses...)
++		} else {
++			if metadata.ResolutionPin != nil {
++				return E.New("pin_resolution: second resolution forbidden")
++			}
++			var err error
++			addresses, err = r.dns.Lookup(adapter.WithContext(ctx, metadata), metadata.Destination.Fqdn, options)
++			if err != nil {
++				return err
++			}
+ 		}
+ 		metadata.DestinationAddresses = addresses
+ 		r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
+diff --git a/route/rule/rule_action.go b/route/rule/rule_action.go
+index faa7636..afb30d4 100644
+--- a/route/rule/rule_action.go
++++ b/route/rule/rule_action.go
+@@ -87,6 +87,7 @@ func NewRuleAction(logger logger.ContextLogger, action option.RuleAction) (adapt
+ 		return sniffAction, sniffAction.build()
+ 	case C.RuleActionTypeResolve:
+ 		return &RuleActionResolve{
++			PinResolution:          action.ResolveOptions.PinResolution,
+ 			StrictComplete:         action.ResolveOptions.StrictComplete,
+ 			Server:                 action.ResolveOptions.Server,
+ 			Timeout:                time.Duration(action.ResolveOptions.Timeout),
+@@ -530,6 +531,7 @@ func (r *RuleActionSniff) String() string {
+ }
+ 
+ type RuleActionResolve struct {
++	PinResolution          bool
+ 	StrictComplete         bool
+ 	Server                 string
+ 	Timeout                time.Duration

@@ -1,0 +1,1238 @@
+diff --git a/adapter/dns.go b/adapter/dns.go
+index ce8ea1f..c239830 100644
+--- a/adapter/dns.go
++++ b/adapter/dns.go
+@@ -31,7 +31,38 @@ type DNSClient interface {
+ 	ClearCache()
+ }
+ 
++// DNSResponseProof описывает один окончательно выбранный ответ реального DNS.
++// Deadline сохраняет монотонное время исходного ответа. NativeEnvironmentHash
++// является локальным хешем окружения транспорта, а не поколением сети или lease.
++type DNSResponseProof struct {
++	QuestionName          string
++	CanonicalName         string
++	Addresses             []netip.Addr
++	QueryType             uint16
++	NoData                bool
++	Deadline              time.Time
++	TransportTag          string
++	TransportType         string
++	NativeEnvironmentHash uint64
++}
++
++type DNSLookupResult struct {
++	Addresses []netip.Addr
++	Families  []DNSResponseProof
++}
++
++type DNSClientWithProvenance interface {
++	LookupWithProvenance(context.Context, DNSTransport, string, DNSQueryOptions, func(*dns.Msg) bool) (DNSLookupResult, error)
++	ExchangeWithProvenance(context.Context, DNSTransport, *dns.Msg, DNSQueryOptions, func(*dns.Msg) bool) (*dns.Msg, *DNSResponseProof, error)
++	ExchangeWithProvenanceAsync(context.Context, DNSTransport, *dns.Msg, DNSQueryOptions, func(*dns.Msg) bool, func(*dns.Msg, *DNSResponseProof, error))
++}
++
++type DNSRouterWithProvenance interface {
++	LookupWithProvenance(context.Context, string, DNSQueryOptions) (DNSLookupResult, error)
++}
++
+ type DNSQueryOptions struct {
++	RequireProvenance      bool
+ 	StrictComplete         bool
+ 	Transport              DNSTransport
+ 	Strategy               C.DomainStrategy
+diff --git a/dns/client.go b/dns/client.go
+index 93872f9..ac385c7 100644
+--- a/dns/client.go
++++ b/dns/client.go
+@@ -8,6 +8,7 @@ import (
+ 	"net"
+ 	"net/netip"
+ 	"strconv"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+@@ -36,6 +37,8 @@ var (
+ var _ adapter.DNSClient = (*Client)(nil)
+ 
+ type Client struct {
++	provenanceCache   atomic.Pointer[freelru.Cache[dnsCacheKey, *provenanceCacheEntry]]
++	provenanceNow     func() time.Time
+ 	ctx               context.Context
+ 	timeout           time.Duration
+ 	disableCache      bool
+@@ -91,6 +94,8 @@ func NewClient(options ClientOptions) *Client {
+ }
+ 
+ type dnsCacheKey struct {
++	provenanceTransportType string
++	provenance              bool
+ 	dns.Question
+ 	transportTag string
+ 	clientSubnet netip.Prefix
+@@ -124,11 +129,17 @@ func (c *Client) newCacheKey(transport adapter.DNSTransport, question dns.Questi
+ 			clientSubnet = clientSubnetFromMessage(message)
+ 		}
+ 	}
++	var provenanceTransportType string
++	if options.RequireProvenance {
++		provenanceTransportType = transport.Type()
++	}
+ 	return dnsCacheKey{
+-		Question:     question,
+-		transportTag: transport.Tag(),
+-		clientSubnet: clientSubnet,
+-		environment:  c.environmentHash(transport),
++		provenanceTransportType: provenanceTransportType,
++		Question:                question,
++		provenance:              options.RequireProvenance,
++		transportTag:            transport.Tag(),
++		clientSubnet:            clientSubnet,
++		environment:             c.environmentHash(transport),
+ 	}
+ }
+ 
+@@ -239,6 +250,7 @@ const (
+ )
+ 
+ type exchangeOperation struct {
++	proof           *adapter.DNSResponseProof
+ 	ctx             context.Context
+ 	message         *dns.Msg
+ 	question        dns.Question
+@@ -259,6 +271,9 @@ func (o *exchangeOperation) release() {
+ 
+ func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, allowWait bool) (*exchangeOperation, *dns.Msg, exchangeStatus, error) {
+ 	err := ctx.Err()
++	if options.RequireProvenance && options.RewriteTTL != nil {
++		return nil, nil, exchangeDone, ErrProvenanceUnavailable
++	}
+ 	if err != nil {
+ 		return nil, nil, exchangeDone, err
+ 	}
+@@ -306,7 +321,15 @@ func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTranspo
+ 			}
+ 		}
+ 		for {
+-			response, ttl, isStale := c.loadResponse(cacheKey)
++			var response *dns.Msg
++			var ttl int
++			var isStale bool
++			if options.RequireProvenance {
++				response, operation.proof = c.loadProvenance(cacheKey)
++				ttl, isStale = 0, false
++			} else {
++				response, ttl, isStale = c.loadResponse(cacheKey)
++			}
+ 			if response != nil && (!isStale || !options.DisableOptimisticCache) {
+ 				operation.release()
+ 				if isStale {
+@@ -322,7 +345,7 @@ func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTranspo
+ 					logCachedResponse(c.logger, ctx, response, ttl)
+ 				}
+ 				response.Id = message.Id
+-				return nil, response, exchangeDone, nil
++				return operation, response, exchangeDone, nil
+ 			}
+ 			if !loaded {
+ 				break
+@@ -365,6 +388,13 @@ func (c *Client) finishExchange(transport adapter.DNSTransport, operation *excha
+ 	ctx := operation.ctx
+ 	question := operation.question
+ 	disableCache := operation.disableCache || (response.Rcode != dns.RcodeSuccess && response.Rcode != dns.RcodeNameError)
++	if operation.options.RequireProvenance {
++		proof, err := c.responseProof(transport, question, response, operation.options)
++		if err != nil {
++			return nil, err
++		}
++		operation.proof = proof
++	}
+ 	if operation.responseChecker != nil {
+ 		var rejected bool
+ 		if response.Rcode != dns.RcodeSuccess && response.Rcode != dns.RcodeNameError {
+@@ -384,7 +414,11 @@ func (c *Client) finishExchange(transport adapter.DNSTransport, operation *excha
+ 	if !disableCache {
+ 		cacheKey, storable := c.finishCacheKey(transport, operation.cacheKey)
+ 		if storable {
+-			c.storeCache(cacheKey, response, timeToLive)
++			if operation.options.RequireProvenance {
++				c.storeProvenance(cacheKey, response, operation.proof)
++			} else {
++				c.storeCache(cacheKey, response, timeToLive)
++			}
+ 		}
+ 	}
+ 	response.Id = operation.messageId
+@@ -403,6 +437,11 @@ func (c *Client) finishExchange(transport adapter.DNSTransport, operation *excha
+ }
+ 
+ func (c *Client) Exchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool) (*dns.Msg, error) {
++	response, _, err := c.exchangeWithProvenance(ctx, transport, message, options, responseChecker)
++	return response, err
++}
++
++func (c *Client) exchangeWithProvenance(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool) (*dns.Msg, *adapter.DNSResponseProof, error) {
+ 	if options.Timeout == 0 {
+ 		options.Timeout = c.timeout
+ 	}
+@@ -410,17 +449,28 @@ func (c *Client) Exchange(ctx context.Context, transport adapter.DNSTransport, m
+ 	defer cancel()
+ 	operation, earlyResponse, status, err := c.beginExchange(ctx, transport, message, options, responseChecker, true)
+ 	if status != exchangeReady {
+-		return earlyResponse, err
++		if operation != nil {
++			return earlyResponse, cloneProof(operation.proof), err
++		}
++		return earlyResponse, nil, err
+ 	}
+ 	defer operation.release()
+ 	response, err := c.exchangeToTransport(operation.ctx, transport, operation.message)
+ 	if err != nil {
+-		return nil, err
++		return nil, nil, err
++	}
++	response, err = c.finishExchange(transport, operation, response)
++	if err != nil {
++		return response, nil, err
+ 	}
+-	return c.finishExchange(transport, operation, response)
++	return response, cloneProof(operation.proof), nil
+ }
+ 
+ func (c *Client) ExchangeAsync(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, callback func(response *dns.Msg, err error)) {
++	c.exchangeWithProvenanceAsync(ctx, transport, message, options, responseChecker, func(response *dns.Msg, _ *adapter.DNSResponseProof, err error) { callback(response, err) })
++}
++
++func (c *Client) exchangeWithProvenanceAsync(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, callback func(*dns.Msg, *adapter.DNSResponseProof, error)) {
+ 	if options.Timeout == 0 {
+ 		options.Timeout = c.timeout
+ 	}
+@@ -429,13 +479,17 @@ func (c *Client) ExchangeAsync(ctx context.Context, transport adapter.DNSTranspo
+ 	switch status {
+ 	case exchangeDone:
+ 		cancel()
+-		callback(earlyResponse, err)
++		var proof *adapter.DNSResponseProof
++		if operation != nil {
++			proof = cloneProof(operation.proof)
++		}
++		callback(earlyResponse, proof, err)
+ 		return
+ 	case exchangeWait:
+ 		go func() {
+-			response, exchangeErr := c.Exchange(ctx, transport, message, options, responseChecker)
++			response, proof, exchangeErr := c.exchangeWithProvenance(ctx, transport, message, options, responseChecker)
+ 			cancel()
+-			callback(response, exchangeErr)
++			callback(response, proof, exchangeErr)
+ 		}()
+ 		return
+ 	}
+@@ -443,17 +497,25 @@ func (c *Client) ExchangeAsync(ctx context.Context, transport adapter.DNSTranspo
+ 		cancel()
+ 		if exchangeErr != nil {
+ 			operation.release()
+-			callback(nil, exchangeErr)
++			callback(nil, nil, exchangeErr)
+ 			return
+ 		}
+ 		finishedResponse, finishErr := c.finishExchange(transport, operation, response)
+ 		operation.release()
+-		callback(finishedResponse, finishErr)
++		if finishErr != nil {
++			callback(finishedResponse, nil, finishErr)
++			return
++		}
++		callback(finishedResponse, cloneProof(operation.proof), nil)
+ 	}
+ 	c.exchangeToTransportAsync(operation.ctx, transport, operation.message, finish)
+ }
+ 
+ func (c *Client) Lookup(ctx context.Context, transport adapter.DNSTransport, domain string, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool) ([]netip.Addr, error) {
++	return c.lookup(ctx, transport, domain, options, responseChecker, nil)
++}
++
++func (c *Client) lookup(ctx context.Context, transport adapter.DNSTransport, domain string, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, result *adapter.DNSLookupResult) ([]netip.Addr, error) {
+ 	domain = FqdnToDomain(domain)
+ 	dnsName := dns.Fqdn(domain)
+ 	var strategy C.DomainStrategy
+@@ -468,15 +530,15 @@ func (c *Client) Lookup(ctx context.Context, transport adapter.DNSTransport, dom
+ 	}
+ 	switch strategy {
+ 	case C.DomainStrategyIPv4Only:
+-		return c.lookupToExchange(ctx, transport, dnsName, dns.TypeA, lookupOptions, responseChecker)
++		return c.lookupFamily(ctx, transport, dnsName, dns.TypeA, lookupOptions, responseChecker, result, 0)
+ 	case C.DomainStrategyIPv6Only:
+-		return c.lookupToExchange(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker)
++		return c.lookupFamily(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker, result, familySlot(strategy, dns.TypeAAAA))
+ 	}
+ 	var response4 []netip.Addr
+ 	var response6 []netip.Addr
+ 	var group task.Group
+ 	group.Append("exchange4", func(ctx context.Context) error {
+-		response, err := c.lookupToExchange(ctx, transport, dnsName, dns.TypeA, lookupOptions, responseChecker)
++		response, err := c.lookupFamily(ctx, transport, dnsName, dns.TypeA, lookupOptions, responseChecker, result, 0)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -484,7 +546,7 @@ func (c *Client) Lookup(ctx context.Context, transport adapter.DNSTransport, dom
+ 		return nil
+ 	})
+ 	group.Append("exchange6", func(ctx context.Context) error {
+-		response, err := c.lookupToExchange(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker)
++		response, err := c.lookupFamily(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker, result, familySlot(strategy, dns.TypeAAAA))
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -502,6 +564,9 @@ func (c *Client) Lookup(ctx context.Context, transport adapter.DNSTransport, dom
+ }
+ 
+ func (c *Client) ClearCache() {
++	if cache := c.provenanceCache.Load(); cache != nil {
++		cache.Purge()
++	}
+ 	if c.cache != nil {
+ 		c.cache.Purge()
+ 	}
+diff --git a/dns/provenance.go b/dns/provenance.go
+new file mode 100644
+index 0000000..57d2c25
+--- /dev/null
++++ b/dns/provenance.go
+@@ -0,0 +1,308 @@
++package dns
++
++import (
++	"context"
++	"fmt"
++	"net/netip"
++	"strings"
++	"time"
++
++	"github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	C "github.com/sagernet/sing-box/constant"
++	"github.com/sagernet/sing/common"
++	"github.com/sagernet/sing/contrab/freelru"
++	"github.com/sagernet/sing/contrab/maphash"
++)
++
++var ErrProvenanceUnavailable = fmt.Errorf("DNS response provenance unavailable")
++
++func cloneProof(proof *adapter.DNSResponseProof) *adapter.DNSResponseProof {
++	if proof == nil {
++		return nil
++	}
++	copy := *proof
++	copy.Addresses = append([]netip.Addr(nil), proof.Addresses...)
++	return &copy
++}
++func (c *Client) proofNow() time.Time {
++	if c.provenanceNow != nil {
++		return c.provenanceNow()
++	}
++	return time.Now()
++}
++
++type provenanceCacheEntry struct {
++	response *dns.Msg
++	proof    *adapter.DNSResponseProof
++}
++
++func (c *Client) proofCache() *freelru.Cache[dnsCacheKey, *provenanceCacheEntry] {
++	if cache := c.provenanceCache.Load(); cache != nil {
++		return cache
++	}
++	cache := common.Must1(freelru.New[dnsCacheKey, *provenanceCacheEntry](256, maphash.NewHasher[dnsCacheKey]().Hash32, true))
++	if c.provenanceCache.CompareAndSwap(nil, cache) {
++		return cache
++	}
++	return c.provenanceCache.Load()
++}
++func (c *Client) loadProvenance(key dnsCacheKey) (*dns.Msg, *adapter.DNSResponseProof) {
++	entry, ok := c.proofCache().Get(key)
++	if !ok {
++		return nil, nil
++	}
++	now := c.proofNow()
++	if !now.Before(entry.proof.Deadline) {
++		c.proofCache().Remove(key)
++		return nil, nil
++	}
++	response := entry.response.Copy()
++	normalizeTTL(response, uint32(entry.proof.Deadline.Sub(now)/time.Second))
++	return response, cloneProof(entry.proof)
++}
++func (c *Client) storeProvenance(key dnsCacheKey, response *dns.Msg, proof *adapter.DNSResponseProof) {
++	// Ограничиваем и число записей, и размер сохранённых DNS сообщений.
++	if proof == nil || response.Len() > 4096 {
++		return
++	}
++	c.proofCache().Add(key, &provenanceCacheEntry{response.Copy(), cloneProof(proof)})
++}
++
++func canonicalDNSName(name string) string { return strings.ToLower(dns.Fqdn(name)) }
++
++func (c *Client) responseProof(transport adapter.DNSTransport, question dns.Question, response *dns.Msg, options adapter.DNSQueryOptions) (*adapter.DNSResponseProof, error) {
++	fail := func(reason string) (*adapter.DNSResponseProof, error) {
++		return nil, fmt.Errorf("%w: %s", ErrProvenanceUnavailable, reason)
++	}
++	switch transport.Type() {
++	case C.DNSTypeUDP, C.DNSTypeTCP, C.DNSTypeTLS, C.DNSTypeHTTPS, C.DNSTypeQUIC, C.DNSTypeHTTP3:
++	default:
++		return fail("transport has no static wire origin")
++	}
++	if transport.Tag() == "" || options.RewriteTTL != nil {
++		return fail("missing transport identity or rewritten TTL")
++	}
++	if response == nil || !response.Response || response.Opcode != dns.OpcodeQuery || response.Zero || response.Truncated || response.Rcode != dns.RcodeSuccess || len(response.Question) != 1 || question.Qclass != dns.ClassINET || (question.Qtype != dns.TypeA && question.Qtype != dns.TypeAAAA) {
++		return fail("not a complete address response")
++	}
++	q := response.Question[0]
++	if canonicalDNSName(q.Name) != canonicalDNSName(question.Name) || q.Qtype != question.Qtype || q.Qclass != question.Qclass {
++		return fail("response question mismatch")
++	}
++	if _, valid := dns.IsDomainName(question.Name); !valid {
++		return fail("invalid question name")
++	}
++	name := canonicalDNSName(question.Name)
++	minimum := uint32(^uint32(0))
++	hasTTL := false
++	includeTTL := func(ttl uint32) { minimum = min(minimum, ttl); hasTTL = true }
++	owners := make(map[string][]dns.RR)
++	for _, rr := range response.Answer {
++		// DNAME на ancestor влияет на синтезированный CNAME и его срок.
++		if _, unsupported := rr.(*dns.DNAME); unsupported {
++			return fail("DNAME unsupported")
++		}
++		owners[canonicalDNSName(rr.Header().Name)] = append(owners[canonicalDNSName(rr.Header().Name)], rr)
++	}
++	visited := make(map[string]bool)
++	var addresses []netip.Addr
++	for {
++		if visited[name] {
++			return fail("CNAME cycle")
++		}
++		visited[name] = true
++		var target string
++		var familyRecords int
++		seen := make(map[netip.Addr]bool)
++		for _, rr := range owners[name] {
++			if rr.Header().Class != dns.ClassINET {
++				return fail("invalid answer class")
++			}
++			switch value := rr.(type) {
++			case *dns.CNAME:
++				next := canonicalDNSName(value.Target)
++				if _, valid := dns.IsDomainName(value.Target); !valid {
++					return fail("invalid CNAME target")
++				}
++				if target != "" && target != next {
++					return fail("conflicting CNAME targets")
++				}
++				target = next
++				includeTTL(value.Hdr.Ttl)
++			case *dns.A:
++				familyRecords++
++				if question.Qtype == dns.TypeA {
++					address, ok := netip.AddrFromSlice(value.A)
++					if !ok || !address.Unmap().Is4() {
++						return fail("invalid A address")
++					}
++					address = address.Unmap()
++					includeTTL(value.Hdr.Ttl)
++					if !seen[address] {
++						addresses = append(addresses, address)
++						seen[address] = true
++					}
++				}
++			case *dns.AAAA:
++				familyRecords++
++				if question.Qtype == dns.TypeAAAA {
++					address, ok := netip.AddrFromSlice(value.AAAA)
++					if !ok || !address.Is6() || address.Is4In6() {
++						return fail("invalid AAAA address")
++					}
++					includeTTL(value.Hdr.Ttl)
++					if !seen[address] {
++						addresses = append(addresses, address)
++						seen[address] = true
++					}
++				}
++			}
++		}
++		if target == "" {
++			break
++		}
++		if familyRecords > 0 {
++			return fail("CNAME conflicts with address data")
++		}
++		name = target
++	}
++	if len(addresses) > 64 {
++		return fail("too many addresses")
++	}
++	noData := len(addresses) == 0
++	if noData {
++		soaFound := false
++		for _, rr := range response.Ns {
++			soa, ok := rr.(*dns.SOA)
++			if !ok || soa.Hdr.Class != dns.ClassINET || !dns.IsSubDomain(canonicalDNSName(soa.Hdr.Name), name) {
++				continue
++			}
++			includeTTL(min(soa.Hdr.Ttl, soa.Minttl))
++			soaFound = true
++		}
++		if !soaFound {
++			return fail("NODATA has no covering SOA")
++		}
++	}
++	if minimum == 0 || !hasTTL {
++		return fail("no positive original TTL")
++	}
++	return &adapter.DNSResponseProof{QuestionName: strings.TrimSuffix(canonicalDNSName(question.Name), "."), CanonicalName: strings.TrimSuffix(name, "."), Addresses: addresses, QueryType: question.Qtype, NoData: noData, Deadline: c.proofNow().Add(time.Duration(minimum) * time.Second), TransportTag: transport.Tag(), TransportType: transport.Type(), NativeEnvironmentHash: c.environmentHash(transport)}, nil
++}
++
++func familySlot(strategy C.DomainStrategy, qType uint16) int {
++	if qType == dns.TypeAAAA && strategy != C.DomainStrategyIPv6Only {
++		return 1
++	}
++	return 0
++}
++func prepareLookupResult(options adapter.DNSQueryOptions) adapter.DNSLookupResult {
++	strategy := options.Strategy
++	if options.LookupStrategy != C.DomainStrategyAsIS {
++		strategy = options.LookupStrategy
++	}
++	count := 2
++	if strategy == C.DomainStrategyIPv4Only || strategy == C.DomainStrategyIPv6Only {
++		count = 1
++	}
++	return adapter.DNSLookupResult{Families: make([]adapter.DNSResponseProof, count)}
++}
++func finishLookupResult(result adapter.DNSLookupResult, addresses []netip.Addr, err error, domain string) (adapter.DNSLookupResult, error) {
++	if err != nil {
++		return adapter.DNSLookupResult{}, err
++	}
++	if len(addresses) > 64 {
++		return adapter.DNSLookupResult{}, fmt.Errorf("%w: too many combined addresses", ErrProvenanceUnavailable)
++	}
++	for _, proof := range result.Families {
++		if proof.Deadline.IsZero() || canonicalDNSName(proof.QuestionName) != canonicalDNSName(domain) {
++			return adapter.DNSLookupResult{}, ErrProvenanceUnavailable
++		}
++	}
++	result.Addresses = append([]netip.Addr(nil), addresses...)
++	return result, nil
++}
++func (c *Client) LookupWithProvenance(ctx context.Context, transport adapter.DNSTransport, domain string, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool) (adapter.DNSLookupResult, error) {
++	options.RequireProvenance = true
++	options.StrictComplete = true
++	options.DisableOptimisticCache = true
++	result := prepareLookupResult(options)
++	addresses, err := c.lookup(ctx, transport, domain, options, checker, &result)
++	return finishLookupResult(result, addresses, err, domain)
++}
++func (c *Client) ExchangeWithProvenance(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool) (*dns.Msg, *adapter.DNSResponseProof, error) {
++	options.RequireProvenance = true
++	options.DisableOptimisticCache = true
++	return c.exchangeWithProvenance(ctx, transport, message, options, checker)
++}
++func (c *Client) ExchangeWithProvenanceAsync(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool, callback func(*dns.Msg, *adapter.DNSResponseProof, error)) {
++	options.RequireProvenance = true
++	options.DisableOptimisticCache = true
++	c.exchangeWithProvenanceAsync(ctx, transport, message, options, checker, callback)
++}
++func (c *Client) lookupFamily(ctx context.Context, transport adapter.DNSTransport, name string, qType uint16, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool, result *adapter.DNSLookupResult, slot int) ([]netip.Addr, error) {
++	if result == nil {
++		return c.lookupToExchange(ctx, transport, name, qType, options, checker)
++	}
++	message := &dns.Msg{MsgHdr: dns.MsgHdr{RecursionDesired: true}, Question: []dns.Question{{Name: name, Qtype: qType, Qclass: dns.ClassINET}}}
++	_, proof, err := c.ExchangeWithProvenance(ctx, transport, message, options, checker)
++	if err != nil {
++		return nil, err
++	}
++	if proof == nil {
++		return nil, ErrProvenanceUnavailable
++	}
++	result.Families[slot] = *proof
++	return append([]netip.Addr(nil), proof.Addresses...), nil
++}
++
++func (r *Router) clientExchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool) (*dns.Msg, *adapter.DNSResponseProof, error) {
++	if options.RequireProvenance {
++		client, ok := r.client.(adapter.DNSClientWithProvenance)
++		if !ok {
++			return nil, nil, ErrProvenanceUnavailable
++		}
++		return client.ExchangeWithProvenance(ctx, transport, message, options, checker)
++	}
++	response, err := r.client.Exchange(ctx, transport, message, options, checker)
++	return response, nil, err
++}
++func (r *Router) clientExchangeAsync(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool, callback func(*dns.Msg, *adapter.DNSResponseProof, error)) {
++	if options.RequireProvenance {
++		client, ok := r.client.(adapter.DNSClientWithProvenance)
++		if !ok {
++			callback(nil, nil, ErrProvenanceUnavailable)
++			return
++		}
++		client.ExchangeWithProvenanceAsync(ctx, transport, message, options, checker, callback)
++		return
++	}
++	r.client.ExchangeAsync(ctx, transport, message, options, checker, func(response *dns.Msg, err error) { callback(response, nil, err) })
++}
++func (r *Router) clientLookup(ctx context.Context, transport adapter.DNSTransport, domain string, options adapter.DNSQueryOptions, checker func(*dns.Msg) bool, result *adapter.DNSLookupResult) ([]netip.Addr, error) {
++	if result == nil {
++		return r.client.Lookup(ctx, transport, domain, options, checker)
++	}
++	client, ok := r.client.(adapter.DNSClientWithProvenance)
++	if !ok {
++		return nil, ErrProvenanceUnavailable
++	}
++	candidate, err := client.LookupWithProvenance(ctx, transport, domain, options, checker)
++	if err != nil {
++		return nil, err
++	}
++	*result = candidate
++	return candidate.Addresses, nil
++}
++func (r *Router) LookupWithProvenance(ctx context.Context, domain string, options adapter.DNSQueryOptions) (adapter.DNSLookupResult, error) {
++	options.RequireProvenance = true
++	options.StrictComplete = true
++	options.DisableOptimisticCache = true
++	if options.Strategy == C.DomainStrategyAsIS {
++		options.Strategy = r.defaultDomainStrategy
++	}
++	result := prepareLookupResult(options)
++	addresses, err := r.lookup(ctx, domain, options, &result)
++	return finishLookupResult(result, addresses, err, domain)
++}
+diff --git a/dns/provenance_test.go b/dns/provenance_test.go
+new file mode 100644
+index 0000000..86c9082
+--- /dev/null
++++ b/dns/provenance_test.go
+@@ -0,0 +1,393 @@
++package dns
++
++import (
++	"context"
++	"fmt"
++	"net/netip"
++	"strings"
++	"testing"
++	"time"
++
++	mdns "github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	C "github.com/sagernet/sing-box/constant"
++	"github.com/sagernet/sing-box/log"
++	"github.com/sagernet/sing-box/option"
++	"github.com/stretchr/testify/require"
++)
++
++type provenanceTransport struct {
++	fakeDNSTransport
++	kind    string
++	respond func(*mdns.Msg) (*mdns.Msg, error)
++	gate    <-chan struct{}
++	started chan<- struct{}
++}
++
++func (t *provenanceTransport) Type() string { return t.kind }
++func (t *provenanceTransport) Exchange(ctx context.Context, m *mdns.Msg) (*mdns.Msg, error) {
++	t.queryCount.Add(1)
++	return t.respond(m)
++}
++func (t *provenanceTransport) ExchangeAsync(ctx context.Context, m *mdns.Msg, cb func(*mdns.Msg, error)) {
++	if t.gate == nil {
++		cb(t.Exchange(ctx, m))
++		return
++	}
++	if t.started != nil {
++		t.started <- struct{}{}
++	}
++	go func() {
++		select {
++		case <-t.gate:
++			cb(t.Exchange(ctx, m))
++		case <-ctx.Done():
++			cb(nil, ctx.Err())
++		}
++	}()
++}
++func proofTransport() *provenanceTransport {
++	t := &provenanceTransport{kind: C.DNSTypeUDP}
++	t.tag = "wire"
++	t.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++		r := new(mdns.Msg)
++		r.SetReply(m)
++		if m.Question[0].Qtype == mdns.TypeA {
++			rr, _ := mdns.NewRR("lease.example. 60 IN A 192.0.2.1")
++			r.Answer = []mdns.RR{rr}
++		} else {
++			rr, _ := mdns.NewRR("example. 50 IN SOA ns.example. hostmaster.example. 1 2 3 4 20")
++			r.Ns = []mdns.RR{rr}
++		}
++		return r, nil
++	}
++	return t
++}
++func TestProvenanceActualLookupAndCache(t *testing.T) {
++	now := time.Now()
++	c := NewClient(ClientOptions{Context: context.Background(), Logger: log.NewNOPFactory().Logger()})
++	c.provenanceNow = func() time.Time { return now }
++	tr := proofTransport()
++	first, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	require.Equal(t, []netip.Addr{netip.MustParseAddr("192.0.2.1")}, first.Addresses)
++	require.Len(t, first.Families, 2)
++	require.Equal(t, now.Add(60*time.Second), first.Families[0].Deadline)
++	require.Equal(t, now.Add(20*time.Second), first.Families[1].Deadline)
++	require.True(t, first.Families[1].NoData)
++	first.Families[0].Addresses[0] = netip.MustParseAddr("192.0.2.99")
++	now = now.Add(5 * time.Second)
++	second, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	require.Equal(t, int32(2), tr.queryCount.Load())
++	require.Equal(t, 55*time.Second, second.Families[0].Deadline.Sub(now))
++	require.Equal(t, "192.0.2.1", second.Families[0].Addresses[0].String())
++	now = now.Add(61 * time.Second)
++	_, err = c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	require.Equal(t, int32(4), tr.queryCount.Load())
++}
++func TestProvenanceRawTTL(t *testing.T) {
++	for _, tc := range []struct {
++		name               string
++		opcode             int
++		reserved           bool
++		answers, authority []string
++		ttl                uint32
++		fail               bool
++	}{
++		{name: "reserved_z", reserved: true, answers: []string{"lease.example. 60 IN A 192.0.2.1"}, fail: true},
++		{name: "non_query_opcode", opcode: mdns.OpcodeStatus, answers: []string{"lease.example. 60 IN A 192.0.2.1"}, fail: true},
++		{name: "mixed_zero", answers: []string{"lease.example. 60 IN A 192.0.2.1", "lease.example. 0 IN A 192.0.2.2"}, fail: true},
++		{name: "cname", answers: []string{"lease.example. 7 IN CNAME target.example.", "target.example. 60 IN A 192.0.2.1"}, ttl: 7},
++		{name: "ancestor_dname", answers: []string{"example. 1 IN DNAME target.", "lease.example. 60 IN CNAME lease.target.", "lease.target. 60 IN A 192.0.2.1"}, fail: true},
++		{name: "ancestor_dname_zero", answers: []string{"example. 0 IN DNAME target.", "lease.example. 60 IN CNAME lease.target.", "lease.target. 60 IN A 192.0.2.1"}, fail: true},
++		{name: "negative_cname", answers: []string{"lease.example. 7 IN CNAME target.example."}, authority: []string{"example. 50 IN SOA ns.example. hostmaster.example. 1 2 3 4 20"}, ttl: 7},
++		{name: "negative_min", authority: []string{"example. 50 IN SOA ns.example. hostmaster.example. 1 2 3 4 20"}, ttl: 20},
++		{name: "negative_zero", authority: []string{"example. 50 IN SOA ns.example. hostmaster.example. 1 2 3 4 0"}, fail: true},
++		{name: "negative_missing", fail: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			now := time.Now()
++			tr := proofTransport()
++			tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++				r := new(mdns.Msg)
++				r.SetReply(m)
++				r.Opcode = tc.opcode
++				r.Zero = tc.reserved
++				for _, s := range tc.answers {
++					rr, e := mdns.NewRR(s)
++					require.NoError(t, e)
++					r.Answer = append(r.Answer, rr)
++				}
++				for _, s := range tc.authority {
++					rr, e := mdns.NewRR(s)
++					require.NoError(t, e)
++					r.Ns = append(r.Ns, rr)
++				}
++				return r, nil
++			}
++			c := NewClient(ClientOptions{Context: context.Background(), DisableCache: true})
++			c.provenanceNow = func() time.Time { return now }
++			result, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{Strategy: C.DomainStrategyIPv4Only}, nil)
++			if tc.fail {
++				require.Error(t, err)
++				return
++			}
++			require.NoError(t, err)
++			require.Equal(t, now.Add(time.Duration(tc.ttl)*time.Second), result.Families[0].Deadline)
++		})
++	}
++}
++
++func TestProvenanceFailuresAndSources(t *testing.T) {
++	for _, kind := range []string{C.DNSTypeLocal, C.DNSTypeDHCP, C.DNSTypeFakeIP, C.DNSTypeHosts, "unknown"} {
++		t.Run(kind, func(t *testing.T) {
++			tr := proofTransport()
++			tr.kind = kind
++			c := NewClient(ClientOptions{Context: context.Background()})
++			_, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++			require.ErrorIs(t, err, ErrProvenanceUnavailable)
++		})
++	}
++	for _, family := range []uint16{mdns.TypeA, mdns.TypeAAAA} {
++		t.Run(mdns.TypeToString[family], func(t *testing.T) {
++			tr := proofTransport()
++			original := tr.respond
++			tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++				if m.Question[0].Qtype == family {
++					return nil, context.DeadlineExceeded
++				}
++				return original(m)
++			}
++			c := NewClient(ClientOptions{Context: context.Background()})
++			result, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++			require.Error(t, err)
++			require.Empty(t, result.Families)
++			require.Empty(t, result.Addresses)
++		})
++	}
++}
++func TestProvenanceDoesNotPromoteOrdinaryCacheOrRewrite(t *testing.T) {
++	now := time.Now()
++	tr := proofTransport()
++	c := NewClient(ClientOptions{Context: context.Background(), DisableExpire: true, OptimisticTimeout: time.Hour})
++	c.provenanceNow = func() time.Time { return now }
++	_, err := c.Lookup(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	result, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	require.Equal(t, int32(4), tr.queryCount.Load())
++	rewrite := uint32(900)
++	_, err = c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{RewriteTTL: &rewrite}, nil)
++	require.ErrorIs(t, err, ErrProvenanceUnavailable)
++	now = now.Add(21 * time.Second)
++	next, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.NoError(t, err)
++	require.Equal(t, int32(5), tr.queryCount.Load())
++	require.Equal(t, result.Families[0].Deadline, next.Families[0].Deadline)
++	require.Equal(t, now.Add(20*time.Second), next.Families[1].Deadline)
++}
++func TestProvenanceSelectedRules(t *testing.T) {
++	for _, path := range []string{"pending", "explicit", "legacy", "respond_named", "respond_anonymous", "race", "terminal"} {
++		t.Run(path, func(t *testing.T) {
++			selected := proofTransport()
++			selected.tag = "final"
++			discarded := proofTransport()
++			discarded.tag = "discarded"
++			original := discarded.respond
++			discarded.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++				r, err := original(m)
++				for _, rr := range r.Answer {
++					rr.Header().Ttl = 1
++					if a, ok := rr.(*mdns.A); ok {
++						a.A = netip.MustParseAddr("192.0.2.99").AsSlice()
++					}
++				}
++				return r, err
++			}
++			router := strictCompleteRouter(selected)
++			router.transport.(*fakeDNSTransportManager).transports["discarded"] = discarded
++			opts := adapter.DNSQueryOptions{}
++			switch path {
++			case "explicit":
++				opts.Transport = selected
++			case "legacy":
++				router.legacyDNSMode = true
++			case "respond_named":
++				router.rules = raceTestRules(t, []option.DNSRule{evaluateRule("discarded", "other", true), evaluateRule("final", "chosen", false), respondRule("chosen", false, true)})
++			case "respond_anonymous":
++				router.rules = raceTestRules(t, []option.DNSRule{evaluateRule("discarded", "other", true), evaluateRule("final", "", false), respondRule("", false, true)})
++			case "race":
++				router.rules = raceTestRules(t, []option.DNSRule{evaluateRule("discarded", "other", true), evaluateRule("final", "chosen", false), respondRule("chosen", true, true)})
++			case "terminal":
++				router.rules = raceTestRules(t, []option.DNSRule{routeRule("final", true)})
++			}
++			result, err := router.LookupWithProvenance(context.Background(), "lease.example", opts)
++			require.NoError(t, err)
++			require.Len(t, result.Families, 2)
++			require.Equal(t, []netip.Addr{netip.MustParseAddr("192.0.2.1")}, result.Addresses)
++			for _, proof := range result.Families {
++				require.Equal(t, "final", proof.TransportTag)
++				require.Equal(t, C.DNSTypeUDP, proof.TransportType)
++			}
++		})
++	}
++}
++func TestProvenanceRejectsMalformedChainAndQuestion(t *testing.T) {
++	for _, kind := range []string{"question", "truncated", "rcode", "cycle", "conflict", "uncovered_soa", "unrelated"} {
++		t.Run(kind, func(t *testing.T) {
++			tr := proofTransport()
++			original := tr.respond
++			tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++				r, err := original(m)
++				switch kind {
++				case "question":
++					r.Question[0].Name = "other.example."
++				case "truncated":
++					r.Truncated = true
++				case "rcode":
++					r.Rcode = mdns.RcodeServerFailure
++				case "cycle":
++					rr, _ := mdns.NewRR("lease.example. 30 IN CNAME lease.example.")
++					r.Answer = []mdns.RR{rr}
++				case "conflict":
++					rr, _ := mdns.NewRR("lease.example. 30 IN CNAME target.example.")
++					r.Answer = append(r.Answer, rr)
++				case "uncovered_soa":
++					r.Answer = nil
++					rr, _ := mdns.NewRR("other. 30 IN SOA ns.other. hostmaster.other. 1 2 3 4 20")
++					r.Ns = []mdns.RR{rr}
++				case "unrelated":
++					r.Answer[0].Header().Name = "other.example."
++				}
++				return r, err
++			}
++			c := NewClient(ClientOptions{Context: context.Background()})
++			_, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{Strategy: C.DomainStrategyIPv4Only}, nil)
++			require.ErrorIs(t, err, ErrProvenanceUnavailable)
++		})
++	}
++}
++
++func TestProvenanceAsyncSelection(t *testing.T) {
++	for _, path := range []string{"respond", "race", "terminal"} {
++		t.Run(path, func(t *testing.T) {
++			started := make(chan struct{}, 4)
++			gate := make(chan struct{})
++			discardedGate := make(chan struct{})
++			chosen := proofTransport()
++			chosen.tag = "final"
++			chosen.gate = gate
++			chosen.started = started
++			other := proofTransport()
++			other.tag = "other"
++			other.gate = discardedGate
++			other.started = started
++			router := strictCompleteRouter(chosen)
++			router.transport.(*fakeDNSTransportManager).transports["other"] = other
++			rules := []option.DNSRule{evaluateRule("other", "discarded", true), evaluateRule("final", "selected", false), respondRule("selected", path == "race", true)}
++			count := 4
++			if path == "terminal" {
++				miss := respondRule("discarded", true, false)
++				failure := option.DNSRCode(mdns.RcodeNameError)
++				miss.DefaultOptions.ResponseRcode = &failure
++				rules = []option.DNSRule{evaluateRule("other", "discarded", false), miss, routeRule("final", true)}
++			}
++			router.rules = raceTestRules(t, rules)
++			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++			defer cancel()
++			type outcome struct {
++				result adapter.DNSLookupResult
++				err    error
++			}
++			done := make(chan outcome, 1)
++			go func() {
++				result, err := router.LookupWithProvenance(ctx, "lease.example", adapter.DNSQueryOptions{})
++				done <- outcome{result, err}
++			}()
++			for range count {
++				select {
++				case <-started:
++				case <-ctx.Done():
++					t.Fatal("queries did not launch")
++				}
++			}
++			close(gate)
++			if path == "terminal" {
++				close(discardedGate)
++			}
++			select {
++			case got := <-done:
++				require.NoError(t, got.err)
++				require.Len(t, got.result.Families, 2)
++				for _, proof := range got.result.Families {
++					require.Equal(t, "final", proof.TransportTag)
++				}
++			case <-ctx.Done():
++				t.Fatal("selected future did not finish")
++			}
++		})
++	}
++}
++
++func TestProvenanceCacheBounds(t *testing.T) {
++	c := NewClient(ClientOptions{Context: context.Background()})
++	c.ClearCache()
++	require.Nil(t, c.provenanceCache.Load())
++	tr := proofTransport()
++	tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++		return FixedResponse(m.Id, m.Question[0], []netip.Addr{netip.MustParseAddr("192.0.2.1")}, 60), nil
++	}
++	options := adapter.DNSQueryOptions{Strategy: C.DomainStrategyIPv4Only}
++	for i := range 270 {
++		_, err := c.LookupWithProvenance(context.Background(), tr, fmt.Sprintf("d%d.example", i), options, nil)
++		require.NoError(t, err)
++	}
++	require.LessOrEqual(t, c.proofCache().Len(), 256)
++	c.ClearCache()
++	original := tr.respond
++	tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++		r, err := original(m)
++		for range 20 {
++			r.Extra = append(r.Extra, &mdns.TXT{Hdr: mdns.RR_Header{Name: m.Question[0].Name, Rrtype: mdns.TypeTXT, Class: mdns.ClassINET, Ttl: 60}, Txt: []string{strings.Repeat("x", 250)}})
++		}
++		return r, err
++	}
++	for range 2 {
++		_, err := c.LookupWithProvenance(context.Background(), tr, "large.example", options, nil)
++		require.NoError(t, err)
++	}
++	require.Zero(t, c.proofCache().Len())
++	require.Equal(t, int32(272), tr.queryCount.Load())
++}
++func TestProvenanceCombinedAddressBound(t *testing.T) {
++	tr := proofTransport()
++	tr.respond = func(m *mdns.Msg) (*mdns.Msg, error) {
++		addresses := make([]netip.Addr, 33)
++		for i := range addresses {
++			if m.Question[0].Qtype == mdns.TypeA {
++				addresses[i] = netip.AddrFrom4([4]byte{192, 0, 2, byte(i + 1)})
++			} else {
++				addresses[i] = netip.AddrFrom16([16]byte{0x20, 1, 0xd, 0xb8, 15: byte(i + 1)})
++			}
++		}
++		return FixedResponse(m.Id, m.Question[0], addresses, 60), nil
++	}
++	c := NewClient(ClientOptions{Context: context.Background()})
++	result, err := c.LookupWithProvenance(context.Background(), tr, "lease.example", adapter.DNSQueryOptions{}, nil)
++	require.ErrorIs(t, err, ErrProvenanceUnavailable)
++	require.Empty(t, result.Families)
++}
++func TestProvenancePredefinedRefusal(t *testing.T) {
++	for _, legacy := range []bool{false, true} {
++		t.Run(fmt.Sprint(legacy), func(t *testing.T) {
++			router := strictCompleteRouter(proofTransport())
++			router.legacyDNSMode = legacy
++			router.rules = raceTestRules(t, []option.DNSRule{{DefaultOptions: option.DefaultDNSRule{DNSRuleAction: option.DNSRuleAction{Action: C.RuleActionTypePredefined}}}})
++			result, err := router.LookupWithProvenance(context.Background(), "lease.example", adapter.DNSQueryOptions{})
++			require.ErrorIs(t, err, ErrProvenanceUnavailable)
++			require.Empty(t, result.Families)
++		})
++	}
++}
+diff --git a/dns/router.go b/dns/router.go
+index 66087b9..3ac2d07 100644
+--- a/dns/router.go
++++ b/dns/router.go
+@@ -422,6 +422,7 @@ func (r *Router) logRuleMatch(ctx context.Context, ruleIndex int, currentRule ad
+ }
+ 
+ type exchangeWithRulesResult struct {
++	proof        *adapter.DNSResponseProof
+ 	response     *mDNS.Msg
+ 	transport    adapter.DNSTransport
+ 	rejectAction *R.RuleActionReject
+@@ -437,6 +438,7 @@ type dnsRuleWalkState struct {
+ 	anonymousFuture  *dnsEvaluatedFuture
+ 	namedFutures     map[string]*dnsEvaluatedFuture
+ 	namedResponses   map[string]*mDNS.Msg
++	namedProofs      map[string]*adapter.DNSResponseProof
+ 	namedTransports  map[string]adapter.DNSTransport
+ 	futures          []*dnsEvaluatedFuture
+ 	armedRules       []*dnsArmedRule
+@@ -453,6 +455,7 @@ func (s *dnsRuleWalkState) anonymousResponse() *mDNS.Msg {
+ }
+ 
+ type dnsEvaluatedFuture struct {
++	proof     *adapter.DNSResponseProof
+ 	tag       string
+ 	terminal  bool
+ 	transport adapter.DNSTransport
+@@ -513,7 +516,8 @@ func (r *Router) launchDNSEvaluate(ctx context.Context, state *dnsRuleWalkState,
+ 		done:      make(chan struct{}),
+ 	}
+ 	state.futures = append(state.futures, future)
+-	r.client.ExchangeAsync(exchangeCtx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, err error) {
++	r.clientExchangeAsync(exchangeCtx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, proof *adapter.DNSResponseProof, err error) {
++		future.proof = proof
+ 		future.response = response
+ 		future.err = err
+ 		close(future.done)
+@@ -541,6 +545,10 @@ func (r *Router) settleDNSFutures(ctx context.Context, message *mDNS.Msg, state
+ 		maps.Copy(newResponses, state.namedResponses)
+ 		newResponses[future.tag] = future.view()
+ 		state.namedResponses = newResponses
++		newProofs := make(map[string]*adapter.DNSResponseProof, len(state.namedProofs)+1)
++		maps.Copy(newProofs, state.namedProofs)
++		newProofs[future.tag] = future.proof
++		state.namedProofs = newProofs
+ 		newTransports := make(map[string]adapter.DNSTransport, len(state.namedTransports)+1)
+ 		maps.Copy(newTransports, state.namedTransports)
+ 		newTransports[future.tag] = future.transport
+@@ -691,6 +699,7 @@ func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, mess
+ 				return exchangeWithRulesResult{
+ 					response:  namedResponse,
+ 					transport: state.namedTransports[responseTag],
++					proof:     state.namedProofs[responseTag],
+ 				}, nil
+ 			}
+ 			if !hasBindings {
+@@ -707,6 +716,7 @@ func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, mess
+ 			return exchangeWithRulesResult{
+ 				response:  response,
+ 				transport: state.anonymousFuture.transport,
++				proof:     state.anonymousFuture.proof,
+ 			}, nil
+ 		case *R.RuleActionDNSRoute:
+ 			queryOptions := state.effectiveOptions
+@@ -840,17 +850,21 @@ func (r *Router) sweepArmedDNSRules(ctx context.Context, message *mDNS.Msg, stat
+ 		case *R.RuleActionRespond:
+ 			var (
+ 				response  *mDNS.Msg
++				proof     *adapter.DNSResponseProof
+ 				transport adapter.DNSTransport
+ 			)
+ 			if responseTag := armed.rule.MatchResponseTag(); responseTag != "" {
+ 				response = state.namedResponses[responseTag]
+ 				transport = state.namedTransports[responseTag]
++				proof = state.namedProofs[responseTag]
+ 			} else if armed.anonymousFuture != nil {
+ 				response = armed.anonymousFuture.view()
+ 				transport = armed.anonymousFuture.transport
++				proof = armed.anonymousFuture.proof
+ 			} else if state.anonymousFuture != nil {
+ 				response = state.anonymousResponse()
+ 				transport = state.anonymousFuture.transport
++				proof = state.anonymousFuture.proof
+ 			}
+ 			if response == nil {
+ 				return exchangeWithRulesResult{
+@@ -860,6 +874,7 @@ func (r *Router) sweepArmedDNSRules(ctx context.Context, message *mDNS.Msg, stat
+ 			return exchangeWithRulesResult{
+ 				response:  response,
+ 				transport: transport,
++				proof:     proof,
+ 			}, nil, true
+ 		case *R.RuleActionDNSRoute:
+ 			queryOptions := armed.options
+@@ -909,13 +924,15 @@ func (r *Router) finishPendingExchange(ctx context.Context, message *mDNS.Msg, s
+ 		return exchangeWithRulesResult{
+ 			response:  pending.future.view(),
+ 			transport: pending.future.transport,
++			proof:     pending.future.proof,
+ 			err:       pending.future.err,
+ 		}
+ 	}
+-	response, err := r.client.Exchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil)
++	response, proof, err := r.clientExchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil)
+ 	return exchangeWithRulesResult{
+ 		response:  response,
+ 		transport: pending.transport,
++		proof:     proof,
+ 		err:       err,
+ 	}
+ }
+@@ -931,10 +948,11 @@ func (r *Router) exchangeWithRulesAsync(ctx context.Context, rules []adapter.DNS
+ 	if suspension.pending != nil && suspension.pending.future == nil {
+ 		cancelDNSFutures(state)
+ 		pending := suspension.pending
+-		r.client.ExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil, func(response *mDNS.Msg, err error) {
++		r.clientExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil, func(response *mDNS.Msg, proof *adapter.DNSResponseProof, err error) {
+ 			callback(exchangeWithRulesResult{
+ 				response:  response,
+ 				transport: pending.transport,
++				proof:     proof,
+ 				err:       err,
+ 			})
+ 		})
+@@ -986,16 +1004,20 @@ func filterAddressesByQueryType(addresses []netip.Addr, qType uint16) []netip.Ad
+ }
+ 
+ func (r *Router) lookupWithRules(ctx context.Context, rules []adapter.DNSRule, domain string, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
++	return r.lookupRules(ctx, rules, domain, options, nil)
++}
++
++func (r *Router) lookupRules(ctx context.Context, rules []adapter.DNSRule, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) ([]netip.Addr, error) {
+ 	strategy := r.resolveLookupStrategy(options)
+ 	lookupOptions := options
+ 	if strategy != C.DomainStrategyAsIS {
+ 		lookupOptions.Strategy = strategy
+ 	}
+ 	if strategy == C.DomainStrategyIPv4Only {
+-		return r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeA, lookupOptions)
++		return r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeA, lookupOptions, proofResult, 0)
+ 	}
+ 	if strategy == C.DomainStrategyIPv6Only {
+-		return r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeAAAA, lookupOptions)
++		return r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeAAAA, lookupOptions, proofResult, familySlot(strategy, mDNS.TypeAAAA))
+ 	}
+ 	var (
+ 		response4 []netip.Addr
+@@ -1003,12 +1025,12 @@ func (r *Router) lookupWithRules(ctx context.Context, rules []adapter.DNSRule, d
+ 	)
+ 	var group task.Group
+ 	group.Append("exchange4", func(ctx context.Context) error {
+-		result, err := r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeA, lookupOptions)
++		result, err := r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeA, lookupOptions, proofResult, 0)
+ 		response4 = result
+ 		return err
+ 	})
+ 	group.Append("exchange6", func(ctx context.Context) error {
+-		result, err := r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeAAAA, lookupOptions)
++		result, err := r.lookupWithRulesType(ctx, rules, domain, mDNS.TypeAAAA, lookupOptions, proofResult, familySlot(strategy, mDNS.TypeAAAA))
+ 		response6 = result
+ 		return err
+ 	})
+@@ -1022,7 +1044,7 @@ func (r *Router) lookupWithRules(ctx context.Context, rules []adapter.DNSRule, d
+ 	return sortAddresses(response4, response6, strategy), nil
+ }
+ 
+-func (r *Router) lookupWithRulesType(ctx context.Context, rules []adapter.DNSRule, domain string, qType uint16, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
++func (r *Router) lookupWithRulesType(ctx context.Context, rules []adapter.DNSRule, domain string, qType uint16, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult, slot int) ([]netip.Addr, error) {
+ 	request := &mDNS.Msg{
+ 		MsgHdr: mDNS.MsgHdr{
+ 			RecursionDesired: true,
+@@ -1043,6 +1065,13 @@ func (r *Router) lookupWithRulesType(ctx context.Context, rules []adapter.DNSRul
+ 	if exchangeResult.response.Rcode != mDNS.RcodeSuccess {
+ 		return nil, RcodeError(exchangeResult.response.Rcode)
+ 	}
++	if proofResult != nil {
++		if exchangeResult.proof == nil {
++			return nil, ErrProvenanceUnavailable
++		}
++		proofResult.Families[slot] = *cloneProof(exchangeResult.proof)
++		return append([]netip.Addr(nil), exchangeResult.proof.Addresses...), nil
++	}
+ 	return filterAddressesByQueryType(MessageToAddresses(exchangeResult.response), qType), nil
+ }
+ 
+@@ -1250,6 +1279,10 @@ func (r *Router) finishExchangeAsync(message *mDNS.Msg, transport adapter.DNSTra
+ }
+ 
+ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
++	return r.lookup(ctx, domain, options, nil)
++}
++
++func (r *Router) lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) ([]netip.Addr, error) {
+ 	r.rulesAccess.RLock()
+ 	if r.closing {
+ 		r.rulesAccess.RUnlock()
+@@ -1295,9 +1328,9 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 		if options.Strategy == C.DomainStrategyAsIS {
+ 			options.Strategy = r.defaultDomainStrategy
+ 		}
+-		responseAddrs, err = r.client.Lookup(ctx, transport, domain, options, nil)
++		responseAddrs, err = r.clientLookup(ctx, transport, domain, options, nil, proofResult)
+ 	} else if !legacyDNSMode {
+-		responseAddrs, err = r.lookupWithRules(ctx, rules, domain, options)
++		responseAddrs, err = r.lookupRules(ctx, rules, domain, options, proofResult)
+ 	} else {
+ 		var (
+ 			transport adapter.DNSTransport
+@@ -1314,6 +1347,9 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 				case *R.RuleActionReject:
+ 					return nil, &R.RejectedError{Cause: action.Error(ctx)}
+ 				case *R.RuleActionPredefined:
++					if proofResult != nil {
++						return nil, ErrProvenanceUnavailable
++					}
+ 					responseAddrs = nil
+ 					if action.Rcode != mDNS.RcodeSuccess {
+ 						err = RcodeError(action.Rcode)
+@@ -1335,7 +1371,7 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 			if dnsOptions.Strategy == C.DomainStrategyAsIS {
+ 				dnsOptions.Strategy = r.defaultDomainStrategy
+ 			}
+-			responseAddrs, err = r.client.Lookup(dnsCtx, transport, domain, dnsOptions, responseCheck)
++			responseAddrs, err = r.clientLookup(dnsCtx, transport, domain, dnsOptions, responseCheck, proofResult)
+ 			if errors.Is(err, errIncompleteResponse) || responseCheck == nil || err == nil {
+ 				break
+ 			}
