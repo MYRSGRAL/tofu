@@ -16,8 +16,6 @@ use yonik_engine::Engine;
 
 use super::HostError;
 
-const MAX_BINARY: u64 = 128 * 1024 * 1024;
-
 #[derive(Clone, Copy)]
 pub struct Sha256(pub(crate) [u8; 32]);
 impl std::fmt::Debug for Sha256 {
@@ -58,16 +56,26 @@ impl std::fmt::Debug for BinarySnapshot {
     }
 }
 impl BinarySnapshot {
+    pub(crate) const MAX_SIZE: u64 = 128 * 1024 * 1024;
     pub fn load(path: &Path, expected: Sha256, engine: Engine) -> Result<Self, HostError> {
-        let mut source = OpenOptions::new()
+        let source = OpenOptions::new()
             .read(true)
             .custom_flags(OFlags::NONBLOCK.bits() as i32)
             .open(path)
             .map_err(|_| HostError::BinaryIo)?;
+        Self::load_file(source, expected, engine)
+    }
+
+    /// Копирует уже открытый источник: helper не переоткрывает проверенный путь.
+    pub(crate) fn load_file(
+        mut source: File,
+        expected: Sha256,
+        engine: Engine,
+    ) -> Result<Self, HostError> {
         let metadata = source.metadata().map_err(|_| HostError::BinaryIo)?;
         if !metadata.is_file()
             || metadata.len() < 4
-            || metadata.len() > MAX_BINARY
+            || metadata.len() > Self::MAX_SIZE
             || metadata.permissions().mode() & 0o111 == 0
         {
             return Err(HostError::InvalidBinary);
@@ -90,7 +98,7 @@ impl BinarySnapshot {
                 return Err(HostError::InvalidBinary);
             }
             size += read as u64;
-            if size > MAX_BINARY {
+            if size > Self::MAX_SIZE {
                 return Err(HostError::InvalidBinary);
             }
             hasher.update(&buffer[..read]);

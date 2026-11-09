@@ -4,6 +4,9 @@
 //! `PeerIdentity` — снимок, а не разрешение на будущий Apply: перед каждым
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
+mod registry;
+pub use registry::{RegistryError, TrustedRegistry};
+
 use std::{collections::HashMap, future::Future, time::Duration};
 
 use tokio::{sync::Semaphore, time::Instant};

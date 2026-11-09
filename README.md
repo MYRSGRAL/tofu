@@ -239,6 +239,12 @@ a snapshot; Prepare/Apply must authorize again before effects. Tests use a priva
 bus and fake authority. No system service is installed or network changed.
 [Authorization contract](docs/specs/helper-authorization.md).
 
+`yonik_linux::helper::TrustedRegistry` reads a fixed root-owned system registry
+and creates a hash-checked sealed snapshot from the same verified file descriptor.
+It rejects untrusted paths, metadata and manifest entries. The normal user engine
+directory remains separate. This component does not install a service or apply
+network changes. [Registry contract](docs/specs/helper-trusted-registry.md).
+
 ### Managed network resource journal
 
 `yonik_linux::managed_network` provides a bounded, durable ownership journal for
