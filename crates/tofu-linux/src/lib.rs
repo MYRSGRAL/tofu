@@ -34,7 +34,11 @@ pub use network::{
     read_topology,
 };
 #[cfg(target_os = "linux")]
+mod resolver;
+#[cfg(target_os = "linux")]
 pub use network::{
     NetworkCoverage, NetworkMonitor, NetworkMonitorError, NetworkSnapshot, NetworkStamp,
     NetworkWatch,
 };
+#[cfg(target_os = "linux")]
+pub use resolver::*;

@@ -134,7 +134,7 @@ Linux-библиотека также предоставляет огранич�
 objects либо запрос пути к ядру с явными UID/mark/source и TCP/UDP-селекторами.
 Неизвестные атрибуты сохраняются как неполнота интерпретации. Эти данные не дают
 права Apply, не доказывают достижимость и не включают привязку к приватному VPN.
-ResolverHost/DNS и привилегированный жизненный цикл сети ещё не реализованы.
+ResolverHost Apply и привилегированный жизненный цикл сети ещё не реализованы.
 
 Для явной диагностики в build-каталоге из примера выше:
 
@@ -145,6 +145,23 @@ printf '%s\n' '{"op":"snapshot"}' | flock -s "$tofu_build" "$tofu_build/target/d
 
 CLI намеренно выводит адреса и селекторы сети; обычный Debug скрывает содержимое.
 [Проверки topology/route-get и ограничения](docs/validation/2026-11-09-network-topology.md).
+
+Read-only API ResolverHost `read_resolver_snapshot` и `subscribe_resolver` читают
+полную глобальную/per-link DNS-конфигурацию через systemd Varlink. Route-only
+домены, nullable-факты и неизвестные поля сохраняются; DNS не перенастраивается.
+Dump требует API systemd v259+, поток — v258+ и авторизацию. Диагностический
+пример `resolver_inspect` выводит только счётчики и известные режимы:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --locked -p tofu-linux --example resolver_inspect -- snapshot
+```
+
+Для явно запрошенного потока используется `watch`; интерактивная авторизация
+не запрашивается. На проверенном хосте снимок сообщает `foreign`, подписка —
+`PermissionDenied`. Наличие daemon или снимка не доказывает владение системным
+DNS, namespace или G-DNS. Наблюдатель GUI выше пока не использует этот поток
+и не гарантирует полное покрытие изменений DNS-конфигурации.
+[Проверки ResolverHost и ограничения](docs/validation/2026-11-09-resolver-host.md).
 
 Диагностический пример читает профили только из stdin, проверяет одну принятую
 запись по индексу и выводит только счётчики/status/durations:

@@ -132,7 +132,7 @@ APIs. They read links, addresses, routes from all tables, policy rules and nexth
 objects, or ask the kernel for a route with explicit UID/mark/source and TCP/UDP
 selectors. Unknown attributes remain visible as incomplete interpretation. These
 facts do not authorize Apply, prove reachability or enable private VPN binding.
-DNS/ResolverHost and the privileged network lifecycle remain pending.
+The privileged network lifecycle and ResolverHost Apply remain pending.
 
 For explicit diagnostics, using the build directory above:
 
@@ -143,6 +143,23 @@ printf '%s\n' '{"op":"snapshot"}' | flock -s "$tofu_build" "$tofu_build/target/d
 
 This CLI outputs network addresses and selectors intentionally; ordinary Debug
 output is redacted. [Topology/route-get evidence and limits](docs/validation/2026-11-09-network-topology.md).
+
+The read-only ResolverHost APIs `read_resolver_snapshot` and `subscribe_resolver`
+read complete global/per-link DNS configuration through systemd Varlink. They
+preserve route-only domains, nullable facts and unknown fields; they do not
+configure DNS. Dump requires systemd API v259+, streaming v258+ and authorization.
+The diagnostic `resolver_inspect` example prints only counts and known modes:
+
+```sh
+flock -s "$tofu_build" env CARGO_TARGET_DIR="$tofu_build/target" cargo run --locked -p tofu-linux --example resolver_inspect -- snapshot
+```
+
+Use `watch` for an explicitly requested stream; it never requests interactive
+authorization. On the tested host the snapshot reports `foreign` and streaming
+returns `PermissionDenied`. Neither daemon availability nor a snapshot proves
+system DNS ownership, namespace identity or G-DNS. The GUI observer above does
+not yet consume this stream and does not guarantee complete DNS configuration
+change coverage. [ResolverHost evidence and limits](docs/validation/2026-11-09-resolver-host.md).
 
 A stdin-only diagnostic example checks one accepted record by index and emits
 only counts, status and durations: `cargo run --locked -p tofu-linux --example tcp_probe -- 0`.
