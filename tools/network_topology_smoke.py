@@ -21,6 +21,18 @@ from engine_smoke import install_signal_handlers, run_sandbox
 MAX_OUTPUT = 16 * 1024 * 1024
 LOG = logging.getLogger("tofu.topology-smoke")
 
+# Worker вызывается только launcher внутри unshare. Публичного CLI-пути с
+# переданным пользователем «host inode» нет: такая цифра не доказывает изоляцию.
+_WORKER_BOOTSTRAP = """
+import json, logging, runpy, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
+module = runpy.run_path(sys.argv[1], run_name="tofu_topology_worker")
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+module["install_signal_handlers"]()
+module["worker"](Path(sys.argv[2]), tuple(json.loads(sys.argv[4])), Path(sys.argv[3]))
+"""
+
 
 def decode_output(data: bytes) -> dict[str, Any]:
     if len(data) > MAX_OUTPUT:
@@ -301,6 +313,18 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
             "table",
             "100",
         )
+        mutate(
+            "rule",
+            "add",
+            "priority",
+            "81",
+            "ipproto",
+            "tcp",
+            "dport",
+            "443",
+            "table",
+            "100",
+        )
         mutate("rule", "add", "priority", "90", "from", "192.0.2.1/32", "table", "100")
         mutate("rule", "add", "priority", "100", "fwmark", "42", "table", "100")
         uid = str(os.getuid())
@@ -360,6 +384,8 @@ def worker(binary: Path, host: tuple[int, int], evidence: Path) -> None:
             or selected[90]["source"] != "192.0.2.1/32"
             or selected[80]["destination_ports"] != [5353, 5353]
             or selected[80]["ip_protocol"] != 17
+            or selected[81]["destination_ports"] != [443, 443]
+            or selected[81]["ip_protocol"] != 6
         ):
             raise RuntimeError("Потеряны селекторы policy rules")
         ecmp = [r for r in value["routes"] if r["destination"] == "198.18.0.0/24"]
@@ -494,35 +520,30 @@ def main() -> int:
         type=Path,
         default=Path("local/validation/network-topology/native"),
     )
-    parser.add_argument("--worker-namespace", nargs=2, type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     evidence = args.evidence.resolve()
-    if args.worker_namespace is not None:
-        worker(binary, tuple(args.worker_namespace), evidence)
-    else:
-        host = namespace()
-        run_sandbox(
-            [
-                "unshare",
-                "--user",
-                "--map-root-user",
-                "--net",
-                "--pid",
-                "--fork",
-                "--mount",
-                "--mount-proc",
-                sys.executable,
-                str(Path(__file__).resolve()),
-                str(binary),
-                "--evidence",
-                str(evidence),
-                "--worker-namespace",
-                str(host[0]),
-                str(host[1]),
-            ],
-            timeout=40,
-        )
+    host = namespace()
+    run_sandbox(
+        [
+            "unshare",
+            "--user",
+            "--map-root-user",
+            "--net",
+            "--pid",
+            "--fork",
+            "--mount",
+            "--mount-proc",
+            sys.executable,
+            "-c",
+            _WORKER_BOOTSTRAP,
+            str(Path(__file__).resolve()),
+            str(binary),
+            str(evidence),
+            json.dumps(host),
+        ],
+        timeout=40,
+    )
     return 0
 
 

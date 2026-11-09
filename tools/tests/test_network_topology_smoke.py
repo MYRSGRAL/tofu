@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import sys
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,11 +15,50 @@ from network_topology_smoke import (  # noqa: E402
     bounded_run,
     decode_output,
     guard_namespace,
+    main,
     table_id,
 )
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_public_entrypoint_always_launches_full_namespace_wrapper(self) -> None:
+        with (
+            patch.object(sys, "argv", ["smoke", sys.executable]),
+            patch("network_topology_smoke.namespace", return_value=(9, 12345)),
+            patch("network_topology_smoke.worker") as worker,
+            patch("network_topology_smoke.run_sandbox") as sandbox,
+        ):
+            self.assertEqual(main(), 0)
+            worker.assert_not_called()
+            sandbox.assert_called_once()
+            command = sandbox.call_args.args[0]
+            self.assertEqual(command[0], "unshare")
+            for required in (
+                "--user",
+                "--map-root-user",
+                "--net",
+                "--pid",
+                "--mount",
+                "--mount-proc",
+            ):
+                self.assertIn(required, command)
+            self.assertNotIn("--worker-namespace", command)
+
+    def test_public_entrypoint_rejects_forged_worker_namespace(self) -> None:
+        with (
+            patch.object(
+                sys, "argv", ["smoke", sys.executable, "--worker-namespace", "0", "0"]
+            ),
+            patch("network_topology_smoke.worker") as worker,
+            patch("network_topology_smoke.run_sandbox") as sandbox,
+            redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit) as error:
+                main()
+            self.assertEqual(error.exception.code, 2)
+            worker.assert_not_called()
+            sandbox.assert_not_called()
+
     def test_one_bounded_object(self) -> None:
         self.assertEqual(decode_output(b'{"ok":true}\n'), {"ok": True})
         for data in (b"[]", b"{} {}", b"x" * (MAX_OUTPUT + 1), b'{"ok":NaN}'):
