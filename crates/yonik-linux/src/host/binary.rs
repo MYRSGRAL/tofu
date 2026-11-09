@@ -7,6 +7,7 @@ use std::{
     },
     path::Path,
     str::FromStr,
+    sync::{Arc, Weak},
 };
 
 use rustix::fs::{MemfdFlags, Mode, OFlags, SealFlags, fchmod, fcntl_add_seals, memfd_create};
@@ -15,6 +16,7 @@ use tokio::process::Command;
 use yonik_engine::Engine;
 
 use super::HostError;
+use crate::helper::memory::ByteLease;
 
 #[derive(Clone, Copy)]
 pub struct Sha256(pub(crate) [u8; 32]);
@@ -49,6 +51,15 @@ impl FromStr for Sha256 {
 pub struct BinarySnapshot {
     pub(crate) file: File,
     pub(crate) engine: Engine,
+    image: Arc<SharedImage>,
+}
+
+/// Lease живёт столько же, сколько sealed inode и все его snapshot-дескрипторы.
+pub(crate) struct SharedImage {
+    file: File,
+    engine: Engine,
+    expected: Sha256,
+    _lease: Option<ByteLease>,
 }
 impl std::fmt::Debug for BinarySnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -68,9 +79,27 @@ impl BinarySnapshot {
 
     /// Копирует уже открытый источник: helper не переоткрывает проверенный путь.
     pub(crate) fn load_file(
+        source: File,
+        expected: Sha256,
+        engine: Engine,
+    ) -> Result<Self, HostError> {
+        Self::copy_file(source, expected, engine, None)
+    }
+
+    pub(crate) fn load_budgeted(
+        source: File,
+        expected: Sha256,
+        engine: Engine,
+        lease: ByteLease,
+    ) -> Result<Self, HostError> {
+        Self::copy_file(source, expected, engine, Some(lease))
+    }
+
+    fn copy_file(
         mut source: File,
         expected: Sha256,
         engine: Engine,
+        mut lease: Option<ByteLease>,
     ) -> Result<Self, HostError> {
         let metadata = source.metadata().map_err(|_| HostError::BinaryIo)?;
         if !metadata.is_file()
@@ -79,6 +108,13 @@ impl BinarySnapshot {
             || metadata.permissions().mode() & 0o111 == 0
         {
             return Err(HostError::InvalidBinary);
+        }
+        if let Some(lease) = lease.as_mut() {
+            if metadata.len() as usize > lease.bytes() {
+                lease
+                    .resize(metadata.len() as usize)
+                    .map_err(|_| HostError::ResourceLimit)?;
+            }
         }
         let descriptor = memfd_create(
             "yonik-engine",
@@ -101,6 +137,14 @@ impl BinarySnapshot {
             if size > Self::MAX_SIZE {
                 return Err(HostError::InvalidBinary);
             }
+            // Сначала резервируем рост: даже изменяемый источник не обходит лимит.
+            if let Some(lease) = lease.as_mut() {
+                if size as usize > lease.bytes() {
+                    lease
+                        .resize(size as usize)
+                        .map_err(|_| HostError::ResourceLimit)?;
+                }
+            }
             hasher.update(&buffer[..read]);
             file.write_all(&buffer[..read])
                 .map_err(|_| HostError::Snapshot)?;
@@ -119,7 +163,41 @@ impl BinarySnapshot {
                 | SealFlags::SEAL,
         )
         .map_err(|_| HostError::Snapshot)?;
-        Ok(Self { file, engine })
+        if let Some(lease) = lease.as_mut() {
+            lease
+                .resize(size as usize)
+                .map_err(|_| HostError::ResourceLimit)?;
+        }
+        Self::from_image(
+            Arc::new(SharedImage {
+                file,
+                engine,
+                expected,
+                _lease: lease,
+            }),
+            expected,
+            engine,
+        )
+    }
+
+    pub(crate) fn weak_image(&self) -> Weak<SharedImage> {
+        Arc::downgrade(&self.image)
+    }
+
+    pub(crate) fn from_image(
+        image: Arc<SharedImage>,
+        expected: Sha256,
+        engine: Engine,
+    ) -> Result<Self, HostError> {
+        if image.expected.0 != expected.0 || image.engine != engine {
+            return Err(HostError::BinaryHash);
+        }
+        let file = image.file.try_clone().map_err(|_| HostError::Snapshot)?;
+        Ok(Self {
+            file,
+            engine,
+            image,
+        })
     }
     pub(crate) fn command(&self) -> Command {
         let mut command = Command::new(format!("/proc/self/fd/{}", self.file.as_raw_fd()));
@@ -135,5 +213,59 @@ impl BinarySnapshot {
             }
         }
         command
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::{BinarySnapshot, Engine, File, Hasher, HostError, Sha256};
+    use crate::helper::memory::ByteBudget;
+    use rustix::fs::{MemfdFlags, Mode, fchmod, memfd_create};
+    use sha2::Digest;
+    use std::io::{Seek, SeekFrom, Write};
+
+    const ELF: &[u8] = b"\x7fELFbudget fixture: never execute";
+
+    fn source() -> File {
+        let mut file =
+            File::from(memfd_create("yonik-budget-source", MemfdFlags::CLOEXEC).unwrap());
+        file.write_all(ELF).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        fchmod(&file, Mode::RUSR | Mode::XUSR).unwrap();
+        file
+    }
+
+    #[test]
+    fn source_growth_since_reservation_cannot_bypass_budget() {
+        let budget = ByteBudget::new(4);
+        let lease = budget.reserve(4).unwrap();
+        assert_eq!(
+            BinarySnapshot::load_budgeted(
+                source(),
+                Sha256(Hasher::digest(ELF).into()),
+                Engine::Xray,
+                lease
+            )
+            .err(),
+            Some(HostError::ResourceLimit)
+        );
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn successful_copy_shrinks_reservation_to_actual_sealed_size() {
+        let budget = ByteBudget::new(ELF.len() * 2);
+        let lease = budget.reserve(ELF.len() * 2).unwrap();
+        let snapshot = BinarySnapshot::load_budgeted(
+            source(),
+            Sha256(Hasher::digest(ELF).into()),
+            Engine::Xray,
+            lease,
+        )
+        .unwrap();
+        assert_eq!(budget.used(), ELF.len());
+        assert!(snapshot.file.set_len(ELF.len() as u64 + 1).is_err());
+        drop(snapshot);
+        assert_eq!(budget.used(), 0);
     }
 }

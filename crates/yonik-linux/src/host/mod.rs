@@ -5,6 +5,7 @@ mod session;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use binary::SharedImage;
 pub use binary::{BinarySnapshot, Sha256};
 pub use probe::{ProbeResult, ProbeTarget};
 pub use session::{CheckedConfig, LocalSession};
@@ -18,6 +19,7 @@ pub enum HostError {
     BinaryIo,
     BinaryHash,
     Snapshot,
+    ResourceLimit,
     Version,
     Process,
     ConfigRejected,
@@ -36,6 +38,7 @@ impl fmt::Display for HostError {
             Self::BinaryIo => "Не удалось прочитать бинарник ядра",
             Self::BinaryHash => "SHA-256 бинарника не совпадает",
             Self::Snapshot => "Не удалось создать неизменяемый executable snapshot",
+            Self::ResourceLimit => "Достигнут бюджет исполняемых снимков",
             Self::Version => "Версия ядра не соответствует контракту",
             Self::Process => "Не удалось выполнить операцию процесса",
             Self::ConfigRejected => "Ядро отклонило конфигурацию",

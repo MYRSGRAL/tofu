@@ -1,6 +1,6 @@
 # План завершения yonik
 
-Срез: 10 ноября 2026, реализация `85b2a8e`. Цель — пройти весь порядок из
+Начальная инвентаризация: 10 ноября 2026, UI `85b2a8e`. Текущие изменения отмечены ниже. Цель — пройти весь порядок из
 [спецификации](specs/validation-and-roadmap.md): рабочий Linux-продукт,
 проверенная поставка, затем Android. Пункты и критерии ниже уточняют порядок
 исполнения, не заменяя требования FR и обязательные матрицы приёмки.
@@ -28,8 +28,9 @@
    после успешных push/PR workflows (все 5 PR jobs). UI установлен и проверен.
    Причина сбоя CI — путь сокета 107 байт; короткий приватный runtime исправляет запуск.
 2. Реестр системных ядер влит через PR #29 (`628d5c3`), CI зелёный.
-   Текущий шаг P12 — одноразовые peer-bound artifacts с fresh polkit. Затем
-   общий бюджет snapshots, версионный IPC, безопасный helper и TUN-сессия с явным
+   Одноразовые peer-bound artifacts влиты PR #30 (`d585b01`), CI зелёный.
+   Текущий шаг P12 — общий бюджет buffers/snapshots. Затем версионный IPC,
+   безопасный helper и TUN-сессия с явным
    владением ресурсами и cleanup; затем DNS/Fake-IP и атрибуцию приложений.
 3. Интегрировать приватные VPN/LAN/ru-direct, сценарии смены сети и полную
    Linux-матрицу. При включённом kill switch после исчерпания retries сеть
@@ -61,7 +62,7 @@
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, границы и journal существуют; добавлен [доверенный реестр](specs/helper-trusted-registry.md). Добавлен [брокер одноразовых artifacts](specs/helper-prepared-requests.md). Нужны общий бюджет snapshots, системный service/IPC, повторная авторизация Prepare/Apply, атомарное применение и reconciliation после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, границы и journal существуют; добавлен [доверенный реестр](specs/helper-trusted-registry.md). Добавлен [брокер одноразовых artifacts](specs/helper-prepared-requests.md). Добавляется [общий бюджет](specs/helper-memory-budget.md). Нужны системный service/IPC, повторная авторизация Prepare/Apply, атомарное применение и reconciliation после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
 | P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы есть. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |

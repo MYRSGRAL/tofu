@@ -59,3 +59,20 @@ fn invalidation_without_active_session_is_rejected() {
     assert_eq!(session.state(), State::Disconnected);
     assert_eq!(session.engine_pid(), None);
 }
+
+#[test]
+fn config_writer_rejects_oversize_before_buffer_growth() {
+    use std::io::Write;
+    let mut output = super::ConfigBuffer(Vec::new());
+    output.write_all(b"{}").unwrap();
+    let capacity = output.0.capacity();
+    let large = vec![0; crate::helper::MAX_ARTIFACT_BYTES];
+    assert!(output.write_all(&large).is_err());
+    assert_eq!(output.0.as_slice(), b"{}");
+    assert_eq!(output.0.capacity(), capacity);
+    let mut exact = super::ConfigBuffer(Vec::new());
+    exact.write_all(&large).unwrap();
+    assert!(exact.write_all(b"x").is_err());
+    assert_eq!(exact.0.len(), crate::helper::MAX_ARTIFACT_BYTES);
+    assert!(exact.0.capacity() <= crate::helper::MAX_RETAINED_CONFIG_BYTES);
+}

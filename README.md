@@ -248,8 +248,13 @@ network changes. [Registry contract](docs/specs/helper-trusted-registry.md).
 `PreparedRequests<A>` binds checked artifacts to a bus peer and generation,
 requires fresh polkit on prepare and claim, and releases each artifact once.
 The real `CheckedConfig` supplies its current SHA-256. Pending work, payload size
-and TTL are bounded; executable-image memory still needs a shared budget before
-production service integration. [Prepare/claim contract](docs/specs/helper-prepared-requests.md).
+and TTL are bounded; executable-image memory uses the shared budget described below. [Prepare/claim contract](docs/specs/helper-prepared-requests.md).
+
+A process-wide budget now covers retained config buffers and helper executable
+snapshots. Claimed artifacts retain their lease; a weak registry cache shares the
+sealed inode, and expired pending data can be reclaimed across stores under pressure.
+These counters are not an RSS measurement or a completed G-POWER gate.
+[Memory contract](docs/specs/helper-memory-budget.md).
 
 ### Managed network resource journal
 
