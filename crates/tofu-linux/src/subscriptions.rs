@@ -69,6 +69,10 @@ struct SourceData {
     url: String,
     local_exception: bool,
     proxy: bool,
+    #[serde(default)]
+    hwid_enabled: bool,
+    #[serde(default)]
+    hwid: Option<String>,
 }
 
 /// Debug намеренно не реализован: имя и URL могут содержать секреты.
@@ -86,9 +90,27 @@ impl SubscriptionSource {
             url,
             local_exception,
             proxy: route == FetchRoute::Proxy,
+            hwid_enabled: false,
+            hwid: None,
         });
         value.validate()?;
         Ok(value)
+    }
+
+    pub fn with_hwid(mut self, enabled: bool) -> Result<Self, SubscriptionError> {
+        if enabled && self.0.hwid.is_none() {
+            let mut random = [0_u8; 16];
+            getrandom::getrandom(&mut random).map_err(|_| SubscriptionError::Worker)?;
+            let mut id = String::with_capacity(32);
+            for byte in random {
+                use std::fmt::Write;
+                write!(&mut id, "{byte:02x}").map_err(|_| SubscriptionError::Worker)?;
+            }
+            self.0.hwid = Some(id);
+        }
+        self.0.hwid_enabled = enabled;
+        self.validate()?;
+        Ok(self)
     }
 
     fn validate(&self) -> Result<Source, SubscriptionError> {
@@ -96,10 +118,27 @@ impl SubscriptionSource {
             || self.0.name.trim().is_empty()
             || self.0.name.len() > 512
             || self.0.name.chars().any(char::is_control)
+            || self
+                .0
+                .hwid
+                .as_deref()
+                .is_some_and(|value| !crate::fetch::valid_hwid(value))
         {
             return Err(SubscriptionError::InvalidSource);
         }
-        source_url(&self.0.url, self.0.local_exception)
+        let source = source_url(&self.0.url, self.0.local_exception)?;
+        if self.0.hwid_enabled {
+            source
+                .with_hwid(
+                    self.0
+                        .hwid
+                        .as_deref()
+                        .ok_or(SubscriptionError::InvalidSource)?,
+                )
+                .map_err(|_| SubscriptionError::InvalidSource)
+        } else {
+            Ok(source)
+        }
     }
 
     fn encode(&self) -> Result<Vec<u8>, SubscriptionError> {
@@ -132,11 +171,25 @@ fn encode_validators(value: &FetchValidators) -> Result<Vec<u8>, SubscriptionErr
     })
     .map_err(|_| SubscriptionError::CorruptSnapshot)
 }
-fn decode_validators(bytes: &[u8], local: bool) -> Result<FetchValidators, SubscriptionError> {
+fn decode_validators(
+    bytes: &[u8],
+    spec: &SubscriptionSource,
+) -> Result<FetchValidators, SubscriptionError> {
     let value: ValidatorData =
         serde_json::from_slice(bytes).map_err(|_| SubscriptionError::CorruptSnapshot)?;
+    let mut source = source_url(&value.resource, spec.0.local_exception)?;
+    if spec.0.hwid_enabled {
+        source = source
+            .with_hwid(
+                spec.0
+                    .hwid
+                    .as_deref()
+                    .ok_or(SubscriptionError::InvalidSource)?,
+            )
+            .map_err(|_| SubscriptionError::InvalidSource)?;
+    }
     FetchValidators::new(
-        &source_url(&value.resource, local)?,
+        &source,
         value.etag.as_deref(),
         value.last_modified.as_deref(),
     )
@@ -166,6 +219,7 @@ pub struct OfflineSnapshot {
 pub struct SubscriptionSummary {
     pub id: i64,
     pub name: String,
+    pub hwid_enabled: bool,
 }
 pub struct SubscriptionSourcesPage {
     pub sources: Vec<SubscriptionSummary>,
@@ -267,6 +321,7 @@ impl SubscriptionService {
             sources.push(SubscriptionSummary {
                 id: record.id,
                 name: source.0.name,
+                hwid_enabled: source.0.hwid_enabled,
             });
         }
         Ok(SubscriptionSourcesPage {
@@ -327,6 +382,43 @@ impl SubscriptionService {
             request.cancellation.send_replace(true);
         }
         Ok(generation)
+    }
+
+    pub async fn source_hwid_enabled(&self, id: i64) -> Result<bool, SubscriptionError> {
+        let record = self
+            .repository
+            .load(id)
+            .await?
+            .ok_or(SubscriptionError::NotFound)?;
+        let data = serde_json::from_slice(&record.source.payload)
+            .map_err(|_| SubscriptionError::InvalidSource)?;
+        let source = SubscriptionSource(data);
+        source.validate()?;
+        Ok(source.0.hwid_enabled)
+    }
+
+    pub async fn set_source_hwid(&self, id: i64, enabled: bool) -> Result<(), SubscriptionError> {
+        let mut requests = self.requests.lock().await;
+        let record = self
+            .repository
+            .load(id)
+            .await?
+            .ok_or(SubscriptionError::NotFound)?;
+        let data = serde_json::from_slice(&record.source.payload)
+            .map_err(|_| SubscriptionError::InvalidSource)?;
+        let source = SubscriptionSource(data);
+        source.validate()?;
+        if source.0.hwid_enabled == enabled {
+            return Ok(());
+        }
+        let source = source.with_hwid(enabled)?;
+        self.repository
+            .change_source(id, record.source.generation, source.encode()?)
+            .await?;
+        if let Some(request) = requests.get_mut(&id) {
+            request.cancellation.send_replace(true);
+        }
+        Ok(())
     }
 
     pub async fn cancel(&self, id: i64) -> bool {
@@ -406,7 +498,7 @@ impl SubscriptionService {
             .as_ref()
             .filter(|snapshot| snapshot.source_generation == record.source.generation)
             .and_then(|snapshot| snapshot.validators.as_ref())
-            .map(|bytes| decode_validators(bytes, spec.0.local_exception))
+            .map(|bytes| decode_validators(bytes, &spec))
             .transpose()?;
         let host = FetchHost::new(timeout).map_err(SubscriptionError::Fetch)?;
         let mut parse_cancel = cancel.clone();

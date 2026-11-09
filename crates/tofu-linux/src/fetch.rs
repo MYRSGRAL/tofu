@@ -14,10 +14,18 @@ const MAX_FIELD: usize = 8 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_TIMEOUT: Duration = Duration::from_secs(60);
 
+pub(crate) fn valid_hwid(value: &str) -> bool {
+    (10..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'=' | b'-'))
+}
+
 #[derive(Clone)]
 pub struct Source {
     url: Url,
     local_exception: bool,
+    hwid: Option<header::HeaderValue>,
 }
 
 impl Source {
@@ -35,6 +43,18 @@ impl Source {
         Self::parse(value, true)
     }
 
+    /// Идентификатор передаётся только этому origin и скрыт в Debug.
+    pub fn with_hwid(mut self, value: &str) -> Result<Self, FetchError> {
+        if !valid_hwid(value) {
+            return Err(FetchError::InvalidHwid);
+        }
+        let mut value =
+            header::HeaderValue::from_str(value).map_err(|_| FetchError::InvalidHwid)?;
+        value.set_sensitive(true);
+        self.hwid = Some(value);
+        Ok(self)
+    }
+
     fn parse(value: &str, local_exception: bool) -> Result<Self, FetchError> {
         if value.len() > MAX_FIELD || value.chars().any(char::is_control) {
             return Err(FetchError::InvalidSource);
@@ -44,6 +64,7 @@ impl Source {
         Ok(Self {
             url,
             local_exception,
+            hwid: None,
         })
     }
 }
@@ -63,6 +84,7 @@ pub enum FetchRoute {
 #[derive(Clone)]
 pub struct FetchValidators {
     resource: Url,
+    hwid: Option<header::HeaderValue>,
     etag: Option<header::HeaderValue>,
     last_modified: Option<header::HeaderValue>,
 }
@@ -89,6 +111,7 @@ impl FetchValidators {
     ) -> Result<Self, FetchError> {
         Ok(Self {
             resource: source.url.clone(),
+            hwid: source.hwid.clone(),
             etag: validator_value(etag)?,
             last_modified: validator_value(last_modified)?,
         })
@@ -132,6 +155,11 @@ pub enum FetchResponse {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FetchError {
     InvalidSource,
+    InvalidHwid,
+    HwidRequired,
+    HwidLimit,
+    HwidRejected,
+    HwidRedirect,
     InvalidValidator,
     InvalidTimeout,
     UnsupportedPeerVerification,
@@ -196,6 +224,9 @@ impl FetchHost {
     ) -> Result<FetchResponse, FetchError> {
         let mut url = source.url.clone();
         for hop in 0..=MAX_REDIRECTS {
+            if source.hwid.is_some() && url.origin() != source.url.origin() {
+                return Err(FetchError::HwidRedirect);
+            }
             validate_url(&url, source.local_exception)?;
             let host = url.host_str().ok_or(FetchError::InvalidSource)?;
             let port = url
@@ -224,7 +255,11 @@ impl FetchHost {
                     concat!("Happ/1.0 tofu/", env!("CARGO_PKG_VERSION")),
                 )
                 .header(header::ACCEPT_ENCODING, "identity");
-            let conditional = validators.filter(|value| value.resource == url);
+            if let Some(hwid) = &source.hwid {
+                request = request.header("x-hwid", hwid.clone());
+            }
+            let conditional =
+                validators.filter(|value| value.resource == url && value.hwid == source.hwid);
             let sent_conditional = conditional
                 .is_some_and(|value| value.etag.is_some() || value.last_modified.is_some());
             if let Some(value) = conditional {
@@ -239,6 +274,22 @@ impl FetchHost {
             let peer = response.remote_addr().ok_or(FetchError::PeerMismatch)?;
             if !addresses.contains(&peer) || (!source.local_exception && !is_public_ip(peer.ip())) {
                 return Err(FetchError::PeerMismatch);
+            }
+            let flag = |name: &str| {
+                response
+                    .headers()
+                    .get_all(name)
+                    .iter()
+                    .any(|value| value.as_bytes().eq_ignore_ascii_case(b"true"))
+            };
+            if flag("x-hwid-not-supported") {
+                return Err(FetchError::HwidRequired);
+            }
+            if flag("x-hwid-max-devices-reached") {
+                return Err(FetchError::HwidLimit);
+            }
+            if flag("x-hwid-limit") {
+                return Err(FetchError::HwidRejected);
             }
             if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
                 if hop == MAX_REDIRECTS {
@@ -268,7 +319,8 @@ impl FetchHost {
             } else {
                 None
             };
-            let current = response_validators(&url, response.headers(), previous)?;
+            let current =
+                response_validators(&url, source.hwid.as_ref(), response.headers(), previous)?;
             if response.status() == reqwest::StatusCode::NOT_MODIFIED {
                 if !sent_conditional {
                     return Err(FetchError::UnexpectedNotModified);
@@ -384,6 +436,7 @@ fn validator_value(value: Option<&str>) -> Result<Option<header::HeaderValue>, F
 
 fn response_validators(
     url: &Url,
+    hwid: Option<&header::HeaderValue>,
     headers: &header::HeaderMap,
     previous: Option<&FetchValidators>,
 ) -> Result<FetchValidators, FetchError> {
@@ -404,6 +457,7 @@ fn response_validators(
     };
     Ok(FetchValidators {
         resource: url.clone(),
+        hwid: hwid.cloned(),
         etag: read(header::ETAG, previous.and_then(|value| value.etag.as_ref()))?,
         last_modified: read(
             header::LAST_MODIFIED,
