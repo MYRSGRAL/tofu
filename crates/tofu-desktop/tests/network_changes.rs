@@ -267,7 +267,7 @@ fn assert_invalidated(value: &Value) {
 
 #[test]
 #[ignore = "только отдельный unshare network namespace с TOFU_HOST_NETWORK_NS"]
-fn route_changes_invalidate_completed_and_queued_tcp_checks() {
+fn route_changes_invalidate_completed_and_inflight_tcp_checks() {
     let network = IsolatedNetwork::verify();
     network.ip(&["link", "set", "lo", "up"]);
     let directory = Directory::new();

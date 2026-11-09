@@ -901,6 +901,16 @@ fn synchronize_network(state: &mut Snapshot, network: Option<NetworkSnapshot>) {
     }
 }
 
+fn apply_network_event(state: &mut Snapshot, network: Option<NetworkSnapshot>, control: &Control) {
+    let changed = state.network_epoch != network.map(|network| network.stamp.to_string())
+        || network.is_some_and(|network| network.exhausted);
+    if changed {
+        // Отменяем также CheckTcp, уже принятые UI, но ещё ожидающие в очереди.
+        control.cancel_tcp();
+    }
+    synchronize_network(state, network);
+}
+
 async fn network_changed(network: &mut Option<NetworkWatch>) {
     match network {
         Some(watch) => {
@@ -924,6 +934,42 @@ async fn network_invalidated(network: &mut Option<NetworkWatch>, stamp: Option<N
 #[cfg(test)]
 mod network_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn network_change_invalidates_tcp_commands_already_in_queue() {
+        let first = NetworkMonitor::start().expect("первый наблюдатель");
+        let second = NetworkMonitor::start().expect("второй наблюдатель");
+        let (priority, _) = watch::channel(Priority::default());
+        let (tcp_priority, _) = watch::channel(0);
+        let control = Control {
+            generation: AtomicU64::new(0),
+            priority,
+            tcp_priority,
+            closed: (Mutex::new(false), Condvar::new()),
+        };
+        let (sender, mut receiver) = mpsc::channel(1);
+        sender
+            .try_send(Envelope {
+                generation: 0,
+                tcp_generation: *control.tcp_priority.borrow(),
+                command: Command::CheckTcp,
+            })
+            .expect("проверка уже в очереди");
+        let mut state = Snapshot::new(true);
+        synchronize_network(&mut state, Some(first.watch().current()));
+        apply_network_event(&mut state, Some(second.watch().current()), &control);
+        let queued = receiver.recv().await.expect("ожидавшая команда");
+        assert_ne!(queued.tcp_generation, *control.tcp_priority.borrow());
+        let generation = *control.tcp_priority.borrow();
+        apply_network_event(&mut state, Some(second.watch().current()), &control);
+        assert_eq!(
+            generation,
+            *control.tcp_priority.borrow(),
+            "повтор snapshot не отменяет новую ручную команду"
+        );
+        first.shutdown().await;
+        second.shutdown().await;
+    }
 
     #[tokio::test]
     async fn late_success_from_previous_network_cannot_restore_connected() {
@@ -1349,7 +1395,7 @@ async fn run(
             _ = network_changed(&mut network) => {
                 let current = network.as_ref().map(NetworkWatch::current);
                 actor.network = network.clone();
-                synchronize_network(&mut actor.state, current);
+                apply_network_event(&mut actor.state, current, &control);
                 if let Some(tcp) = tcp_running.as_ref() {
                     if !network_matches(current, tcp.network_stamp) { tcp.cancel.send_replace(true); }
                 }
