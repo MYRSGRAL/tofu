@@ -1,0 +1,219 @@
+//! Staged-обновление подписки без I/O и изменения активной сессии.
+
+use std::{fmt, num::NonZeroU64};
+use tofu_import::{FatalError, ImportReport, import_bytes};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    Stale,
+    Exhausted,
+    InvalidImport(FatalError),
+    NoUsableRecords,
+    ReviewRequired,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Stale => "Обновление подписки устарело или отменено",
+            Self::Exhausted => "Исчерпаны поколения подписки",
+            Self::InvalidImport(_) => "Не удалось разобрать обновление подписки",
+            Self::NoUsableRecords => "Обновление не содержит пригодных записей",
+            Self::ReviewRequired => "Перед сохранением необходимо проверить отчёт импорта",
+        })
+    }
+}
+impl std::error::Error for Error {}
+
+/// Correlation token. Host сериализует commit с записью Repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ticket {
+    controller: NonZeroU64,
+    request: u64,
+    source_generation: u64,
+    revision: u64,
+}
+
+impl Ticket {
+    pub fn source_generation(self) -> u64 {
+        self.source_generation
+    }
+
+    pub fn revision(self) -> u64 {
+        self.revision
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Summary {
+    pub accepted: usize,
+    pub rejected: usize,
+    pub flagged: usize,
+    pub native_json: bool,
+}
+
+impl Summary {
+    pub fn needs_review(self) -> bool {
+        self.rejected != 0 || self.flagged != 0 || self.native_json
+    }
+}
+
+/// Не Clone: согласие относится к единственному неизменяемому отчёту.
+#[derive(Debug)]
+pub struct StagedUpdate {
+    ticket: Ticket,
+    report: ImportReport,
+    summary: Summary,
+}
+
+impl StagedUpdate {
+    pub fn summary(&self) -> Summary {
+        self.summary
+    }
+
+    /// Чувствительные данные: UI должен маскировать endpoint/credentials/source.
+    pub fn report(&self) -> &ImportReport {
+        &self.report
+    }
+
+    pub fn accept_clean(self) -> Result<ApprovedUpdate, Error> {
+        if self.summary.needs_review() {
+            return Err(Error::ReviewRequired);
+        }
+        Ok(ApprovedUpdate(self))
+    }
+
+    /// Вызывается host только после явного согласия на этот отображённый отчёт.
+    /// Не является capability-check или разрешением запуска native JSON.
+    pub fn approve_after_review(self) -> ApprovedUpdate {
+        ApprovedUpdate(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct ApprovedUpdate(StagedUpdate);
+
+impl ApprovedUpdate {
+    /// Для транзакционной записи Repository до публикации нового snapshot.
+    pub fn report(&self) -> &ImportReport {
+        &self.0.report
+    }
+}
+
+/// Один writer владеет controller. ID уникален среди всех экземпляров, callbacks
+/// которых ещё могут прийти, в том числе после удаления и повторного добавления
+/// одной подписки. Это ID controller, а не постоянный ID записи в БД.
+///
+/// Здесь хранится только память. Платформенный Repository должен атомарно
+/// сохранить candidate с CAS до публикации commit, не выполняя I/O в UI-потоке.
+#[derive(Debug)]
+pub struct Subscription {
+    controller: NonZeroU64,
+    source_generation: u64,
+    revision: u64,
+    snapshot_source_generation: Option<u64>,
+    request: u64,
+    active: Option<Ticket>,
+    snapshot: Option<ImportReport>,
+}
+
+impl Subscription {
+    pub fn new(controller: NonZeroU64) -> Self {
+        Self {
+            controller,
+            source_generation: 0,
+            revision: 0,
+            snapshot_source_generation: None,
+            request: 0,
+            active: None,
+            snapshot: None,
+        }
+    }
+
+    pub fn source_generation(&self) -> u64 {
+        self.source_generation
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn snapshot_source_generation(&self) -> Option<u64> {
+        self.snapshot_source_generation
+    }
+
+    pub fn snapshot(&self) -> Option<&ImportReport> {
+        self.snapshot.as_ref()
+    }
+
+    pub fn begin(&mut self) -> Result<Ticket, Error> {
+        let request = self.request.checked_add(1).ok_or(Error::Exhausted)?;
+        let ticket = Ticket {
+            controller: self.controller,
+            request,
+            source_generation: self.source_generation,
+            revision: self.revision,
+        };
+        self.request = request;
+        self.active = Some(ticket);
+        Ok(ticket)
+    }
+
+    pub fn source_changed(&mut self) -> Result<(), Error> {
+        let generation = self
+            .source_generation
+            .checked_add(1)
+            .ok_or(Error::Exhausted)?;
+        self.source_generation = generation;
+        self.active = None;
+        // Старый snapshot остаётся доступен офлайн и отмечен старым поколением.
+        Ok(())
+    }
+
+    pub fn finish(&mut self, ticket: Ticket) -> Result<(), Error> {
+        self.check(ticket)?;
+        self.active = None;
+        Ok(())
+    }
+
+    pub fn stage(&self, ticket: Ticket, body: Vec<u8>) -> Result<StagedUpdate, Error> {
+        self.check(ticket)?;
+        let report = import_bytes(body).map_err(|failure| Error::InvalidImport(failure.kind()))?;
+        if report.servers.is_empty() && report.native_json.is_none() {
+            return Err(Error::NoUsableRecords);
+        }
+        let summary = Summary {
+            accepted: report.servers.len(),
+            rejected: report.issues.len(),
+            flagged: report
+                .servers
+                .iter()
+                .filter(|server| !server.review_flags().is_empty())
+                .count(),
+            native_json: report.native_json.is_some(),
+        };
+        Ok(StagedUpdate {
+            ticket,
+            report,
+            summary,
+        })
+    }
+
+    pub fn commit(&mut self, approved: ApprovedUpdate) -> Result<(), Error> {
+        let StagedUpdate { ticket, report, .. } = approved.0;
+        self.check(ticket)?;
+        let revision = self.revision.checked_add(1).ok_or(Error::Exhausted)?;
+        self.snapshot = Some(report);
+        self.snapshot_source_generation = Some(ticket.source_generation);
+        self.revision = revision;
+        self.active = None;
+        Ok(())
+    }
+
+    fn check(&self, ticket: Ticket) -> Result<(), Error> {
+        if self.active != Some(ticket) {
+            return Err(Error::Stale);
+        }
+        Ok(())
+    }
+}

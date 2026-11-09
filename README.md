@@ -30,10 +30,14 @@ application, installer or production network adapter yet.
   ambiguity, TTL/generation checks and session-bound fake mappings.
 - Native domain-only or explicit IP-only policies with ordered proxy/direct/block,
   protected unavailable destinations and an authenticated outbound-only health listener.
+- Staged subscription refresh with exact-report approval and stale-update rejection;
+  Linux Direct HTTPS fetch with DNS/peer checks, encrypted SQLite snapshots and
+  a Secret Service master-key adapter. These are library APIs; the current CLI
+  still reads profiles from stdin.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Full mixed domain/CIDR DNS/Fake-IP execution,
-network subscription updates, storage, TUN policy integration, helper,
+subscription UI/scheduling, proxied fetch peer verification, TUN policy integration, helper,
 GUI and tray remain to be implemented. GUI toolkit selection is still open.
 
 `tofu-application` currently implements the initial connect/check/stop loop.
@@ -48,7 +52,9 @@ checked artifact. This does not replace OS authorization or atomic host-side App
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses
 Base64, URL/IDNA and JSON libraries. The Linux host uses Tokio, reqwest/rustls,
-SHA-256 and safe rustix syscalls. Cargo.lock pins MSRV-compatible dependencies.
+SHA-256 and safe rustix syscalls. Persistent subscriptions additionally use system
+SQLite (`sqlite3` development headers), XChaCha20Poly1305 and Secret Service.
+Cargo.lock pins MSRV-compatible dependencies.
 Build artifacts belong outside the checkout. On the project development host:
 
 ```sh
@@ -181,6 +187,31 @@ flock -s "$tofu_build" env TMPDIR="$tofu_build" python tools/engine_host.py "$to
 ```
 
 [Host evidence and remaining work](docs/validation/2026-11-09-linux-engine-host.md).
+
+### Subscription library
+
+`tofu-subscription` stages an immutable import report before approval. Linux
+`SubscriptionService` combines it with `FetchHost` and
+`EncryptedSubscriptionRepository`: a new refresh, cancellation or source change
+invalidates older results; SQLite compares source generation and snapshot revision
+in one transaction. Errors and empty imports preserve the last approved snapshot.
+`offline()` also reports whether that snapshot belongs to an older source generation.
+
+The repository encrypts URL/name, body, metadata and validators with
+XChaCha20Poly1305; record identity and generations are authenticated. The 32-byte
+key comes from `subscription_master_key()` through Secret Service, never from
+SQLite. Existing databases must use `allow_create = false`; a missing/locked key
+is an error. The caller must choose a canonical private directory (0700); database
+permissions are 0600. Finish the last GUI handle with `close().await` to keep SQLite
+checkpoint work off the UI thread.
+
+Public sources require HTTPS and public DNS/peer addresses at every redirect.
+Local HTTP/private sources require an explicit source exception. Proxy fetch
+currently returns `UnsupportedPeerVerification`: SOCKS exposes the proxy peer,
+not the upstream peer required by the contract. There is no Direct fallback.
+Native JSON may be saved after review, but this does not authorize its execution.
+Scheduling, server fingerprints/favourites, GUI integration and automatic session
+reconfiguration are still pending. [Validation and limits](docs/validation/2026-11-09-subscription-snapshots.md).
 
 ### Routing policy
 
