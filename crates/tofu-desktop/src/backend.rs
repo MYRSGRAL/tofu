@@ -19,8 +19,9 @@ use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, NetworkMonitor, NetworkSnapshot, NetworkStamp,
     NetworkWatch, PendingRefresh, ProbeResult, ProbeTarget, ProfileQuery, RefreshResult,
-    ResolvedProfile, SubscriptionError, SubscriptionService, SubscriptionSource, TcpProbeResult,
-    TcpProbeStatus, TcpProbeTarget, check_tcp, subscription_master_key,
+    ResolvedProfile, SubscriptionError, SubscriptionService, SubscriptionSource,
+    TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget, check_tcp_series,
+    subscription_master_key,
 };
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroizing;
@@ -1097,6 +1098,51 @@ mod network_tests {
         second.shutdown().await;
     }
 }
+#[cfg(test)]
+mod tcp_series_tests {
+    use super::{TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpResultDto};
+    use std::time::Duration;
+
+    #[test]
+    fn cancelled_or_incomplete_series_cannot_publish_a_median() {
+        let mut dto = TcpResultDto {
+            source_id: 1,
+            profile_id: 2,
+            revision: 3,
+            name: "Проверка".into(),
+            host: "127.0.0.1".into(),
+            port: 443,
+            status: "cancelled",
+            dns_ms: None,
+            connect_ms: None,
+            samples_ms: Vec::new(),
+            samples_requested: TCP_SERIES_SAMPLES,
+            selected_address: None,
+            checked_at_ms: 0,
+            network_epoch: None,
+            network_observed: false,
+        };
+        for (status, count, expected) in [
+            (TcpProbeStatus::Reachable, 3, Some(10)),
+            (TcpProbeStatus::Cancelled, 3, None),
+            (TcpProbeStatus::ConnectFailure, 1, None),
+            (TcpProbeStatus::Reachable, 2, None),
+        ] {
+            // Поздняя отмена меняет status уже завершённой серии. Сохранённая
+            // внутри неё median не должна обойти проверку при публикации DTO.
+            dto.finish(TcpProbeSeriesResult {
+                status,
+                dns_elapsed: None,
+                selected_address: Some("127.0.0.1:443".parse().expect("адрес")),
+                samples: vec![Duration::from_millis(10); count],
+                median: Some(Duration::from_millis(10)),
+            });
+            assert_eq!(dto.connect_ms, expected);
+            assert_eq!(dto.samples_ms.len(), count);
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct HealthResultDto {
     kind: &'static str,
@@ -1157,6 +1203,9 @@ struct TcpResultDto {
     status: &'static str,
     dns_ms: Option<u64>,
     connect_ms: Option<u64>,
+    samples_ms: Vec<u64>,
+    samples_requested: usize,
+    selected_address: Option<String>,
     checked_at_ms: u64,
     network_epoch: Option<String>,
     network_observed: bool,
@@ -1169,7 +1218,7 @@ impl TcpResultDto {
             revision: self.revision,
         }
     }
-    fn finish(&mut self, result: TcpProbeResult) {
+    fn finish(&mut self, result: TcpProbeSeriesResult) {
         self.status = match result.status {
             TcpProbeStatus::Reachable => "reachable",
             TcpProbeStatus::NotApplicable => "not_applicable",
@@ -1182,7 +1231,15 @@ impl TcpResultDto {
         };
         let millis = |duration: Duration| duration.as_millis().min(u64::MAX as u128) as u64;
         self.dns_ms = result.dns_elapsed.map(millis);
-        self.connect_ms = result.connect_elapsed.map(millis);
+        self.connect_ms = if result.status == TcpProbeStatus::Reachable
+            && result.samples.len() == TCP_SERIES_SAMPLES
+        {
+            result.median.map(millis)
+        } else {
+            None
+        };
+        self.samples_ms = result.samples.into_iter().map(millis).collect();
+        self.selected_address = result.selected_address.map(|address| address.to_string());
         self.checked_at_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(millis)
@@ -1195,7 +1252,7 @@ struct TcpRunning {
     network_stamp: Option<NetworkStamp>,
     result: TcpResultDto,
     cancel: watch::Sender<bool>,
-    task: tokio::task::JoinHandle<std::result::Result<TcpProbeResult, HostError>>,
+    task: tokio::task::JoinHandle<std::result::Result<TcpProbeSeriesResult, HostError>>,
 }
 
 async fn session(
@@ -1496,6 +1553,9 @@ async fn run(
                             if tcp.generation != control.generation.load(Ordering::SeqCst)
                                 || tcp.tcp_generation != *control.tcp_priority.borrow() {
                                 result.status = TcpProbeStatus::Cancelled;
+                                result.samples.clear();
+                                result.median = None;
+                                result.selected_address = None;
                             }
                             tcp.result.finish(result); actor.state.tcp_result = Some(tcp.result);
                         }
@@ -1543,11 +1603,13 @@ async fn run(
                                 revision: profile.snapshot_revision, name: profile.profile.name.clone(),
                                 host: profile.server.endpoint().host().into(), port: profile.server.endpoint().port(),
                                 status: "cancelled", dns_ms: None, connect_ms: None, checked_at_ms: 0,
+                                samples_ms: Vec::new(), samples_requested: TCP_SERIES_SAMPLES,
+                                selected_address: None,
                                 network_epoch: network_stamp.map(|stamp| stamp.to_string()),
                                 network_observed: current.is_some_and(NetworkSnapshot::fully_observed),
                             };
                             let (cancel, mut receiver) = Cancellation::new();
-                            let task = tokio::spawn(async move { check_tcp(target, Duration::from_secs(5), &mut receiver).await });
+                            let task = tokio::spawn(async move { check_tcp_series(target, Duration::from_secs(5), &mut receiver).await });
                             actor.state.tcp_busy = true; actor.state.tcp_name = Some(result.name.clone());
                             actor.state.tcp_result = None;
                             actor.state.tcp_invalidated = false;

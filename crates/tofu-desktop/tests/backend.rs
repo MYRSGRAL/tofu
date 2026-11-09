@@ -379,20 +379,22 @@ fn tcp_check_is_separate_from_session_and_bound_to_selected_profile() {
     let (closed_sender, closed) = mpsc::channel();
     let peer = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut socket = loop {
-            match listener.accept() {
-                Ok((socket, _)) => break socket,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline);
-                    thread::sleep(Duration::from_millis(5));
+        for _ in 0..3 {
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline);
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("TCP accept: {error}"),
                 }
-                Err(error) => panic!("TCP accept: {error}"),
-            }
-        };
-        socket
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .expect("timeout");
-        assert_eq!(socket.read(&mut [0]).expect("TCP EOF"), 0);
+            };
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .expect("timeout");
+            assert_eq!(socket.read(&mut [0]).expect("TCP EOF"), 0);
+        }
         closed_sender.send(()).expect("EOF ack");
     });
     let directory = Directory::new();
@@ -440,6 +442,21 @@ fn tcp_check_is_separate_from_session_and_bound_to_selected_profile() {
     assert_eq!(reachable["tcp_result"]["revision"], revision);
     assert_eq!(reachable["tcp_result"]["dns_ms"], Value::Null);
     assert!(reachable["tcp_result"]["connect_ms"].is_u64());
+    let samples = reachable["tcp_result"]["samples_ms"]
+        .as_array()
+        .expect("три TCP-выборки");
+    assert_eq!(samples.len(), 3);
+    assert_eq!(reachable["tcp_result"]["samples_requested"], 3);
+    assert_eq!(
+        reachable["tcp_result"]["selected_address"],
+        format!("127.0.0.1:{port}")
+    );
+    let mut sorted: Vec<u64> = samples
+        .iter()
+        .map(|sample| sample.as_u64().expect("TCP время"))
+        .collect();
+    sorted.sort_unstable();
+    assert_eq!(reachable["tcp_result"]["connect_ms"], sorted[1]);
     assert!(
         reachable["tcp_result"]["checked_at_ms"]
             .as_u64()

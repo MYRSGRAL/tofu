@@ -315,7 +315,10 @@ def run_case(
             )
             if tcp_status is not None:
                 steps.append(step({"selected_profile": 1}, "check_tcp"))
-                finish = step({"tcp_status": tcp_status, "tcp_busy": False}, "shutdown")
+                finish_when = {"tcp_status": tcp_status, "tcp_busy": False}
+                if tcp_status == "reachable":
+                    finish_when.update(tcp_samples_count=3, tcp_samples_requested=3)
+                finish = step(finish_when, "shutdown")
                 finish["capture"] = True
                 steps.append(finish)
             elif engine is not None:
@@ -494,6 +497,8 @@ def run_case(
             "pending",
             "tcp_busy",
             "tcp_status",
+            "tcp_samples_count",
+            "tcp_samples_requested",
             "step",
             "can_stop",
             "probe_present",
@@ -512,6 +517,13 @@ def run_case(
             event.get("tcp_status") == tcp_status for event in events
         ):
             raise RuntimeError("Ожидаемый TCP результат не получен")
+        if tcp_status == "reachable" and not any(
+            event.get("tcp_status") == "reachable"
+            and event.get("tcp_samples_count") == 3
+            and event.get("tcp_samples_requested") == 3
+            for event in events
+        ):
+            raise RuntimeError("GUI не подтвердил три TCP-выборки")
         if engine is not None:
             observed = next(
                 index
@@ -718,7 +730,7 @@ def run_tcp(
         # Host root/service UID не отображены в user namespace. Проверяем native
         # resolver в исходном UID-пространстве; сценарий не запускает ядра.
         cases.append(("tcp-resolved", "localhost", False, "reachable"))
-    expected_connections = sum(status == "reachable" for _, _, _, status in cases)
+    expected_connections = 3 * sum(status == "reachable" for _, _, _, status in cases)
 
     def accept_probes() -> None:
         try:

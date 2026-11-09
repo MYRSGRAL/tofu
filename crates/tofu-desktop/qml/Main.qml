@@ -111,13 +111,15 @@ ApplicationWindow {
             : (["reachable", "connect_failed", "connect_timeout"].indexOf(result.status) >= 0
                 ? tr("DNS не потребовался", "DNS not needed") : "DNS: —")
         const tcp = result.connect_ms !== null && result.connect_ms !== undefined
-            ? "TCP: " + result.connect_ms + tr(" мс", " ms") : "TCP: —"
-        return dns + " · " + tcp
+            ? tr("TCP, медиана: ", "TCP median: ") + result.connect_ms + tr(" мс", " ms") : "TCP: —"
+        const samples = result.samples_ms ? result.samples_ms.length : 0
+        return dns + " · " + tcp + " · " + tr("выборки: ", "samples: ") + samples + "/" + result.samples_requested
     }
     function tcpEndpointText(result) {
         if (!result) return ""
         const host = result.host.indexOf(":") >= 0 ? "[" + result.host + "]" : result.host
         return result.name + " · " + host + ":" + result.port
+            + (result.selected_address ? tr(" · адрес: ", " · address: ") + result.selected_address : "")
     }
     function tcpCheckedAtText(result) {
         if (!result) return ""
@@ -446,7 +448,7 @@ ApplicationWindow {
                             SmallLabel {
                                 Layout.fillWidth: true
                                 font.pixelSize: 11
-                                text: window.tr("Напрямую через обычную сеть, без системного прокси. Один замер; до 5 с на DNS и TCP вместе. Без внешнего DNS-резерва.", "Direct over the regular network, without the system proxy. One measurement; up to 5 s for DNS and TCP combined. No external DNS fallback.")
+                                text: window.tr("Напрямую через обычную сеть, без системного прокси. Серия из трёх проб; до 5 с на DNS и TCP вместе. Без внешнего DNS-резерва.", "Direct over the regular network, without the system proxy. A series of three samples; up to 5 s for DNS and TCP combined. No external DNS fallback.")
                             }
                             SmallLabel {
                                 Layout.fillWidth: true
