@@ -2,6 +2,8 @@
 
 [English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
 
+[План завершения и текущая готовность](docs/PLAN.md).
+
 Нативный прокси-клиент с открытым исходным кодом. Сначала Linux
 (CachyOS/Arch, KDE Plasma, Wayland), затем Android. Запланированы Xray-core и
 sing-box, TUN, Fake DNS, подписки, маршрутизация по приложениям и работа в трее.

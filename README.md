@@ -2,6 +2,8 @@
 
 [English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
 
+[Implementation plan and current progress](docs/PLAN.md) (Russian).
+
 A native, open source proxy client in development. Linux first (CachyOS/Arch,
 KDE Plasma, Wayland), Android later. Planned features include Xray-core and
 sing-box, TUN, Fake DNS, subscriptions, per-application routing and a system tray.
