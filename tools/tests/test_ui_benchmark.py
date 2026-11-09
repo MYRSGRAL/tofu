@@ -143,6 +143,13 @@ class ChildTests(unittest.TestCase):
             'import os,time\nos.write(2,b"x"*2000000)\nprint("{}",flush=True)\ntime.sleep(2)'
         )
         self.assertEqual(child.ack(3)[0], {})
+        # ACK в stdout не подтверждает чтение независимого stderr pipe.
+        deadline = time.monotonic() + 1
+        while (
+            child.stderr_bytes < 2_000_000
+            and (remaining := deadline - time.monotonic()) > 0
+        ):
+            child.pump(remaining)
         self.assertEqual(child.stderr_bytes, 2_000_000)
         self.assertEqual(child.stderr_saved, bench.MAX_STDERR)
         self.assertEqual(child.log.tell(), bench.MAX_STDERR)

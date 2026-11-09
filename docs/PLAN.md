@@ -37,14 +37,15 @@
 2. Реестр системных ядер влит через PR #29 (`628d5c3`), CI зелёный.
    Одноразовые peer-bound artifacts влиты PR #30 (`d585b01`), CI зелёный.
    Общий бюджет buffers/snapshots реализован в `73a6ab2`: локально 393 Rust-теста
-   прошли, независимое ревью выполнено. PR #31 ещё не принят: Python job выявил
-   сбой очистки старого launcher на relatime; остальные четыре PR jobs успешны.
-   Причина исправлена локально: atime исключён из сравнения identity, проверки
-   содержимого/владельца/inode и mtime/ctime сохранены. Новый regression прошёл
-   цикл FAIL/PASS, все 100 Python-тестов прошли; независимое ревью без findings.
-   Ближайший шаг — получить зелёный CI нового commit. Затем реальное
-   создание, сверка и удаление собственных nftables-ресурсов в изолированном
-   network namespace, версионный IPC, безопасный helper и TUN-сессия с явным
+   прошли, независимое ревью выполнено. PR #31 влит как `acff6c5` после всех
+   пяти зелёных jobs в обоих workflows. Выявленный CI сбой очистки launcher на
+   relatime исправлен в `ed770be`, все 100 Python-тестов прошли.
+   Реализован [nftables executor](specs/helper-nftables-executor.md): создание,
+   сверка и удаление пустых собственных таблиц проверены в изолированном namespace;
+   [evidence](validation/2026-11-10-helper-nftables.md): 403 workspace tests,
+   отдельный real-namespace тест и независимое ревью с исправленным P2.
+   это ещё не правила блокировки. Следом нужны защитные правила, версионный IPC,
+   безопасный helper и TUN-сессия с явным
    владением ресурсами и cleanup; затем DNS/Fake-IP и атрибуцию приложений.
 3. Интегрировать приватные VPN/LAN/ru-direct, сценарии смены сети и полную
    Linux-матрицу. При включённом kill switch после исчерпания retries сеть
@@ -76,7 +77,7 @@
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, границы и journal существуют; добавлен [доверенный реестр](specs/helper-trusted-registry.md). Добавлен [брокер одноразовых artifacts](specs/helper-prepared-requests.md) с повторной авторизацией Prepare/claim. [Общий бюджет](specs/helper-memory-budget.md) реализован и локально проверен, PR #31 ожидает исправления Python CI. Нужны системный service/IPC и авторизованный Apply, реальные сетевые эффекты, атомарное применение и reconciliation после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, границы и journal существуют; добавлен [доверенный реестр](specs/helper-trusted-registry.md). Добавлен [брокер одноразовых artifacts](specs/helper-prepared-requests.md) с повторной авторизацией Prepare/claim. [Общий бюджет](specs/helper-memory-budget.md) влит PR #31 (`acff6c5`), CI зелёный. [Nftables executor](specs/helper-nftables-executor.md) выполняет жизненный цикл пустой собственной таблицы, правила защиты ещё отсутствуют. Нужны системный service/IPC и авторизованный Apply, остальные сетевые эффекты, атомарное применение и reconciliation всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
 | P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы есть. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |

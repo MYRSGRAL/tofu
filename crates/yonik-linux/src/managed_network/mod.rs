@@ -1,4 +1,4 @@
-//! Durable-учёт для доверенного системного helper; сетевых эффектов здесь нет.
+//! Durable-учёт для доверенного системного helper и типизированные исполнители.
 //!
 //! Сначала `intent`, затем внешний эффект, затем явный `reconcile`. Возврат
 //! `intent(false)` означает повтор: повторять внешний эффект вслепую нельзя.
@@ -6,6 +6,7 @@
 //! Helper обязан сверить namespace, собственную метку ресурса и его атрибуты.
 //! Drop/отмена не очищает сеть и не удаляет неоднозначные намерения.
 
+pub mod nft;
 mod storage;
 
 use serde::{Deserialize, Serialize};
@@ -331,6 +332,20 @@ impl Journal {
     pub fn needs_reconciliation(&self, id: u64) -> bool {
         !self.reconciled.contains(&id)
     }
+    /// Старое подтверждение не переживает новую сверку: ошибка или отмена
+    /// наблюдения должна оставить неизвестное, а не прежнее applied-состояние.
+    pub fn require_reconciliation(
+        &mut self,
+        ownership: Ownership,
+        id: u64,
+    ) -> Result<(), JournalError> {
+        self.check(ownership)?;
+        if !self.document.records.iter().any(|record| record.id == id) {
+            return Err(JournalError::Missing);
+        }
+        self.reconciled.remove(&id);
+        Ok(())
+    }
     fn check(&self, ownership: Ownership) -> Result<(), JournalError> {
         if self.poisoned {
             return Err(JournalError::UncertainWrite);
@@ -411,6 +426,25 @@ impl Journal {
                 self.reconciled.remove(&id);
             }
         }
+        Ok(())
+    }
+    /// Durable-граница перед асинхронным удалением. После возврата, отмены или
+    /// ошибки новая попытка требует новой сверки ОС, даже без перезапуска helper.
+    pub fn mark_cleanup(&mut self, ownership: Ownership, id: u64) -> Result<(), JournalError> {
+        self.check(ownership)?;
+        let index = self
+            .document
+            .records
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or(JournalError::Missing)?;
+        if !self.reconciled.contains(&id) {
+            return Err(JournalError::ReconcileRequired);
+        }
+        let mut document = self.document.clone();
+        document.records[index].state = RecordState::CleanupRemaining;
+        self.persist(document)?;
+        self.reconciled.remove(&id);
         Ok(())
     }
     /// Callback удаляет только заново проверенный собственный ресурс, Ok —
