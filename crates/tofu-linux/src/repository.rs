@@ -124,8 +124,13 @@ impl EncryptedSubscriptionRepository {
             .acquire_owned()
             .await
             .map_err(|_| RepositoryError::Storage)?;
+        let cpu_permit = crate::subscriptions::IMPORT_GATE
+            .acquire()
+            .await
+            .map_err(|_| RepositoryError::Storage)?;
         let database = self.inner.clone();
         tokio::task::spawn_blocking(move || {
+            let _cpu_permit = cpu_permit;
             let _permit = permit;
             let mut database = database.lock().map_err(|_| RepositoryError::Storage)?;
             operation(&mut database)
@@ -237,6 +242,7 @@ impl EncryptedSubscriptionRepository {
             check_small(value)?;
         }
         self.run(move |db| {
+            let parsed = prepare_profiles(&db.key, &db.id, id, &body)?;
             let body = encrypt(&db.key, &db.id, 2, id, expected_generation, revision, &body)?;
             let metadata = encrypt(&db.key, &db.id, 3, id, expected_generation, revision, &metadata)?;
             let validators = validators.as_ref().map(|v| encrypt(&db.key, &db.id, 4, id, expected_generation, revision, v)).transpose()?;
@@ -245,6 +251,7 @@ impl EncryptedSubscriptionRepository {
             let previous: i64 = tx.query_row("SELECT revision FROM snapshots WHERE source_id=?1", [id], |r| r.get(0)).optional().map_err(storage)?.unwrap_or(0);
             if generation != Some(expected_generation) || previous != expected_revision { return Err(RepositoryError::Conflict); }
             tx.execute("INSERT INTO snapshots(source_id,source_generation,revision,body,metadata,validators) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(source_id) DO UPDATE SET source_generation=excluded.source_generation,revision=excluded.revision,body=excluded.body,metadata=excluded.metadata,validators=excluded.validators", params![id, expected_generation, revision, body, metadata, validators]).map_err(storage)?;
+            reconcile(&tx, &db.key, &db.id, id, expected_generation, revision, parsed)?;
             tx.commit().map_err(storage)?;
             Ok(revision)
         }).await
@@ -307,7 +314,7 @@ impl Database {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(storage)?;
-        if version > 1 {
+        if version > 2 {
             return Err(RepositoryError::UnsupportedVersion);
         }
         if version < 0 {
@@ -355,6 +362,13 @@ impl Database {
             }
             id
         };
+        if version < 2 {
+            let tx = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            tx.execute_batch("CREATE TABLE profile_catalog(source_id INTEGER PRIMARY KEY REFERENCES sources(id),generation INTEGER NOT NULL,revision INTEGER NOT NULL,raw_count INTEGER NOT NULL,unique_count INTEGER NOT NULL); CREATE TABLE profiles(id INTEGER PRIMARY KEY AUTOINCREMENT,source_id INTEGER NOT NULL REFERENCES sources(id),fingerprint BLOB NOT NULL,generation INTEGER NOT NULL,revision INTEGER NOT NULL,ordinal INTEGER NOT NULL,present INTEGER NOT NULL,payload BLOB NOT NULL,UNIQUE(source_id,fingerprint)); PRAGMA user_version=2;").map_err(storage)?;
+            tx.commit().map_err(storage)?;
+        }
         connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF;").map_err(storage)?;
         Ok(Self {
             connection,
@@ -559,7 +573,7 @@ mod tests {
     }
     fn snapshot() -> SnapshotInput {
         SnapshotInput {
-            body: b"secret-snapshot-marker".to_vec(),
+            body: b"trojan://secret-snapshot-marker@fixture.invalid:443#test".to_vec(),
             metadata: b"secret-metadata-marker".to_vec(),
             validators: Some(b"secret-validator-marker".to_vec()),
         }
@@ -578,7 +592,7 @@ mod tests {
             let bytes = fs::read(entry.expect("файл").path()).expect("данные");
             for marker in [
                 b"secret-source-marker".as_slice(),
-                b"secret-snapshot-marker",
+                b"trojan://secret-snapshot-marker@fixture.invalid:443#test",
                 b"secret-metadata-marker",
                 b"secret-validator-marker",
             ] {
@@ -594,7 +608,10 @@ mod tests {
             .expect("запись");
         assert_eq!(value.source.payload.as_slice(), b"secret-source-marker");
         let value = value.snapshot.expect("снимок");
-        assert_eq!(value.body.as_slice(), b"secret-snapshot-marker");
+        assert_eq!(
+            value.body.as_slice(),
+            b"trojan://secret-snapshot-marker@fixture.invalid:443#test"
+        );
         assert_eq!(
             value.validators.expect("валидаторы").as_slice(),
             b"secret-validator-marker"
@@ -640,7 +657,10 @@ mod tests {
         let value = value.snapshot.expect("старый снимок");
         assert_eq!(value.revision, 1);
         assert_eq!(value.source_generation, 1);
-        assert_eq!(value.body.as_slice(), b"secret-snapshot-marker");
+        assert_eq!(
+            value.body.as_slice(),
+            b"trojan://secret-snapshot-marker@fixture.invalid:443#test"
+        );
         assert!(value.validators.is_none());
         assert_eq!(
             first.commit_snapshot(source.id, 2, 1, snapshot()).await,
@@ -686,6 +706,190 @@ mod tests {
         ));
     }
 
+    async fn commit_body(
+        repo: &EncryptedSubscriptionRepository,
+        source: i64,
+        revision: i64,
+        body: &str,
+    ) {
+        repo.commit_snapshot(
+            source,
+            1,
+            revision,
+            SnapshotInput {
+                body: body.as_bytes().to_vec(),
+                metadata: Vec::new(),
+                validators: None,
+            },
+        )
+        .await
+        .expect("снимок");
+    }
+    #[tokio::test]
+    async fn catalog_identity_favorites_and_tamper() {
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo
+            .create_source(b"source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        commit_body(&repo,source,0,"trojan://password@one.invalid:443#first\ntrojan://second@two.invalid:443#second\ntrojan://password@one.invalid:443#duplicate").await;
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("каталог");
+        assert_eq!(
+            (page.raw_count, page.unique_count, page.duplicate_count),
+            (3, 2, 1)
+        );
+        let favorite = page.profiles[0].id;
+        let retired = page.profiles[1].id;
+        let other = repo
+            .create_source(b"other source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        commit_body(&repo, other, 0, "trojan://password@one.invalid:443#first").await;
+        let other_page = repo
+            .profiles(other, ProfileQuery::default())
+            .await
+            .expect("другой каталог");
+        assert_ne!(other_page.profiles[0].id, favorite);
+        assert!(!other_page.profiles[0].favorite);
+        assert_eq!(page.profiles[0].name, "first");
+        repo.set_favorite(favorite, true).await.expect("избранное");
+        commit_body(
+            &repo,
+            source,
+            1,
+            "trojan://second@two.invalid:443#second\ntrojan://password@one.invalid:443#renamed",
+        )
+        .await;
+        let resolved = repo.resolve_profile(favorite, 2).await.expect("resolve");
+        assert_eq!(resolved.profile.name, "renamed");
+        assert!(resolved.profile.favorite);
+        assert_eq!(resolved.profile.ordinal, 1);
+        commit_body(&repo, source, 2, "trojan://new@three.invalid:443#new").await;
+        let page = repo
+            .profiles(
+                source,
+                ProfileQuery {
+                    include_unavailable: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("каталог");
+        assert_eq!(page.total, 2);
+        assert!(
+            page.profiles
+                .iter()
+                .any(|p| p.id == favorite && !p.available && p.favorite)
+        );
+        assert!(matches!(
+            repo.resolve_profile(favorite, 3).await,
+            Err(RepositoryError::NotFound)
+        ));
+        assert!(matches!(
+            repo.commit_snapshot(source, 1, 2, snapshot()).await,
+            Err(RepositoryError::Conflict)
+        ));
+        commit_body(
+            &repo,
+            source,
+            3,
+            "trojan://password@one.invalid:443#returned\ntrojan://second@two.invalid:443#second",
+        )
+        .await;
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("каталог");
+        assert_eq!(page.profiles[0].id, favorite);
+        assert!(page.profiles[0].favorite);
+        assert!(page.profiles[1].id > retired);
+        commit_body(&repo,source,4,"trojan://changed@one.invalid:443#returned\ntrojan://password@one.invalid:443?unknown=x#changed-option").await;
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("каталог");
+        assert!(page.profiles.iter().all(|p| p.id != favorite));
+        let connection = Connection::open(dir.database()).expect("соединение");
+        connection
+            .execute(
+                "UPDATE profiles SET fingerprint=zeroblob(32) WHERE id=?1",
+                [page.profiles[0].id],
+            )
+            .expect("tamper");
+        assert!(matches!(
+            repo.profiles(source, ProfileQuery::default()).await,
+            Err(RepositoryError::Corrupt)
+        ));
+    }
+    #[tokio::test]
+    async fn migration_lazy_catalog_and_invalid_body() {
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo
+            .create_source(b"source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        commit_body(
+            &repo,
+            source,
+            0,
+            "trojan://password@fixture.invalid:443#sensitive-display-marker",
+        )
+        .await;
+        repo.close().await.expect("close");
+        let connection = Connection::open(dir.database()).expect("соединение");
+        connection
+            .execute_batch(
+                "DROP TABLE profiles; DROP TABLE profile_catalog; PRAGMA user_version=1;",
+            )
+            .expect("fixture v1");
+        drop(connection);
+        let repo = dir.open().await;
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("lazy migration");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.snapshot_revision, 1);
+        assert!(matches!(
+            repo.commit_snapshot(
+                source,
+                1,
+                1,
+                SnapshotInput {
+                    body: b"invalid".to_vec(),
+                    metadata: Vec::new(),
+                    validators: None
+                }
+            )
+            .await,
+            Err(RepositoryError::InvalidInput)
+        ));
+        assert_eq!(
+            repo.profiles(source, ProfileQuery::default())
+                .await
+                .expect("каталог сохранён")
+                .snapshot_revision,
+            1
+        );
+        repo.close().await.expect("close");
+        let bytes = fs::read(dir.database()).expect("файл");
+        for secret in [
+            b"password".as_slice(),
+            b"fixture.invalid",
+            b"sensitive-display-marker",
+        ] {
+            assert!(!bytes.windows(secret.len()).any(|w| w == secret));
+        }
+    }
+
     #[tokio::test]
     async fn future_version_is_not_modified() {
         let dir = TestDirectory::new();
@@ -696,7 +900,7 @@ mod tests {
         ));
         let connection = Connection::open(dir.database()).expect("тестовое соединение");
         connection
-            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=2;")
+            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=3;")
             .expect("будущая версия");
         drop(connection);
         let before = fs::read(dir.database()).expect("данные");
@@ -745,5 +949,588 @@ mod tests {
             EncryptedSubscriptionRepository::open(dir.database(), Zeroizing::new([7; 32])).await,
             Err(RepositoryError::UnsafePath)
         ));
+    }
+    #[tokio::test]
+    async fn corrupt_catalog_counts_and_replayed_current_profile_are_rejected() {
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo.create_source(vec![]).await.expect("источник").id;
+        commit_body(
+            &repo,
+            source,
+            0,
+            "trojan://password@fixture.invalid:443#old",
+        )
+        .await;
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("страница");
+        let id = page.profiles[0].id;
+        let connection = Connection::open(dir.database()).expect("fixture соединение");
+        for query in [
+            "UPDATE profile_catalog SET raw_count=20001",
+            "UPDATE profile_catalog SET raw_count=1,unique_count=2",
+            "UPDATE profile_catalog SET unique_count=1,revision=0",
+        ] {
+            connection.execute_batch(query).expect("tamper marker");
+            assert!(matches!(
+                repo.profiles(source, ProfileQuery::default()).await,
+                Err(RepositoryError::Corrupt)
+            ));
+        }
+        connection
+            .execute_batch("UPDATE profile_catalog SET raw_count=1,unique_count=1,revision=1")
+            .expect("fixture marker");
+        let payload: Vec<u8> = connection
+            .query_row("SELECT payload FROM profiles WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .expect("старый ciphertext");
+        commit_body(
+            &repo,
+            source,
+            1,
+            "trojan://password@fixture.invalid:443#new",
+        )
+        .await;
+        // Ciphertext корректен для этой записи, но относится к прежнему revision.
+        connection
+            .execute(
+                "UPDATE profiles SET generation=1,revision=1,payload=?1 WHERE id=?2",
+                params![payload, id],
+            )
+            .expect("replay fixture");
+        assert!(matches!(
+            repo.profiles(source, ProfileQuery::default()).await,
+            Err(RepositoryError::Corrupt)
+        ));
+        assert!(matches!(
+            repo.resolve_profile(id, 2).await,
+            Err(RepositoryError::Corrupt)
+        ));
+        drop(connection);
+        repo.close().await.expect("закрытие");
+    }
+}
+
+#[derive(Default)]
+pub enum ProfileSort {
+    #[default]
+    SourceOrder,
+    Name,
+}
+pub struct ProfileQuery {
+    pub search: String,
+    pub favorites_only: bool,
+    pub include_unavailable: bool,
+    pub sort: ProfileSort,
+    pub offset: usize,
+    pub limit: usize,
+}
+impl Default for ProfileQuery {
+    fn default() -> Self {
+        Self {
+            search: String::new(),
+            favorites_only: false,
+            include_unavailable: false,
+            sort: ProfileSort::SourceOrder,
+            offset: 0,
+            limit: 200,
+        }
+    }
+}
+// Метаданные чувствительны; Debug намеренно отсутствует.
+pub struct ServerProfile {
+    pub id: i64,
+    pub source_id: i64,
+    pub ordinal: usize,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub protocol: String,
+    pub favorite: bool,
+    pub available: bool,
+}
+pub struct ResolvedProfile {
+    pub profile: ServerProfile,
+    pub server: tofu_import::ParsedServer,
+    pub snapshot_revision: i64,
+    pub snapshot_generation: i64,
+    pub source_generation: i64,
+}
+pub struct ProfilePage {
+    pub profiles: Vec<ServerProfile>,
+    pub total: usize,
+    pub raw_count: usize,
+    pub unique_count: usize,
+    pub duplicate_count: usize,
+    pub source_generation: i64,
+    pub snapshot_generation: i64,
+    pub snapshot_revision: i64,
+}
+struct Prepared {
+    fingerprint: Vec<u8>,
+    ordinal: usize,
+    name: String,
+    host: String,
+    port: u16,
+    protocol: String,
+}
+struct PreparedCatalog {
+    raw: usize,
+    rows: Vec<Prepared>,
+}
+struct ProfileRow {
+    id: i64,
+    source: i64,
+    fingerprint: Vec<u8>,
+    generation: i64,
+    revision: i64,
+    ordinal: usize,
+    present: bool,
+    payload: Vec<u8>,
+}
+fn fingerprint(
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+    server: &tofu_import::ParsedServer,
+) -> Result<Vec<u8>> {
+    use hmac::{Hmac, Mac};
+    let identity = server
+        .identity_material()
+        .map_err(|_| RepositoryError::InvalidInput)?;
+    let mut mac =
+        <Hmac<sha2::Sha256> as Mac>::new_from_slice(key).map_err(|_| RepositoryError::Storage)?;
+    mac.update(b"tofu-profile-fingerprint\0v1\0");
+    mac.update(db);
+    mac.update(&source.to_le_bytes());
+    mac.update(identity.expose());
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+fn prepare_profiles(
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+    body: &[u8],
+) -> Result<PreparedCatalog> {
+    let report =
+        tofu_import::import_bytes(body.to_vec()).map_err(|_| RepositoryError::InvalidInput)?;
+    if report.servers.len() > 20_000 || (report.servers.is_empty() && report.native_json.is_none())
+    {
+        return Err(RepositoryError::InvalidInput);
+    }
+    let raw = report.servers.len();
+    let mut seen = std::collections::HashSet::new();
+    let mut rows = Vec::new();
+    for (ordinal, server) in report.servers.iter().enumerate() {
+        let fingerprint = fingerprint(key, db, source, server)?;
+        if seen.insert(fingerprint.clone()) {
+            rows.push(Prepared {
+                fingerprint,
+                ordinal,
+                name: server.display_name().expose().to_owned(),
+                host: server.endpoint().host().to_owned(),
+                port: server.endpoint().port(),
+                protocol: server.protocol().as_str().to_owned(),
+            });
+        }
+    }
+    Ok(PreparedCatalog { raw, rows })
+}
+fn profile_aad(db: &[u8; 32], r: &ProfileRow) -> Vec<u8> {
+    let mut v = aad(db, 5, r.id, r.generation, r.revision).to_vec();
+    v.extend_from_slice(&r.source.to_le_bytes());
+    v.extend_from_slice(&r.fingerprint);
+    v.extend_from_slice(&(r.ordinal as u64).to_le_bytes());
+    v.push(u8::from(r.present));
+    v
+}
+fn seal_profile(
+    key: &[u8; 32],
+    db: &[u8; 32],
+    r: &ProfileRow,
+    p: &ServerProfile,
+) -> Result<Vec<u8>> {
+    let value = Zeroizing::new(
+        serde_json::to_vec(&(
+            p.name.as_str(),
+            p.host.as_str(),
+            p.port,
+            p.protocol.as_str(),
+            p.favorite,
+        ))
+        .map_err(|_| RepositoryError::InvalidInput)?,
+    );
+    check_small(&value)?;
+    let mut nonce = [0u8; 24];
+    getrandom::getrandom(&mut nonce).map_err(|_| RepositoryError::Storage)?;
+    let mut out = nonce.to_vec();
+    out.extend(
+        XChaCha20Poly1305::new(key.into())
+            .encrypt(
+                XNonce::from_slice(&nonce),
+                Payload {
+                    msg: &value,
+                    aad: &profile_aad(db, r),
+                },
+            )
+            .map_err(|_| RepositoryError::Corrupt)?,
+    );
+    Ok(out)
+}
+fn open_profile(key: &[u8; 32], db: &[u8; 32], r: &ProfileRow) -> Result<ServerProfile> {
+    if r.payload.len() < 40 || r.fingerprint.len() != 32 {
+        return Err(RepositoryError::Corrupt);
+    }
+    let value = Zeroizing::new(
+        XChaCha20Poly1305::new(key.into())
+            .decrypt(
+                XNonce::from_slice(&r.payload[..24]),
+                Payload {
+                    msg: &r.payload[24..],
+                    aad: &profile_aad(db, r),
+                },
+            )
+            .map_err(|_| RepositoryError::Corrupt)?,
+    );
+    let (name, host, port, protocol, favorite): (String, String, u16, String, bool) =
+        serde_json::from_slice(&value).map_err(|_| RepositoryError::Corrupt)?;
+    Ok(ServerProfile {
+        id: r.id,
+        source_id: r.source,
+        ordinal: r.ordinal,
+        name,
+        host,
+        port,
+        protocol,
+        favorite,
+        available: r.present,
+    })
+}
+fn read_profiles(tx: &rusqlite::Transaction<'_>, source: i64) -> Result<Vec<ProfileRow>> {
+    let mut stmt=tx.prepare("SELECT id,source_id,fingerprint,generation,revision,ordinal,present,payload FROM profiles WHERE source_id=?1 LIMIT 40001").map_err(storage)?;
+    let rows = stmt
+        .query_map([source], |r| {
+            Ok(ProfileRow {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                fingerprint: bounded_blob(r, 2, 32)?,
+                generation: r.get(3)?,
+                revision: r.get(4)?,
+                ordinal: r.get(5)?,
+                present: r.get(6)?,
+                payload: bounded_blob(r, 7, SMALL_LIMIT + 40)?,
+            })
+        })
+        .map_err(storage)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| RepositoryError::Corrupt)?;
+    if rows.len() > 40_000 {
+        return Err(RepositoryError::Corrupt);
+    }
+    Ok(rows)
+}
+fn reconcile(
+    tx: &rusqlite::Transaction<'_>,
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+    generation: i64,
+    revision: i64,
+    prepared: PreparedCatalog,
+) -> Result<()> {
+    let mut old = std::collections::HashMap::new();
+    for r in read_profiles(tx, source)? {
+        let p = open_profile(key, db, &r)?;
+        old.insert(r.fingerprint.clone(), (r, p));
+    }
+    let unique = prepared.rows.len();
+    for p in prepared.rows {
+        let existing = old.remove(&p.fingerprint);
+        let (id, favorite) = if let Some((r, profile)) = existing {
+            (r.id, profile.favorite)
+        } else {
+            tx.execute("INSERT INTO profiles(source_id,fingerprint,generation,revision,ordinal,present,payload) VALUES (?1,?2,?3,?4,?5,1,X'')",params![source,p.fingerprint,generation,revision,p.ordinal]).map_err(storage)?;
+            (tx.last_insert_rowid(), false)
+        };
+        let r = ProfileRow {
+            id,
+            source,
+            fingerprint: p.fingerprint,
+            generation,
+            revision,
+            ordinal: p.ordinal,
+            present: true,
+            payload: Vec::new(),
+        };
+        let profile = ServerProfile {
+            id,
+            source_id: source,
+            ordinal: p.ordinal,
+            name: p.name,
+            host: p.host,
+            port: p.port,
+            protocol: p.protocol,
+            favorite,
+            available: true,
+        };
+        let payload = seal_profile(key, db, &r, &profile)?;
+        tx.execute("UPDATE profiles SET generation=?1,revision=?2,ordinal=?3,present=1,payload=?4 WHERE id=?5",params![generation,revision,r.ordinal,payload,id]).map_err(storage)?;
+    }
+    for (_, (mut r, p)) in old {
+        if p.favorite {
+            r.present = false;
+            let payload = seal_profile(key, db, &r, &p)?;
+            tx.execute(
+                "UPDATE profiles SET present=0,payload=?1 WHERE id=?2",
+                params![payload, r.id],
+            )
+            .map_err(storage)?;
+        } else {
+            tx.execute("DELETE FROM profiles WHERE id=?1", [r.id])
+                .map_err(storage)?;
+        }
+    }
+    tx.execute("INSERT INTO profile_catalog VALUES (?1,?2,?3,?4,?5) ON CONFLICT(source_id) DO UPDATE SET generation=excluded.generation,revision=excluded.revision,raw_count=excluded.raw_count,unique_count=excluded.unique_count",params![source,generation,revision,prepared.raw,unique]).map_err(storage)?;
+    Ok(())
+}
+
+fn ensure_catalog(
+    tx: &rusqlite::Transaction<'_>,
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+) -> Result<(i64, i64, usize, usize)> {
+    let snapshot: Option<(i64, i64)> = tx
+        .query_row(
+            "SELECT source_generation,revision FROM snapshots WHERE source_id=?1",
+            [source],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(storage)?;
+    let Some((generation, revision)) = snapshot else {
+        return Ok((0, 0, 0, 0));
+    };
+    if generation <= 0 || revision <= 0 {
+        return Err(RepositoryError::Corrupt);
+    }
+    let marker:Option<(i64,i64,usize,usize)>=tx.query_row("SELECT generation,revision,raw_count,unique_count FROM profile_catalog WHERE source_id=?1",[source],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(storage)?;
+    if let Some(value) = marker {
+        if value.0 <= 0 || value.1 <= 0 || value.2 > tofu_import::MAX_RECORDS || value.3 > value.2 {
+            return Err(RepositoryError::Corrupt);
+        }
+        if value.0 == generation && value.1 == revision {
+            return Ok(value);
+        }
+    }
+    let body: Vec<u8> = tx
+        .query_row(
+            "SELECT body FROM snapshots WHERE source_id=?1",
+            [source],
+            |r| bounded_blob(r, 0, BODY_LIMIT + 40),
+        )
+        .map_err(storage)?;
+    let body = decrypt(key, db, 2, source, generation, revision, &body, BODY_LIMIT)?;
+    let prepared = prepare_profiles(key, db, source, &body)?;
+    let raw = prepared.raw;
+    let unique = prepared.rows.len();
+    reconcile(tx, key, db, source, generation, revision, prepared)?;
+    Ok((generation, revision, raw, unique))
+}
+impl EncryptedSubscriptionRepository {
+    pub async fn profiles(&self, source: i64, query: ProfileQuery) -> Result<ProfilePage> {
+        positive(source)?;
+        if !(1..=200).contains(&query.limit)
+            || query.offset > 40_000
+            || query.search.len() > 512
+            || query.search.chars().any(char::is_control)
+        {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.run(move |db| {
+            let tx = db
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            let source_generation = tx
+                .query_row(
+                    "SELECT generation FROM sources WHERE id=?1",
+                    [source],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(storage)?
+                .ok_or(RepositoryError::NotFound)?;
+            let (snapshot_generation, snapshot_revision, raw_count, unique_count) =
+                ensure_catalog(&tx, &db.key, &db.id, source)?;
+            let search = query.search.to_lowercase();
+            let mut profiles = Vec::new();
+            for r in read_profiles(&tx, source)? {
+                if r.present
+                    && (r.generation != snapshot_generation || r.revision != snapshot_revision)
+                {
+                    return Err(RepositoryError::Corrupt);
+                }
+                let p = open_profile(&db.key, &db.id, &r)?;
+                let name = p.name.to_lowercase();
+                if (query.include_unavailable || p.available)
+                    && (!query.favorites_only || p.favorite)
+                    && (search.is_empty()
+                        || name.contains(&search)
+                        || p.host.to_lowercase().contains(&search))
+                {
+                    profiles.push((name, p));
+                }
+            }
+            match query.sort {
+                ProfileSort::Name => {
+                    profiles.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)))
+                }
+                ProfileSort::SourceOrder => profiles.sort_by_key(|(_, p)| (p.ordinal, p.id)),
+            }
+            let total = profiles.len();
+            let profiles = profiles
+                .into_iter()
+                .skip(query.offset)
+                .take(query.limit)
+                .map(|(_, p)| p)
+                .collect();
+            tx.commit().map_err(storage)?;
+            Ok(ProfilePage {
+                profiles,
+                total,
+                raw_count,
+                unique_count,
+                duplicate_count: raw_count.saturating_sub(unique_count),
+                source_generation,
+                snapshot_generation,
+                snapshot_revision,
+            })
+        })
+        .await
+    }
+    pub async fn set_favorite(&self, id: i64, favorite: bool) -> Result<()> {
+        positive(id)?;
+        self.run(move |db| {
+            let tx = db
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            let source: i64 = tx
+                .query_row("SELECT source_id FROM profiles WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .map_err(storage)?
+                .ok_or(RepositoryError::NotFound)?;
+            let rows = read_profiles(&tx, source)?;
+            let mut favorites = 0;
+            let mut target = None;
+            for r in rows {
+                let p = open_profile(&db.key, &db.id, &r)?;
+                favorites += usize::from(p.favorite);
+                if r.id == id {
+                    target = Some((r, p))
+                }
+            }
+            let (r, mut p) = target.ok_or(RepositoryError::NotFound)?;
+            if favorite && !p.favorite && favorites >= 20_000 {
+                return Err(RepositoryError::InvalidInput);
+            }
+            p.favorite = favorite;
+            if !favorite && !r.present {
+                tx.execute("DELETE FROM profiles WHERE id=?1", [id])
+                    .map_err(storage)?;
+            } else {
+                let payload = seal_profile(&db.key, &db.id, &r, &p)?;
+                tx.execute(
+                    "UPDATE profiles SET payload=?1 WHERE id=?2",
+                    params![payload, id],
+                )
+                .map_err(storage)?;
+            }
+            tx.commit().map_err(storage)?;
+            Ok(())
+        })
+        .await
+    }
+    pub async fn resolve_profile(
+        &self,
+        id: i64,
+        expected_snapshot_revision: i64,
+    ) -> Result<ResolvedProfile> {
+        positive(id)?;
+        positive(expected_snapshot_revision)?;
+        self.run(move |db| {
+            let tx = db
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            let source: i64 = tx
+                .query_row("SELECT source_id FROM profiles WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .map_err(storage)?
+                .ok_or(RepositoryError::NotFound)?;
+            let (generation, revision, _, _) = ensure_catalog(&tx, &db.key, &db.id, source)?;
+            if revision != expected_snapshot_revision {
+                return Err(RepositoryError::Conflict);
+            }
+            let r = read_profiles(&tx, source)?
+                .into_iter()
+                .find(|r| r.id == id)
+                .ok_or(RepositoryError::NotFound)?;
+            let p = open_profile(&db.key, &db.id, &r)?;
+            if !p.available {
+                return Err(RepositoryError::NotFound);
+            }
+            if r.generation != generation || r.revision != revision {
+                return Err(RepositoryError::Corrupt);
+            }
+            let body: Vec<u8> = tx
+                .query_row(
+                    "SELECT body FROM snapshots WHERE source_id=?1",
+                    [source],
+                    |r| bounded_blob(r, 0, BODY_LIMIT + 40),
+                )
+                .map_err(storage)?;
+            let body = decrypt(
+                &db.key, &db.id, 2, source, generation, revision, &body, BODY_LIMIT,
+            )?;
+            let report =
+                tofu_import::import_bytes(body.to_vec()).map_err(|_| RepositoryError::Corrupt)?;
+            let server = report
+                .servers
+                .get(p.ordinal)
+                .ok_or(RepositoryError::Corrupt)?;
+            if fingerprint(&db.key, &db.id, source, server)? != r.fingerprint {
+                return Err(RepositoryError::Corrupt);
+            }
+            let source_generation = tx
+                .query_row(
+                    "SELECT generation FROM sources WHERE id=?1",
+                    [source],
+                    |r| r.get(0),
+                )
+                .map_err(storage)?;
+            let server = report
+                .servers
+                .into_iter()
+                .nth(p.ordinal)
+                .ok_or(RepositoryError::Corrupt)?;
+            tx.commit().map_err(storage)?;
+            Ok(ResolvedProfile {
+                profile: p,
+                server,
+                snapshot_revision: revision,
+                snapshot_generation: generation,
+                source_generation,
+            })
+        })
+        .await
     }
 }

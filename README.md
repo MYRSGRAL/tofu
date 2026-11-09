@@ -34,6 +34,8 @@ application, installer or production network adapter yet.
   Linux Direct HTTPS fetch with DNS/peer checks, encrypted SQLite snapshots and
   a Secret Service master-key adapter. These are library APIs; the current CLI
   still reads profiles from stdin.
+- Stable server identities and encrypted favourites, search/sort pages, duplicate
+  reconciliation and revision-bound selection from the same stored snapshot.
 
 The Rust library calculates policy; the isolated suites provide the specific
 network evidence described below. Full mixed domain/CIDR DNS/Fake-IP execution,
@@ -210,8 +212,22 @@ Local HTTP/private sources require an explicit source exception. Proxy fetch
 currently returns `UnsupportedPeerVerification`: SOCKS exposes the proxy peer,
 not the upstream peer required by the contract. There is no Direct fallback.
 Native JSON may be saved after review, but this does not authorize its execution.
-Scheduling, server fingerprints/favourites, GUI integration and automatic session
+Scheduling, GUI integration and automatic session
 reconfiguration are still pending. [Validation and limits](docs/validation/2026-11-09-subscription-snapshots.md).
+
+Server identities use versioned connection parameters, including unknown options;
+URI fragments and VMess `ps` only change the displayed name. A source-scoped HMAC
+index preserves profile IDs and favourites on rename/reorder. A changed endpoint,
+credential or option creates a new identity; absent and explicit defaults may
+conservatively differ. Duplicates collapse to the first parsed record. Removed
+favourites stay visible as unavailable and recover their ID when they return;
+removed non-favourites are pruned and their IDs are never reused.
+
+`profiles()` returns bounded search/sort pages; `select_profile(id, revision)`
+returns an owned parsed server from that exact snapshot, rejecting a stale page
+instead of applying an obsolete ordinal. Schema v2 migrates v1 transactionally
+and builds old snapshot indexes lazily. The master key remains unchanged.
+[Identity, migration and load checks](docs/validation/2026-11-09-profile-identities.md).
 
 ### Routing policy
 

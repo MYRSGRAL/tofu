@@ -2,7 +2,8 @@
 
 use crate::{
     EncryptedSubscriptionRepository, FetchError, FetchHost, FetchResponse, FetchRoute,
-    FetchValidators, RepositoryError, SnapshotInput, Source,
+    FetchValidators, ProfilePage, ProfileQuery, RepositoryError, ResolvedProfile, SnapshotInput,
+    Source,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -20,7 +21,7 @@ use tofu_subscription::{ApprovedUpdate, StagedUpdate, Subscription, Summary};
 use tokio::sync::{Mutex, Semaphore, watch};
 
 static CONTROLLERS: AtomicU64 = AtomicU64::new(1);
-static IMPORT_GATE: Semaphore = Semaphore::const_new(2);
+pub(crate) static IMPORT_GATE: Semaphore = Semaphore::const_new(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionError {
@@ -241,6 +242,42 @@ impl SubscriptionService {
 
     pub async fn add(&self, source: SubscriptionSource) -> Result<i64, SubscriptionError> {
         Ok(self.repository.create_source(source.encode()?).await?.id)
+    }
+
+    pub async fn profiles(
+        &self,
+        source: i64,
+        query: ProfileQuery,
+    ) -> Result<ProfilePage, SubscriptionError> {
+        self.repository
+            .profiles(source, query)
+            .await
+            .map_err(SubscriptionError::Repository)
+    }
+
+    pub async fn set_favorite(
+        &self,
+        profile: i64,
+        favorite: bool,
+    ) -> Result<(), SubscriptionError> {
+        self.repository
+            .set_favorite(profile, favorite)
+            .await
+            .map_err(SubscriptionError::Repository)
+    }
+
+    /// Выбор относится к конкретному snapshot списка. Repository возвращает
+    /// сам parsed server из того же snapshot; повторное чтение по ordinal
+    /// после resolve создало бы гонку с обновлением подписки.
+    pub async fn select_profile(
+        &self,
+        profile: i64,
+        snapshot_revision: i64,
+    ) -> Result<ResolvedProfile, SubscriptionError> {
+        self.repository
+            .resolve_profile(profile, snapshot_revision)
+            .await
+            .map_err(SubscriptionError::Repository)
     }
     pub async fn change_source(
         &self,
