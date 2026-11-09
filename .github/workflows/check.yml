@@ -28,6 +28,8 @@ jobs:
         run: cargo +1.85.1 clippy --workspace --all-targets --locked -- -D warnings
       - name: Выполнить тесты
         run: cargo +1.85.1 test --workspace --locked
+      - name: Проверить пакет из 10000 TCP-серий на loopback
+        run: cargo +1.85.1 test -p tofu-linux --lib --locked -- --ignored --exact tcp_batch::tests::ten_thousand_loopback_series
       - name: Собрать release
         run: cargo +1.85.1 build --workspace --release --locked
       - name: Проверить общую библиотеку для Android
