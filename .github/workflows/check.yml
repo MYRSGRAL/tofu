@@ -65,8 +65,8 @@ jobs:
           export GOMODCACHE="$tofu_native_root/build-native-adapter-cache/go-mod"
           export GOTMPDIR="$tofu_native_root/build-native-adapter-cache/go-tmp"
           export TMPDIR="$tofu_native_root/build-native-adapter-cache/tmp"
-          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly ./dns ./route ./route/rule ./option
-          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly -race ./dns -run TestStrictComplete -count=1
+          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly ./adapter ./common/dialer ./dns ./route ./route/rule ./protocol/direct ./option
+          flock -s "$tofu_native_root" go -C "$tofu_native_root/build-source-sing-box" test -mod=readonly -race ./adapter ./common/dialer ./dns ./route ./route/rule ./protocol/direct ./option -count=1
           flock -s "$tofu_native_root" git -C "$tofu_native_root/build-source-sing-box" diff --exit-code -- go.mod go.sum
   desktop:
     runs-on: ubuntu-latest
