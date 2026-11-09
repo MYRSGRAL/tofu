@@ -4,6 +4,12 @@
 //! `PeerIdentity` — снимок, а не разрешение на будущий Apply: перед каждым
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
+mod prepared;
+pub use prepared::{
+    MAX_ARTIFACT_BYTES, MAX_IN_FLIGHT, MAX_PENDING, MAX_PENDING_PER_PEER, PREPARED_TTL,
+    PreparedArtifact, PreparedContext, PreparedError, PreparedHandle, PreparedRequests,
+};
+
 mod registry;
 pub use registry::{RegistryError, TrustedRegistry};
 

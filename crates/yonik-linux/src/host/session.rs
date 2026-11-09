@@ -43,6 +43,14 @@ pub struct CheckedConfig {
     probe_port: NonZeroU16,
     probe_access: ProbeAccess,
 }
+impl crate::helper::PreparedArtifact for CheckedConfig {
+    fn current_digest(&self) -> ConfigDigest {
+        ConfigDigest::new(Sha256::digest(&self.bytes).into())
+    }
+    fn byte_len(&self) -> usize {
+        self.bytes.len()
+    }
+}
 impl std::fmt::Debug for CheckedConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("CheckedConfig(<скрыто>)")

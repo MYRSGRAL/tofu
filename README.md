@@ -245,6 +245,12 @@ It rejects untrusted paths, metadata and manifest entries. The normal user engin
 directory remains separate. This component does not install a service or apply
 network changes. [Registry contract](docs/specs/helper-trusted-registry.md).
 
+`PreparedRequests<A>` binds checked artifacts to a bus peer and generation,
+requires fresh polkit on prepare and claim, and releases each artifact once.
+The real `CheckedConfig` supplies its current SHA-256. Pending work, payload size
+and TTL are bounded; executable-image memory still needs a shared budget before
+production service integration. [Prepare/claim contract](docs/specs/helper-prepared-requests.md).
+
 ### Managed network resource journal
 
 `yonik_linux::managed_network` provides a bounded, durable ownership journal for
