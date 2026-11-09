@@ -20,3 +20,7 @@ pub use repository::*;
 mod subscriptions;
 #[cfg(target_os = "linux")]
 pub use subscriptions::*;
+#[cfg(target_os = "linux")]
+mod tcp_probe;
+#[cfg(target_os = "linux")]
+pub use tcp_probe::{TcpProbeResult, TcpProbeStatus, TcpProbeTarget, check_tcp};
