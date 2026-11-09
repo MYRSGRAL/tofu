@@ -429,6 +429,66 @@ fn tcp_cancel_bypasses_full_queue_and_invalidates_queued_probe() {
 }
 
 #[test]
+fn stop_and_shutdown_finish_a_pending_tcp_task_before_acknowledgement() {
+    for shutdown in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("свой TCP listener");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("порт").port();
+        let directory = Directory::new();
+        let (url, server) = fixture(vec![format!(
+            "trojan://pending-secret@127.0.0.1:{port}#Pending"
+        )]);
+        let blocked = Arc::new((Mutex::new(false), Condvar::new()));
+        let gate = blocked.clone();
+        let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+            let value: Value = serde_json::from_str(snapshot).expect("DTO");
+            if value["tcp_busy"] == true {
+                let (lock, condition) = &*gate;
+                let mut released = lock.lock().expect("gate lock");
+                while !*released {
+                    released = condition.wait(released).expect("gate wait");
+                }
+            }
+        });
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"add_source","name":"Pending","url":url,"local_exception":true,"route":"direct"}));
+        app.wait(|v| v["source_id"].is_number());
+        app.send(json!({"command":"refresh"}));
+        let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+        app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+        app.wait(|v| v["selected_profile"].is_number());
+        app.send(json!({"command":"check_tcp"}));
+        app.wait(|v| v["tcp_busy"] == true);
+        if shutdown {
+            app.host.shutdown();
+        } else {
+            app.send(json!({"command":"stop"}));
+        }
+        let (lock, condition) = &*blocked;
+        *lock.lock().expect("gate lock") = true;
+        condition.notify_all();
+        if shutdown {
+            let closed = app.wait(|v| v["closed"] == true);
+            assert_eq!(closed["tcp_busy"], false);
+            assert!(app.host.wait_closed(Duration::from_secs(2)));
+        } else {
+            let cancelled =
+                app.wait(|v| v["tcp_busy"] == false && v["tcp_result"]["status"] == "cancelled");
+            assert_eq!(cancelled["status"], "Disconnected");
+            app.close();
+        }
+        assert_eq!(
+            listener
+                .accept()
+                .expect_err("отмена до polling connect")
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        server.join().expect("HTTP fixture завершён");
+    }
+}
+
+#[test]
 fn native_json_requires_approval_and_never_becomes_profile() {
     let directory = Directory::new();
     let (url, server) = fixture(vec![r#"{"outbounds":[{"type":"direct"}]}"#]);
