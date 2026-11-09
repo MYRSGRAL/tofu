@@ -17,10 +17,10 @@ use tofu_engine::Engine;
 use tofu_import::{Field, IssueCode, ReviewFlag};
 use tofu_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
-    FetchError, FetchRoute, HostError, LocalSession, PendingRefresh, ProbeResult, ProbeTarget,
-    ProfileQuery, RefreshResult, ResolvedProfile, SubscriptionError, SubscriptionService,
-    SubscriptionSource, TcpProbeResult, TcpProbeStatus, TcpProbeTarget, check_tcp,
-    subscription_master_key,
+    FetchError, FetchRoute, HostError, LocalSession, NetworkMonitor, NetworkSnapshot, NetworkStamp,
+    NetworkWatch, PendingRefresh, ProbeResult, ProbeTarget, ProfileQuery, RefreshResult,
+    ResolvedProfile, SubscriptionError, SubscriptionService, SubscriptionSource, TcpProbeResult,
+    TcpProbeStatus, TcpProbeTarget, check_tcp, subscription_master_key,
 };
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroizing;
@@ -453,6 +453,12 @@ struct Snapshot {
     tcp_busy: bool,
     tcp_name: Option<String>,
     tcp_result: Option<TcpResultDto>,
+    network_epoch: Option<String>,
+    network_observed: bool,
+    network_routes: bool,
+    network_resolver: bool,
+    network_manager: bool,
+    tcp_invalidated: bool,
 }
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
@@ -486,6 +492,12 @@ impl Snapshot {
             tcp_busy: false,
             tcp_name: None,
             tcp_result: None,
+            network_epoch: None,
+            network_observed: false,
+            network_routes: false,
+            network_resolver: false,
+            network_manager: false,
+            tcp_invalidated: false,
         }
     }
     fn emit(&self, callback: &Callback) {
@@ -558,6 +570,7 @@ struct Actor {
     search: String,
     favorites_only: bool,
     probe_url: Zeroizing<String>,
+    network: Option<NetworkWatch>,
 }
 impl Actor {
     fn tcp_key(&self) -> Option<TcpKey> {
@@ -574,11 +587,11 @@ impl Actor {
             .map_err(|_| DesktopError("probe_target_invalid"))
     }
     fn update(&mut self, update: SessionUpdate) {
-        self.state.status = update.status;
-        self.state.error = update.error;
-        if let Some(result) = update.probe_result {
-            self.state.probe_result = Some(result);
-        }
+        apply_session_update(
+            &mut self.state,
+            update,
+            self.network.as_ref().map(NetworkWatch::current),
+        );
     }
     fn emit(&mut self) {
         self.state.can_connect = self.selected.is_some()
@@ -839,12 +852,128 @@ struct SessionUpdate {
     status: &'static str,
     error: Option<&'static str>,
     probe_result: Option<HealthResultDto>,
+    network_stamp: Option<NetworkStamp>,
+}
+
+fn network_matches(network: Option<NetworkSnapshot>, stamp: Option<NetworkStamp>) -> bool {
+    match (network, stamp) {
+        (Some(network), Some(stamp)) => network.is_current(stamp),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn apply_session_update(
+    state: &mut Snapshot,
+    update: SessionUpdate,
+    network: Option<NetworkSnapshot>,
+) {
+    if update.network_stamp.is_some() && !network_matches(network, update.network_stamp) {
+        state.status = "Limited";
+        state.error = Some("network_changed");
+        state.probe_result = None;
+        return;
+    }
+    state.status = update.status;
+    state.error = update.error;
+    if let Some(result) = update.probe_result {
+        state.probe_result = Some(result);
+    }
+}
+
+fn synchronize_network(state: &mut Snapshot, network: Option<NetworkSnapshot>) {
+    let epoch = network.map(|network| network.stamp.to_string());
+    let changed = state.network_epoch != epoch || network.is_some_and(|network| network.exhausted);
+    state.network_epoch = epoch;
+    state.network_observed = network.is_some_and(NetworkSnapshot::fully_observed);
+    let coverage = network.map(|network| network.coverage).unwrap_or_default();
+    state.network_routes = coverage.routes;
+    state.network_resolver = coverage.resolver;
+    state.network_manager = coverage.manager;
+    if changed {
+        state.tcp_invalidated |= state.tcp_result.is_some() || state.tcp_busy;
+        state.tcp_result = None;
+        state.probe_result = None;
+        if matches!(state.status, "Checking" | "Connected" | "Limited") {
+            state.status = "Limited";
+            state.error = Some("network_changed");
+        }
+    }
+}
+
+async fn network_changed(network: &mut Option<NetworkWatch>) {
+    match network {
+        Some(watch) => {
+            if watch.changed().await.is_err() {
+                *network = None;
+            }
+        }
+        None => std::future::pending().await,
+    }
+}
+
+async fn network_invalidated(network: &mut Option<NetworkWatch>, stamp: Option<NetworkStamp>) {
+    loop {
+        if !network_matches(network.as_ref().map(NetworkWatch::current), stamp) {
+            return;
+        }
+        network_changed(network).await;
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn late_success_from_previous_network_cannot_restore_connected() {
+        let first = NetworkMonitor::start().expect("первый наблюдатель");
+        let second = NetworkMonitor::start().expect("второй наблюдатель");
+        let mut state = Snapshot::new(true);
+        state.status = "Limited";
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Connected",
+                error: None,
+                probe_result: Some(ProbeResult::Timeout.into()),
+                network_stamp: Some(first.watch().current().stamp),
+            },
+            Some(second.watch().current()),
+        );
+        assert_eq!(state.status, "Limited");
+        assert_eq!(state.error, Some("network_changed"));
+        assert!(state.probe_result.is_none());
+        first.shutdown().await;
+        second.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn new_network_removes_old_proof_without_stopping_core() {
+        let first = NetworkMonitor::start().expect("первый наблюдатель");
+        let second = NetworkMonitor::start().expect("второй наблюдатель");
+        let mut state = Snapshot::new(true);
+        state.network_epoch = Some(first.watch().current().stamp.to_string());
+        state.status = "Connected";
+        state.can_stop = true;
+        state.probe_result = Some(ProbeResult::Timeout.into());
+        state.tcp_busy = true;
+        synchronize_network(&mut state, Some(second.watch().current()));
+        assert!(state.probe_result.is_none());
+        assert!(state.tcp_invalidated);
+        assert_eq!(state.status, "Limited");
+        assert!(state.can_stop);
+        first.shutdown().await;
+        second.shutdown().await;
+    }
 }
 #[derive(Serialize)]
 struct HealthResultDto {
     kind: &'static str,
     http_status: Option<u16>,
     elapsed_ms: Option<u64>,
+    network_epoch: Option<String>,
+    network_observed: bool,
 }
 impl From<ProbeResult> for HealthResultDto {
     fn from(result: ProbeResult) -> Self {
@@ -853,6 +982,8 @@ impl From<ProbeResult> for HealthResultDto {
                 kind: "http",
                 http_status: Some(status),
                 elapsed_ms: Some(elapsed.as_millis().min(u64::MAX as u128) as u64),
+                network_epoch: None,
+                network_observed: false,
             },
             other => Self {
                 kind: match other {
@@ -862,6 +993,8 @@ impl From<ProbeResult> for HealthResultDto {
                 },
                 http_status: None,
                 elapsed_ms: None,
+                network_epoch: None,
+                network_observed: false,
             },
         }
     }
@@ -895,6 +1028,8 @@ struct TcpResultDto {
     dns_ms: Option<u64>,
     connect_ms: Option<u64>,
     checked_at_ms: u64,
+    network_epoch: Option<String>,
+    network_observed: bool,
 }
 impl TcpResultDto {
     fn key(&self) -> TcpKey {
@@ -927,6 +1062,7 @@ impl TcpResultDto {
 struct TcpRunning {
     generation: u64,
     tcp_generation: u64,
+    network_stamp: Option<NetworkStamp>,
     result: TcpResultDto,
     cancel: watch::Sender<bool>,
     task: tokio::task::JoinHandle<std::result::Result<TcpProbeResult, HostError>>,
@@ -939,6 +1075,7 @@ async fn session(
     target: ProbeTarget,
     mut cancel: Cancellation,
     updates: mpsc::Sender<SessionUpdate>,
+    mut network: Option<NetworkWatch>,
 ) -> std::result::Result<(), LocalSession> {
     let Ok(mut session) = LocalSession::new() else {
         let _ = updates
@@ -946,6 +1083,7 @@ async fn session(
                 status: "Error",
                 error: Some("engine_failed"),
                 probe_result: None,
+                network_stamp: None,
             })
             .await;
         return Ok(());
@@ -990,45 +1128,81 @@ async fn session(
                 "engine_failed"
             }
         })?;
+        let checked_network = network.as_ref().map(NetworkWatch::current);
+        let mut network_stamp = checked_network.map(|network| network.stamp);
         let _ = updates
             .send(SessionUpdate {
                 status: "Checking",
                 error: None,
                 probe_result: None,
+                network_stamp,
             })
             .await;
-        let result = session.check(&target, &mut cancel).await.map_err(|e| {
+        let result = tokio::select! {
+            biased;
+            _ = network_invalidated(&mut network, network_stamp) => None,
+            result = session.check(&target, &mut cancel) => Some(result),
+        };
+        let result = result.transpose().map_err(|e| {
             if e == HostError::Cancelled {
                 "cancelled"
             } else {
                 "check_failed"
             }
         })?;
-        let passed = target.accepts(result);
-        let error = if passed {
-            None
-        } else {
-            Some(match result {
-                ProbeResult::Response { .. } => "check_http_status",
-                ProbeResult::Timeout => "check_timeout",
-                ProbeResult::Tls => "check_tls",
-                ProbeResult::Transport => "check_transport",
-            })
-        };
-        let _ = updates
-            .send(SessionUpdate {
+        if let Some(result) = result.filter(|_| {
+            network_matches(network.as_ref().map(NetworkWatch::current), network_stamp)
+        }) {
+            let passed = target.accepts(result);
+            let error = if passed {
+                None
+            } else {
+                Some(match result {
+                    ProbeResult::Response { .. } => "check_http_status",
+                    ProbeResult::Timeout => "check_timeout",
+                    ProbeResult::Tls => "check_tls",
+                    ProbeResult::Transport => "check_transport",
+                })
+            };
+            let mut proof: HealthResultDto = result.into();
+            proof.network_epoch = network_stamp.map(|stamp| stamp.to_string());
+            proof.network_observed = checked_network.is_some_and(NetworkSnapshot::fully_observed);
+            let _ = updates.send(SessionUpdate {
                 status: if passed { "Connected" } else { "Limited" },
                 error,
-                probe_result: Some(result.into()),
-            })
-            .await;
-        session.wait_exit(&mut cancel).await.map_err(|e| {
-            if e == HostError::Cancelled {
-                "cancelled"
-            } else {
-                "engine_failed"
+                probe_result: Some(proof),
+                network_stamp,
+            }).await;
+        } else {
+            session.invalidate_check().map_err(|_| "check_failed")?;
+            let _ = updates.send(SessionUpdate {
+                status: "Limited",
+                error: Some("network_changed"),
+                probe_result: None,
+                network_stamp: None,
+            }).await;
+            network_stamp = network.as_ref().map(|watch| watch.current().stamp);
+        }
+        loop {
+            tokio::select! {
+                biased;
+                result = session.wait_exit(&mut cancel) => return result.map_err(|e| {
+                    if e == HostError::Cancelled { "cancelled" } else { "engine_failed" }
+                }),
+                _ = network_changed(&mut network) => {
+                    if !network_matches(network.as_ref().map(NetworkWatch::current), network_stamp) {
+                        session.invalidate_check().map_err(|_| "check_failed")?;
+                        network_stamp = network.as_ref().map(|watch| watch.current().stamp);
+                        let _ = updates.send(SessionUpdate {
+                            status: "Limited",
+                            error: Some("network_changed"),
+                            probe_result: None,
+                            network_stamp: None,
+                        }).await;
+                    }
+                }
             }
-        })
+        }
     }
     .await;
     if session.stop().await.is_err() {
@@ -1037,6 +1211,7 @@ async fn session(
                 status: "CleanupError",
                 error: Some("cleanup_failed"),
                 probe_result: None,
+                network_stamp: None,
             })
             .await;
         return Err(session);
@@ -1051,6 +1226,7 @@ async fn session(
             },
             error,
             probe_result: None,
+            network_stamp: None,
         })
         .await;
     Ok(())
@@ -1120,6 +1296,9 @@ async fn run(
         }
     };
     state.ready = true;
+    let network_monitor = NetworkMonitor::start().ok();
+    let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
+    synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let mut actor = Actor {
         service,
         state,
@@ -1129,6 +1308,7 @@ async fn run(
         search: String::new(),
         favorites_only: false,
         probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
+        network: network.clone(),
     };
     if let Err(error) = actor.reload().await {
         actor.state.error = Some(error.key());
@@ -1166,11 +1346,21 @@ async fn run(
                 tcp_priority.borrow_and_update();
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
             }
+            _ = network_changed(&mut network) => {
+                let current = network.as_ref().map(NetworkWatch::current);
+                actor.network = network.clone();
+                synchronize_network(&mut actor.state, current);
+                if let Some(tcp) = tcp_running.as_ref() {
+                    if !network_matches(current, tcp.network_stamp) { tcp.cancel.send_replace(true); }
+                }
+                actor.emit();
+            }
             result = async { (&mut tcp_running.as_mut().expect("guard").task).await }, if tcp_running.is_some() => {
                 let mut tcp = tcp_running.take().expect("guard");
                 actor.state.tcp_busy = false;
                 actor.state.tcp_name = None;
-                if actor.tcp_key() == Some(tcp.result.key()) && !quitting {
+                if actor.tcp_key() == Some(tcp.result.key()) && !quitting
+                    && network_matches(network.as_ref().map(NetworkWatch::current), tcp.network_stamp) {
                     match result {
                         Ok(Ok(mut result)) => {
                             if tcp.generation != control.generation.load(Ordering::SeqCst)
@@ -1216,18 +1406,23 @@ async fn run(
                             Err(DesktopError("busy"))
                         } else if let Some(profile) = actor.selected.as_ref() {
                             let target = TcpProbeTarget::for_server(&profile.server);
+                            let current = network.as_ref().map(NetworkWatch::current);
+                            let network_stamp = current.map(|network| network.stamp);
                             let result = TcpResultDto {
                                 source_id: profile.profile.source_id, profile_id: profile.profile.id,
                                 revision: profile.snapshot_revision, name: profile.profile.name.clone(),
                                 host: profile.server.endpoint().host().into(), port: profile.server.endpoint().port(),
                                 status: "cancelled", dns_ms: None, connect_ms: None, checked_at_ms: 0,
+                                network_epoch: network_stamp.map(|stamp| stamp.to_string()),
+                                network_observed: current.is_some_and(NetworkSnapshot::fully_observed),
                             };
                             let (cancel, mut receiver) = Cancellation::new();
                             let task = tokio::spawn(async move { check_tcp(target, Duration::from_secs(5), &mut receiver).await });
                             actor.state.tcp_busy = true; actor.state.tcp_name = Some(result.name.clone());
                             actor.state.tcp_result = None;
+                            actor.state.tcp_invalidated = false;
                             tcp_running = Some(TcpRunning { generation: envelope.generation,
-                                tcp_generation: envelope.tcp_generation, result, cancel, task });
+                                tcp_generation: envelope.tcp_generation, network_stamp, result, cancel, task });
                             Ok(())
                         } else { Err(DesktopError("profile_required")) }
                     }
@@ -1249,7 +1444,7 @@ async fn run(
                                 match (NonZeroU16::new(actor.state.port).and_then(|port| tofu_engine::compile(&profile.server, actor.state.engine.engine(), port).ok()), actor.probe_target()) {
                                     (Some(compiled), Ok(target)) => {
                                         let (cancel, receiver) = Cancellation::new();
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
                                         running = Some(Running { cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -1295,6 +1490,9 @@ async fn run(
         }
     }
     actor.pending = None;
+    if let Some(monitor) = network_monitor {
+        monitor.shutdown().await;
+    }
     actor.selected = None;
     let closed = actor.service.close().await.is_ok();
     drop(_lock);

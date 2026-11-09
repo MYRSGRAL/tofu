@@ -1,0 +1,61 @@
+use tofu_application::{ConfigDigest, Event, Outcome, State};
+
+use super::{HostError, LOCAL_ENV, LocalSession};
+
+fn advance(session: &mut LocalSession, event: Option<Event>) {
+    let token = session.session.begin().unwrap();
+    let digest = ConfigDigest::new([0; 32]);
+    let plan = session.session.prepare(token, LOCAL_ENV, digest).unwrap();
+    session.active = match session.session.apply(plan, LOCAL_ENV, digest).unwrap() {
+        Outcome::Applied(Some(token)) => Some(token),
+        other => panic!("Ожидался Starting: {other:?}"),
+    };
+    session.accept(Event::NetworkApplied).unwrap();
+    if let Some(event) = event {
+        session.accept(event).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn invalidated_check_preserves_live_owned_process_until_explicit_stop() {
+    for event in [
+        None,
+        Some(Event::CheckPassed),
+        Some(Event::EndpointUnavailable),
+    ] {
+        let mut session = LocalSession::new().unwrap();
+        advance(&mut session, event);
+        let mut command = tokio::process::Command::new("/usr/bin/sleep");
+        command.arg("30").kill_on_drop(true).process_group(0);
+        session.child = Some(command.spawn().unwrap());
+        let pid = session.engine_pid().unwrap();
+        let generation = session.session.applied_generation();
+
+        session.invalidate_check().unwrap();
+
+        assert_eq!(session.state(), State::Limited);
+        assert_eq!(session.session.applied_generation(), generation);
+        assert_eq!(session.engine_pid(), Some(pid));
+        assert!(
+            session
+                .child
+                .as_mut()
+                .unwrap()
+                .try_wait()
+                .unwrap()
+                .is_none()
+        );
+        session.stop().await.unwrap();
+        assert_eq!(session.state(), State::Disconnected);
+        assert_eq!(session.engine_pid(), None);
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+    }
+}
+
+#[test]
+fn invalidation_without_active_session_is_rejected() {
+    let mut session = LocalSession::new().unwrap();
+    assert_eq!(session.invalidate_check(), Err(HostError::State));
+    assert_eq!(session.state(), State::Disconnected);
+    assert_eq!(session.engine_pid(), None);
+}
