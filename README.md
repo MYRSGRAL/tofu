@@ -53,6 +53,11 @@ Preparation now goes through `prepare/apply`; direct `Event::Validated` is remov
 The trusted host supplies fresh generations and a SHA-256 digest of the immutable
 checked artifact. This does not replace OS authorization or atomic host-side Apply.
 
+The strict DNS gate now has isolated native counterexamples for partial A/AAAA,
+route-to-dial address changes and Fake-IP reuse before the original TTL expires.
+These results keep mixed DNS/Fake-IP execution disabled; they do not mark G-DNS
+as passed. [Evidence and adapter requirements](docs/validation/2026-11-09-native-dns-contracts.md).
+
 ## Development
 
 ### Native Linux GUI
