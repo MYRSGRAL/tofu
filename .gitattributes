@@ -1,0 +1,2 @@
+# Пробелы перед табами и пустыми строками — обязательный контекст unified diff.
+adapters/**/*.patch -whitespace
