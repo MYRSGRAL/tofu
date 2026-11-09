@@ -8,6 +8,7 @@ fn main() {
         )
         .file("src/bridge.rs")
         .cpp_file("src/application.cpp")
+        .qrc("resources.qrc")
         .include_dir("src")
         .qt_module("Quick")
         .qt_module("Widgets")
@@ -16,5 +17,6 @@ fn main() {
         .build();
         println!("cargo::rerun-if-changed=src/application.h");
         println!("cargo::rerun-if-changed=src/application.cpp");
+        println!("cargo::rerun-if-changed=src/ui_smoke.h");
     }
 }

@@ -96,6 +96,23 @@ def free_port() -> int:
 def step(
     when: dict[str, object], command: str, **arguments: object
 ) -> dict[str, object]:
+    if command in ("connect", "stop") and not arguments:
+        expected: dict[str, object] = {
+            "window": {"page": 0},
+            "mainConnectButton": {"enabled": True},
+        }
+        statuses = {
+            "Connected": "Подключено",
+            "Limited": "Соединение ограничено",
+            "Checking": "Проверка доступа…",
+        }
+        if label := statuses.get(str(when.get("status"))):
+            expected["mainStatusLabel"] = {"text": label}
+        return {
+            "when": when,
+            "ui_when": expected,
+            "ui": {"action": "click", "object": "mainConnectButton"},
+        }
     return {"when": when, "command": {"command": command, **arguments}}
 
 

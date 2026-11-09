@@ -71,8 +71,12 @@ simple connect screen. All configuration moves to Settings. Variant A, with a
 large central connect button, has been selected in the [interactive concepts](design/ui-variants.html).
 The [isolated Qt/GTK4/Slint benchmark](bench/ui/README.md) is separate from the
 application; real-window measurements and toolkit selection remain pending.
-The current GUI remains a functional prototype. [UI direction](docs/specs/ui-direction.md).
+The native Qt prototype now implements A: server card, central connect/stop button,
+status, server picker and separate Settings. Onest/Unbounded fonts and OFL licenses
+are embedded. This working UI does not wait for the benchmark or system TUN.
+[UI direction](docs/specs/ui-direction.md).
 [Main-screen/backend contract](docs/specs/ui-backend-contract.md).
+[Native A implementation and checks](docs/validation/2026-11-09-ui-a-native.md).
 
 ## Development
 
@@ -100,8 +104,9 @@ The engine directory contains verified `xray-26.10.31/xray` and/or
 the local SOCKS port (default 10808). Configure that SOCKS proxy explicitly in the
 application that should use it. The GUI does not enable TUN or system proxy.
 
-Paste a subscription into **Subscriptions → Add**, fetch it, approve any partial
-import, select a profile and connect. `Limited` means the core is running but the
+Open **Settings → Subscriptions → Add**, paste a subscription, refresh it and approve
+any partial import. Return home, choose a server and press the central button.
+`Limited` means the core is running but the
 HTTPS check failed. Data lives under `$XDG_DATA_HOME/tofu` or `~/.local/share/tofu`;
 `--data-dir PATH` selects a private directory. The master key stays in Secret Service.
 A locked/missing key never triggers plaintext fallback. Never pass subscription

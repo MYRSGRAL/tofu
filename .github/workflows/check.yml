@@ -111,3 +111,7 @@ jobs:
           python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case profiles --no-namespace --output "$RUNNER_TEMP/gui-profiles"
           python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case partial --no-namespace --output "$RUNNER_TEMP/gui-partial"
           python3 tools/desktop_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --case tcp-basic --no-namespace --output "$RUNNER_TEMP/gui-tcp"
+      - name: Проверить действия пользователя в тёмном UI А
+        run: |
+          python3 tools/desktop_ui_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --output "$RUNNER_TEMP/gui-ui-a"
+          python3 tools/desktop_ui_smoke.py "$CARGO_TARGET_DIR/debug/tofu-desktop" --output "$RUNNER_TEMP/gui-ui-a-compact" --width 520 --height 640 --scale 1.5
