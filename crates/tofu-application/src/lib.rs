@@ -31,6 +31,7 @@ pub enum Fault {
 pub enum Event {
     NetworkApplied,
     CheckPassed,
+    CheckInvalidated,
     EndpointUnavailable,
     Failed(Fault),
     CleanupConfirmed,
@@ -167,6 +168,9 @@ impl Session {
         let (state, fault) = match (self.state, event) {
             (State::Starting, Event::NetworkApplied) => (State::Checking, None),
             (State::Checking | State::Limited, Event::CheckPassed) => (State::Connected, None),
+            (State::Checking | State::Connected | State::Limited, Event::CheckInvalidated) => {
+                (State::Limited, None)
+            }
             (State::Checking | State::Limited, Event::EndpointUnavailable) => {
                 (State::Limited, None)
             }

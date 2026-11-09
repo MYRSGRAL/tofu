@@ -21,6 +21,10 @@ use super::{BinarySnapshot, Cancellation, HostError, ProbeResult, ProbeTarget, p
 
 static CONTROLLER: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;
+
 // Локальный режим не владеет системной сетью/правами. Snapshot ядра immutable;
 // эти значения не выдаются за поколения будущих NetworkHost/ApplicationCatalog.
 const LOCAL_ENV: EnvironmentStamp = EnvironmentStamp {
@@ -113,6 +117,11 @@ impl LocalSession {
     }
     pub fn engine_pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
+    }
+
+    /// Инвалидирует результат проверки, сохраняя запущенное ядро и его ресурсы.
+    pub fn invalidate_check(&mut self) -> Result<(), HostError> {
+        self.accept(Event::CheckInvalidated)
     }
 
     fn accept(&mut self, event: Event) -> Result<(), HostError> {

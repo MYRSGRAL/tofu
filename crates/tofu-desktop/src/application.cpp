@@ -293,7 +293,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             stopAction->setEnabled(snapshot.value(QStringLiteral("can_stop")).toBool());
             updateTrayLabels();
             QJsonObject metadata;
-            for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed", "tcp_busy"}) {
+            for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed", "tcp_busy", "can_stop"}) {
                 metadata.insert(QLatin1String(key), snapshot.value(QLatin1String(key)));
             }
             const auto sources = snapshot.value(QStringLiteral("sources")).toArray().size();
@@ -305,6 +305,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             metadata.insert(QStringLiteral("step"), stepIndex);
             const auto tcpStatus = snapshot.value(QStringLiteral("tcp_result")).toObject().value(QStringLiteral("status"));
             metadata.insert(QStringLiteral("tcp_status"), tcpStatus);
+            metadata.insert(QStringLiteral("probe_present"), snapshot.value(QStringLiteral("probe_result")).isObject());
             if (smokeTest && traceFile.isOpen()) {
                 const auto line = QJsonDocument(metadata).toJson(QJsonDocument::Compact) + '\n';
                 if (traceFile.pos() + line.size() > 500000 || traceFile.write(line) != line.size()) {

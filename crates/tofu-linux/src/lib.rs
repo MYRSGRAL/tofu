@@ -24,3 +24,10 @@ pub use subscriptions::*;
 mod tcp_probe;
 #[cfg(target_os = "linux")]
 pub use tcp_probe::{TcpProbeResult, TcpProbeStatus, TcpProbeTarget, check_tcp};
+#[cfg(target_os = "linux")]
+mod network;
+#[cfg(target_os = "linux")]
+pub use network::{
+    NetworkCoverage, NetworkMonitor, NetworkMonitorError, NetworkSnapshot, NetworkStamp,
+    NetworkWatch,
+};

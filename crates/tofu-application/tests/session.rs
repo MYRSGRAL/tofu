@@ -184,3 +184,75 @@ fn cancel_preparation_and_duplicate_stop_do_not_revive_old_operation() {
         Ok(Outcome::Ignored)
     );
 }
+
+#[test]
+fn invalidated_check_keeps_applied_generation_and_rejects_stale_results() {
+    for event in [
+        None,
+        Some(Event::CheckPassed),
+        Some(Event::EndpointUnavailable),
+    ] {
+        let mut session = Session::new(NonZeroU64::MIN);
+        let mut token = checking(&mut session);
+        if let Some(event) = event {
+            token = advance(&mut session, token, event);
+        }
+        let generation = session.applied_generation();
+        let invalidated = advance(&mut session, token, Event::CheckInvalidated);
+        assert_eq!(session.state(), State::Limited);
+        assert_eq!(session.applied_generation(), generation);
+        assert_eq!(invalidated.generation(), token.generation());
+        assert_ne!(invalidated, token);
+        assert_eq!(session.fault(), None);
+        assert_eq!(session.begin(), Err(Error::Busy));
+        assert_eq!(
+            session.accept(token, Event::CheckPassed),
+            Ok(Outcome::Ignored)
+        );
+        assert_eq!(session.state(), State::Limited);
+        advance(&mut session, invalidated, Event::CheckPassed);
+        assert_eq!(session.state(), State::Connected);
+    }
+}
+
+#[test]
+fn check_invalidation_rejects_inactive_phases_without_mutation() {
+    let mut session = Session::new(NonZeroU64::MIN);
+    let preparing = session.begin().unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(
+        session.accept(preparing, Event::CheckInvalidated),
+        Err(Error::InvalidTransition)
+    );
+    assert_eq!(session.state(), State::Preparing);
+    let token = starting(&mut session, preparing);
+    assert_eq!(
+        session.accept(token, Event::CheckInvalidated),
+        Err(Error::InvalidTransition)
+    );
+    assert_eq!(session.state(), State::Starting);
+    let token = advance(&mut session, token, Event::NetworkApplied);
+    let stopping = session.stop().unwrap().unwrap();
+    assert_eq!(
+        session.accept(stopping, Event::CheckInvalidated),
+        Err(Error::InvalidTransition)
+    );
+    assert_eq!(session.state(), State::Stopping);
+    assert_eq!(session.applied_generation(), Some(token.generation()));
+    let cleanup_error = advance(&mut session, stopping, Event::CleanupFailed);
+    assert_eq!(
+        session.accept(cleanup_error, Event::CheckInvalidated),
+        Err(Error::InvalidTransition)
+    );
+    assert_eq!(session.state(), State::CleanupError);
+    assert_eq!(session.applied_generation(), Some(token.generation()));
+    let cleanup = session.stop().unwrap().unwrap();
+    assert_eq!(
+        session.accept(cleanup, Event::CleanupConfirmed),
+        Ok(Outcome::Applied(None))
+    );
+    assert_eq!(
+        session.accept(cleanup, Event::CheckInvalidated),
+        Ok(Outcome::Ignored)
+    );
+    assert_eq!(session.state(), State::Disconnected);
+}
