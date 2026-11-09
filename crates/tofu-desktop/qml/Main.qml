@@ -711,6 +711,18 @@ ApplicationWindow {
                             text: (window.state.probe_custom ? window.tr("Применена своя проверка", "Custom check applied") : window.tr("Стандартная проверка: gstatic", "Default check: gstatic"))
                                 + window.tr(" · ожидается HTTP ", " · expected HTTP ") + window.state.probe_expected_status
                         }
+                        SmallLabel {
+                            objectName: "probeResultLabel"
+                            Layout.fillWidth: true
+                            visible: window.state.can_stop && !!window.state.probe_result
+                            text: window.state.probe_result ? window.tr("Проверка активной сессии: ", "Active session check: ") + window.probeResultText(window.state.probe_result) : ""
+                        }
+                        SmallLabel {
+                            objectName: "probeNetworkWarning"
+                            Layout.fillWidth: true
+                            visible: window.state.can_stop && !!window.state.probe_result && !window.state.probe_result.network_observed
+                            text: window.tr("Во время HTTPS-проверки наблюдение за изменениями сети было неполным. Её результат относится к моменту проверки.", "Network change monitoring was incomplete during the HTTPS check. Its result applies to the time of the check.")
+                        }
                         PlainLabel { text: window.tr("HTTPS URL новой проверки", "New check HTTPS URL") }
                         RowLayout {
                             Layout.fillWidth: true
@@ -839,7 +851,7 @@ ApplicationWindow {
             PlainLabel { text: window.tr("Принято: ", "Accepted: ") + (window.state.pending ? window.state.pending.accepted : 0) }
             PlainLabel { text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
             PlainLabel { text: window.tr("Требуют внимания: ", "Flagged: ") + (window.state.pending ? window.state.pending.flagged : 0) }
-            PlainLabel { Layout.fillWidth: true; color: "#e6bc83"; visible: !!window.state.pending && !!window.state.pending.native_json; text: window.tr("Источник содержит конфигурацию ядра JSON. Её содержимое не показывается: она может содержать секреты. Подтверждайте импорт только из доверенного источника.", "The source contains native engine JSON configuration. Its contents are hidden because they may contain secrets. Approve only a trusted source.") }
+            PlainLabel { objectName: "nativeJsonWarning"; Layout.fillWidth: true; color: "#e6bc83"; visible: !!window.state.pending && !!window.state.pending.native_json; text: window.tr("Источник содержит конфигурацию ядра JSON. Её содержимое не показывается: она может содержать секреты. Подтверждайте импорт только из доверенного источника.", "The source contains native engine JSON configuration. Its contents are hidden because they may contain secrets. Approve only a trusted source.") }
             ListView {
                 id: reviewRows
                 Layout.fillWidth: true
@@ -869,11 +881,13 @@ ApplicationWindow {
                     onClicked: { reviewRows.positionViewAtBeginning(); window.send({command: "review_page", offset: window.state.pending.rows_offset + 100}) }
                 }
             }
-            RowLayout {
-                Item { Layout.fillWidth: true }
-                ActionButton { objectName: "discardRefreshButton"; text: window.tr("Отменить импорт", "Discard import"); enabled: !window.state.busy; onClicked: window.send({command: "discard_refresh"}) }
-                ActionButton { visible: window.state.can_stop; text: window.tr("Отключить", "Disconnect"); onClicked: window.send({command: "stop"}) }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                layoutDirection: Qt.RightToLeft
                 ActionButton { objectName: "approveRefreshButton"; text: window.tr("Сохранить профили", "Save profiles"); highlighted: true; enabled: !!window.state.pending && !window.state.busy; onClicked: window.send({command: "approve_refresh"}) }
+                ActionButton { objectName: "reviewStopButton"; visible: window.state.can_stop; text: window.tr("Отключить", "Disconnect"); onClicked: window.send({command: "stop"}) }
+                ActionButton { objectName: "discardRefreshButton"; text: window.tr("Отменить импорт", "Discard import"); enabled: !window.state.busy; onClicked: window.send({command: "discard_refresh"}) }
             }
         }
     }

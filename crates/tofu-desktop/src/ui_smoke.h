@@ -49,9 +49,15 @@ inline bool matches(QQuickWindow* window, const QJsonObject& expected)
         const auto properties = object.value().toObject();
         if (properties.size() > 16) return false;
         for (auto property = properties.begin(); property != properties.end(); ++property) {
-            if (!validName(property.key()) || property.value().isObject() || property.value().isArray()) return false;
+            if (!validName(property.key()) || property.value().isArray()) return false;
             const auto value = target->property(property.key().toLatin1().constData());
-            if (!value.isValid() || QJsonValue::fromVariant(value) != property.value()) return false;
+            if (!value.isValid()) return false;
+            if (property.value().isObject()) {
+                const auto condition = property.value().toObject();
+                const auto fragment = condition.value(QStringLiteral("contains"));
+                if (condition.size() != 1 || !fragment.isString() || fragment.toString().size() > 2048
+                    || value.metaType().id() != QMetaType::QString || !value.toString().contains(fragment.toString())) return false;
+            } else if (QJsonValue::fromVariant(value) != property.value()) return false;
         }
     }
     return true;

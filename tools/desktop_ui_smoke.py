@@ -213,6 +213,7 @@ def execute(
     output: Path,
     scale: str,
     expected_exit: int = 0,
+    engines: Path | None = None,
 ) -> list[dict[str, Any]]:
     source = root / "steps.json"
     source.write_text(json.dumps({"steps": steps}, ensure_ascii=False))
@@ -231,7 +232,7 @@ def execute(
         "--data-dir",
         str(root / "data"),
         "--engine-dir",
-        str(root / "empty-engines"),
+        str(engines or root / "empty-engines"),
         "--smoke-script",
         str(source),
         "--smoke-trace",
