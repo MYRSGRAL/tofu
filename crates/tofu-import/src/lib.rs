@@ -5,6 +5,7 @@ mod identity;
 mod json;
 mod model;
 mod uri;
+mod xray;
 
 pub use identity::{IdentityError, SecretIdentity};
 pub use model::{
@@ -102,6 +103,8 @@ fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
         // RawValue проверяет синтаксис без построения произвольного дерева Value.
         serde_json::from_str::<&serde_json::value::RawValue>(content)
             .map_err(|_| FatalError::InvalidJson)?;
+        json::validate_unique(content).map_err(|_| FatalError::InvalidJson)?;
+        xray::extract(content, &mut servers, &mut issues)?;
         Some(SecretText::new(content.to_owned()))
     } else {
         if !content.contains("://") {
