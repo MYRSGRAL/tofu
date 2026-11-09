@@ -72,7 +72,9 @@ large central connect button, has been selected in the [interactive concepts](de
 The [isolated Qt/GTK4/Slint benchmark](bench/ui/README.md) is separate from the
 application; real-window measurements and toolkit selection remain pending.
 The native Qt prototype now implements A: server card, central connect/stop button,
-status and three persistent sections: **Connection**, **Servers** and **Settings**.
+and connection status. The server card opens **Servers**; a gear in the upper right
+opens **Settings**. Back returns to the previous level. The home screen has no
+extra action buttons, mode badge or subscription summary.
 The window starts at 420×760 logical pixels (minimum 380×600). Onest/Unbounded
 fonts and OFL licenses are embedded. This working UI does not wait for the benchmark or system TUN.
 [UI direction](docs/specs/ui-direction.md).

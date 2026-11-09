@@ -38,6 +38,7 @@ ApplicationWindow {
         : tr("Подключить", "Connect")
     property string language: "ru"
     property int page: 0
+    property int settingsOrigin: 0
     property string settingsSection: ""
     property bool reducedMotion: false
     property var desiredProfileId: null
@@ -70,9 +71,16 @@ ApplicationWindow {
         desiredProfileId = id
         send({command: "select_profile", id: id, revision: state.revision})
     }
+    function openSettings() {
+        settingsOrigin = page
+        settingsSection = ""
+        page = 2
+    }
     function back() {
         if (page === 2 && settingsSection !== "") settingsSection = ""
+        else if (page === 2) page = settingsOrigin
         else if (page === 1 && sourceOptions) sourceOptions = false
+        else if (page === 1) page = 0
     }
     property string parseError: ""
     property var state: ({ready: false, busy: true, error: null, pending: null,
@@ -400,7 +408,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             ActionButton {
                 objectName: "homeButton"
-                visible: (window.page === 2 && window.settingsSection !== "") || (window.page === 1 && window.sourceOptions)
+                visible: window.page !== 0
                 text: "‹"
                 implicitWidth: 44
                 Accessible.name: window.tr("Назад", "Back")
@@ -422,19 +430,17 @@ ApplicationWindow {
                 }
             }
             Item { Layout.fillWidth: true }
-            Rectangle {
-                visible: window.page === 0
-                implicitWidth: modeLabel.implicitWidth + 20; implicitHeight: 28; radius: 14
-                color: "#191919"
-                SmallLabel { id: modeLabel; anchors.centerIn: parent; text: "SOCKS5"; font.pixelSize: 11; font.letterSpacing: 1 }
+            ActionButton {
+                objectName: "settingsButton"
+                visible: window.page !== 2
+                implicitWidth: 44
+                leftPadding: 8; rightPadding: 8
+                text: "⚙"
+                font.family: "Noto Sans"
+                font.pixelSize: 27
+                Accessible.name: window.tr("Настройки", "Settings")
+                onClicked: window.openSettings()
             }
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 6
-            ActionButton { objectName: "connectionNavButton"; Layout.fillWidth: true; leftPadding: 8; rightPadding: 8; text: window.tr("Подключение", "Connection"); highlighted: window.page === 0; onClicked: window.page = 0 }
-            ActionButton { objectName: "serversNavButton"; Layout.fillWidth: true; leftPadding: 8; rightPadding: 8; text: window.tr("Серверы", "Servers"); highlighted: window.page === 1; onClicked: window.page = 1 }
-            ActionButton { objectName: "settingsButton"; Layout.fillWidth: true; leftPadding: 8; rightPadding: 8; text: window.tr("Настройки", "Settings"); highlighted: window.page === 2; onClicked: window.page = 2 }
         }
         StackLayout {
             Layout.fillWidth: true
@@ -460,7 +466,7 @@ ApplicationWindow {
                         leftPadding: 18; rightPadding: 18
                         enabled: window.state.ready && !window.state.closed
                         Accessible.name: window.tr("Выбрать сервер", "Choose server") + ": " + serverName.text
-                        onClicked: { if (window.state.sources.length === 0) window.openAdd(false); else window.page = 1 }
+                        onClicked: window.page = 1
                         background: Rectangle {
                             radius: 20
                             border.color: serverCard.activeFocus ? window.accent : serverCard.hovered ? "#755589" : "#493254"
@@ -491,7 +497,7 @@ ApplicationWindow {
                             PlainLabel { text: "›"; color: "#d9c6fc"; font.pixelSize: 28 }
                         }
                     }
-                    Item { Layout.fillHeight: true; Layout.minimumHeight: 24; Layout.maximumHeight: 64 }
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 24 }
                     Button {
                         id: powerButton
                         objectName: "mainConnectButton"
@@ -564,30 +570,14 @@ ApplicationWindow {
                             : window.state.can_stop ? window.actionText
                             : window.state.selected_name ? window.tr("Нажмите, чтобы подключиться", "Press to connect") : window.tr("Добавьте подписку и выберите сервер", "Add a subscription and choose a server"))
                     }
-                    Item { Layout.fillHeight: true; Layout.minimumHeight: window.height < 720 ? 12 : 20 }
                     SmallLabel {
                         objectName: "selectedNextServerLabel"
                         Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
                         visible: window.state.can_stop && !!window.state.selected_name
+                        Layout.topMargin: visible ? 12 : 0
                         text: window.tr("Выбран для следующего подключения: ", "Selected for next connection: ") + window.state.selected_name + window.tr(" · после отключения", " · after disconnecting")
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        ActionButton { objectName: "homeAddSourceButton"; Layout.fillWidth: true; text: window.tr("Добавить подписку", "Add subscription"); enabled: window.state.ready && !window.state.busy && !window.state.pending; onClicked: window.openAdd(false) }
-                        ActionButton { objectName: "homeServersButton"; Layout.fillWidth: true; text: window.tr("Выбрать сервер", "Choose server"); onClicked: window.page = 1 }
-                    }
-                    RowLayout {
-                        visible: window.state.can_stop && !!window.state.listen_address
-                        Layout.fillWidth: true; Layout.topMargin: 8
-                        TextField { id: homeProxy; objectName: "homeProxyAddress"; Layout.fillWidth: true; text: window.state.listen_address || ""; readOnly: true; selectByMouse: true; Accessible.name: window.tr("Адрес SOCKS5", "SOCKS5 address") }
-                        ActionButton { objectName: "homeProxyCopyButton"; text: window.tr("Копировать", "Copy"); onClicked: { homeProxy.selectAll(); homeProxy.copy(); homeProxy.deselect() } }
-                    }
-                    SmallLabel {
-                        Layout.fillWidth: true; Layout.topMargin: 8; horizontalAlignment: Text.AlignHCenter
-                        text: window.tr("SOCKS5 · только для приложений с настроенным прокси", "SOCKS5 · only for apps configured to use this proxy"); font.pixelSize: 11
-                    }
-                    SmallLabel { objectName: "homeImportFeedback"; Layout.fillWidth: true; visible: window.sourceFeedbackText() !== ""; text: window.sourceFeedbackText(); maximumLineCount: 2; elide: Text.ElideRight }
-
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 24 }
                 }
             }
             PanelScroll {
@@ -725,7 +715,7 @@ ApplicationWindow {
                     SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
                     SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                     SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
-                    SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык и анимация", "Language and motion"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
+                    SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                     SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     Item { Layout.fillHeight: true }
                 }
@@ -785,8 +775,6 @@ ApplicationWindow {
                 ComboBox { objectName: "languageChoice"; model: ["Русский", "English"]; currentIndex: window.language === "ru" ? 0 : 1; onActivated: window.language = currentIndex === 0 ? "ru" : "en"; Accessible.name: window.tr("Язык интерфейса", "Interface language") }
                 HelpButton { explanation: window.tr("Выбор действует до закрытия приложения.", "Applies until the app exits.") }
             }
-            Divider {}
-            CheckBox { objectName: "reducedMotionChoice"; text: window.tr("Меньше анимации", "Reduce motion"); checked: window.reducedMotion; onToggled: window.reducedMotion = checked }
             Item { Layout.fillHeight: true }
         }
     }

@@ -43,26 +43,68 @@ def ui(
 def script(url: str, width: int, height: int) -> list[dict[str, object]]:
     steps = [ui("resize", when={"ready": True}, width=width, height=height)]
 
+    page = 0
+    settings_origin = 0
+    settings_section = ""
+    source_options = False
+
     def click(target: str, **kwargs: Any) -> None:
+        nonlocal page, settings_origin, settings_section, source_options
         steps.append(ui("click", target, **kwargs))
+        if target == "settingsButton":
+            settings_origin, page, settings_section = page, 2, ""
+        elif target == "homeButton":
+            if page == 2:
+                if settings_section:
+                    settings_section = ""
+                else:
+                    page = settings_origin
+            elif source_options:
+                source_options = False
+            else:
+                page = 0
+        elif target == "serverPickerButton":
+            page = 1
+        elif target.startswith("settings") and target.endswith("Button"):
+            settings_section = target
+        elif target == "sourceOptionsButton":
+            source_options = not source_options
+        elif target == "sourceAddConfirmButton":
+            page = 1
 
     def check(expect: dict[str, object], **kwargs: Any) -> None:
-        steps.append(
-            ui("key", "connectionNavButton", key="Tab", expect=expect, **kwargs)
-        )
+        target = "homeButton" if page == 2 else "settingsButton"
+        steps.append(ui("key", target, key="Tab", expect=expect, **kwargs))
 
-    # Каждая пара разделов доступна через постоянную навигацию.
-    for origin in ("connectionNavButton", "serversNavButton", "settingsButton"):
-        for destination, page in (
-            ("connectionNavButton", 0),
-            ("serversNavButton", 1),
-            ("settingsButton", 2),
-        ):
-            click(origin)
-            click(destination)
-            check({"window": {"page": page}})
-    click("connectionNavButton")
-    click("homeAddSourceButton", capture="home-empty.png")
+    def navigate(destination: int, **kwargs: Any) -> None:
+        # Модель выбирает только пользовательские кнопки; состояние окна
+        # дополнительно проверяется smoke driver после каждого перехода.
+        first = True
+        while page != destination:
+            target = (
+                "serverPickerButton" if page == 0 and destination == 1 else "homeButton"
+            )
+            click(target, **(kwargs if first else {}))
+            first = False
+        if first and kwargs:
+            expect = {"window": {"page": destination}, **kwargs.pop("expect", {})}
+            check(expect, **kwargs)
+        else:
+            check({"window": {"page": destination}})
+
+    # Шестерёнка помнит исходную страницу, Back сначала закрывает подраздел.
+    for origin in (0, 1):
+        navigate(origin)
+        click("settingsButton")
+        check({"window": {"page": 2, "settingsSection": ""}})
+        click("settingsAboutButton")
+        click("homeButton")
+        check({"window": {"page": 2, "settingsSection": ""}})
+        click("homeButton")
+        check({"window": {"page": origin}})
+    navigate(0)
+    click("serverPickerButton", capture="home-empty.png")
+    click("addSourceButton")
     steps.append(
         ui("text", "sourceUrlInput", value="https://cancel.invalid/?ui-secret=hidden")
     )
@@ -70,8 +112,9 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
     click("sourceHwidChoice")
     click("revealSourceUrl")
     click("sourceAddCancelButton")
-    check({"window": {"page": 0}, "addSourceDialog": {"visible": False}})
-    click("homeAddSourceButton")
+    check({"window": {"page": 1}, "addSourceDialog": {"visible": False}})
+    navigate(1)
+    click("addSourceButton")
     check(
         {
             "sourceUrlInput": {"text": ""},
@@ -80,9 +123,9 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         }
     )
     steps.append(ui("key", "sourceUrlInput", key="Escape"))
-    click(
-        "serversNavButton",
-        expect={"window": {"page": 0}, "addSourceDialog": {"visible": False}},
+    navigate(
+        1,
+        expect={"window": {"page": 1}, "addSourceDialog": {"visible": False}},
     )
     steps.append(ui("clipboard", value=url))
     click("pasteSourceButton")
@@ -151,6 +194,7 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             expect={"profileSourceFilter": {"currentText": "Переименованная А"}},
         )
     )
+    source_options = False
     click("sourceOptionsButton", expect={"window": {"sourceOptions": False}})
     click("homeButton", expect={"window": {"sourceOptions": True}})
     click(
@@ -159,9 +203,9 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         capture="servers.png",
     )
     # Пока сервер держит ответ, навигация остаётся доступной, Cancel сохраняет профили.
-    click("connectionNavButton", when={"busy": True})
+    navigate(0, when={"busy": True})
     click("settingsButton")
-    click("serversNavButton")
+    navigate(1)
     click(
         "cancelSourceRefreshButton",
         when={"busy": True},
@@ -189,7 +233,7 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
         when={"selected_profile": 1, "can_connect": True},
         expect={"window": {"page": 1, "selectionConfirmed": True}},
     )
-    click("connectionNavButton", when={"error": "engine_missing", "can_stop": False})
+    navigate(0, when={"error": "engine_missing", "can_stop": False})
     click(
         "settingsButton",
         expect={"mainErrorLabel": {"visible": True}},
@@ -234,13 +278,11 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
     click("applyProbeTargetButton")
     click("homeButton", when={"probe_custom": True, "probe_expected_status": 200})
     click("settingsAppearanceButton")
-    click("reducedMotionChoice")
     steps.append(
         ui(
             "key",
             "languageChoice",
             key="Down",
-            expect={"window": {"reducedMotion": True}},
         )
     )
     steps.append(ui("key", "languageChoice", key="Enter"))
@@ -253,14 +295,14 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             capture="appearance.png",
         )
     )
+    settings_section = ""  # Escape возвращает из Appearance в корень настроек.
     click("settingsAboutButton", expect={"window": {"settingsSection": ""}})
-    click(
-        "connectionNavButton",
+    navigate(
+        0,
         expect={"buildIdLabel": {"visible": True, "text": {"contains": "0.1.0"}}},
         capture="about-build.png",
     )
     click("settingsButton")
-    click("homeButton")
     click("settingsDiagnosticsButton")
     click(
         "resetProbeTargetButton",
@@ -271,36 +313,36 @@ def script(url: str, width: int, height: int) -> list[dict[str, object]]:
             "revealProbeUrl": {"checked": False},
         },
     )
-    click(
-        "serversNavButton", when={"probe_custom": False, "probe_expected_status": 204}
-    )
+    navigate(1, when={"probe_custom": False, "probe_expected_status": 204})
     # Изменение параметров проверки очищает прошлую ошибку соединения;
     # повторная попытка создаёт её заново перед проверкой независимых scopes.
-    click("connectionNavButton")
+    navigate(0)
     click("mainConnectButton")
-    click("serversNavButton", when={"connection_error": "engine_missing"})
+    navigate(1, when={"connection_error": "engine_missing"})
     click("refreshSourceButton")
-    click(
-        "connectionNavButton",
+    navigate(
+        0,
         when={"busy": False, "source_error": "fetch", "profiles_count": 2},
         expect={
             "window": {"sourceError": "fetch", "connectionError": "engine_missing"}
         },
     )
-    click("serversNavButton", expect={"mainErrorLabel": {"visible": True}})
+    navigate(1, expect={"mainErrorLabel": {"visible": True}})
     # Ошибочный импорт сохраняет фильтр прежнего источника.
     steps.append(ui("input", "profileSearch", value="нет-совпадений"))
-    click("connectionNavButton", when={"profiles_count": 0})
-    click("homeAddSourceButton")
+    navigate(0, when={"profiles_count": 0})
+    navigate(1)
+    click("addSourceButton")
     steps.append(ui("text", "sourceUrlInput", value="not-a-url"))
     click("sourceAddConfirmButton")
     check(
         {"window": {"page": 1}, "profileSearch": {"text": "нет-совпадений"}},
         when={"source_error": "invalid_input", "sources_total": 1, "profiles_count": 0},
     )
-    # Второй источник добавляется с Home, успешный импорт сбрасывает фильтр.
-    click("connectionNavButton")
-    click("homeAddSourceButton")
+    # Второй источник добавляется через карточку Home; импорт сбрасывает фильтр.
+    navigate(0)
+    navigate(1)
+    click("addSourceButton")
     steps.append(ui("text", "sourceUrlInput", value=url + "-second"))
     click("sourceAdvancedButton")
     steps.append(ui("text", "sourceNameInput", value="Тест Б"))
@@ -536,6 +578,11 @@ def run(
             *(
                 (f"removed-{name}", ui("click", name, when={"ready": True}))
                 for name in (
+                    "connectionNavButton",
+                    "serversNavButton",
+                    "homeAddSourceButton",
+                    "homeServersButton",
+                    "reducedMotionChoice",
                     "homeFavoritesButton",
                     "favorite_1",
                     "settingsSubscriptionsButton",

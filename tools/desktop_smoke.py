@@ -431,7 +431,17 @@ def run_case(
                                         "capture_name": f"{name}-diagnostics.png",
                                         "ui": {
                                             "action": "click",
-                                            "object": "connectionNavButton",
+                                            "object": "homeButton",
+                                        },
+                                    },
+                                    {
+                                        "when": stop_when,
+                                        "ui_when": {
+                                            "window": {"page": 2, "settingsSection": ""}
+                                        },
+                                        "ui": {
+                                            "action": "click",
+                                            "object": "homeButton",
                                         },
                                     },
                                 ]
