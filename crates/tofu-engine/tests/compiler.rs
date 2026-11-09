@@ -206,3 +206,140 @@ fn mapped_ipv4_and_localhost_dot_cannot_create_self_proxy() {
         assert!(config(engine, "socks5://[::ffff:127.0.0.1]:10809").is_ok());
     }
 }
+
+fn json_vless(network: &str, security: &str, options: Value) -> Value {
+    let mut stream = json!({"network":network,"security":security});
+    if network == "grpc" {
+        stream["grpcSettings"] = options;
+        stream["tlsSettings"] = json!({"serverName":"verify.example"});
+    } else {
+        stream["realitySettings"] = options;
+    }
+    json!({"outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"secret.example","port":443,"users":[{"id":UUID,"encryption":"none"}]}]},"streamSettings":stream}]})
+}
+
+#[test]
+fn json_grpc_defaults_authority_and_blocking_options() {
+    for engine in [Engine::Xray, Engine::SingBox] {
+        for mode in [None, Some("gun")] {
+            for authority in [None, Some(""), Some("grpc.example:8443"), Some("[::1]:443")] {
+                let mut options = json!({"serviceName":"service/a"});
+                if let Some(mode) = mode {
+                    options["mode"] = json!(mode);
+                }
+                if let Some(authority) = authority {
+                    options["authority"] = json!(authority);
+                }
+                let source = json_vless("grpc", "tls", options).to_string();
+                let result = config(engine, &source);
+                if engine == Engine::SingBox && authority.is_some_and(|v| !v.is_empty()) {
+                    assert_eq!(result, Err(CompileError::UnsupportedOption));
+                } else {
+                    let result = result.unwrap();
+                    if engine == Engine::Xray {
+                        let grpc = &result["outbounds"][0]["streamSettings"]["grpcSettings"];
+                        assert_eq!(grpc["serviceName"], "service/a");
+                        assert!(grpc.get("mode").is_none());
+                        assert!(grpc.get("multiMode").is_none());
+                        assert_eq!(
+                            grpc.get("authority").and_then(Value::as_str),
+                            authority.filter(|v| !v.is_empty())
+                        );
+                    }
+                }
+            }
+        }
+        for extra in [
+            json!({"mode":"multi"}),
+            json!({"mode":"auto"}),
+            json!({"mode":""}),
+            json!({"multiMode":false}),
+            json!({"unknown":true}),
+        ] {
+            assert_eq!(
+                config(engine, &json_vless("grpc", "tls", extra).to_string()),
+                Err(CompileError::UnsupportedOption)
+            );
+        }
+        for authority in [
+            "bad\nname",
+            "user@host",
+            "host/path",
+            "host?query",
+            "host#fragment",
+            "host\\path",
+            "host:bad",
+            "host name",
+        ] {
+            assert!(
+                config(
+                    engine,
+                    &json_vless("grpc", "tls", json!({"mode":"gun","authority":authority}))
+                        .to_string()
+                )
+                .is_err()
+            );
+        }
+        let mut unsafe_node = json_vless("grpc", "tls", json!({"mode":"gun"}));
+        unsafe_node["outbounds"][0]["streamSettings"]["tlsSettings"]["allowInsecure"] = json!(true);
+        assert_eq!(
+            config(engine, &unsafe_node.to_string()),
+            Err(CompileError::UnsupportedOption)
+        );
+    }
+}
+
+#[test]
+fn json_reality_spider_path_preserves_query_and_defaults() {
+    for engine in [Engine::Xray, Engine::SingBox] {
+        for spider in [None, Some(""), Some("/"), Some("/a?b=c&x=%2F")] {
+            let mut options = json!({"serverName":"verify.example","fingerprint":"chrome","publicKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","shortId":"ab12"});
+            if let Some(spider) = spider {
+                options["spiderX"] = json!(spider);
+            }
+            let source = json_vless("tcp", "reality", options.clone()).to_string();
+            let result = config(engine, &source);
+            if engine == Engine::SingBox && spider.is_some_and(|v| !matches!(v, "" | "/")) {
+                assert_eq!(result, Err(CompileError::UnsupportedOption));
+            } else {
+                let result = result.unwrap();
+                if engine == Engine::Xray && spider == Some("/a?b=c&x=%2F") {
+                    assert_eq!(
+                        result["outbounds"][0]["streamSettings"]["realitySettings"]["spiderX"],
+                        spider.unwrap()
+                    );
+                }
+            }
+            for bad in [
+                "relative",
+                "https://other/",
+                "//other/path",
+                "/a\nb",
+                "/a b",
+                "/a#fragment",
+                "/a\\b",
+            ] {
+                options["spiderX"] = json!(bad);
+                assert!(
+                    config(
+                        engine,
+                        &json_vless("tcp", "reality", options.clone()).to_string()
+                    )
+                    .is_err()
+                );
+            }
+            options["spiderX"] = json!("/");
+            options["unknown"] = json!(true);
+            assert_eq!(
+                config(
+                    engine,
+                    &json_vless("tcp", "reality", options.clone()).to_string()
+                ),
+                Err(CompileError::UnsupportedOption)
+            );
+            options.as_object_mut().unwrap().remove("unknown");
+            options["publicKey"] = json!("bad");
+            assert!(config(engine, &json_vless("tcp", "reality", options).to_string()).is_err());
+        }
+    }
+}

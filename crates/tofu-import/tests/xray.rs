@@ -316,3 +316,76 @@ fn disabled_tls_session_resumption_is_noop_but_enabled_or_malformed_is_blocked()
         );
     }
 }
+
+#[test]
+fn grpc_gun_mode_is_preserved_without_accepting_unknown_siblings() {
+    for extra in [
+        json!({}),
+        json!({"multiMode":false}),
+        json!({"unknown":true}),
+    ] {
+        let mut node = outbound();
+        node["streamSettings"]["network"] = json!("grpc");
+        let mut settings = json!({"mode":"gun"});
+        settings
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        node["streamSettings"]["grpcSettings"] = settings;
+        let report = parse(json!({"outbounds":[node]}));
+        let server = &report.servers[0];
+        assert_eq!(
+            server
+                .review_flags()
+                .contains(&ReviewFlag::UnsupportedOption),
+            !extra.as_object().unwrap().is_empty()
+        );
+        let uri = url::Url::parse(server.source().expose()).unwrap();
+        assert_eq!(
+            uri.query_pairs().find(|(k, _)| k == "mode").unwrap().1,
+            "gun"
+        );
+    }
+    for mode in [json!(1), json!({}), json!([]), Value::Null] {
+        let mut node = outbound();
+        node["streamSettings"]["network"] = json!("grpc");
+        node["streamSettings"]["grpcSettings"] = json!({"mode":mode});
+        let report = parse(json!({"outbounds":[node]}));
+        assert!(report.servers.is_empty());
+        assert!(!report.issues.is_empty());
+    }
+}
+
+#[test]
+fn grpc_boolean_mode_stays_visible_but_cannot_activate() {
+    for mode in [false, true] {
+        let mut node = outbound();
+        node["streamSettings"]["network"] = json!("grpc");
+        node["streamSettings"]["grpcSettings"] = json!({"mode":mode});
+        let report = parse(json!({"outbounds":[node]}));
+        assert_eq!(report.servers.len(), 1);
+        assert!(
+            report.servers[0]
+                .review_flags()
+                .contains(&ReviewFlag::UnsupportedOption)
+        );
+        assert!(report.native_json.is_some());
+    }
+}
+
+#[test]
+fn grpc_and_reality_options_reject_non_string_values() {
+    for (network, field, key) in [
+        ("grpc", "grpcSettings", "authority"),
+        ("tcp", "realitySettings", "spiderX"),
+    ] {
+        for value in [Value::Null, json!(false), json!(42), json!([]), json!({})] {
+            let mut node = outbound();
+            node["streamSettings"]["network"] = json!(network);
+            node["streamSettings"][field][key] = value;
+            let report = parse(json!({"outbounds":[node]}));
+            assert!(report.servers.is_empty());
+            assert!(!report.issues.is_empty());
+        }
+    }
+}

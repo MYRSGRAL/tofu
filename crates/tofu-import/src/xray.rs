@@ -318,8 +318,12 @@ fn stream_parameters(node: &Value) -> Result<(Parameters, bool), RecordError> {
         (
             "grpcSettings",
             "grpc",
-            &["serviceName", "authority"][..],
-            &[("serviceName", "serviceName"), ("authority", "authority")][..],
+            &["serviceName", "authority", "mode"][..],
+            &[
+                ("serviceName", "serviceName"),
+                ("authority", "authority"),
+                ("mode", "mode"),
+            ][..],
         ),
         (
             "xhttpSettings",
@@ -333,10 +337,21 @@ fn stream_parameters(node: &Value) -> Result<(Parameters, bool), RecordError> {
                 return Err(invalid());
             }
             unsupported |= network != expected || unknown(options, allowed);
+            // Некоторые источники используют bool mode как расширение клиента.
+            // Его семантика не доказана: профиль сохраняем, активацию блокируем.
+            let opaque_grpc_mode =
+                key == "grpcSettings" && options.get("mode").is_some_and(Value::is_boolean);
+            unsupported |= opaque_grpc_mode;
             for (from, to) in mapping {
+                if opaque_grpc_mode && *from == "mode" {
+                    continue;
+                }
                 if options.get(from).is_some() {
                     parameters.push((*to, text(options, from, "")?.to_owned()));
                 }
+            }
+            if key == "grpcSettings" && !opaque_grpc_mode && options.get("mode").is_some() {
+                unsupported |= text(options, "mode", "")? != "gun";
             }
             if key == "wsSettings" {
                 if let Some(headers) = options.get("headers") {

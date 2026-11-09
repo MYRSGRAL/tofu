@@ -18,6 +18,8 @@ pub(crate) struct Options {
     pub path: String,
     pub mode: String,
     pub service: String,
+    pub authority: String,
+    pub spider_path: String,
     pub cipher: String,
 }
 
@@ -209,6 +211,22 @@ pub(crate) fn validate(server: &ParsedServer, engine: Engine) -> Result<Options,
             {
                 return Err(CompileError::InvalidParameter);
             }
+            options.spider_path = take(&mut parameters, "spx");
+            if !options.spider_path.is_empty() && options.spider_path != "/" {
+                if !options.spider_path.starts_with('/')
+                    || options.spider_path.starts_with("//")
+                    || options.spider_path.contains(['\\', '#'])
+                    || options
+                        .spider_path
+                        .chars()
+                        .any(|c| c.is_control() || c.is_whitespace())
+                {
+                    return Err(CompileError::InvalidParameter);
+                }
+                if engine == Engine::SingBox {
+                    return Err(CompileError::UnsupportedOption);
+                }
+            }
             options.short_id = take(&mut parameters, "sid");
             if options.short_id.len() > 16
                 || options.short_id.len() % 2 != 0
@@ -252,6 +270,23 @@ pub(crate) fn validate(server: &ParsedServer, engine: Engine) -> Result<Options,
             }
         }
         Transport::Grpc => {
+            // gun соответствует обычному gRPC обоих ядер; multiMode не подменяется.
+            if parameters.remove("mode").is_some_and(|mode| mode != "gun") {
+                return Err(CompileError::UnsupportedOption);
+            }
+            options.authority = take(&mut parameters, "authority");
+            if !options.authority.is_empty() {
+                if options.authority.contains(['/', '\\', '@', '#', '?', '%'])
+                    || !options.authority.bytes().all(|b| b.is_ascii_graphic())
+                    || url::Url::parse(&format!("https://{}/", options.authority))
+                        .map_or(true, |url| url.host_str().is_none())
+                {
+                    return Err(CompileError::InvalidParameter);
+                }
+                if engine == Engine::SingBox {
+                    return Err(CompileError::UnsupportedOption);
+                }
+            }
             options.service = take(&mut parameters, "serviceName");
             if options.service.chars().any(char::is_control) {
                 return Err(CompileError::InvalidParameter);

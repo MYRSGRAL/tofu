@@ -239,7 +239,10 @@ fn xray_outbound(server: &ParsedServer, options: &Options) -> Result<Value, Comp
         }
         Security::Reality => {
             stream["realitySettings"] = json!({"serverName":options.sni,
-            "fingerprint":options.fingerprint,"password":options.public_key,"shortId":options.short_id})
+            "fingerprint":options.fingerprint,"password":options.public_key,"shortId":options.short_id});
+            if !options.spider_path.is_empty() && options.spider_path != "/" {
+                stream["realitySettings"]["spiderX"] = json!(options.spider_path);
+            }
         }
         _ => {}
     }
@@ -247,7 +250,12 @@ fn xray_outbound(server: &ParsedServer, options: &Options) -> Result<Value, Comp
         Transport::WebSocket => {
             stream["wsSettings"] = json!({"host":options.host,"path":options.path})
         }
-        Transport::Grpc => stream["grpcSettings"] = json!({"serviceName":options.service}),
+        Transport::Grpc => {
+            stream["grpcSettings"] = json!({"serviceName":options.service});
+            if !options.authority.is_empty() {
+                stream["grpcSettings"]["authority"] = json!(options.authority);
+            }
+        }
         Transport::Xhttp => {
             stream["xhttpSettings"] =
                 json!({"host":options.host,"path":options.path,"mode":options.mode})
