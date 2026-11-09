@@ -24,6 +24,9 @@ impl FromStr for Cidr {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let (address, prefix) = value.split_once('/').ok_or(InvalidCidr)?;
         let network = address.parse::<IpAddr>().map_err(|_| InvalidCidr)?;
+        if matches!(network, IpAddr::V6(address) if address.to_ipv4_mapped().is_some()) {
+            return Err(InvalidCidr);
+        }
         let prefix = prefix.parse::<u8>().map_err(|_| InvalidCidr)?;
         let valid = match network {
             IpAddr::V4(address) if prefix <= 32 => u32::from(address) & !mask_v4(prefix) == 0,
@@ -34,6 +37,12 @@ impl FromStr for Cidr {
             return Err(InvalidCidr);
         }
         Ok(Self { network, prefix })
+    }
+}
+
+impl fmt::Display for Cidr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.network, self.prefix)
     }
 }
 

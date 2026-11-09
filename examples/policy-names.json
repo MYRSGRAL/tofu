@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "default_action": "proxy",
+  "private_domains": [
+    {"suffix": "corp.example", "vpn": 1, "available": false}
+  ],
+  "user_rules": [
+    {"id": 1, "action": "block", "conditions": {"domain_suffix": ["blocked.example"]}},
+    {"id": 2, "action": "direct", "conditions": {"domain": ["direct.example"]}}
+  ]
+}

@@ -54,11 +54,18 @@ impl ProbeResult {
     }
 }
 
-pub(crate) async fn probe(port: u16, target: &ProbeTarget) -> ProbeResult {
-    let proxy = match Proxy::all(format!("socks5h://127.0.0.1:{port}")) {
+pub(crate) async fn probe(
+    port: u16,
+    target: &ProbeTarget,
+    auth: Option<&tofu_engine::ProbeCredentials>,
+) -> ProbeResult {
+    let mut proxy = match Proxy::all(format!("socks5h://127.0.0.1:{port}")) {
         Ok(proxy) => proxy,
         Err(_) => return ProbeResult::Transport,
     };
+    if let Some(auth) = auth {
+        proxy = proxy.basic_auth(auth.username(), auth.password());
+    }
     let client = match Client::builder()
         .no_proxy()
         .proxy(proxy)
@@ -139,7 +146,7 @@ mod tests {
                 .unwrap();
         };
         let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            tokio::join!(super::probe(port, &target), server)
+            tokio::join!(super::probe(port, &target, None), server)
         })
         .await
         .unwrap();

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "default_action": "proxy",
+  "private_networks": [
+    {"cidr": "10.0.0.0/8", "vpn": 1, "available": false}
+  ],
+  "user_rules": [
+    {"id": 1, "action": "block", "conditions": {"ip_cidr": ["192.0.2.0/24"]}},
+    {"id": 2, "action": "direct", "conditions": {"ip_cidr": ["198.51.100.0/24"]}}
+  ]
+}
