@@ -4,6 +4,7 @@ mod dns;
 pub use dns::{DnsContract, DnsMode, compile_native_dns, compile_policy_with_dns};
 mod options;
 pub mod policy_input;
+pub mod private_dns;
 mod routing;
 mod source_selectors;
 mod system_tun;

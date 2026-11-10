@@ -26,7 +26,9 @@ impl PrivateBindings {
             if !snapshot.coverage.routes || snapshot.exhausted {
                 break BindingInvalidation::ObservationLost;
             }
-            if self.invalidated || !current(snapshot, self.stamp) {
+            if self.invalidated.load(std::sync::atomic::Ordering::Acquire)
+                || !current(snapshot, self.stamp)
+            {
                 break BindingInvalidation::NetworkChanged;
             }
             tokio::select! {
@@ -37,7 +39,8 @@ impl PrivateBindings {
                 }
             }
         };
-        self.invalidated = true;
+        self.invalidated
+            .store(true, std::sync::atomic::Ordering::Release);
         reason
     }
 }

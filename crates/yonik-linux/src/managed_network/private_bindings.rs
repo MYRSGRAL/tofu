@@ -18,9 +18,9 @@ pub struct BindingRequest {
 
 /// Не Policy: проверенные входы существующего PublicBlockPolicy.
 pub struct PrivateBindings {
-    invalidated: bool,
+    invalidated: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stamp: NetworkStamp,
-    topology: LinuxTopology,
+    topology: std::sync::Arc<LinuxTopology>,
     requests: Vec<BindingRequest>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,9 +112,9 @@ impl PrivateBindings {
             }
         }
         Ok(Self {
-            invalidated: false,
+            invalidated: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             stamp: before.stamp,
-            topology,
+            topology: std::sync::Arc::new(topology),
             requests,
         })
     }
@@ -126,17 +126,31 @@ impl PrivateBindings {
         snapshot: NetworkSnapshot,
         topology: &LinuxTopology,
     ) -> (Vec<PrivateRoute>, Vec<LanException>) {
-        let valid = !self.invalidated
+        let valid = !self.invalidated.load(std::sync::atomic::Ordering::Acquire)
             && current(snapshot, self.stamp)
             && crate::network::same_external_topology(topology, &self.topology);
         let mut private = Vec::new();
         let mut lan = Vec::new();
         for request in &self.requests {
             if request.wireguard {
-                private.push(
-                    PrivateRoute::new(request.prefix, valid.then_some(request.ifindex))
-                        .expect("Индекс проверен при создании привязки"),
-                );
+                private.push(if valid {
+                    let link = self
+                        .topology
+                        .links
+                        .iter()
+                        .find(|l| l.index == request.ifindex)
+                        .expect("Link проверен при capture");
+                    std::str::from_utf8(&link.name)
+                        .ok()
+                        .and_then(|name| {
+                            PrivateRoute::bound(request.prefix, request.ifindex, name).ok()
+                        })
+                        .unwrap_or_else(|| {
+                            PrivateRoute::new(request.prefix, None).expect("Guard без интерфейса")
+                        })
+                } else {
+                    PrivateRoute::new(request.prefix, None).expect("Guard без интерфейса")
+                });
             } else if valid {
                 lan.push(
                     LanException::new(request.prefix, request.ifindex)
@@ -158,3 +172,9 @@ mod watch;
 pub use watch::BindingInvalidation;
 #[cfg(test)]
 mod event_tests;
+
+mod dns;
+pub use dns::{PrivateDnsCompileError, VerifiedPrivateResolver};
+
+#[cfg(test)]
+mod dns_tests;

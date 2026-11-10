@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    BindingInvalidation, BindingRequest, IpPrefix, LanException, LinuxTopology, PrivateBindings,
+    PrivateRoute,
+};
 use crate::{
     Cancellation,
     managed_network::{
@@ -167,7 +170,12 @@ async fn scenario(wg_first: bool) {
         .unwrap();
     traffic(true);
     let old_stamp = watch.current().stamp;
-    ip(&["link", "set", "vpn", "down"]);
+    fixture("disconnect");
+    if !wg_first {
+        create_foreign(old_index);
+        // Kernel bound predicate закрывает другое имя ДО обработки события.
+        traffic(false);
+    }
     let event = tokio::time::timeout(
         Duration::from_secs(3),
         binding.wait_invalidation(&mut watch, &mut cancel),
@@ -185,39 +193,8 @@ async fn scenario(wg_first: bool) {
         .apply_durable_public_policy(&mut journal, 2, 5, blocked)
         .await
         .unwrap();
-    fixture("disconnect");
-    // Настоящий reuse: kernel link с прежним index, другой name/kind/identity.
-    ip(&[
-        "link",
-        "add",
-        "name",
-        "foreign-reuse",
-        "index",
-        &old_index.to_string(),
-        "type",
-        "veth",
-        "peer",
-        "name",
-        "foreign-peer",
-    ]);
-    ip(&["link", "set", "foreign-peer", "netns", "yonik-peer"]);
-    ip(&["link", "set", "foreign-reuse", "up"]);
-    ip(&["-n", "yonik-peer", "link", "set", "foreign-peer", "up"]);
-    for (local, remote) in [
-        ("10.42.1.1/24", "10.42.1.2/24"),
-        ("fd42:1::1/64", "fd42:1::2/64"),
-    ] {
-        ip(&["address", "add", local, "dev", "foreign-reuse", "nodad"]);
-        ip(&[
-            "-n",
-            "yonik-peer",
-            "address",
-            "add",
-            remote,
-            "dev",
-            "foreign-peer",
-            "nodad",
-        ]);
+    if wg_first {
+        create_foreign(old_index);
     }
     let foreign = read_topology(&mut cancel, Duration::from_secs(3))
         .await
@@ -384,4 +361,40 @@ async fn events_wg_before_guard() {
 #[ignore = "Только private namespace runner"]
 async fn events_wg_after_guard() {
     scenario(false).await;
+}
+
+fn create_foreign(old_index: u32) {
+    // Настоящий reuse: kernel link с прежним index, другой name/kind/identity.
+    ip(&[
+        "link",
+        "add",
+        "name",
+        "foreign-reuse",
+        "index",
+        &old_index.to_string(),
+        "type",
+        "veth",
+        "peer",
+        "name",
+        "foreign-peer",
+    ]);
+    ip(&["link", "set", "foreign-peer", "netns", "yonik-peer"]);
+    ip(&["link", "set", "foreign-reuse", "up"]);
+    ip(&["-n", "yonik-peer", "link", "set", "foreign-peer", "up"]);
+    for (local, remote) in [
+        ("10.42.1.1/24", "10.42.1.2/24"),
+        ("fd42:1::1/64", "fd42:1::2/64"),
+    ] {
+        ip(&["address", "add", local, "dev", "foreign-reuse", "nodad"]);
+        ip(&[
+            "-n",
+            "yonik-peer",
+            "address",
+            "add",
+            remote,
+            "dev",
+            "foreign-peer",
+            "nodad",
+        ]);
+    }
 }
