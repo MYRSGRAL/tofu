@@ -1,8 +1,11 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
+#[path = "batch_diagnostics.rs"]
+mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
 use crate::preferences::{Preferences, SaveOutcome, Store};
+use batch_diagnostics::{BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -208,6 +211,11 @@ enum Command {
     },
     ResetProbeTarget,
     CheckTcp,
+    CheckBatch,
+    CancelBatch,
+    BatchPage {
+        offset: usize,
+    },
     CancelTcp,
     Connect,
     Stop,
@@ -384,6 +392,8 @@ impl DesktopHost {
                 | Command::ResetProbeTarget
                 | Command::ResetListenPort
                 | Command::CheckTcp
+                | Command::CheckBatch
+                | Command::CancelBatch
                 | Command::CancelTcp
         ) {
             let object: serde_json::Value =
@@ -406,7 +416,7 @@ impl DesktopHost {
                 self.control.interrupt(false);
                 Ok(())
             }
-            Command::CancelTcp => {
+            Command::CancelTcp | Command::CancelBatch => {
                 self.control.cancel_tcp();
                 Ok(())
             }
@@ -448,6 +458,7 @@ fn validate(command: &Command) -> Result<()> {
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
+        Command::BatchPage { offset } => *offset <= 10_000,
         Command::SourcePage { offset } => *offset <= 40_000,
         Command::ReviewPage { offset } => *offset <= 160_000,
         Command::SetProbeTarget { url, .. } => text(url, 2048),
@@ -627,6 +638,7 @@ struct Snapshot {
     probe_persistent: bool,
     probe_expected_status: u16,
     probe_result: Option<HealthResultDto>,
+    batch: BatchState,
     tcp_busy: bool,
     tcp_name: Option<String>,
     tcp_result: Option<TcpResultDto>,
@@ -683,6 +695,7 @@ impl Snapshot {
             probe_persistent: true,
             probe_expected_status: 204,
             probe_result: None,
+            batch: BatchState::default(),
             tcp_busy: false,
             tcp_name: None,
             tcp_result: None,
@@ -1956,7 +1969,7 @@ struct TcpKey {
     profile: i64,
     revision: i64,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct TcpResultDto {
     source_id: i64,
     profile_id: i64,
@@ -2318,6 +2331,7 @@ async fn run(
     let mut running: Option<Running> = None;
     let mut failed_session: Option<LocalSession> = None;
     let mut refreshing: Option<RefreshTask> = None;
+    let mut batch_running: Option<BatchRunning> = None;
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
@@ -2380,6 +2394,7 @@ async fn run(
                 // получить polling сети во время ожидания scheduler acknowledgement.
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
@@ -2396,6 +2411,7 @@ async fn run(
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
@@ -2460,16 +2476,51 @@ async fn run(
             changed = tcp_priority.changed() => {
                 let _ = changed;
                 tcp_priority.borrow_and_update();
+                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
             }
             _ = network_changed(&mut network) => {
                 let current = network.as_ref().map(NetworkWatch::current);
                 actor.network = network.clone();
                 apply_network_event(&mut actor.state, current, &control);
+                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); }
+                actor.state.batch.invalidate();
                 if let Some(tcp) = tcp_running.as_ref() {
                     if !network_matches(current, tcp.network_stamp) { tcp.cancel.send_replace(true); }
                 }
                 actor.emit();
+            }
+            result = async { batch_running.as_mut().expect("guard").receiver.recv().await }, if batch_running.is_some() => {
+                if let Some(result) = result {
+                    let valid = batch_running.as_ref().is_some_and(|batch|
+                        batch.generation == control.generation.load(Ordering::SeqCst)
+                        && batch.tcp_generation == *control.tcp_priority.borrow()
+                        && network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                        && actor.state.batch.source_id == actor.state.source_id
+                        && actor.state.batch.revision == actor.state.revision);
+                    if !valid {
+                        let stale = batch_running.as_ref().is_some_and(|batch|
+                            !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                            || actor.state.batch.source_id != actor.state.source_id
+                            || actor.state.batch.revision != actor.state.revision);
+                        if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); }
+                        if stale { actor.state.batch.invalidate(); }
+                        else { actor.state.batch.busy = false; actor.state.batch.cancelled = true; }
+                        actor.emit(); continue;
+                    }
+                    let batch = batch_running.as_mut().expect("guard");
+                    if let Some(mut row) = batch.rows.remove(&result.id) {
+                        match result.result { Ok(result) => row.finish(result), Err(_) => row.status = "tcp_failed" }
+                        actor.state.batch.accept(row);
+                        if actor.state.batch.completed % 32 == 0 { actor.emit(); }
+                    }
+                } else {
+                    if let Some(batch) = batch_running.take() {
+                        if !matches!(batch.task.await, Ok(Ok(()))) { actor.state.batch.cancelled = true; }
+                    }
+                    actor.state.batch.busy = false;
+                    actor.emit();
+                }
             }
             result = async { (&mut tcp_running.as_mut().expect("guard").task).await }, if tcp_running.is_some() => {
                 let mut tcp = tcp_running.take().expect("guard");
@@ -2586,6 +2637,14 @@ async fn run(
                             _ => Err(DesktopError("refresh_required")),
                         }
                     }
+                    Command::BatchPage { offset } => { actor.state.batch.page(offset); Ok(()) }
+                    Command::CheckBatch => {
+                        if batch_running.is_some() || actor.state.busy { Err(DesktopError("busy")) }
+                        else if envelope.generation != control.generation.load(Ordering::SeqCst) || envelope.tcp_generation != *control.tcp_priority.borrow() { Err(DesktopError("cancelled")) }
+                        else { match actor.start_batch(envelope.generation, envelope.tcp_generation, &control).await {
+                            Ok(batch) => { batch_running = Some(batch); Ok(()) }, Err(error) => Err(error)
+                        } }
+                    }
                     Command::CheckTcp => {
                         if envelope.tcp_generation != *control.tcp_priority.borrow() {
                             Err(DesktopError("cancelled"))
@@ -2692,6 +2751,38 @@ async fn run(
                 actor.emit();
             }
         }
+        if batch_running.as_ref().is_some_and(|batch| {
+            batch.generation != control.generation.load(Ordering::SeqCst)
+                || batch.tcp_generation != *control.tcp_priority.borrow()
+                || !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                || actor.state.batch.source_id != actor.state.source_id
+                || actor.state.batch.revision != actor.state.revision
+        }) {
+            let stale = batch_running.as_ref().is_some_and(|batch| {
+                !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                    || actor.state.batch.source_id != actor.state.source_id
+                    || actor.state.batch.revision != actor.state.revision
+            });
+            if let Some(batch) = batch_running.take() {
+                batch.cancel.send_replace(true);
+                batch.task.abort();
+            }
+            if stale {
+                actor.state.batch.invalidate();
+            } else {
+                actor.state.batch.busy = false;
+                actor.state.batch.cancelled = true;
+            }
+            actor.emit();
+        }
+        if !actor.state.batch.invalidated
+            && actor.state.batch.source_id.is_some()
+            && (actor.state.batch.source_id != actor.state.source_id
+                || actor.state.batch.revision != actor.state.revision)
+        {
+            actor.state.batch.invalidate();
+            actor.emit();
+        }
         if let Some(tcp) = tcp_running.as_ref() {
             if actor.tcp_key() != Some(tcp.result.key()) {
                 tcp.cancel.send_replace(true);
@@ -2706,7 +2797,12 @@ async fn run(
             actor.state.tcp_result = None;
             actor.emit();
         }
-        if quitting && running.is_none() && refreshing.is_none() && tcp_running.is_none() {
+        if quitting
+            && batch_running.is_none()
+            && running.is_none()
+            && refreshing.is_none()
+            && tcp_running.is_none()
+        {
             if failed_session.is_some() {
                 quitting = false;
                 actor.state.command_error(false, "cleanup_failed");
