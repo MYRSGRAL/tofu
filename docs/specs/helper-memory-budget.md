@@ -77,3 +77,14 @@ G-POWER. Эти пределы не объявляются общей готов
 
 Контракты: [реестр](helper-trusted-registry.md),
 [подготовленные запросы](helper-prepared-requests.md).
+
+Для sing-box config-budget учитывает две физические копии: исходный sealed config
+и worker-owned sealed memfd для повторного открытия `/dev/stdin` ядром. Второй
+reserve устанавливается в WorkerPayload до передачи FD; retained_bytes включает
+обе копии. SystemWorkerSupervisor удерживает payload до подтверждённого empty
+cgroup и завершения transfer. Отмена/timeout сохраняют custody до recovery.
+Если supervisor уничтожен без empty proof, reserve и payload остаются в
+консервативном карантине до выхода helper (memory budget остаётся занят).
+Публичные лимиты не увеличены. Worker дополнительно резервирует локальный budget
+до создания memfd; streaming pread не меняет offset исходного FD, временный buffer
+zeroize, mode=0600, CLOEXEC и seals сохраняются. Xray использует прежний stdin FD.

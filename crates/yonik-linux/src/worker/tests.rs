@@ -245,3 +245,32 @@ fn received_descriptors_are_cloexec_and_executable_is_copied() {
     assert!(fcntl_getfd(&input).unwrap().contains(FdFlags::CLOEXEC));
     assert!(input.set_len(5).is_err());
 }
+
+#[test]
+fn worker_owned_config_preserves_bytes_cursor_seals_and_budget() {
+    use std::os::unix::fs::MetadataExt;
+    let bytes = b"{\"secret\":\"fixture-only\"}";
+    let mut source = sealed_config(bytes).unwrap();
+    source.seek(SeekFrom::Start(7)).unwrap();
+    let budget = crate::helper::memory::ByteBudget::new(bytes.len());
+    let mut copy = worker_owned_config(&source, &budget).unwrap();
+    assert_eq!(source.stream_position().unwrap(), 7);
+    assert_eq!(copy.file.stream_position().unwrap(), 0);
+    assert_eq!(
+        copy.file.metadata().unwrap().uid(),
+        rustix::process::getuid().as_raw()
+    );
+    assert_eq!(copy.file.metadata().unwrap().mode() & 0o777, 0o600);
+    let mut actual = Vec::new();
+    copy.file.read_to_end(&mut actual).unwrap();
+    assert_eq!(actual, bytes);
+    assert!(fcntl_get_seals(&copy.file).unwrap().contains(SEALS));
+    assert!(copy.file.set_len(0).is_err());
+    assert_eq!(budget.used(), bytes.len());
+    assert!(worker_owned_config(&source, &budget).is_err());
+    assert_eq!(budget.used(), bytes.len());
+    drop(copy);
+    assert_eq!(budget.used(), 0);
+    assert!(worker_owned_config(&config_file().unwrap(), &budget).is_err());
+    assert_eq!(budget.used(), 0);
+}
