@@ -25,9 +25,9 @@ use yonik_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, NetworkMonitor, NetworkSnapshot, NetworkStamp,
     NetworkWatch, PendingRefresh, ProbeResult, ProbeTarget, ProfileQuery, RefreshResult,
-    ResolvedProfile, SubscriptionError, SubscriptionService, SubscriptionSource,
-    TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget, check_tcp_series,
-    subscription_master_key,
+    ResolvedProfile, SubscriptionError, SubscriptionIdentity, SubscriptionService,
+    SubscriptionSource, TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget,
+    check_tcp_series, subscription_master_key,
 };
 use zeroize::Zeroizing;
 
@@ -784,6 +784,15 @@ impl Actor {
             .to_string();
         self.pending = None;
         self.state.pending = None;
+        let identity = SubscriptionIdentity {
+            id,
+            generation: self
+                .service
+                .schedule_generation(id)
+                .await
+                .map_err(map_subscription)?
+                .ok_or(DesktopError("source_required"))?,
+        };
         let service = self.service.clone();
         let (cancel, receiver) = watch::channel(false);
         let wall = std::time::SystemTime::now()
@@ -791,17 +800,20 @@ impl Actor {
             .unwrap_or_default()
             .as_secs();
         service
-            .reserve_manual_schedule(id, wall)
+            .reserve_manual_schedule(identity, wall)
             .await
             .map_err(map_subscription)?;
-        let task =
-            tokio::spawn(
-                async move { service.refresh(id, Duration::from_secs(30), receiver).await },
-            );
+        let task = tokio::spawn(async move {
+            let host = yonik_linux::FetchHost::new(Duration::from_secs(30))
+                .map_err(SubscriptionError::Fetch)?;
+            service
+                .refresh_with_host(identity.id, Some(identity.generation), &host, receiver)
+                .await
+        });
         self.state.busy = true;
         self.state.refresh_source_id = Some(id);
         self.state.refresh_token = Some(token.clone());
-        Ok((generation, cancel, task, id, token))
+        Ok((generation, cancel, task, identity, token))
     }
     fn tcp_key(&self) -> Option<TcpKey> {
         let selected = self.selected.as_ref()?;
@@ -1006,18 +1018,20 @@ impl Actor {
             }
             Command::ApproveRefresh => {
                 let pending = self.pending.take().ok_or(DesktopError("review_required"))?;
+                let identity = pending.identity();
                 self.state.pending = None;
                 self.service
                     .commit(pending.approve_after_review())
                     .await
                     .map_err(map_subscription)?;
-                self.persist_refresh_completion(true).await?;
+                self.persist_refresh_completion(identity, true).await?;
                 self.clear_selection();
                 self.page().await
             }
             Command::DiscardRefresh => {
-                if self.pending.is_some() {
-                    self.persist_refresh_completion(true).await?;
+                if let Some(pending) = self.pending.as_ref() {
+                    self.persist_refresh_completion(pending.identity(), true)
+                        .await?;
                 }
                 self.pending = None;
                 self.state.pending = None;
@@ -1159,22 +1173,23 @@ impl Actor {
             _ => Err(DesktopError("invalid_input")),
         }
     }
-    async fn persist_refresh_completion(&self, success: bool) -> Result<()> {
-        let id = self
-            .state
-            .source_id
-            .ok_or(DesktopError("source_required"))?;
+    async fn persist_refresh_completion(
+        &self,
+        identity: SubscriptionIdentity,
+        success: bool,
+    ) -> Result<()> {
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         self.service
-            .record_schedule_completion(id, success, wall)
+            .record_schedule_completion(identity, success, wall)
             .await
             .map_err(map_subscription)
     }
     async fn refreshed(
         &mut self,
+        identity: SubscriptionIdentity,
         result: std::result::Result<RefreshResult, SubscriptionError>,
     ) -> Result<()> {
         let outcome = match result.map_err(map_subscription) {
@@ -1199,7 +1214,8 @@ impl Actor {
             },
         };
         if self.pending.is_none() {
-            self.persist_refresh_completion(outcome.is_ok()).await?;
+            self.persist_refresh_completion(identity, outcome.is_ok())
+                .await?;
         }
         outcome
     }
@@ -1670,11 +1686,34 @@ impl From<ProbeResult> for HealthResultDto {
         }
     }
 }
+/// Completion старого ресурса не отменяет очередь/review нового поколения.
+async fn reconcile_manual_schedule(
+    scheduled: &mut DesktopSchedule,
+    service: &SubscriptionService,
+    identity: SubscriptionIdentity,
+    clock: impl Fn() -> Duration,
+    storage_failed: bool,
+) -> Result<()> {
+    if service
+        .schedule_generation(identity.id)
+        .await
+        .map_err(map_subscription)?
+        != Some(identity.generation)
+    {
+        return Ok(());
+    }
+    scheduled.cancel(identity.id, &clock).await?;
+    if !storage_failed {
+        scheduled.reload_id(service, identity.id, clock()).await?;
+    }
+    Ok(())
+}
+
 type RefreshTask = (
     u64,
     watch::Sender<bool>,
     tokio::task::JoinHandle<std::result::Result<RefreshResult, SubscriptionError>>,
-    i64,
+    SubscriptionIdentity,
     String,
 );
 
@@ -2204,19 +2243,16 @@ async fn run(
                 actor.emit();
             }
             result = async { (&mut refreshing.as_mut().expect("guard").2).await }, if refreshing.is_some() => {
-                let (generation, cancel, _, _, _) = refreshing.take().expect("guard");
+                let (generation, cancel, _, identity, _) = refreshing.take().expect("guard");
                 actor.state.busy = false;
                 actor.state.refresh_source_id = None;
                 actor.state.refresh_token = None;
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.source_error = None; }
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting && !*cancel.borrow() {
-                    let outcome = match result { Ok(result) => actor.refreshed(result).await, Err(_) => Err(DesktopError("fetch")) };
+                    let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Some(id) = actor.state.source_id {
-                        if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await { actor.state.command_error(true, error.key()); }
-                        else if !storage_failed { if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await { actor.state.command_error(true, error.key()); } }
-                    }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 actor.emit();
             }
@@ -2231,6 +2267,12 @@ async fn run(
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
                     actor.state.command_error(true, "busy"); actor.emit(); continue;
                 }
+                if matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. } | Command::ImportSource { .. }) && (scheduled.review.is_some() || actor.pending.is_some()) {
+                    actor.state.command_error(true, "review_required"); actor.emit(); continue;
+                }
+                if matches!(&envelope.command, Command::Refresh) && (scheduled.fetching || scheduled.deferred.is_some()) {
+                    actor.state.command_error(true, "busy"); actor.emit(); continue;
+                }
                 let cancel_id = match &envelope.command {
                     Command::DeleteSource { id } => Some(*id),
                     Command::SetSourceHwid { .. } | Command::Refresh => actor.state.source_id,
@@ -2241,7 +2283,7 @@ async fn run(
                     if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
                         actor.state.command_error(true, error.key()); actor.emit(); continue;
                     }
-                    if scheduled.deferred.is_some() && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
+                    if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
                         if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         } else { actor.state.command_error(true, "busy"); }
@@ -2250,7 +2292,7 @@ async fn run(
                     if cancelled_review { actor.state.pending = None; }
                 }
                 actor.state.begin_command(&envelope.command);
-                let manual_review_completion = scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh);
+                let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
                 let outcome = match envelope.command {
                     Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
                     Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
@@ -2272,7 +2314,7 @@ async fn run(
 
                     Command::CancelRefresh { id, token } => {
                         match refreshing.as_ref() {
-                            Some((_, cancel, _, source, current_token)) if *source == id && token == *current_token && !*cancel.borrow() => {
+                            Some((_, cancel, _, source, current_token)) if source.id == id && token == *current_token && !*cancel.borrow() => {
                                 cancel.send_replace(true);
                                 Ok(())
                             }
@@ -2370,12 +2412,9 @@ async fn run(
                         } else { actor.command(command).await }
                     }
                 };
-                if manual_review_completion {
+                if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Some(id) = actor.state.source_id {
-                        if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await { actor.state.command_error(true, error.key()); }
-                        else if !storage_failed { if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await { actor.state.command_error(true, error.key()); } }
-                    }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {

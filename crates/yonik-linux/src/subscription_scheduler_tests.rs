@@ -692,7 +692,7 @@ async fn schedule_ciphertext_wrong_key_and_corruption_fail_closed() {
         .await
         .unwrap();
     service
-        .record_schedule_completion(id, true, 100)
+        .record_schedule_completion(SubscriptionIdentity { id, generation: 1 }, true, 100)
         .await
         .unwrap();
     service.close().await.unwrap();
@@ -748,7 +748,7 @@ async fn legacy_database_and_source_without_schedule_migrate_and_reopen() {
         None
     );
     migrated
-        .record_schedule_completion(id, true, 100)
+        .record_schedule_completion(SubscriptionIdentity { id, generation: 1 }, true, 100)
         .await
         .unwrap();
     migrated.close().await.unwrap();
@@ -768,4 +768,92 @@ async fn legacy_database_and_source_without_schedule_migrate_and_reopen() {
         Some(86500)
     );
     reopened.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn p2_старое_manual_completion_не_изменяет_новое_поколение() {
+    let (_dir, service) = service().await;
+    let id = service
+        .add(
+            SubscriptionSource::new(
+                "Тест".into(),
+                "http://127.0.0.1:9/sub".into(),
+                true,
+                FetchRoute::Direct,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    service
+        .reserve_manual_schedule(SubscriptionIdentity { id, generation: 1 }, 100)
+        .await
+        .unwrap();
+    service
+        .change_source(
+            id,
+            1,
+            SubscriptionSource::new(
+                "Новый".into(),
+                "http://127.0.0.1:9/new".into(),
+                true,
+                FetchRoute::Direct,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        service
+            .reserve_manual_schedule(SubscriptionIdentity { id, generation: 1 }, 200)
+            .await,
+        Err(SubscriptionError::StaleUpdate)
+    ));
+    let result = service
+        .record_schedule_completion(SubscriptionIdentity { id, generation: 1 }, true, 200)
+        .await;
+    assert!(
+        matches!(result, Err(SubscriptionError::StaleUpdate)),
+        "old completion: {result:?}"
+    );
+    let current = service.schedule_metadata(id).await.unwrap().unwrap();
+    assert_eq!(current.generation, 2);
+    assert_eq!(current.state, None);
+    service.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn p2_hwid_сбрасывает_paused_в_переходе_поколения() {
+    let (_dir, service) = service().await;
+    let id = service
+        .add(
+            SubscriptionSource::new(
+                "Тест".into(),
+                "http://127.0.0.1:9/sub".into(),
+                true,
+                FetchRoute::Direct,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let token = service.schedule_metadata(id).await.unwrap().unwrap();
+    service
+        .persist_schedule(
+            token,
+            ScheduleState {
+                version: 1,
+                due_wall: None,
+                recorded_wall: 100,
+                failures: 5,
+                paused: true,
+            },
+        )
+        .await
+        .unwrap();
+    service.set_source_hwid(id, true).await.unwrap();
+    let current = service.schedule_metadata(id).await.unwrap().unwrap();
+    assert_eq!(current.generation, 2);
+    assert_eq!(current.state, None, "новый ресурс не наследует paused");
+    service.close().await.unwrap();
 }

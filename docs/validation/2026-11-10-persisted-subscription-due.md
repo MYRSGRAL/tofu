@@ -67,3 +67,54 @@ integration-теста затем прошли. Ошибочная fixture stora
 зависимостей: Cargo менял только порядок. Независимый review и CI не подменяются
 локальными проверками. GUI, platform events, power/resume/background acceptance
 и измерения энергии остаются за пределами среза P10.
+
+## PR59: исправление трёх P2 после integration merge
+
+База delta: `4e35eabb4290081ccab3a6cd9c7dd234ae349b69`; root merge с provider58
+сохранён. Ownership delta: backend, subscriptions API, их tests и этот отчёт.
+
+Ручная операция захватывает `SubscriptionIdentity { id, generation }` до
+checkpoint. Та же identity передаётся fetch с expected generation, completion
+metadata и последующему cancel/reload. Ручной pending review возвращает identity
+самого PendingRefresh; approve/discard не используют текущий UI selection.
+Перед reconcile scheduler проверяется поколение ресурса: старый completion не
+отменяет очередь или review нового поколения. Checkpoint и completion API
+проверяют expected generation до прежнего payload CAS; гонку после проверки
+по-прежнему отклоняет CAS repository.
+
+Владельцы fetch согласованы admission guards: Refresh получает busy, пока идёт
+плановая работа. При существующем ручном/плановом review Refresh/Import/HWID
+получают review_required до отмены scheduler и сохраняют отчёт. HWID продолжает
+отменять свою active работу с acknowledgement; если после cancel остаётся чужой
+fetch, новая ручная работа не запускается. Сам переход HWID сбрасывает schedule
+в encrypted payload той же операции change_source, без последующего checkpoint
+как условия корректности.
+
+Три регрессии выполнены RED до изменения production-кода, затем GREEN:
+
+- `p2_ручной_b_не_пересекается_с_плановым_a_и_не_теряет_review`: RED — ручной B
+  запустился при удерживаемом loopback fetch A и вернул fetch error вместо busy.
+  GREEN — guard отказывает, затем review A появляется, переживает повторный
+  Refresh и завершается штатным discard.
+- `p2_старое_manual_completion_не_изменяет_новое_поколение`: RED — completion gen1
+  после change_source gen2 вернул Ok. GREEN — StaleUpdate, schedule gen2 остаётся
+  None. Дополнительно проверен отказ старого checkpoint.
+- `p2_hwid_сбрасывает_paused_в_переходе_поколения`: RED — gen2 наследует paused5.
+  GREEN — непосредственно после set_source_hwid generation=2 и schedule=None,
+  без запуска ручного checkpoint/fetch.
+
+Rust 1.85.1, jobs=2, собственный transient root с BSD flock:
+`cargo test -p yonik-subscription -p yonik-linux -p yonik-desktop` — 439 passed,
+0 failed, 24 ignored; среди прошедших четыре provider-теста. GUI/Qt не собирались.
+Сырые RED/GREEN и validation logs вне git:
+`/home/myrs/.local/state/codex-evidence/yonik-pr59-p2-20261110`.
+Clippy заметил непроверенный размер read только в новой loopback fixture;
+проверка усилена assert > 0, затем повторены backend regression, workspace
+clippy с all-targets/-D warnings и fmt check. Provider58, core scheduler,
+network/helper/application catalog/QML и зависимости в delta не менялись.
+Независимый delta review остаётся root; детей не запускали. P10 не закрывается.
+
+Финальные backend regression, workspace clippy и fmt завершились exit 0.
+Перед очисткой lsof не нашёл открытых файлов собственного target. Cargo target
+очищен штатным cargo clean, собственный transient root удалён; evidence сохранён
+в указанном каталоге без TTL. Сгенерированные логи не входят в commit.

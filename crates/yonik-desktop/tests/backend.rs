@@ -1599,3 +1599,64 @@ fn scheduler_metadata_pages_and_generation_follow_source_changes() {
             service.close().await.expect("close");
         });
 }
+
+#[test]
+fn p2_ручной_b_не_пересекается_с_плановым_a_и_не_теряет_review() {
+    let dir = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/held", listener.local_addr().unwrap());
+    let mut seed = Harness::new(dir.config());
+    seed.wait(|v| v["ready"] == true);
+    seed.send(json!({"command":"add_source", "name":"A", "url":url, "local_exception":true,"route":"direct"}));
+    let a = seed.wait(|v| v["source_id"].is_i64())["source_id"].clone();
+    seed.send(json!({"command":"add_source", "name":"B", "url":"http://127.0.0.1:9/b", "local_exception":true,"route":"direct"}));
+    let b = seed.wait(|v| v["sources_total"] == 2)["source_id"].clone();
+    seed.close();
+    сделать_overdue(&dir);
+    let (entered, receive) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut bytes = [0; 4096];
+        assert!(stream.read(&mut bytes).unwrap() > 0);
+        entered.send(()).unwrap();
+        released.recv_timeout(Duration::from_secs(10)).unwrap();
+        let body = "socks5://127.0.0.1:1080#A";
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+    });
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"subscription_visibility","visible":true}));
+    app.host
+        .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+            online: true,
+            ..Default::default()
+        })
+        .unwrap();
+    receive.recv_timeout(Duration::from_secs(10)).unwrap();
+    app.send(json!({"command":"select_source","id":b}));
+    app.wait(|v| v["source_id"] == b);
+    app.send(json!({"command":"refresh"}));
+    let refused = app.wait(|v| !v["error"].is_null());
+    // Освобождаем loopback даже в RED, прежде чем проверять guard.
+    release.send(()).unwrap();
+    let guarded = refused["error"] == "busy" && refused["busy"] == false;
+    if !guarded {
+        app.close();
+        server.join().unwrap();
+        panic!("ручной B должен ждать владельца A: {refused}");
+    }
+    let review = app.wait(|v| !v["pending"].is_null());
+    assert_eq!(review["source_id"], a);
+    app.send(json!({"command":"refresh"}));
+    let blocked = app.wait(|v| v["error"] == "review_required");
+    assert!(!blocked["pending"].is_null());
+    app.send(json!({"command":"discard_refresh"}));
+    app.wait(|v| v["pending"].is_null());
+    app.close();
+    server.join().unwrap();
+}

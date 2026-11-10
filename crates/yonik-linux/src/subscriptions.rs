@@ -128,6 +128,13 @@ impl ScheduleState {
     }
 }
 
+/// Неизменная идентичность ресурса, захваченная до запуска операции.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubscriptionIdentity {
+    pub id: i64,
+    pub generation: i64,
+}
+
 /// CAS token без публичного доступа к URL/credentials.
 pub struct ScheduleMetadata {
     pub id: i64,
@@ -332,6 +339,12 @@ struct PendingData {
 }
 
 impl PendingRefresh {
+    pub fn identity(&self) -> SubscriptionIdentity {
+        SubscriptionIdentity {
+            id: self.id,
+            generation: self.generation,
+        }
+    }
     pub fn summary(&self) -> Summary {
         self.staged.summary()
     }
@@ -441,13 +454,16 @@ impl SubscriptionService {
 
     pub async fn reserve_manual_schedule(
         &self,
-        id: i64,
+        identity: SubscriptionIdentity,
         wall: u64,
     ) -> Result<(), SubscriptionError> {
         let token = self
-            .schedule_metadata(id)
+            .schedule_metadata(identity.id)
             .await?
             .ok_or(SubscriptionError::NotFound)?;
+        if token.generation != identity.generation {
+            return Err(SubscriptionError::StaleUpdate);
+        }
         let failures = token
             .state
             .map_or(0, |s| if s.paused { 0 } else { s.failures });
@@ -467,14 +483,17 @@ impl SubscriptionService {
     /// Завершение ручной операции использует тот же retry-контракт.
     pub async fn record_schedule_completion(
         &self,
-        id: i64,
+        identity: SubscriptionIdentity,
         success: bool,
         wall: u64,
     ) -> Result<(), SubscriptionError> {
         let token = self
-            .schedule_metadata(id)
+            .schedule_metadata(identity.id)
             .await?
             .ok_or(SubscriptionError::NotFound)?;
+        if token.generation != identity.generation {
+            return Err(SubscriptionError::StaleUpdate);
+        }
         let state = yonik_subscription::scheduler::Scheduler::completion_state(
             token.state.map_or(0, |s| s.failures),
             Duration::ZERO,
@@ -669,7 +688,8 @@ impl SubscriptionService {
         if source.0.hwid_enabled == enabled {
             return Ok(());
         }
-        let source = source.with_hwid(enabled)?;
+        let mut source = source.with_hwid(enabled)?;
+        source.0.schedule = None;
         self.repository
             .change_source(id, record.source.generation, source.encode()?)
             .await?;
