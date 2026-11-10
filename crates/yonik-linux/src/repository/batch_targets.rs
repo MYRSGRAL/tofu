@@ -232,9 +232,12 @@ mod tests {
             .profiles[0]
             .id;
         repo.set_favorite(first, true).await.expect("favorite A");
-        let body = (0..available)
-            .map(|id| format!("trojan://available-{id}@127.0.0.1:1#B{id}\n"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..available).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://available-{id}@127.0.0.1:1#B{id}")
+                .expect("Строка fixture");
+            text
+        });
         repo.commit_snapshot(
             source,
             1,
@@ -368,9 +371,12 @@ mod tests {
             .expect("favorites");
         assert_eq!(retained.profiles.len(), 1);
         assert!(retained.profiles[0].favorite && !retained.profiles[0].available);
-        let body = (0..10_001)
-            .map(|id| format!("trojan://available-{id}@127.0.0.1:1#B{id}\n"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..10_001).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://available-{id}@127.0.0.1:1#B{id}")
+                .expect("Строка fixture");
+            text
+        });
         repo.commit_snapshot(
             source,
             1,
@@ -511,9 +517,12 @@ mod tests {
             .create_source(b"fresh".to_vec())
             .await
             .expect("источник");
-        let body = (0..10_000)
-            .map(|id| format!("trojan://synthetic-{id}@127.0.0.1:1#Цель{id}\n"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..10_000).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://synthetic-{id}@127.0.0.1:1#Цель{id}")
+                .expect("Строка fixture");
+            text
+        });
         repo.commit_snapshot(
             fresh.id,
             1,

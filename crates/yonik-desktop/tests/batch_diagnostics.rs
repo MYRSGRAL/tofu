@@ -16,9 +16,15 @@ fn source_batch_pages_failures_without_credentials() {
     let closed = TcpListener::bind("127.0.0.1:0").expect("закрытый endpoint");
     let port = closed.local_addr().expect("адрес").port();
     drop(closed);
-    let body = (0..250)
-        .map(|id| format!("trojan://fixture-password{id}@127.0.0.1:{port}#Сервер{id}\n"))
-        .collect::<String>();
+    use std::fmt::Write as _;
+    let body = (0..250).fold(String::new(), |mut text, id| {
+        writeln!(
+            &mut text,
+            "trojan://fixture-password{id}@127.0.0.1:{port}#Сервер{id}"
+        )
+        .expect("Строка fixture");
+        text
+    });
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("HTTP");
         let mut request = [0; 4096];

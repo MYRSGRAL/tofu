@@ -70,14 +70,16 @@ impl Fixture {
         }
         let http = TcpListener::bind("127.0.0.1:0").expect("loopback HTTP");
         let url = format!("http://{}/fixture", http.local_addr().expect("адрес"));
-        let body = (0..targets)
-            .map(|id| {
-                format!(
-                    "trojan://synthetic-credential-{id}@127.0.0.1:{}#Цель{id}\n",
-                    ports[id % LISTENERS]
-                )
-            })
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..targets).fold(String::new(), |mut text, id| {
+            writeln!(
+                &mut text,
+                "trojan://synthetic-credential-{id}@127.0.0.1:{}#Цель{id}",
+                ports[id % LISTENERS]
+            )
+            .expect("Строка fixture");
+            text
+        });
         threads.push(thread::spawn(move || {
             let (mut stream, _) = http.accept().expect("HTTP запрос");
             stream

@@ -62,3 +62,17 @@ SystemGUI writer для обычного merge и узкого review испра
 clippy.log, provenance.json, cleanup.log. Бинарники сохранены вне build TTL;
 точные SHA256 и source blobs связаны с новым commit в provenance. Старый merge
 base и все исходные результаты не переписываются.
+
+## Исправление CI test formatters
+
+Root проверил failed run `42917837879`: Rust и desktop jobs падают на шести
+`format_collect` в тестовых генераторах (не на runtime P2). Эти выражения
+заменены на `fold`/`writeln!` с одним String; production preparation не менялась.
+Для шести точных старых/новых выражений отдельный std-only Rust 1.85.1 harness
+подтвердил побайтовую эквивалентность при 0/1/17/10000/10001 и портах 1/65535
+(60 сравнений). Новый formatter-only harness проходит pinned Clippy -D warnings;
+это не повтор всего crate Clippy. Rustfmt и diff-check проходят.
+
+Evidence: `local/validation/pr76-ci-fix/` основного workspace — исходный CI log,
+точные пары выражений, harness и результаты. Полные batch/backend/native gates
+повторно не запускались для этой замены тестовых строк; новый CI ожидается.
