@@ -9,6 +9,15 @@ worker и очистку. Этот план продолжает P09/P12/P13/P19
 [компилятор TUN](../../specs/helper-tun-configuration.md).
 Основной код — Rust; без новых Go-обвязок и изменения пользовательских ключей.
 
+## Текущий срез
+
+[Worker runtime](../../specs/helper-worker-runtime.md): launcher и supervisor
+реализованы. В namespace проверен отдельный ненулевой UID, zero-capability
+Check и NET_ADMIN-only Run обоих ядер через TUN/RPDB с peer за veth.
+Private-bus tests подтверждают отмену, asynchronous jobs и lifecycle guards.
+Пункты ниже остаются открытыми до полной приёмки: эти доказательства не
+заменяют установленный systemd unit, cgroup tree и session host.
+
 ## Порядок интеграции
 
 - [ ] Отдельный закреплённый systemd worker template, как предусмотрено
@@ -45,6 +54,15 @@ worker и очистку. Этот план продолжает P09/P12/P13/P19
   Stop, recovery/error и повторный запуск без потери подписок/ключей.
 
 ## Проверки перед приёмкой
+
+Actual unit gate выполнять в одноразовой Linux VM, чтобы проверить systemd,
+cgroup v2, установленный worker user, реальные unit-файлы, fork/setsid и
+helper crash без установки helper на host. Локально доступны QEMU, xorriso,
+SSH и чтение/запись /dev/kvm; запуск ещё не проверен. Образ брать только из
+официального источника с проверкой целостности. VM, overlay, seed и временные
+ключи — в собственном transient task-каталоге под root flock; evidence и нужные
+артефакты сохранить вне TTL до остановки и очистки VM. VM gate не заменяет
+полную приёмку приложения на CachyOS/KDE.
 
 - [ ] Настоящие Xray/sing-box и compiler в отдельной сети: TCP/UDP, обе семьи,
   endpoint за veth, отсутствие зацикливания благодаря socket mark; отрицательный

@@ -157,6 +157,113 @@ with echo_servers():
     peer_signal(&mut peer, "ready").await;
     peer
 }
+fn worker_channel(area: &Path, check: bool) -> (Process, std::os::unix::net::UnixStream) {
+    use std::os::{
+        fd::OwnedFd,
+        unix::net::{UnixListener, UnixStream},
+    };
+    let path = area.join(if check {
+        "worker-check.sock"
+    } else {
+        "worker-run.sock"
+    });
+    let listener = UnixListener::bind(&path).unwrap();
+    let stream = UnixStream::connect(&path).unwrap();
+    let input: OwnedFd = listener.into();
+    let worker = area.join("yonik-worker");
+    if !worker.exists() {
+        // Build root может быть 0700: отдельному UID передаётся только launcher
+        // внутри private /tmp этой namespace, а не доступ к checkout/build tree.
+        File::create(&worker).unwrap();
+        assert!(
+            StdCommand::new("/usr/bin/mount")
+                .arg("--bind")
+                .arg(std::env::var_os("YONIK_WORKER_BIN").unwrap())
+                .arg(&worker)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    // Worker UID 1 отличается от helper/TUN owner UID 0. Проверка установленного
+    // systemd sandbox и cgroup остаётся отдельным gate.
+    let capabilities = if check { "-all" } else { "-all,+net_admin" };
+    let process = Process(
+        StdCommand::new("/usr/bin/setpriv")
+            .args([
+                format!("--bounding-set={capabilities}"),
+                format!("--inh-caps={capabilities}"),
+                format!("--ambient-caps={capabilities}"),
+                "--no-new-privs".into(),
+                "--reuid=1".into(),
+                "--regid=1".into(),
+                "--clear-groups".into(),
+                "--".into(),
+            ])
+            .arg(&worker)
+            .arg(if check { "--check" } else { "--run" })
+            .env_clear()
+            .env("LANG", "C")
+            .stdin(Stdio::from(input))
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    (process, stream)
+}
+async fn compiled_worker(
+    binary: &Path,
+    engine: Engine,
+    config: yonik_engine::CompiledConfig,
+    area: &Path,
+) -> Process {
+    use crate::worker::{WorkerMode, WorkerPayload, WorkerStatus};
+    use sha2::{Digest, Sha256 as Hasher};
+    use std::io::Read;
+    let mut source = File::open(binary).unwrap();
+    let mut hash = Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let n = source.read(&mut buffer).unwrap();
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    let snapshot =
+        crate::BinarySnapshot::load(binary, crate::Sha256(hash.finalize().into()), engine).unwrap();
+    let payload = WorkerPayload::new(snapshot, config).unwrap();
+    let (mut checker, stream) = worker_channel(area, true);
+    let began = std::time::Instant::now();
+    let ack = payload
+        .send(&stream, WorkerMode::Check)
+        .unwrap_or_else(|error| {
+            panic!(
+                "Worker Check: {error:?}, elapsed={:?}, status={:?}",
+                began.elapsed(),
+                checker.0.try_wait()
+            );
+        });
+    assert_eq!(ack.status, WorkerStatus::Checked);
+    assert_eq!(ack.pid, checker.0.id());
+    tokio::time::timeout(DEADLINE, async {
+        loop {
+            if let Some(status) = checker.0.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (worker, stream) = worker_channel(area, false);
+    let ack = payload.send(&stream, WorkerMode::Run).unwrap();
+    assert_eq!(ack.status, WorkerStatus::Accepted);
+    assert_eq!(ack.pid, worker.0.id());
+    worker
+}
 async fn address_state(index: u32) -> Vec<(std::net::IpAddr, u8, u32)> {
     let (_keep, mut cancel) = Cancellation::new();
     let snapshot = read_topology(&mut cancel, Duration::from_secs(5))
@@ -184,6 +291,14 @@ fn probe_script() -> String {
 #[tokio::test]
 #[ignore = "Требует отдельные namespaces и явно выбранный закреплённый engine"]
 async fn compiled_profile_crosses_owned_tun_and_proxy() {
+    compiled_profile_session(false).await;
+}
+#[tokio::test]
+#[ignore = "Требует отдельные namespaces, engine и собранный yonik-worker"]
+async fn compiled_worker_crosses_owned_tun_and_proxy() {
+    compiled_profile_session(true).await;
+}
+async fn compiled_profile_session(use_worker: bool) {
     let ns = File::open("/proc/thread-self/ns/net").unwrap();
     let (device, inode) = namespace(&ns).unwrap();
     let owner = Ownership::new(rustix::process::getuid().as_raw(), 7, 9, device, inode).unwrap();
@@ -311,8 +426,33 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
             "yonik-outer"
         );
     }
-    let mut client = core(&binary, &client_path);
+    let mut client = if use_worker {
+        compiled_worker(&binary, engine, config, area).await
+    } else {
+        core(&binary, &client_path)
+    };
     listener(&mut client, 10808).await;
+    if use_worker {
+        let status = std::fs::read_to_string(format!("/proc/{}/status", client.0.id())).unwrap();
+        for expected in [
+            "Uid:\t1\t1\t1\t1",
+            "CapEff:\t0000000000001000",
+            "CapBnd:\t0000000000001000",
+            "CapAmb:\t0000000000001000",
+            "NoNewPrivs:\t1",
+        ] {
+            assert!(
+                status.lines().any(|line| line == expected),
+                "Неверные права worker: {expected}"
+            );
+        }
+        assert!(
+            std::fs::read_link(format!("/proc/{}/exe", client.0.id()))
+                .unwrap()
+                .to_string_lossy()
+                .contains("memfd:")
+        );
+    }
     assert_eq!(
         address_state(index).await,
         before,

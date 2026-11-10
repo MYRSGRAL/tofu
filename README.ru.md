@@ -317,6 +317,12 @@ RPDB executor с durable-журналом захватывает непомеч�
 IPv4/IPv6 через peer за veth в соседнем namespace с очисткой своих ресурсов.
 Service/worker/GUI, live reconcile и DNS gates остаются открыты.
 [Контракт RPDB](docs/specs/helper-tun-rpdb.md).
+Новый sealed-FD launcher разделяет Check/Run, сохраняет PID при exec и фиксирует
+argv/среду ядра. Оба ядра проходят TUN fixture с отдельным ненулевым UID,
+только NET_ADMIN и no-new-privileges; тот же профиль проходит Check без capability.
+Закреплённые systemd units и supervisor связывают lifecycle с InvocationID и
+подтверждённой пустой cgroup. Приёмка установленного unit и подключение к
+profile Prepare/Apply и GUI ещё нужны. [Контракт worker](docs/specs/helper-worker-runtime.md).
 
 ### Rust-библиотеки и CLI
 

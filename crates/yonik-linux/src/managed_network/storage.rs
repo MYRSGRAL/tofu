@@ -3,6 +3,7 @@ use rustix::fs::{self, AtFlags, FileType, FlockOperation, Mode, OFlags};
 use std::{
     fs::File,
     io::{Read, Write},
+    ops::Deref,
     path::{Component, Path},
 };
 
@@ -15,6 +16,35 @@ const DIR_FLAGS: OFlags = OFlags::RDONLY
 const FILE_FLAGS: OFlags = OFlags::NOFOLLOW
     .union(OFlags::CLOEXEC)
     .union(OFlags::NONBLOCK);
+
+/// Единственный владелец блокировки; дубликаты FD её временем жизни не управляют.
+pub(super) struct LockedDirectory(File);
+
+impl Deref for LockedDirectory {
+    type Target = File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for LockedDirectory {
+    fn drop(&mut self) {
+        // После fork CLOEXEC-дубликат до exec удерживает то же open file description.
+        // Явный unlock освобождает flock сразу, не дожидаясь закрытия дубликата.
+        loop {
+            match fs::flock(&self.0, FlockOperation::Unlock) {
+                Ok(()) => break,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => {
+                    // Drop не может вернуть ошибку. При иной ошибке оставляем
+                    // штатное закрытие File; унаследованный FD закроется при exec.
+                    break;
+                }
+            }
+        }
+    }
+}
 
 fn safe_file(file: &File) -> Result<(), JournalError> {
     let stat = fs::fstat(file).map_err(|_| JournalError::Io)?;
@@ -31,14 +61,14 @@ fn safe_file(file: &File) -> Result<(), JournalError> {
 /// Каждый компонент открывается относительно закреплённого FD с NOFOLLOW.
 /// Предки — root/euid-owned, без чужой записи (кроме root-owned sticky /tmp).
 /// Только последний компонент разрешено создать; права существующих не чиним.
-pub(super) fn directory(path: &Path) -> Result<File, JournalError> {
+pub(super) fn directory(path: &Path) -> Result<LockedDirectory, JournalError> {
     directory_with_sync(path, &mut File::sync_all)
 }
 
 fn directory_with_sync(
     path: &Path,
     sync_parent: &mut impl FnMut(&File) -> std::io::Result<()>,
-) -> Result<File, JournalError> {
+) -> Result<LockedDirectory, JournalError> {
     if !path.is_absolute() {
         return Err(JournalError::UnsafePath);
     }
@@ -96,7 +126,7 @@ fn directory_with_sync(
             JournalError::Io
         }
     })?;
-    Ok(current)
+    Ok(LockedDirectory(current))
 }
 
 fn existing(directory: &File, name: &str, flags: OFlags) -> Result<Option<File>, JournalError> {
@@ -192,6 +222,7 @@ pub(super) fn write(directory: &File, document: &Document) -> Result<(), Journal
 #[cfg(test)]
 mod tests {
     use super::{JournalError, directory_with_sync};
+    use crate::managed_network::{Journal, Ownership};
     use std::{fs, os::unix::fs::DirBuilderExt, path::PathBuf};
 
     struct Area(PathBuf);
@@ -199,6 +230,46 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).expect("Очистка собственного тестового каталога");
         }
+    }
+
+    #[test]
+    fn owner_drop_unlocks_directory_with_duplicate_descriptor_alive() {
+        let mut nonce = [0; 8];
+        getrandom::getrandom(&mut nonce).expect("Тестовая случайность");
+        let area_path = std::env::temp_dir().join(format!(
+            "yonik-lock-lifetime-{:016x}",
+            u64::from_le_bytes(nonce)
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&area_path)
+            .expect("Тестовый каталог");
+        let area = Area(area_path);
+        let path = area.0.join("state");
+        let ownership = Ownership::new(1000, 1, 1, 1, 1).expect("Тестовый владелец");
+        let owner = Journal::open(&path, ownership).expect("Первый владелец");
+        // try_clone сохраняет то же open file description, как FD после fork.
+        let inherited = owner.directory.try_clone().expect("Дубликат FD");
+        assert!(
+            rustix::io::fcntl_getfd(&*owner.directory)
+                .expect("Флаги FD журнала")
+                .contains(rustix::io::FdFlags::CLOEXEC)
+        );
+        assert!(matches!(
+            Journal::open(&path, ownership),
+            Err(JournalError::Busy)
+        ));
+
+        drop(owner);
+        let next_owner = Journal::open(&path, ownership)
+            .expect("Drop владельца освобождает блокировку при живом дубликате");
+        drop(inherited);
+        assert!(matches!(
+            Journal::open(&path, ownership),
+            Err(JournalError::Busy)
+        ));
+        drop(next_owner);
+        Journal::open(&path, ownership).expect("Следующий владелец освободил блокировку");
     }
 
     #[test]

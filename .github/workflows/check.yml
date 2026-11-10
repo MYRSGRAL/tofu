@@ -17,7 +17,7 @@ jobs:
       - name: Установить SQLite, D-Bus и сетевые тестовые инструменты
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libsqlite3-dev pkg-config dbus-daemon iproute2 nftables
+          sudo apt-get install --yes --no-install-recommends libsqlite3-dev pkg-config dbus-daemon iproute2 nftables util-linux
       - name: Подготовить Arch-пути только для namespace fixtures Ubuntu
         shell: bash
         run: |
@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends iproute2 libsqlite3-dev pkg-config dbus-daemon
+          sudo apt-get install --yes --no-install-recommends iproute2 libsqlite3-dev pkg-config dbus-daemon util-linux
           rustup toolchain install 1.85.1 --profile minimal
           if [ ! -e /usr/bin/ip ] || [ -L /usr/bin/ip ]; then
             test -x /usr/sbin/ip
@@ -140,10 +140,15 @@ jobs:
           (
             cd "$yonik_ci_stage"
             CARGO_TARGET_DIR="$yonik_ci_stage/target" CARGO_BUILD_JOBS=2 cargo +1.85.1 test -p yonik-linux --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/yonik-compiled-tun-tests.jsonl"
+            # Runtime gate использует поставляемый release-профиль. Software SHA
+            # проверяет путь без CPU-ускорения, не продлевая deadline протокола.
+            CARGO_TARGET_DIR="$yonik_ci_stage/target" CARGO_BUILD_JOBS=2 cargo +1.85.1 build --release -p yonik-linux --bin yonik-worker --features sha2/force-soft --locked
           )
           yonik_network_test="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="yonik_linux" and r.get("profile",{}).get("test") and r.get("executable")]; assert len(paths)==1, paths; print(paths[0])' "$RUNNER_TEMP/yonik-compiled-tun-tests.jsonl")"
           install --mode=0755 "$yonik_network_test" "$yonik_ci_stage/yonik-linux-tests"
+          install --mode=0755 "$yonik_ci_stage/target/release/yonik-worker" "$yonik_ci_stage/yonik-worker"
           sudo flock -s "$RUNNER_TEMP/yonik-native-adapter" /usr/bin/python3 "$yonik_ci_stage/tools/managed_network_smoke.py" "$yonik_ci_stage/yonik-linux-tests" --case compiled-tun --engine sing-box --engine-binary "$yonik_ci_stage/sing-box"
+          sudo flock -s "$RUNNER_TEMP/yonik-native-adapter" /usr/bin/python3 "$yonik_ci_stage/tools/managed_network_smoke.py" "$yonik_ci_stage/yonik-linux-tests" --case worker-tun --engine sing-box --engine-binary "$yonik_ci_stage/sing-box" --worker-binary "$yonik_ci_stage/yonik-worker"
   desktop:
     runs-on: ubuntu-latest
     env:

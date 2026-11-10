@@ -21,7 +21,6 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(args[0], "/usr/bin/unshare")
                 for required in (
                     "--user",
-                    "--map-root-user",
                     "--net",
                     "--mount",
                     "--pid",
@@ -29,6 +28,8 @@ class BoundaryTests(unittest.TestCase):
                     "--mount-proc",
                 ):
                     self.assertIn(required, args)
+                if case != "worker-tun":
+                    self.assertIn("--map-root-user", args)
                 self.assertEqual(
                     args[-5:],
                     ["/test-binary", "--ignored", "--exact", test, "--nocapture"],
@@ -139,6 +140,74 @@ class UnsupportedCaseTests(unittest.TestCase):
                     "--engine",
                     "xray",
                     "--engine-binary",
+                    sys.executable,
+                ],
+            ),
+            patch("managed_network_smoke.run_sandbox") as run,
+        ):
+            with self.assertRaises(ValueError):
+                main()
+            run.assert_not_called()
+
+
+class WorkerCaseTests(unittest.TestCase):
+    def test_worker_namespace_maps_a_distinct_uid_for_root_and_regular_callers(
+        self,
+    ) -> None:
+        with patch("managed_network_smoke.os.geteuid", return_value=0):
+            root_args = command(Path("/test-binary"), "worker-tun")
+        self.assertIn("--map-users=0:0:2", root_args)
+        self.assertIn("--map-groups=0:0:2", root_args)
+        self.assertNotIn("--map-root-user", root_args)
+        with patch("managed_network_smoke.os.geteuid", return_value=1000):
+            args = command(Path("/test-binary"), "worker-tun")
+        self.assertIn("--map-auto", args)
+        self.assertIn("--map-root-user", args)
+
+    def test_worker_requires_explicit_binary_and_engine_inside_namespace(self) -> None:
+        import json
+
+        base = [
+            "smoke",
+            sys.executable,
+            "--case",
+            "worker-tun",
+            "--engine",
+            "xray",
+            "--engine-binary",
+            sys.executable,
+        ]
+        with (
+            patch.object(sys, "argv", base),
+            patch("managed_network_smoke.run_sandbox") as run,
+        ):
+            with self.assertRaises(ValueError):
+                main()
+            run.assert_not_called()
+        with (
+            patch.object(sys, "argv", [*base, "--worker-binary", sys.executable]),
+            patch("managed_network_smoke.run_sandbox") as run,
+        ):
+            self.assertEqual(main(), 0)
+            args = run.call_args.args[0]
+            self.assertEqual(args[0], "/usr/bin/unshare")
+            metadata = json.loads(args[-6])
+            self.assertEqual(
+                metadata["worker_binary"], str(Path(sys.executable).resolve())
+            )
+            self.assertEqual(metadata["engine"], "xray")
+
+    def test_other_cases_cannot_inject_worker_binary(self) -> None:
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "smoke",
+                    sys.executable,
+                    "--case",
+                    "owned-tun",
+                    "--worker-binary",
                     sys.executable,
                 ],
             ),

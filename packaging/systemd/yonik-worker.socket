@@ -1,0 +1,14 @@
+[Unit]
+Description=Yonik — приватный канал запуска ядра
+BindsTo=yonik-helper.service
+After=yonik-helper.service
+
+[Socket]
+ListenStream=/run/yonik-worker/run.sock
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+DirectoryMode=0700
+Accept=no
+RemoveOnStop=yes
+Service=yonik-worker.service

@@ -180,6 +180,10 @@ impl BinarySnapshot {
         )
     }
 
+    pub(crate) fn trusted_hash(&self) -> [u8; 32] {
+        self.image.expected.0
+    }
+
     pub(crate) fn weak_image(&self) -> Weak<SharedImage> {
         Arc::downgrade(&self.image)
     }

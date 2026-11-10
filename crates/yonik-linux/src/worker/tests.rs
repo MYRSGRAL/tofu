@@ -1,0 +1,247 @@
+use super::*;
+
+#[test]
+fn streaming_config_bounds_hash_and_seals_the_only_plaintext_copy() {
+    let mut writer = BoundedConfig::new().unwrap();
+    let chunk = [b'x'; 8192];
+    for _ in 0..MAX_ARTIFACT_BYTES / chunk.len() {
+        writer.write_all(&chunk).unwrap();
+    }
+    assert!(writer.write_all(b"extra").is_err());
+    let (file, length, hash) = writer.finish().unwrap();
+    assert_eq!(length, MAX_ARTIFACT_BYTES);
+    validate_file(&file, length, hash).unwrap();
+    assert_eq!(file.metadata().unwrap().len(), MAX_ARTIFACT_BYTES as u64);
+}
+#[test]
+fn header_rejects_every_truncation_and_unknown_discriminants() {
+    let valid = Header {
+        mode: WorkerMode::Check,
+        engine: Engine::Xray,
+        length: 12,
+        binary_hash: [3; 32],
+        config_hash: [7; 32],
+    }
+    .encode();
+    for end in 0..valid.len() {
+        assert!(Header::decode(&valid[..end]).is_err());
+    }
+    assert_eq!(Header::decode(&valid).unwrap().length, 12);
+    for index in [0, 7, 8, 9, 10, 11] {
+        let mut changed = valid;
+        changed[index] = 255;
+        assert!(Header::decode(&changed).is_err());
+    }
+    let mut zero = valid;
+    zero[12..16].copy_from_slice(&0u32.to_be_bytes());
+    assert!(Header::decode(&zero).is_err());
+}
+#[test]
+fn unsealed_and_bad_hash_descriptors_are_rejected() {
+    let file = File::from(
+        memfd_create("invalid", MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING).unwrap(),
+    );
+    assert_eq!(
+        validate_file(&file, 4, [0; 32]).err(),
+        Some(WorkerError::Protocol)
+    );
+    let file = sealed_config(b"safe").unwrap();
+    assert_eq!(
+        validate_file(&file, 4, [0; 32]).err(),
+        Some(WorkerError::Protocol)
+    );
+    assert!(validate_file(&file, 4, Hasher::digest(b"safe").into()).is_ok());
+}
+
+fn send_request(stream: &UnixStream, bytes: &[u8], files: &[&File]) {
+    let descriptors: Vec<_> = files.iter().map(|file| file.as_fd()).collect();
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(4))];
+    let mut ancillary = SendAncillaryBuffer::new(&mut space);
+    if !descriptors.is_empty() {
+        assert!(ancillary.push(SendAncillaryMessage::ScmRights(&descriptors)));
+    }
+    assert_eq!(
+        sendmsg(
+            stream,
+            &[IoSlice::new(bytes)],
+            &mut ancillary,
+            SendFlags::NOSIGNAL
+        )
+        .unwrap(),
+        bytes.len()
+    );
+    stream.shutdown(Shutdown::Write).unwrap();
+}
+#[test]
+fn protocol_rejects_missing_extra_unsealed_and_mismatched_mode() {
+    let root = rustix::process::getuid().is_root();
+    let file = sealed_config(b"safe").unwrap();
+    let header = Header {
+        mode: WorkerMode::Check,
+        engine: Engine::Xray,
+        length: 4,
+        binary_hash: [0; 32],
+        config_hash: Hasher::digest(b"safe").into(),
+    }
+    .encode();
+    for count in [0, 1, 2, 3] {
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        send_request(&sender, &header, &vec![&file; count]);
+        assert!(receive(&receiver, WorkerMode::Run).is_err());
+    }
+    let (sender, receiver) = UnixStream::pair().unwrap();
+    send_request(&sender, &header, &[&file, &file]);
+    let error = receive(&receiver, WorkerMode::Check).err().unwrap();
+    assert_eq!(
+        error,
+        if root {
+            WorkerError::Protocol
+        } else {
+            WorkerError::Peer
+        }
+    );
+    let (sender, receiver) = UnixStream::pair().unwrap();
+    send_request(&sender, &header[..24], &[&file, &file]);
+    assert!(receive(&receiver, WorkerMode::Check).is_err());
+}
+
+/// Выполняется отдельно в собственном user namespace с настоящим закреплённым ELF.
+#[test]
+#[ignore = "Нужны canonical ELF, собранный yonik-worker и собственный user namespace"]
+fn canonical_worker_process_check_and_run() {
+    use std::{
+        os::{fd::OwnedFd, unix::net::UnixListener},
+        path::PathBuf,
+    };
+    assert!(rustix::process::getuid().is_root());
+    use std::os::unix::fs::MetadataExt;
+    let actual = std::fs::metadata("/proc/thread-self/ns/net").unwrap();
+    let host = std::env::var("YONIK_NFT_TEST_HOST_NETNS").expect("YONIK_NFT_TEST_HOST_NETNS");
+    let (device, inode) = host.split_once(':').unwrap();
+    assert_ne!(
+        (actual.dev(), actual.ino()),
+        (
+            device.parse::<u64>().unwrap(),
+            inode.parse::<u64>().unwrap()
+        ),
+        "Нужен отдельный network namespace"
+    );
+    let worker = std::env::var_os("YONIK_WORKER_BIN").expect("YONIK_WORKER_BIN");
+    let engine = match std::env::var("YONIK_SYSTEM_TUN_ENGINE").unwrap().as_str() {
+        "xray" => Engine::Xray,
+        "sing-box" => Engine::SingBox,
+        _ => panic!("Неизвестное тестовое ядро"),
+    };
+    let path = PathBuf::from(std::env::var_os("YONIK_SYSTEM_TUN_BINARY").unwrap());
+    {
+        let bytes = std::fs::read(&path).unwrap();
+        let binary =
+            BinarySnapshot::load(&path, Sha256(Hasher::digest(&bytes).into()), engine).unwrap();
+        let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
+            .unwrap()
+            .servers
+            .remove(0);
+        let config =
+            yonik_engine::compile(&server, engine, std::num::NonZeroU16::new(10808).unwrap())
+                .unwrap();
+        let payload = WorkerPayload::new(binary, config).unwrap();
+        for mode in [WorkerMode::Check, WorkerMode::Run] {
+            let directory = std::env::temp_dir().join(format!(
+                "yonik-worker-test-{}-{:?}-{:?}",
+                std::process::id(),
+                engine,
+                mode
+            ));
+            std::fs::create_dir(&directory).unwrap();
+            let socket = directory.join("worker.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let fd: OwnedFd = listener.into();
+            let mut child = Command::new(&worker)
+                .arg(if mode == WorkerMode::Check {
+                    "--check"
+                } else {
+                    "--run"
+                })
+                .stdin(Stdio::from(fd))
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let stream = UnixStream::connect(&socket).unwrap();
+            let ack = payload.send(&stream, mode).unwrap();
+            assert_eq!(ack.pid, child.id());
+            assert_eq!(
+                ack.status,
+                if mode == WorkerMode::Check {
+                    WorkerStatus::Checked
+                } else {
+                    WorkerStatus::Accepted
+                }
+            );
+            if mode == WorkerMode::Run {
+                std::thread::sleep(Duration::from_millis(250));
+                assert!(child.try_wait().unwrap().is_none());
+                let executable = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
+                assert!(executable.to_string_lossy().contains("memfd:yonik-engine"));
+                for descriptor in std::fs::read_dir(format!("/proc/{}/fd", child.id())).unwrap() {
+                    let descriptor = descriptor.unwrap();
+                    if descriptor.file_name() == "0" {
+                        continue;
+                    }
+                    if let Ok(target) = std::fs::read_link(descriptor.path()) {
+                        let target = target.to_string_lossy();
+                        assert!(!target.contains("memfd:yonik-config"));
+                        assert!(!target.contains("memfd:yonik-engine"));
+                    }
+                }
+                child.kill().unwrap();
+            }
+            let status = child.wait().unwrap();
+            if mode == WorkerMode::Check {
+                assert!(status.success());
+            }
+            std::fs::remove_file(socket).unwrap();
+            std::fs::remove_dir(directory).unwrap();
+        }
+    }
+}
+
+#[test]
+fn received_descriptors_are_cloexec_and_executable_is_copied() {
+    use rustix::io::{FdFlags, fcntl_getfd};
+    use std::os::unix::fs::MetadataExt;
+    let bytes = std::fs::read("/usr/bin/true").unwrap();
+    let expected = Hasher::digest(&bytes).into();
+    let binary = BinarySnapshot::load(
+        std::path::Path::new("/usr/bin/true"),
+        Sha256(expected),
+        Engine::Xray,
+    )
+    .unwrap();
+    let config = sealed_config(b"safe").unwrap();
+    let header = Header {
+        mode: WorkerMode::Check,
+        engine: Engine::Xray,
+        length: 4,
+        binary_hash: expected,
+        config_hash: Hasher::digest(b"safe").into(),
+    }
+    .encode();
+    let (sender, receiver) = UnixStream::pair().unwrap();
+    send_request(&sender, &header, &[&binary.file, &config]);
+    if !rustix::process::getuid().is_root() {
+        assert_eq!(
+            receive(&receiver, WorkerMode::Check).err(),
+            Some(WorkerError::Peer)
+        );
+        return;
+    }
+    let (copy, input) = receive(&receiver, WorkerMode::Check).unwrap();
+    assert_ne!(
+        copy.file.metadata().unwrap().ino(),
+        binary.file.metadata().unwrap().ino()
+    );
+    assert!(fcntl_getfd(&copy.file).unwrap().contains(FdFlags::CLOEXEC));
+    assert!(fcntl_getfd(&input).unwrap().contains(FdFlags::CLOEXEC));
+    assert!(input.set_len(5).is_err());
+}

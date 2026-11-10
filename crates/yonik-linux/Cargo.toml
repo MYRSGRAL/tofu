@@ -35,3 +35,7 @@ path = "src/helper_main.rs"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "yonik-worker"
+path = "src/worker_main.rs"
