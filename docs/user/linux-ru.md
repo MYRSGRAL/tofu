@@ -175,8 +175,8 @@ binary и повторите установку пункта меню с его 
 версией; восстанавливайте согласованный backup отдельно, не заменяя ключ.
 
 Для удаления пользовательского launcher удалите только созданные им
-`applications/cloud.highpriority.yonik.desktop` и
-`icons/hicolor/scalable/apps/cloud.highpriority.yonik.svg` внутри XDG data home,
+`applications/cloud.highpriority.yonik.local.desktop` и
+`icons/hicolor/scalable/apps/cloud.highpriority.yonik.local.svg` внутри XDG data home,
 после проверки владения/managed-маркера entry; чужие файлы оставьте. Отдельно
 можно удалить собственный binary. Сохраняйте БД, пользовательские данные и ключи.
 Удаление пакета не обещает очистить активную сеть: `/run`, чужие ресурсы и keyring

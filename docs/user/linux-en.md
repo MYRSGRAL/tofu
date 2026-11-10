@@ -173,8 +173,8 @@ with an older version. Restore a matching backup separately without replacing
 the key.
 
 To remove the user launcher, remove only its created
-`applications/cloud.highpriority.yonik.desktop` and
-`icons/hicolor/scalable/apps/cloud.highpriority.yonik.svg` under XDG data home,
+`applications/cloud.highpriority.yonik.local.desktop` and
+`icons/hicolor/scalable/apps/cloud.highpriority.yonik.local.svg` under XDG data home,
 after checking ownership and the entry's managed marker. Preserve unrelated files.
 You may separately remove your own binary. Preserve databases, user data and keys.
 Package removal does not promise active-network cleanup; do not manually delete
