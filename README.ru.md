@@ -305,6 +305,13 @@ LAN до этого явно unsupported. [Контракт и evidence](docs/sp
 multi-queue не поддержан. Routes, DNS и service/GUI-сессия ещё не подключены.
 [Контракт и evidence владения TUN](docs/specs/helper-owned-tun.md).
 
+Системный compiler сохраняет профиль и авторизованный probe; адресами и
+маршрутами владеет helper, policy-режим пока только IP. Xray и pinned адаптер
+sing-box с external configuration прошли TUN→VLESS→echo и crash cleanup.
+Обычный sing-box для этого режима отклоняется: auto_route=false всё ещё
+создаёт IPv6-эффекты. Service/GUI, production RPDB и DNS gates остаются открыты.
+[Контракт и evidence](docs/specs/helper-tun-configuration.md).
+
 ### Rust-библиотеки и CLI
 
 Rust 1.85+ (edition 2024). Application использует только std, нормализация доменов — IDNA; у импортера

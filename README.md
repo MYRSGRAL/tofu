@@ -302,6 +302,13 @@ pass the single-queue traffic/lifecycle fixture; multi-queue is unsupported.
 Routes, DNS and service/GUI session wiring remain open.
 [Owned TUN contract and evidence](docs/specs/helper-owned-tun.md).
 
+System TUN compilation now preserves the selected profile and authenticated
+probe, with helper-owned addresses/routes and IP-only policy. Xray and the
+pinned sing-box external-configuration adapter pass TUN→VLESS→echo and crash
+cleanup fixtures. Stock sing-box is rejected for this mode: auto_route=false
+still creates IPv6 network effects. Service/GUI, production RPDB and DNS gates
+remain open. [Contract and evidence](docs/specs/helper-tun-configuration.md).
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses

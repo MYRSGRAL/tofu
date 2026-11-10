@@ -15,7 +15,7 @@ pub use policy_state::{PublicPolicyPhase, PublicPolicyRecord};
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
     fs::File,
     net::IpAddr,
@@ -94,6 +94,13 @@ pub enum NftFamily {
 pub enum Resource {
     /// Имя `tofu` + 8 hex-цифр name_id. При сверке нужна метка владения link alias.
     Tun { name_id: u32 },
+    /// Адрес принадлежит конкретному собственному TUN, а не произвольному ifindex.
+    Address {
+        tun_id: u64,
+        ifindex: u32,
+        address: IpAddr,
+        prefix_len: u8,
+    },
     /// Отдельная таблица helper; chain/rules принадлежат этой таблице целиком.
     NftTable { table_id: u64, family: NftFamily },
     Route {
@@ -127,6 +134,24 @@ impl Resource {
         }
         let valid = match self {
             Self::Tun { name_id } => *name_id != 0,
+            Self::Address {
+                tun_id,
+                ifindex,
+                address,
+                prefix_len,
+            } => {
+                *tun_id != 0
+                    && *ifindex != 0
+                    && *prefix_len > 0
+                    && *prefix_len <= if address.is_ipv4() { 32 } else { 128 }
+                    && !address.is_unspecified()
+                    && !address.is_loopback()
+                    && !address.is_multicast()
+                    && match address {
+                        IpAddr::V4(ip) => !ip.is_broadcast() && !ip.is_link_local(),
+                        IpAddr::V6(ip) => !ip.is_unicast_link_local() && ip.to_ipv4().is_none(),
+                    }
+            }
             Self::NftTable { table_id, .. } => *table_id != 0,
             Self::Route {
                 table,
@@ -238,6 +263,20 @@ impl Document {
             record.resource.validate(record.scope)?;
             if !resources.insert(&record.resource) {
                 return Err(JournalError::Conflict);
+            }
+        }
+        let tun_ids: HashSet<_> = self
+            .records
+            .iter()
+            .filter_map(|record| {
+                matches!(record.resource, Resource::Tun { .. }).then_some(record.id)
+            })
+            .collect();
+        for record in &self.records {
+            if let Resource::Address { tun_id, .. } = record.resource {
+                if !tun_ids.contains(&tun_id) {
+                    return Err(JournalError::Invalid);
+                }
             }
         }
         if let Some(policy) = &self.public_policy {
@@ -560,6 +599,7 @@ impl Journal {
             .filter(|record| record.scope == scope)
             .filter(|record| self.reconciled.contains(&record.id))
             .map(|record| record.id)
+            .rev()
             .collect();
         if ids.is_empty() {
             if self
@@ -583,6 +623,12 @@ impl Journal {
         }
         self.persist(document)?;
         let mut removed = 0;
+        let mut address_children = BTreeMap::<u64, usize>::new();
+        for record in &self.document.records {
+            if let Resource::Address { tun_id, .. } = record.resource {
+                *address_children.entry(tun_id).or_default() += 1;
+            }
+        }
         for id in ids {
             let index = self
                 .document
@@ -592,9 +638,14 @@ impl Journal {
                 .ok_or(JournalError::Missing)?;
             // Даже при unwind/cancellation следующая попытка требует новой сверки.
             self.reconciled.remove(&id);
+            if matches!(self.document.records[index].resource, Resource::Tun { .. })
+                && address_children.get(&id).copied().unwrap_or(0) != 0
+            {
+                continue;
+            }
             if remove(&self.document.records[index]).is_ok() {
                 let mut document = self.document.clone();
-                document.records.remove(index);
+                let removed_record = document.records.remove(index);
                 if document
                     .public_policy
                     .as_ref()
@@ -603,6 +654,11 @@ impl Journal {
                     document.public_policy = None;
                 }
                 self.persist(document)?;
+                if let Resource::Address { tun_id, .. } = removed_record.resource {
+                    if let Some(count) = address_children.get_mut(&tun_id) {
+                        *count -= 1;
+                    }
+                }
                 removed += 1;
             }
         }

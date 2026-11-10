@@ -225,6 +225,7 @@ def worker(binary: Path, engine: str, host: tuple[int, int]) -> int:
                 "engine": engine,
                 "sha256": digest,
                 "supported_modes": modes,
+                "route_ownership_verified": False,
                 "cases": results,
                 "cleanup": "PASS",
             },

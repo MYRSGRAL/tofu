@@ -35,7 +35,11 @@ class BuilderTests(unittest.TestCase):
         self.patch_file = self.base / "adapter.patch"
         self.patch_file.write_bytes(builder.DEFAULT_PATCH.read_bytes())
         self.extra_patches = []
-        for name in ("dns_provenance", "pin_resolution"):
+        for name in (
+            "dns_provenance",
+            "pin_resolution",
+            "external_tun_configuration",
+        ):
             path = self.base / f"{name}.patch"
             path.write_text(f"synthetic canonical {name} patch")
             self.extra_patches.append((path, name))
@@ -44,6 +48,7 @@ class BuilderTests(unittest.TestCase):
         self.dirty = ""
         self.fail_go = False
         self.modify_module = False
+        self.binary_version = builder.SOURCE_VERSION
         self.commands: list[list[str]] = []
 
     def fake_run(self, runner: builder.Runner, argv: list[str], cwd: Path) -> str:
@@ -77,6 +82,8 @@ class BuilderTests(unittest.TestCase):
             if self.modify_module:
                 (self.source / "go.sum").write_text("unexpected change")
             Path(argv[argv.index("-o") + 1]).write_bytes(b"fixture binary")
+        if len(argv) == 2 and argv[1] == "version":
+            return f"sing-box version {self.binary_version}\n"
         return ""
 
     def build(self) -> Path:
@@ -201,12 +208,34 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(manifest["source_commit"], builder.SOURCE_COMMIT)
         self.assertEqual(manifest["source_tag"], "v1.14.4")
         self.assertEqual(manifest["engine"], "sing-box")
+        self.assertEqual(manifest["engine_version"], "1.14.4")
         self.assertEqual(manifest["build_tags"], ["with_quic", "with_utls"])
         self.assertTrue(manifest["adapter_features"]["strict_complete_dns"])
+        self.assertTrue(manifest["adapter_features"]["external_tun_configuration"])
         self.assertFalse(manifest["strictDNSGate"])
         self.assertFalse(manifest["strict_dns_gate"])
         self.assertIn("-mod=readonly", manifest["build_args"])
+        self.assertEqual(
+            manifest["build_args"][manifest["build_args"].index("-ldflags") + 1],
+            "-X github.com/sagernet/sing-box/constant.Version=1.14.4",
+        )
         self.assertEqual(manifest["build_args"][-1], "./cmd/sing-box")
+
+    def test_unknown_binary_version_is_refused_before_publication(self) -> None:
+        self.binary_version = "unknown"
+        with self.assertRaisesRegex(builder.BuildError, "закреплённую версию"):
+            self.build()
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_default_chain_binds_the_external_tun_patch(self) -> None:
+        entries = [
+            path
+            for path, feature in builder.EXTRA_PATCHES
+            if feature == "external_tun_configuration"
+        ]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].name, "external-tun-configuration.patch")
+        self.assertTrue(entries[0].is_file())
 
     def test_manifest_binds_complete_ordered_patch_chain(self) -> None:
         manifest = json.loads(self.build().read_text())

@@ -682,3 +682,120 @@ fn process_exit_releases_lock_and_keeps_ambiguous_intent() {
     assert_eq!(journal.records()[0].state(), RecordState::Intent);
     assert!(journal.needs_reconciliation(1));
 }
+
+#[test]
+fn address_records_require_a_live_parent_in_the_same_document() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    let address = Resource::Address {
+        tun_id: 1,
+        ifindex: 7,
+        address: "198.18.0.1".parse().unwrap(),
+        prefix_len: 30,
+    };
+    assert_eq!(
+        journal.intent(owner(), Scope::Session, 2, address.clone()),
+        Err(JournalError::Invalid)
+    );
+    assert!(journal.records().is_empty());
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    journal.intent(owner(), Scope::Session, 2, address).unwrap();
+    assert_eq!(
+        journal.reconcile(owner(), 1, Reconciled::Absent),
+        Err(JournalError::Invalid)
+    );
+    assert_eq!(journal.records().len(), 2);
+    drop(journal);
+    let mut journal = open(&area);
+    assert_eq!(journal.records().len(), 2);
+    journal.reconcile(owner(), 2, Reconciled::Absent).unwrap();
+    journal.reconcile(owner(), 1, Reconciled::Absent).unwrap();
+    assert!(journal.records().is_empty());
+}
+
+#[test]
+fn address_records_reject_invalid_address_scope_and_bounds() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    for (address, prefix_len) in [
+        ("0.0.0.0", 24),
+        ("127.0.0.1", 8),
+        ("224.0.0.1", 24),
+        ("255.255.255.255", 32),
+        ("169.254.0.1", 16),
+        ("::", 64),
+        ("::1", 128),
+        ("::ffff:127.0.0.1", 128),
+        ("::192.0.2.1", 128),
+        ("ff02::1", 64),
+        ("fe80::1", 64),
+        ("198.18.0.1", 0),
+        ("198.18.0.1", 33),
+        ("2001:db8::1", 129),
+    ] {
+        let resource = Resource::Address {
+            tun_id: 1,
+            ifindex: 7,
+            address: address.parse().unwrap(),
+            prefix_len,
+        };
+        assert_eq!(
+            journal.intent(owner(), Scope::Session, 2, resource),
+            Err(JournalError::Invalid)
+        );
+    }
+    let valid = Resource::Address {
+        tun_id: 1,
+        ifindex: 7,
+        address: "2001:db8::1".parse().unwrap(),
+        prefix_len: 64,
+    };
+    assert_eq!(
+        journal.intent(owner(), Scope::PublicBlock, 2, valid.clone()),
+        Err(JournalError::Invalid)
+    );
+    journal.intent(owner(), Scope::Session, 2, valid).unwrap();
+}
+
+#[test]
+fn cleanup_orders_children_first_and_never_calls_parent_after_child_failure() {
+    for fail_child in [false, true] {
+        let area = Area::new();
+        let mut journal = open(&area);
+        journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+        journal
+            .intent(
+                owner(),
+                Scope::Session,
+                2,
+                Resource::Address {
+                    tun_id: 1,
+                    ifindex: 7,
+                    address: "198.18.0.1".parse().unwrap(),
+                    prefix_len: 30,
+                },
+            )
+            .unwrap();
+        journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+        journal.reconcile(owner(), 2, Reconciled::Owned).unwrap();
+        let mut called = Vec::new();
+        let report = journal
+            .cleanup(owner(), Scope::Session, |record| {
+                called.push(record.id());
+                if fail_child && record.id() == 2 {
+                    Err(CleanupFailed)
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
+        if fail_child {
+            assert_eq!(called, [2]);
+            assert_eq!((report.removed, report.remaining), (0, 2));
+        } else {
+            assert_eq!(called, [2, 1]);
+            assert_eq!((report.removed, report.remaining), (2, 0));
+        }
+    }
+}

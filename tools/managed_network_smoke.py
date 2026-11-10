@@ -15,6 +15,9 @@ from engine_smoke import install_signal_handlers, run_sandbox
 LOG = logging.getLogger("yonik.managed-network")
 CASES = {
     "owned-tun": "managed_network::tun::tests::real_namespace_tun_ownership_reopen_and_cleanup",
+    "tun-config": "managed_network::tun::config::tests::real_namespace_owned_addresses_routes_and_cleanup",
+    "unsupported-tun": "managed_network::tun::session_tests::unpatched_engine_is_rejected_before_network_effects",
+    "compiled-tun": "managed_network::tun::session_tests::compiled_profile_crosses_owned_tun_and_proxy",
     "public-block": "managed_network::nft::block::tests::real_public_block_tcp_udp_dual_stack_and_lifetime",
     "durable-policy": "managed_network::nft::policy::tests::sigkill_recovery_preserves_desired_previous_and_unlock_intents",
     "service": "helper::protection_host::tests::isolated_service_applies_preserves_and_unlocks_real_rules",
@@ -22,7 +25,8 @@ CASES = {
 _BOOTSTRAP = """
 import json, os, subprocess, sys
 from pathlib import Path
-host = tuple(json.loads(sys.argv[1]))
+metadata = json.loads(sys.argv[1])
+host = tuple(metadata['namespace'])
 current = os.stat('/proc/self/ns/net')
 if (current.st_dev, current.st_ino) == host:
     raise SystemExit('Нет изоляции network namespace')
@@ -34,6 +38,9 @@ runtime.mkdir(mode=0o700)
 env = os.environ.copy()
 env['XDG_RUNTIME_DIR'] = str(runtime)
 env['YONIK_NFT_TEST_HOST_NETNS'] = f'{host[0]}:{host[1]}'
+if metadata.get('engine'):
+    env['YONIK_SYSTEM_TUN_ENGINE'] = metadata['engine']
+    env['YONIK_SYSTEM_TUN_BINARY'] = metadata['engine_binary']
 listing = subprocess.run([sys.argv[2], '--list', '--format', 'terse', '--exact', sys.argv[5]], env=env, capture_output=True, text=True, timeout=5)
 if listing.returncode or listing.stdout.strip() != f'{sys.argv[5]}: test':
     raise SystemExit('Нужный Rust test отсутствует; ноль тестов не является успехом')
@@ -41,7 +48,12 @@ raise SystemExit(subprocess.run(sys.argv[2:], env=env, timeout=90).returncode)
 """
 
 
-def command(binary: Path, case: str) -> list[str]:
+def command(
+    binary: Path,
+    case: str,
+    engine: str | None = None,
+    engine_binary: Path | None = None,
+) -> list[str]:
     namespace = os.stat("/proc/self/ns/net")
     return [
         "/usr/bin/unshare",
@@ -55,7 +67,13 @@ def command(binary: Path, case: str) -> list[str]:
         sys.executable,
         "-c",
         _BOOTSTRAP,
-        json.dumps((namespace.st_dev, namespace.st_ino)),
+        json.dumps(
+            {
+                "namespace": (namespace.st_dev, namespace.st_ino),
+                "engine": engine,
+                "engine_binary": str(engine_binary) if engine_binary else None,
+            }
+        ),
         str(binary),
         "--ignored",
         "--exact",
@@ -68,11 +86,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--case", choices=CASES, required=True)
+    parser.add_argument("--engine", choices=("xray", "sing-box"))
+    parser.add_argument("--engine-binary", type=Path)
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError("Нужен исполняемый Rust test binary")
-    run_sandbox(command(binary, args.case), timeout=100)
+    if args.case in {"compiled-tun", "unsupported-tun"}:
+        if args.engine is None or args.engine_binary is None:
+            raise ValueError("Для compiled-tun нужны --engine и --engine-binary")
+        if args.case == "unsupported-tun" and args.engine != "sing-box":
+            raise ValueError("Для unsupported-tun нужен sing-box без adapter feature")
+        engine_binary = args.engine_binary.resolve(strict=True)
+        if not engine_binary.is_file() or not os.access(engine_binary, os.X_OK):
+            raise ValueError("Нужен исполняемый закреплённый engine")
+    else:
+        if args.engine is not None or args.engine_binary is not None:
+            raise ValueError("Engine допустим только для compiled-tun")
+        engine_binary = None
+    run_sandbox(command(binary, args.case, args.engine, engine_binary), timeout=100)
     return 0
 
 

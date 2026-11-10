@@ -56,3 +56,43 @@ fn partial_native_and_bad_arguments_are_rejected_without_secrets() {
         assert!(!error.contains("00112233"));
     }
 }
+
+#[test]
+fn system_tun_cli_requires_complete_typed_settings_and_keeps_summary_safe() {
+    let fields = [
+        "--tun-id",
+        "1",
+        "--tun-mtu",
+        "1500",
+        "--routing-mark",
+        "99",
+        "--tun-address",
+        "198.18.0.1/30",
+        "--tun-address",
+        "2001:db8:746f::1/126",
+    ];
+    for engine in ["xray", "sing-box"] {
+        let mut args = vec![engine];
+        args.extend(fields);
+        let summary = run(URI, &args);
+        assert!(summary.status.success());
+        let summary: serde_json::Value = serde_json::from_slice(&summary.stdout).unwrap();
+        assert_eq!(summary["system_tun"], true);
+        assert!(!summary.to_string().contains("secret.example"));
+        args.push("--emit-secret-config");
+        let emitted = run(URI, &args);
+        assert!(emitted.status.success());
+        let value: serde_json::Value = serde_json::from_slice(&emitted.stdout).unwrap();
+        assert_eq!(value["inbounds"][1]["tag"], "system-tun");
+    }
+    for fields in [
+        vec!["xray", "--tun-id", "1"],
+        vec!["xray", "--tun-mtu", "1500"],
+        vec!["xray", "--routing-mark", "1"],
+        vec!["xray", "--tun-address", "127.0.0.1/8"],
+    ] {
+        let output = run(URI, &fields);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+}

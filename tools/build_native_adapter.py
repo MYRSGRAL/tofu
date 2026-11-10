@@ -1,4 +1,4 @@
-"""Закреплённая сборка sing-box с DNS provenance и direct resolution pin."""
+"""Закреплённая сборка sing-box с DNS provenance, pin и внешним владением TUN."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from pathlib import Path
 
 SOURCE_URL = "https://github.com/SagerNet/sing-box.git"
 SOURCE_TAG = "v1.14.4"
+SOURCE_VERSION = SOURCE_TAG.removeprefix("v")
 SOURCE_COMMIT = "c005f35300ce76427dc285481ec5695f5b179cd2"
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
 DEFAULT_ROOT = TRANSIENT / "yonik-native-adapter"
@@ -26,6 +27,10 @@ DEFAULT_PATCH = (
 EXTRA_PATCHES = (
     (DEFAULT_PATCH.with_name("resolution-provenance.patch"), "dns_provenance"),
     (DEFAULT_PATCH.with_name("resolution-pin.patch"), "pin_resolution"),
+    (
+        DEFAULT_PATCH.with_name("external-tun-configuration.patch"),
+        "external_tun_configuration",
+    ),
 )
 LOG = logging.getLogger("yonik.native_adapter")
 COMMAND_TIMEOUT = 180
@@ -34,6 +39,23 @@ BUILD_TIMEOUT = 900
 
 class BuildError(RuntimeError):
     """Сборка остановлена; оставленные исходники и логи требуют проверки."""
+
+
+def build_arguments(binary: Path, tags: list[str]) -> list[str]:
+    return [
+        "go",
+        "build",
+        "-mod=readonly",
+        "-trimpath",
+        "-buildvcs=false",
+        "-ldflags",
+        f"-X github.com/sagernet/sing-box/constant.Version={SOURCE_VERSION}",
+        "-tags",
+        ",".join(tags),
+        "-o",
+        str(binary),
+        "./cmd/sing-box",
+    ]
 
 
 def sha256(path: Path) -> str:
@@ -228,18 +250,7 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
     binary = root / "build-native-adapter-sing-box"
     if binary.exists() or binary.is_symlink():
         raise BuildError(f"Обнаружен предыдущий бинарник: {binary}")
-    args = [
-        "go",
-        "build",
-        "-mod=readonly",
-        "-trimpath",
-        "-buildvcs=false",
-        "-tags",
-        ",".join(tags),
-        "-o",
-        str(binary),
-        "./cmd/sing-box",
-    ]
+    args = build_arguments(binary, tags)
     try:
         runner.run(args, source)
     finally:
@@ -252,8 +263,12 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
         raise BuildError("Патч изменился во время сборки")
     if not binary.is_file() or binary.is_symlink():
         raise BuildError("Go не создал ожидаемый бинарник")
+    version = runner.run([str(binary), "version"], source).splitlines()
+    if not version or version[0].strip() != f"sing-box version {SOURCE_VERSION}":
+        raise BuildError("Бинарник не подтверждает закреплённую версию sing-box")
     manifest = {
         "engine": "sing-box",
+        "engine_version": SOURCE_VERSION,
         "source_url": SOURCE_URL,
         "source_tag": SOURCE_TAG,
         "source_commit": head,
