@@ -1,0 +1,304 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling syn v3.0.9
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.4
+   Compiling zerovec-derive v0.11.7
+   Compiling zerovec v0.11.9
+   Compiling displaydoc v0.2.7
+   Compiling tinystr v0.8.5
+   Compiling litemap v0.8.3
+   Compiling writeable v0.6.4
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling smallvec v1.16.5
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling utf_types v1.0.0
+   Compiling serde_core v1.0.229
+   Compiling utf8_iter v1.1.0
+   Compiling idna_adapter v1.2.1
+   Compiling zmij v1.0.23
+   Compiling idna v1.1.0
+   Compiling percent-encoding v2.3.2
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling form_urlencoded v1.2.2
+   Compiling serde_derive v1.0.229
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling url v2.5.8
+   Compiling base64 v0.23.1
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-52a84d3a-be4397e1f25171c7/crates/yonik-import)
+   Compiling libc v0.2.191
+   Compiling rustix v1.1.6
+   Compiling bitflags v2.13.2
+   Compiling linux-raw-sys v0.12.1
+   Compiling cfg-if v1.0.5
+   Compiling getrandom v0.2.17
+   Compiling yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-52a84d3a-be4397e1f25171c7/crates/yonik-domain)
+   Compiling yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-52a84d3a-be4397e1f25171c7/crates/yonik-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.08s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/yonik_engine-f2ab6873b3a00a32)
+
+running 1 test
+test presets::tests::installing_preset_preserves_private_lan_and_user_priority ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/yonik_compile-78f661a4b9b6d8c3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/attribution_tun.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/attribution_tun-da284ac7527d5b94)
+
+running 1 test
+test executable_conditions_are_scoped_to_tun_and_keep_destination_and_or_values ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/cli-f19c452b213b5386)
+
+running 3 tests
+test default_output_is_metadata_and_sensitive_export_requires_flag ... ok
+test partial_native_and_bad_arguments_are_rejected_without_secrets ... ok
+test system_tun_cli_requires_complete_typed_settings_and_keeps_summary_safe ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/compiler.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/compiler-7c86b485d9c7df8e)
+
+running 11 tests
+test mapped_ipv4_and_localhost_dot_cannot_create_self_proxy ... ok
+test grpc_and_xhttp_have_engine_specific_capabilities ... ok
+test invalid_shadowsocks_2022_key_and_vmess_options_are_rejected ... ok
+test recursive_listener_and_public_xray_plaintext_are_rejected ... ok
+test tls_websocket_preserves_host_path_alpn_and_fingerprint ... ok
+test reality_validates_key_short_id_and_transport ... ok
+test vless_is_loopback_only_and_has_no_direct_fallback ... ok
+test unsafe_unknown_and_inapplicable_options_never_silently_disappear ... ok
+test six_protocols_and_credentials_survive_compilation ... ok
+test json_grpc_defaults_authority_and_blocking_options ... ok
+test json_reality_spider_path_preserves_query_and_defaults ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/dns_contract.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/dns_contract-05ae423d5373e8d3)
+
+running 3 tests
+test unsupported_dns_semantics_never_produce_a_config ... ok
+test private_zones_and_full_family_cidrs_are_not_dropped ... ok
+test external_dns_is_explicit_and_does_not_enable_native_resolver ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native_dns_modes.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/native_dns_modes-02c20b1ee2e1d075)
+
+running 5 tests
+test live_dns_and_fake_mapping ... ignored, явный изолированный native gate
+test live_ipv6_family_gates ... ignored, явный изолированный IPv6 native gate
+test reject_recursive_upstream_bootstrap_and_routing_before_activation ... ok
+test generate_native_modes ... ok
+test explicit_family_and_guarantee_gates ... ok
+
+test result: ok. 3 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_input.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/policy_input-305cf47449233fdb)
+
+running 6 tests
+test ids_are_unique_in_each_group_including_disabled_rules ... ok
+test defaults_and_normalization ... ok
+test rejects_malformed_unknown_duplicate_and_missing_fields ... ok
+test rejects_invalid_semantics ... ok
+test read_is_bounded_and_errors_never_include_input ... ok
+test aggregate_rule_and_selector_limits ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/routing.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/routing-40296ff79a521d2a)
+
+running 4 tests
+test unproven_native_combinations_are_errors_not_semantic_changes ... ok
+test probe_cannot_bypass_known_protected_destinations ... ok
+test ip_only_has_domain_rejection_and_private_protection_first ... ok
+test native_policy_keeps_order_and_authenticated_probe_override ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/system_tun.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/system_tun-70b25678fe57bd70)
+
+running 3 tests
+test malformed_runtime_settings_are_rejected_before_configuration ... ok
+test system_policy_preserves_authenticated_probe_and_rejects_unproven_domain_input ... ok
+test system_inbound_retains_profile_and_never_enables_automatic_network_control ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples/import_compile_resource.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/examples/import_compile_resource-915519327e4190b7)
+
+running 1 test
+test tests::control_rule_set_is_explicitly_refused ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/yonik_import-031788c7048187d7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/yonik_import-2c5e8b788d7c5a1b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/cli-6cc6c7e89f78633b)
+
+running 2 tests
+test argument_error_does_not_echo_secret_argument ... ok
+test stdin_summary_and_errors_do_not_reveal_credentials ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/failure_source.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/failure_source-83b76533f3827061)
+
+running 2 tests
+test fatal_errors_keep_original_bytes_without_debug_leakage ... ok
+test oversized_stream_retains_only_bounded_prefix_and_marks_it_incomplete ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/identity-0304f83bc1a00152)
+
+running 9 tests
+test legacy_shadowsocks_uses_decoded_credentials ... ok
+test display_names_are_safe_bounded_and_source_is_unchanged ... ok
+test reserved_path_escape_does_not_collapse_different_options ... ok
+test query_encoding_order_and_unknown_options ... ok
+test unknown_json_numbers_never_round_to_the_same_identity ... ok
+test vmess_recursive_canonicalization ... ok
+test vmess_keeps_nested_duplicate_keys_and_their_relative_order ... ok
+test every_protocol_tracks_credentials_and_options ... ok
+test names_do_not_change_identity_for_all_protocols ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/import.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/import-89f3a423cf1da52c)
+
+running 7 tests
+test json_is_opaque_and_depth_limited ... ok
+test partial_import_reports_indices_without_echoing_input ... ok
+test all_initial_protocols_parse_core_credentials ... ok
+test standard_base64_one_layer_and_uri_list ... ok
+test unknown_and_unsafe_parameters_are_retained_and_require_review ... ok
+test vless_normalizes_endpoint_and_keeps_opaque_source ... ok
+test bounded_read_stops_before_consuming_unbounded_source ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/intent.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/intent-5b2de51c7f10d982)
+
+running 6 tests
+test закрытый_контракт_и_ограничение_размера ... ok
+test сохраняет_http_host_с_портом_и_скрывает_ошибку_секрета ... ok
+test отклоняет_неизвестные_повторные_и_избыточные_поля ... ok
+test сохраняет_протоколы_и_секреты_не_попадают_в_debug ... ok
+test reality_xhttp_и_неподдерживаемые_опции ... ok
+test проверяет_endpoint_uuid_и_управляющие_символы ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/invalid.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/invalid-8312c68977532819)
+
+running 5 tests
+test aead_2022_userinfo_must_not_use_base64_wrapper ... ok
+test vmess_duplicate_or_mistyped_core_fields_are_rejected ... ok
+test oversized_uri_and_control_credentials_do_not_become_profiles ... ok
+test hostile_reader_errors_are_redacted_and_invalid_utf8_is_rejected ... ok
+test exact_contract_limits_accept_valid_input ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+
+     Running tests/matrix.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/matrix-cbd8e3f7ea7ffb25)
+
+running 8 tests
+test idna_и_ip_нормализуются_одинаково_в_uri_и_vmess ... ok
+test вложенность_считает_контейнеры_но_не_экранированные_строки ... ok
+test алфавиты_base64_и_отказ_от_повторной_обёртки ... ok
+test неизвестные_опции_сохраняются_и_требуют_review ... ok
+test опасные_uri_отклоняются_без_потери_соседней_записи ... ok
+test граница_размера_uri_в_обычном_и_base64_списке ... ok
+test непустые_отклонённые_записи_тоже_расходуют_лимит ... ok
+test граница_входа_измеряется_до_декодирования ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+
+     Running tests/review.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/review-f3baf29453c1abe5)
+
+running 3 tests
+test vmess_json_accepts_bare_ipv6_and_normalizes_it ... ok
+test http_proxy_security_cannot_conflict_with_scheme ... ok
+test vmess_alter_id_rejects_malformed_values_and_flags_legacy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/variants.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/variants-759d6bcf212eac7b)
+
+running 4 tests
+test json_brackets_in_strings_do_not_consume_nesting_budget ... ok
+test urlsafe_unpadded_envelope_and_bom_are_supported ... ok
+test shadowsocks_legacy_and_escaped_userinfo_keep_password_exact ... ok
+test ipv6_idna_and_default_ports_are_normalized ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/xray.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/xray-665ef66952379143)
+
+running 18 tests
+test explicitly_disabled_mux_and_plain_tcp_header_are_noops ... ok
+test disabled_tls_session_resumption_is_noop_but_enabled_or_malformed_is_blocked ... ok
+test endpoints_users_and_names_are_distinct_and_stable ... ok
+test grpc_boolean_mode_stays_visible_but_cannot_activate ... ok
+test grpc_and_reality_options_reject_non_string_values ... ok
+test rejects_duplicate_nested_auth_fields ... ok
+test remna_array_extracts_only_servers_and_keeps_native_json ... ok
+test maps_ws_grpc_xhttp_without_losing_parameters ... ok
+test shadowsocks_json_preserves_credentials_endpoints_and_native_source ... ok
+test grpc_gun_mode_is_preserved_without_accepting_unknown_siblings ... ok
+test tls_unsafe_and_unknown_nested_options_cannot_be_lost ... ok
+test shadowsocks_unknown_options_and_malformed_credentials_are_not_lost ... ok
+test unrelated_native_numbers_keep_their_original_opaque_representation ... ok
+test unknown_protocol_and_malformed_credentials_are_reported ... ok
+test escaped_root_keys_are_recognized_and_large_names_are_bounded ... ok
+test unsupported_semantics_are_blocking_review_flags ... ok
+test unknown_native_is_opaque_and_oversized_outbound_is_rejected ... ok
+test native_json_bounds_and_duplicate_security_fields_are_enforced ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/xray_protocols.rs (/var/tmp/codex-myrs/transient/yonik-p04-52a84d3a/target/debug/deps/xray_protocols-bb87b8e22cec77bf)
+
+running 8 tests
+test legacy_vmess_и_неизвестные_credentials_остаются_на_review ... ok
+test alpn_с_запятой_не_превращается_в_несколько_протоколов ... ok
+test ipv6_grpc_и_непредставимые_reality_опции_не_теряются ... ok
+test извлекает_оба_протокола_и_сохраняет_intent_и_исходник ... ok
+test неоднозначные_массивы_отклоняются_целиком ... ok
+test неизвестные_и_небезопасные_поля_блокируют_intent ... ok
+test повреждённые_endpoint_и_credentials_отклоняются ... ok
+test дубли_escaped_keys_размер_и_глубина_проверяются_до_экстракции ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
