@@ -33,3 +33,29 @@ Cargo target в собственном transient root под flock, jobs=2.
 workspace clippy --all-targets --locked -- -D warnings и fmt --check прошли.
 Исходный Cargo.lock не менялся. Целевой build-каталог очищается штатным
 cargo clean после сохранения evidence; новых бинарников для передачи не нужно.
+
+## Явный async shutdown после CI
+
+Один Rust job на 1b3c4bf7ef60cd355af226feb4956b40f6540f73 и combined прогон
+редактора всё ещё отказали на новом held-callback assertion. Одного Drop было
+недостаточно: отложенные zbus cleanup tasks могут удерживать clones Connection,
+а callback на current-thread runtime не даёт им выполняться.
+
+Дополнительная private-bus регрессия намеренно сохраняет clone Connection.
+Отмена run без explicit close дала RED: уникальное имя осталось на шине.
+Теперь provider принимает существующую Cancellation, отменяет connect/run/backoff,
+явно закрывает transport и подтверждает shutdown только после успеха close
+(bound 3 секунды). Backend посылает отмену и дожидается результата до closed;
+ошибка закрытия приводит к cleanup_failed, а не ложному closed=true.
+Старый API provider сохранён, desktop использует новый cancellable API.
+
+NetworkMonitor также явно закрывает D-Bus connection до завершения своей задачи.
+Policy admission, owner fencing и backoff не изменены; ошибка подключения
+по-прежнему означает unknown/reconnect. Новый GREEN подтверждает исчезновение
+имени даже при сохранённом clone; held-callback gate сохранён без ослабления.
+Первоначальный локальный PASS первого исправления не подменяет результат CI.
+
+Повторная проверка: 427 desktop/Linux tests passed, 24 ignored и отдельный
+p10 gate exit 0; workspace clippy --all-targets --locked -- -D warnings,
+fmt --check и diff --check прошли. Retained-clone RED/GREEN сохранён как
+explicit-red.log / explicit-green.log, общий прогон — explicit-all.log.
