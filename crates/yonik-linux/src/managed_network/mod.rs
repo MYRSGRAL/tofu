@@ -10,6 +10,7 @@ pub mod firewall;
 pub mod nft;
 mod policy_state;
 mod storage;
+pub mod tun;
 pub use policy_state::{PublicPolicyPhase, PublicPolicyRecord};
 
 use serde::{Deserialize, Serialize};

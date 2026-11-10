@@ -7,6 +7,7 @@ fn link(index: u32, kind: Option<&[u8]>, loopback: bool) -> LinuxLink {
         link_type: if loopback { 772 } else { ARPHRD_ETHER },
         flags: IFF_UP | if loopback { IFF_LOOPBACK } else { 0 },
         name: format!("link{index}").into_bytes(),
+        alias: None,
         mtu: Some(1500),
         master: None,
         parent: None,

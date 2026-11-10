@@ -91,6 +91,50 @@ fn link_and_address_keep_native_facts_and_debug_is_redacted() {
 }
 
 #[test]
+fn malformed_link_alias_is_not_accepted_as_an_opaque_attribute() {
+    for alias in [
+        b"missing-nul".to_vec(),
+        b"embedded\0nul\0".to_vec(),
+        vec![b'x'; 257],
+    ] {
+        let mut link = vec![0; 16];
+        link[4..8].copy_from_slice(&3_i32.to_ne_bytes());
+        link.extend(attr(3, b"tofu00000001\0"));
+        link.extend(attr(20, &alias));
+        assert!(matches!(
+            parse_link(&link),
+            Err(NetworkReadError::Malformed)
+        ));
+    }
+}
+
+#[test]
+fn link_alias_is_bounded_redacted_and_unknown_flags_remain_opaque() {
+    let mut link = vec![0; 16];
+    link[4..8].copy_from_slice(&3_i32.to_ne_bytes());
+    link.extend(attr(3, b"tofu00000001\0"));
+    link.extend(attr(20, b"yonik-private-owner\0"));
+    let parsed = parse_link(&link).unwrap();
+    assert_eq!(
+        parsed.alias.as_deref(),
+        Some(b"yonik-private-owner".as_slice())
+    );
+    assert!(!format!("{parsed:?}").contains("yonik-private-owner"));
+    let mut flagged = link[..16].to_vec();
+    flagged.extend(attr(3, b"tofu00000001\0"));
+    flagged.extend(attr(20 | 0x8000, b"opaque\0"));
+    let parsed = parse_link(&flagged).unwrap();
+    assert_eq!(parsed.alias, None);
+    assert_eq!(parsed.unknown[0].kind, 20 | 0x8000);
+    let mut conflict = link;
+    conflict.extend(attr(20, b"different-owner\0"));
+    assert!(matches!(
+        parse_link(&conflict),
+        Err(NetworkReadError::Malformed)
+    ));
+}
+
+#[test]
 fn flagged_scalar_is_retained_and_never_decoded_as_native_endian() {
     let mut bytes = route(2, 0);
     bytes.extend(attr(4 | 0x4000, &3_u32.to_be_bytes()));

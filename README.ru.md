@@ -299,6 +299,12 @@ Journal schema v2 сохраняет desired/previous политику и нам
 но он не установлен и не связан с GUI. Системный TUN и live reconcile ещё нужны;
 LAN до этого явно unsupported. [Контракт и evidence](docs/specs/helper-service.md).
 
+Типизированный persistent TUN executor записывает intent, проверяет полную
+метку владельца и очищает интерфейс по ifindex. Оба закреплённых ядра и
+адаптированный sing-box прошли single-queue traffic/lifecycle fixture;
+multi-queue не поддержан. Routes, DNS и service/GUI-сессия ещё не подключены.
+[Контракт и evidence владения TUN](docs/specs/helper-owned-tun.md).
+
 ### Rust-библиотеки и CLI
 
 Rust 1.85+ (edition 2024). Application использует только std, нормализация доменов — IDNA; у импортера
