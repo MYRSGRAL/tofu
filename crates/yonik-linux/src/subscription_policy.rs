@@ -50,16 +50,43 @@ fn policy(
 /// Повторное соединение имеет backoff только после ошибки транспорта;
 /// исправная шина не создаёт таймеров и не опрашивает свойства.
 pub async fn system_subscription_policy(sender: watch::Sender<SubscriptionPolicy>) {
+    let (_keep, shutdown) = crate::Cancellation::new();
+    let _ = system_subscription_policy_until(sender, shutdown).await;
+}
+
+/// Отмена дожидается закрытия transport; ошибка не является cleanup acknowledgement.
+pub async fn system_subscription_policy_until(
+    sender: watch::Sender<SubscriptionPolicy>,
+    mut shutdown: crate::Cancellation,
+) -> zbus::Result<()> {
     let mut delay = std::time::Duration::from_secs(1);
     loop {
         sender.send_replace(Default::default());
+        let connection = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(()),
+            connection = Connection::system() => connection,
+        };
         let mut healthy_since = None;
-        if let Ok(connection) = Connection::system().await {
-            let _ = run_tracked(connection, sender.clone(), &mut healthy_since).await;
+        if let Ok(connection) = connection {
+            if run_until(
+                connection,
+                sender.clone(),
+                &mut healthy_since,
+                &mut shutdown,
+            )
+            .await?
+            {
+                return Ok(());
+            }
         }
         sender.send_replace(Default::default());
         delay = retry_delay(delay, healthy_since.map(|since| since.elapsed()));
-        tokio::time::sleep(delay).await;
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(()),
+            _ = tokio::time::sleep(delay) => {},
+        }
         delay = (delay * 2).min(std::time::Duration::from_secs(30));
     }
 }
@@ -145,12 +172,27 @@ fn relevant(message: &zbus::Message, owners: &Owners) -> bool {
     }
 }
 
-#[cfg(test)]
-async fn run(
+async fn run_until(
     connection: Connection,
     sender: watch::Sender<SubscriptionPolicy>,
-) -> zbus::Result<()> {
-    run_tracked(connection, sender, &mut None).await
+    healthy_since: &mut Option<Instant>,
+    shutdown: &mut crate::Cancellation,
+) -> zbus::Result<bool> {
+    let stopped = tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => true,
+        _ = run_tracked(connection.clone(), sender.clone(), healthy_since) => false,
+    };
+    sender.send_replace(Default::default());
+    // Close закрывает socket даже при clones в отложенных RemoveMatch tasks.
+    let closed = tokio::time::timeout(Duration::from_secs(3), connection.close())
+        .await
+        .map_err(|_| zbus::Error::Failure("Timeout закрытия policy transport".into()))
+        .and_then(|result| result);
+    if stopped {
+        closed?;
+    }
+    Ok(stopped)
 }
 
 async fn run_tracked(
@@ -399,8 +441,12 @@ mod bus_tests {
             .await
             .unwrap();
         let client_name = client.unique_name().unwrap().to_owned();
+        // Такой clone моделирует удержание соединения отложенной cleanup task.
+        let retained = client.clone();
         let (sender, mut receiver) = tokio::sync::watch::channel(SubscriptionPolicy::default());
-        let task = tokio::spawn(async move { run(client, sender).await });
+        let (stop, mut shutdown) = crate::Cancellation::new();
+        let task =
+            tokio::spawn(async move { run_until(client, sender, &mut None, &mut shutdown).await });
         tokio::time::timeout(std::time::Duration::from_secs(5), reached.notified())
             .await
             .unwrap();
@@ -585,8 +631,8 @@ mod bus_tests {
         })
         .await
         .unwrap();
-        task.abort();
-        assert!(task.await.unwrap_err().is_cancelled());
+        stop.send_replace(true);
+        assert!(task.await.unwrap().unwrap());
         let bus_proxy = zbus::fdo::DBusProxy::new(&server).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             while bus_proxy
@@ -599,5 +645,6 @@ mod bus_tests {
         })
         .await
         .unwrap();
+        drop(retained);
     }
 }

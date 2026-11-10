@@ -2087,15 +2087,17 @@ async fn run(
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
     let (system_policy_sender, mut system_policy) = watch::channel(Default::default());
+    let (provider_stop, provider_cancel) = Cancellation::new();
     let provider_enabled = config.system_subscription_policy;
     let provider = async move {
         if provider_enabled {
-            yonik_linux::system_subscription_policy(system_policy_sender).await;
+            yonik_linux::system_subscription_policy_until(system_policy_sender, provider_cancel)
+                .await
         } else {
-            std::future::pending::<()>().await;
+            std::future::pending().await
         }
     };
-    tokio::pin!(provider);
+    let mut provider = Box::pin(provider);
     let mut subscription_policy = control.subscription_policy.subscribe();
     let mut subscription_visible = control.subscription_visible.subscribe();
     let origin = tokio::time::Instant::now();
@@ -2476,12 +2478,18 @@ async fn run(
     if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
         actor.state.command_error(true, "storage");
     }
+    // Отмена с acknowledgement: Drop может отложить zbus cleanup до следующего poll.
+    provider_stop.send_replace(true);
+    let provider_closed = !provider_enabled || provider.as_mut().await.is_ok();
+    drop(provider);
     actor.pending = None;
-    if let Some(monitor) = network_monitor {
-        monitor.shutdown().await;
-    }
+    let network_closed = if let Some(monitor) = network_monitor {
+        monitor.shutdown().await
+    } else {
+        true
+    };
     actor.selected = None;
-    let closed = actor.service.close().await.is_ok();
+    let closed = actor.service.close().await.is_ok() && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;

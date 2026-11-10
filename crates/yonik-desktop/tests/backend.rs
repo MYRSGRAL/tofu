@@ -50,7 +50,10 @@ impl Harness {
     pub(crate) fn new(config: HostConfig) -> Self {
         Self::with_hook(config, |_| {})
     }
-    fn with_hook(config: HostConfig, hook: impl Fn(&str) + Send + Sync + 'static) -> Self {
+    pub(crate) fn with_hook(
+        config: HostConfig,
+        hook: impl Fn(&str) + Send + Sync + 'static,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
             let _ = sender.send(value.clone());

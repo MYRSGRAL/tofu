@@ -204,20 +204,21 @@ fn signal_rule(interface: &str, member: &str) -> zbus::Result<MatchRule<'static>
         .build())
 }
 
-pub(super) async fn run(publisher: NetworkPublisher, mut cancel: watch::Receiver<bool>) {
+pub(super) async fn run(publisher: NetworkPublisher, mut cancel: watch::Receiver<bool>) -> bool {
     if *cancel.borrow() {
-        return;
+        return true;
     }
     // Отмена охватывает аутентификацию, AddMatch и начальные запросы владельцев.
     let connection = tokio::select! {
-        _ = cancel.changed() => return,
+        _ = cancel.changed() => return true,
         result = Connection::system() => result,
     };
     if let Ok(connection) = connection {
-        listen(connection, publisher, cancel).await;
+        listen(connection, publisher, cancel).await
     } else {
         publisher.lost(NetworkSource::Resolver);
         publisher.lost(NetworkSource::Manager);
+        true
     }
 }
 
@@ -225,15 +226,21 @@ async fn listen(
     connection: Connection,
     publisher: NetworkPublisher,
     mut cancel: watch::Receiver<bool>,
-) {
+) -> bool {
     if !*cancel.borrow() {
         tokio::select! {
             _ = cancel.changed() => {},
             _ = observe(&connection, &publisher) => {},
         }
     }
+    // Не оставляем закрытие socket отложенным cleanup tasks после shutdown ack.
+    let closed = matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), connection.close()).await,
+        Ok(Ok(()))
+    );
     publisher.lost(NetworkSource::Resolver);
     publisher.lost(NetworkSource::Manager);
+    closed
 }
 
 async fn observe(connection: &Connection, publisher: &NetworkPublisher) -> Result<(), ()> {
