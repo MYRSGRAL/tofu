@@ -78,3 +78,6 @@ pub mod policy_test_support;
 
 #[cfg(target_os = "linux")]
 pub mod system_client;
+
+#[cfg(target_os = "linux")]
+pub mod event_log;

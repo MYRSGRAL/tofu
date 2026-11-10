@@ -70,7 +70,9 @@ fn main() {
         use cxx_qt_build::{CxxQtBuilder, QmlModule};
 
         CxxQtBuilder::new_qml_module(
-            QmlModule::new("cloud.highpriority.yonik").qml_file("qml/Main.qml"),
+            QmlModule::new("cloud.highpriority.yonik")
+                .qml_file("qml/Main.qml")
+                .qml_file("qml/DiagnosticsExport.qml"),
         )
         .file("src/bridge.rs")
         .cpp_file("src/application.cpp")

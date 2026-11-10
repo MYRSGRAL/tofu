@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import cloud.highpriority.yonik
 
 ApplicationWindow {
+    readonly property var backendForDiagnostics: backend
     id: window
     width: 420
     height: 760
@@ -998,6 +999,7 @@ ApplicationWindow {
             objectName: "diagnosticsScroll"
             ColumnLayout {
                 width: diagnosticsScroll.availableWidth; spacing: 14
+                DiagnosticsExport { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en" }
                 PlainLabel { Layout.fillWidth: true; visible: !!window.connectionError || !!window.parseError; color: "#e6bc83"; text: window.parseError || (window.connectionError ? window.errorText(window.connectionError) : "") }
                     Rectangle {
                         Layout.fillWidth: true

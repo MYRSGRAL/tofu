@@ -112,6 +112,7 @@ impl CheckedConfig {
 /// Один владелец сериализует start/check/stop. На Drop — аварийный kill_on_drop;
 /// подтверждение cleanup выдаётся только после явного stop().await.
 pub struct LocalSession {
+    event_log: Option<crate::event_log::EventLog>,
     session: Session,
     active: Option<Token>,
     child: Option<Child>,
@@ -135,6 +136,7 @@ impl LocalSession {
         let id = NonZeroU64::new(id).ok_or(HostError::State)?;
         Ok(Self {
             session: Session::new(id),
+            event_log: None,
             active: None,
             child: None,
             binary: None,
@@ -142,6 +144,16 @@ impl LocalSession {
             probe_port: None,
             probe_access: ProbeAccess::default(),
         })
+    }
+    /// Явное подключение журнала; прежний конструктор сохраняет поведение.
+    pub fn with_event_log(mut self, log: crate::event_log::EventLog) -> Self {
+        self.event_log = Some(log);
+        self
+    }
+    fn log(&self, code: crate::event_log::EventCode) {
+        if let Some(log) = &self.event_log {
+            log.record(crate::event_log::EventSource::App, code, None);
+        }
     }
     pub fn state(&self) -> State {
         self.session.state()
@@ -176,6 +188,7 @@ impl LocalSession {
         cancel: &mut Cancellation,
     ) -> Result<(), HostError> {
         cancel.check()?;
+        self.log(crate::event_log::EventCode::StartRequested);
         let token = self.session.begin().map_err(|_| HostError::State)?;
         let plan = self
             .session
@@ -197,6 +210,7 @@ impl LocalSession {
         let result = async {
             let binary = self.binary.as_ref().ok_or(HostError::State)?;
             self.child = Some(process::spawn(binary, false)?);
+            self.log(crate::event_log::EventCode::ProcessSpawned);
             let child = self.child.as_mut().ok_or(HostError::State)?;
             process::write_config(child, &checked.bytes, cancel).await?;
             let readiness = async {
@@ -287,11 +301,15 @@ impl LocalSession {
     }
     async fn release(&mut self) -> Result<(), HostError> {
         if let Some(child) = self.child.as_mut() {
-            if process::terminate(child).await.is_err() {
+            if process::terminate_logged(child, self.event_log.as_ref())
+                .await
+                .is_err()
+            {
                 self.accept(Event::CleanupFailed)?;
                 return Err(HostError::Cleanup);
             }
         }
+        self.log(crate::event_log::EventCode::CleanupConfirmed);
         self.child = None;
         self.binary = None;
         self.port = None;
@@ -300,6 +318,7 @@ impl LocalSession {
         self.accept(Event::CleanupConfirmed)
     }
     pub async fn stop(&mut self) -> Result<(), HostError> {
+        self.log(crate::event_log::EventCode::StopRequested);
         self.active = self.session.stop().map_err(|_| HostError::State)?;
         if self.active.is_some() {
             self.release().await
