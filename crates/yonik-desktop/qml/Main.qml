@@ -285,7 +285,8 @@ ApplicationWindow {
         id: backend
         onSnapshot_jsonChanged: window.readSnapshot()
     }
-    Component.onCompleted: { backend.initialize(); readSnapshot() }
+    Component.onCompleted: { backend.initialize(); readSnapshot(); backend.dispatch(JSON.stringify({command: "subscription_visibility", visible: window.visible})) }
+    onVisibleChanged: backend.dispatch(JSON.stringify({command: "subscription_visibility", visible: window.visible}))
     Shortcut {
         sequence: "Escape"
         enabled: !addDialog.visible && !reviewDialog.visible && !renameDialog.visible && !deleteDialog.visible

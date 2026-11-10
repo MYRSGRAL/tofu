@@ -18,6 +18,7 @@ use std::{
 };
 use tokio::sync::{Mutex, Semaphore, watch};
 use yonik_import::{ImportReport, import_bytes};
+pub use yonik_subscription::scheduler::Policy as SubscriptionPolicy;
 use yonik_subscription::{ApprovedUpdate, StagedUpdate, Subscription, Summary};
 
 /// Подменяемая граница транспорта; реализация обязана соблюдать route и отмену.
@@ -327,6 +328,30 @@ impl SubscriptionService {
 
     pub async fn add(&self, source: SubscriptionSource) -> Result<i64, SubscriptionError> {
         Ok(self.repository.create_source(source.encode()?).await?.id)
+    }
+
+    /// Текущее поколение без чтения snapshot; None после удаления.
+    pub async fn schedule_generation(&self, id: i64) -> Result<Option<i64>, SubscriptionError> {
+        Ok(self
+            .repository
+            .source_record_by_id(id)
+            .await?
+            .map(|record| record.generation))
+    }
+
+    /// Ограниченная страница идентификаторов и поколений без snapshot body и секретов.
+    pub async fn schedule_sources(
+        &self,
+        offset: usize,
+    ) -> Result<Vec<(i64, i64)>, SubscriptionError> {
+        Ok(self
+            .repository
+            .source_records(offset, 64)
+            .await?
+            .records
+            .into_iter()
+            .map(|record| (record.id, record.generation))
+            .collect())
     }
 
     pub async fn sources_page(
