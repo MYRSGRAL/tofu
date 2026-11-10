@@ -834,9 +834,24 @@ mod tests {
 
     #[tokio::test]
     async fn interrupted_transaction_recovers_after_reopen() {
+        use std::io::{Read, Write};
+        use std::process::Stdio;
+
         const CHILD_PATH: &str = "YONIK_REPOSITORY_CRASH_FIXTURE";
-        if let Some(path) = std::env::var_os(CHILD_PATH) {
-            let repo = EncryptedSubscriptionRepository::open(path.into(), Zeroizing::new([7; 32]))
+        if let Some(mode) = std::env::var_os(CHILD_PATH) {
+            // Переменная выбирает только протокол, никогда путь к данным.
+            assert_eq!(mode, "child-v1", "неподдерживаемый child-протокол");
+            let mut message = Vec::new();
+            std::io::stdin()
+                .take(16 * 1024)
+                .read_to_end(&mut message)
+                .expect("канал родителя");
+            let (path, nonce): (PathBuf, [u8; 32]) =
+                serde_json::from_slice(&message).expect("child-сообщение");
+            let marker = path.parent().expect("каталог fixture").join("crash-marker");
+            assert_eq!(fs::read(marker).expect("маркер fixture"), nonce);
+            assert!(path.is_file(), "родитель должен заранее создать БД");
+            let repo = EncryptedSubscriptionRepository::open(path, Zeroizing::new([7; 32]))
                 .await
                 .expect("дочернее открытие");
             repo.run::<()>(|db| {
@@ -863,18 +878,57 @@ mod tests {
             .await
             .expect("snapshot");
         repo.close().await.expect("закрытие");
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([
-                "--exact",
-                "repository::tests::interrupted_transaction_recovers_after_reopen",
-            ])
-            .env(CHILD_PATH, dir.database())
-            .status()
-            .expect("дочерний процесс");
+        let mut nonce = [0_u8; 32];
+        getrandom::getrandom(&mut nonce).expect("nonce fixture");
+        let marker = dir
+            .database()
+            .parent()
+            .expect("каталог fixture")
+            .join("crash-marker");
+        fs::write(marker, nonce).expect("маркер fixture");
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "repository::tests::interrupted_transaction_recovers_after_reopen",
+                ])
+                .env(CHILD_PATH, "child-v1")
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("дочерний процесс");
+        child
+            .stdin
+            .take()
+            .expect("канал fixture")
+            .write_all(&serde_json::to_vec(&(dir.database(), nonce)).expect("сообщение"))
+            .expect("отправка fixture");
+        let status = child.wait().expect("завершение child");
         assert_eq!(status.code(), Some(73));
         let repo = dir.open().await;
         assert_original_snapshot(&repo, source).await;
         repo.close().await.expect("закрытие");
+    }
+
+    #[test]
+    fn inherited_crash_fixture_path_cannot_open_database() {
+        let dir = TestDirectory::new();
+        fs::write(dir.database(), []).expect("посторонний пустой файл");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "repository::tests::interrupted_transaction_recovers_after_reopen",
+            ])
+            .env("YONIK_REPOSITORY_CRASH_FIXTURE", dir.database())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("дочерний процесс");
+        assert!(!output.status.success());
+        assert_ne!(output.status.code(), Some(73));
+        assert!(
+            fs::read(dir.database())
+                .expect("неизменённый файл")
+                .is_empty()
+        );
     }
 
     #[tokio::test]
