@@ -137,25 +137,42 @@ fn вложенность_считает_контейнеры_но_не_экра
 
 #[test]
 fn алфавиты_base64_и_отказ_от_повторной_обёртки() {
-    let text = "trojan://пароль@пример.рф:443?opaque=\u{ffff}";
-    for engine in [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD] {
-        let encoded = engine.encode(text);
-        let report = parse(&encoded);
-        assert!(report.base64_envelope);
-        assert!(report.issues.is_empty());
-        assert_eq!(report.servers.len(), 1);
-        assert_eq!(report.servers[0].source().expose(), text);
-        let spaced = encoded
-            .as_bytes()
-            .chunks(7)
-            .map(|s| std::str::from_utf8(s).unwrap_or_else(|e| panic!("{e}")))
-            .collect::<Vec<_>>()
-            .join(" \r\n\t");
-        assert_eq!(parse(&spaced).servers.len(), 1);
-        let error = import_bytes(engine.encode(&encoded).into_bytes())
-            .err()
-            .unwrap_or_else(|| panic!("Ожидался отказ"));
-        assert_eq!(error.kind(), FatalError::UnsupportedFormat);
+    for (suffix, padding) in [("", 0), ("a", 2), ("ab", 1)] {
+        let text = format!("trojan://пароль@пример.рф:443?opaque=\u{ffff}{suffix}");
+        assert_eq!((3 - text.len() % 3) % 3, padding);
+        for (engine, padded) in [
+            (STANDARD, true),
+            (STANDARD_NO_PAD, false),
+            (URL_SAFE, true),
+            (URL_SAFE_NO_PAD, false),
+        ] {
+            let encoded = engine.encode(&text);
+            let expected_padding = if padded { padding } else { 0 };
+            assert_eq!(
+                encoded
+                    .bytes()
+                    .rev()
+                    .take_while(|byte| *byte == b'=')
+                    .count(),
+                expected_padding
+            );
+            let report = parse(&encoded);
+            assert!(report.base64_envelope);
+            assert!(report.issues.is_empty());
+            assert_eq!(report.servers.len(), 1);
+            assert_eq!(report.servers[0].source().expose(), text);
+            let spaced = encoded
+                .as_bytes()
+                .chunks(7)
+                .map(|s| std::str::from_utf8(s).unwrap_or_else(|e| panic!("{e}")))
+                .collect::<Vec<_>>()
+                .join(" \r\n\t");
+            assert_eq!(parse(&spaced).servers.len(), 1);
+            let error = import_bytes(engine.encode(&encoded).into_bytes())
+                .err()
+                .unwrap_or_else(|| panic!("Ожидался отказ"));
+            assert_eq!(error.kind(), FatalError::UnsupportedFormat);
+        }
     }
     for (text, kind) in [
         ("A", FatalError::InvalidEncoding),

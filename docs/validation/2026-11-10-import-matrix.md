@@ -30,6 +30,12 @@ ParsedServer разрешением на активацию; allowInsecure со�
 
 ## Проверки
 
+Независимое review выявило, что исходная Base64-строка занимала 54 UTF-8 байта
+и не требовала padding. Тест расширен тремя длинами по модулю 3 (0, 1, 2):
+для Standard/URL-safe явно проверяется ровно 0, 2 или 1 завершающих `=`,
+для NO_PAD — их отсутствие. Для каждого случая проверяются импорт, whitespace
+и отказ от повторной обёртки. Production parser не менялся.
+
 Rust 1.97.0, Cargo 1.97.0, Linux. `CARGO_BUILD_JOBS=2`.
 Cargo target: `/var/tmp/codex-myrs/transient/yonik-import-matrix-b43d5d8e/target`,
 все Cargo test/clippy/clean удерживали shared flock корня task-каталога.
