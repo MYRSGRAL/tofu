@@ -58,3 +58,8 @@ pub mod helper;
 
 #[cfg(target_os = "linux")]
 pub mod worker;
+
+#[cfg(target_os = "linux")]
+mod subscription_scheduler;
+#[cfg(target_os = "linux")]
+pub use subscription_scheduler::*;

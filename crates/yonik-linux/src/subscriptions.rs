@@ -20,6 +20,28 @@ use tokio::sync::{Mutex, Semaphore, watch};
 use yonik_import::{ImportReport, import_bytes};
 use yonik_subscription::{ApprovedUpdate, StagedUpdate, Subscription, Summary};
 
+/// Подменяемая граница транспорта; реализация обязана соблюдать route и отмену.
+pub trait SubscriptionFetch: Send + Sync {
+    fn fetch<'a>(
+        &'a self,
+        source: &'a Source,
+        route: FetchRoute,
+        validators: Option<&'a FetchValidators>,
+        cancel: watch::Receiver<bool>,
+    ) -> futures_util::future::BoxFuture<'a, Result<FetchResponse, FetchError>>;
+}
+impl SubscriptionFetch for FetchHost {
+    fn fetch<'a>(
+        &'a self,
+        source: &'a Source,
+        route: FetchRoute,
+        validators: Option<&'a FetchValidators>,
+        cancel: watch::Receiver<bool>,
+    ) -> futures_util::future::BoxFuture<'a, Result<FetchResponse, FetchError>> {
+        Box::pin(FetchHost::fetch(self, source, route, validators, cancel))
+    }
+}
+
 static CONTROLLERS: AtomicU64 = AtomicU64::new(1);
 pub(crate) static IMPORT_GATE: Semaphore = Semaphore::const_new(2);
 
@@ -505,18 +527,32 @@ impl SubscriptionService {
         timeout: Duration,
         cancel: watch::Receiver<bool>,
     ) -> Result<RefreshResult, SubscriptionError> {
+        let host = FetchHost::new(timeout).map_err(SubscriptionError::Fetch)?;
+        self.refresh_with_host(id, None, &host, cancel).await
+    }
+
+    /// generation защищает запланированную работу от смены источника до запуска.
+    pub async fn refresh_with_host(
+        &self,
+        id: i64,
+        generation: Option<i64>,
+        host: &dyn SubscriptionFetch,
+        cancel: watch::Receiver<bool>,
+    ) -> Result<RefreshResult, SubscriptionError> {
         let mut requests = self.requests.lock().await;
         let record = self
             .repository
             .load(id)
             .await?
             .ok_or(SubscriptionError::NotFound)?;
-        let serial = requests.get(&id).map_or(Ok(1), |request| {
-            request
-                .serial
-                .checked_add(1)
-                .ok_or(SubscriptionError::Exhausted)
-        })?;
+        if generation.is_some_and(|value| value != record.source.generation) {
+            return Err(SubscriptionError::StaleUpdate);
+        }
+        let serial = CONTROLLERS
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .map_err(|_| SubscriptionError::Exhausted)?;
         let (sender, mut superseded) = watch::channel(false);
         if let Some(previous) = requests.insert(
             id,
@@ -528,6 +564,7 @@ impl SubscriptionService {
             previous.cancellation.send_replace(true);
         }
         drop(requests);
+        let result = async {
         let data: SourceData = serde_json::from_slice(&record.source.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
         let spec = SubscriptionSource(data);
@@ -543,7 +580,6 @@ impl SubscriptionService {
             .and_then(|snapshot| snapshot.validators.as_ref())
             .map(|bytes| decode_validators(bytes, &spec))
             .transpose()?;
-        let host = FetchHost::new(timeout).map_err(SubscriptionError::Fetch)?;
         let mut parse_cancel = cancel.clone();
         let response = tokio::select! {
             biased;
@@ -590,11 +626,21 @@ impl SubscriptionService {
                 (body.into_bytes(), encode_validators(&validators)?)
             }
         };
+        // Сохраняем operation (включая JoinHandle blocking-import) до acknowledgement.
+        // Отмена сигнала запрещает публикацию, но не отсоединяет уже начатый parser.
+        let operation = stage_body(body);
+        tokio::pin!(operation);
         let (controller, staged) = tokio::select! {
             biased;
-            _ = watch_cancelled(&mut superseded) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
-            _ = watch_cancelled(&mut parse_cancel) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
-            result = stage_body(body) => result?,
+            _ = watch_cancelled(&mut superseded) => {
+                let _ = operation.await;
+                return Err(SubscriptionError::Fetch(FetchError::Cancelled));
+            },
+            _ = watch_cancelled(&mut parse_cancel) => {
+                let _ = operation.await;
+                return Err(SubscriptionError::Fetch(FetchError::Cancelled));
+            },
+            result = &mut operation => result?,
         };
         Ok(RefreshResult::Pending(Box::new(PendingRefresh {
             service: self.identity.clone(),
@@ -606,6 +652,31 @@ impl SubscriptionService {
             controller,
             staged,
         })))
+        }.await;
+        if !matches!(result, Ok(RefreshResult::Pending(_))) {
+            let mut requests = self.requests.lock().await;
+            if requests
+                .get(&id)
+                .is_some_and(|request| request.serial == serial)
+            {
+                requests.remove(&id);
+            }
+        }
+        result
+    }
+
+    /// Освободить неутверждённый отчёт, не затрагивая более новый запрос.
+    pub async fn discard_refresh(&self, pending: PendingRefresh) {
+        let mut requests = self.requests.lock().await;
+        if Arc::ptr_eq(&self.identity, &pending.service)
+            && requests
+                .get(&pending.id)
+                .is_some_and(|r| r.serial == pending.request)
+        {
+            if let Some(request) = requests.remove(&pending.id) {
+                request.cancellation.send_replace(true);
+            }
+        }
     }
 
     /// CAS внутри Repository — окончательная проверка свежести. Смена списка
@@ -618,7 +689,7 @@ impl SubscriptionService {
         if !Arc::ptr_eq(&self.identity, &pending.service) {
             return Err(SubscriptionError::ForeignApproval);
         }
-        let requests = self.requests.lock().await;
+        let mut requests = self.requests.lock().await;
         check_request(&requests, pending.id, pending.request)?;
         let report = approved.report();
         let metadata = serde_json::to_vec(&serde_json::json!({ "version": 1,
@@ -643,6 +714,7 @@ impl SubscriptionService {
             .ok_or(SubscriptionError::StaleUpdate)?
             .cancellation
             .send_replace(true);
+        requests.remove(&pending.id);
         pending
             .controller
             .commit(approved)
@@ -678,6 +750,8 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
         .map_err(|_| SubscriptionError::Worker)?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
+        #[cfg(test)]
+        scheduler_tests::hold_parser(&body);
         let next = CONTROLLERS
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| SubscriptionError::Exhausted)?;
@@ -692,3 +766,7 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
     .await
     .map_err(|_| SubscriptionError::Worker)?
 }
+
+#[cfg(test)]
+#[path = "subscription_scheduler_tests.rs"]
+mod scheduler_tests;
