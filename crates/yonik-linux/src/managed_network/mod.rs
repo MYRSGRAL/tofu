@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
-    fs::File,
     net::IpAddr,
     path::Path,
 };
@@ -365,7 +364,7 @@ pub struct CleanupReport {
 /// Синхронный single-writer: helper выносит файловый I/O из async executor.
 /// Блокировка живёт до Drop; Drop не имеет сетевых побочных эффектов.
 pub struct Journal {
-    directory: File,
+    directory: storage::LockedDirectory,
     document: Document,
     reconciled: BTreeSet<u64>,
     poisoned: bool,
