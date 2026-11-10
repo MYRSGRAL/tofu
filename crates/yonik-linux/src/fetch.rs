@@ -185,6 +185,7 @@ impl std::error::Error for FetchError {}
 
 pub struct FetchHost {
     timeout: Duration,
+    socks_endpoint: Option<SocketAddr>,
 }
 
 impl FetchHost {
@@ -192,7 +193,21 @@ impl FetchHost {
         if timeout.is_zero() || timeout > MAX_TIMEOUT {
             return Err(FetchError::InvalidTimeout);
         }
-        Ok(Self { timeout })
+        Ok(Self {
+            timeout,
+            socks_endpoint: None,
+        })
+    }
+
+    /// Явно выбранный SOCKS5 listener активной сессии. DNS разрешается локально;
+    /// прокси получает только проверенный IP. Конечный peer доверяется сессии,
+    /// для HTTPS дополнительно проверяется сертификат исходного имени.
+    pub fn with_socks_endpoint(mut self, endpoint: SocketAddr) -> Result<Self, FetchError> {
+        if !endpoint.ip().is_loopback() || endpoint.port() == 0 {
+            return Err(FetchError::BlockedAddress);
+        }
+        self.socks_endpoint = Some(endpoint);
+        Ok(self)
     }
 
     pub async fn fetch(
@@ -205,21 +220,22 @@ impl FetchHost {
         if *cancel.borrow() || cancel.has_changed().is_err() {
             return Err(FetchError::Cancelled);
         }
-        if route == FetchRoute::Proxy {
+        if route == FetchRoute::Proxy && self.socks_endpoint.is_none() {
             return Err(FetchError::UnsupportedPeerVerification);
         }
         tokio::select! {
             biased;
             () = cancelled(&mut cancel) => Err(FetchError::Cancelled),
-            result = tokio::time::timeout(self.timeout, self.fetch_direct(source, validators)) => {
+            result = tokio::time::timeout(self.timeout, self.fetch_route(source, route, validators)) => {
                 result.map_err(|_| FetchError::Timeout)?
             }
         }
     }
 
-    async fn fetch_direct(
+    async fn fetch_route(
         &self,
         source: &Source,
+        route: FetchRoute,
         validators: Option<&FetchValidators>,
     ) -> Result<FetchResponse, FetchError> {
         let mut url = source.url.clone();
@@ -238,14 +254,23 @@ impl FetchHost {
             {
                 return Err(FetchError::BlockedAddress);
             }
-            let client = reqwest::Client::builder()
+            let proxy_endpoint = if route == FetchRoute::Proxy {
+                self.socks_endpoint
+            } else {
+                None
+            };
+            let mut builder = reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .referer(false)
                 .resolve_to_addrs(host, &addresses)
-                .timeout(self.timeout)
-                .build()
-                .map_err(|_| FetchError::Transport)?;
+                .timeout(self.timeout);
+            if let Some(endpoint) = proxy_endpoint {
+                let proxy = reqwest::Proxy::all(format!("socks5://{endpoint}"))
+                    .map_err(|_| FetchError::Transport)?;
+                builder = builder.proxy(proxy);
+            }
+            let client = builder.build().map_err(|_| FetchError::Transport)?;
             let mut request = client
                 .get(url.clone())
                 // Remnawave распознаёт /^Happ\// и выдаёт Xray JSON вместо URI fallback.
@@ -272,7 +297,13 @@ impl FetchHost {
             }
             let mut response = request.send().await.map_err(transport_error)?;
             let peer = response.remote_addr().ok_or(FetchError::PeerMismatch)?;
-            if !addresses.contains(&peer) || (!source.local_exception && !is_public_ip(peer.ip())) {
+            let valid_peer = match proxy_endpoint {
+                Some(endpoint) => peer == endpoint,
+                None => {
+                    addresses.contains(&peer) && (source.local_exception || is_public_ip(peer.ip()))
+                }
+            };
+            if !valid_peer {
                 return Err(FetchError::PeerMismatch);
             }
             let flag = |name: &str| {
