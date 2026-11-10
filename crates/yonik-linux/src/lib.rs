@@ -72,3 +72,6 @@ mod subscription_policy;
 
 #[cfg(target_os = "linux")]
 pub use subscription_policy::system_subscription_policy;
+
+#[cfg(all(target_os = "linux", feature = "test-support"))]
+pub mod policy_test_support;

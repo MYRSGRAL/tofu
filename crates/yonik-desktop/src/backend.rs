@@ -39,6 +39,7 @@ pub struct HostConfig {
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
+    schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -48,6 +49,7 @@ impl HostConfig {
             ephemeral_key: None,
             listen_port: None,
             system_subscription_policy: true,
+            schedule_observer: None,
         }
     }
     pub fn data_dir(&self) -> &Path {
@@ -59,6 +61,20 @@ impl HostConfig {
     pub fn with_ephemeral_key(mut self, key: [u8; 32]) -> Self {
         self.ephemeral_key = Some(Zeroizing::new(key));
         self.system_subscription_policy = false;
+        self
+    }
+    /// Доверенная настройка platform provider; после ephemeral key требуется
+    /// явное включение. GUI JSON не имеет доступа к этой настройке.
+    pub fn with_system_subscription_policy(mut self, enabled: bool) -> Self {
+        self.system_subscription_policy = enabled;
+        self
+    }
+    /// Read-only наблюдение effective policy после загрузки schedule, вне GUI JSON.
+    pub fn with_schedule_observer(
+        mut self,
+        observer: impl Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync + 'static,
+    ) -> Self {
+        self.schedule_observer = Some(Arc::new(observer));
         self
     }
     pub fn with_listen_port(mut self, port: NonZeroU16) -> Self {
@@ -2096,14 +2112,20 @@ async fn run(
     };
     scheduled.policy = *subscription_policy.borrow_and_update();
     scheduled.visible = *subscription_visible.borrow_and_update();
+    let mut schedule_loaded = false;
     if let Err(error) = scheduled.load(&actor.service, origin.elapsed()).await {
         actor.state.command_error(true, error.key());
         actor.emit();
+    } else {
+        schedule_loaded = true;
     }
     let fetch_host = yonik_linux::FetchHost::new(Duration::from_secs(30))
         .ok()
         .map(Arc::new);
     loop {
+        if let Some(observer) = &config.schedule_observer {
+            observer(scheduled.policy(), schedule_loaded);
+        }
         let allowed = fetch_host.is_some()
             && !quitting
             && refreshing.is_none()
