@@ -8,7 +8,9 @@
 
 pub mod firewall;
 pub mod nft;
+mod policy_state;
 mod storage;
+pub use policy_state::{PublicPolicyPhase, PublicPolicyRecord};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -214,10 +216,12 @@ struct Document {
     version: u32,
     ownership: Ownership,
     records: Vec<Record>,
+    public_policy: Option<PublicPolicyRecord>,
+    policy_sequence: u64,
 }
 impl Document {
     fn validate(&self) -> Result<(), JournalError> {
-        if self.version != 1 {
+        if self.version != 2 {
             return Err(JournalError::Version);
         }
         self.ownership.validate()?;
@@ -234,6 +238,9 @@ impl Document {
             if !resources.insert(&record.resource) {
                 return Err(JournalError::Conflict);
             }
+        }
+        if let Some(policy) = &self.public_policy {
+            policy.validate(self)?;
         }
         Ok(())
     }
@@ -304,11 +311,19 @@ impl Journal {
         let directory = storage::directory(path)?;
         let loaded = storage::read(&directory)?;
         let fresh = loaded.is_none();
-        let document = loaded.unwrap_or(Document {
-            version: 1,
+        let migrated = loaded
+            .as_ref()
+            .is_some_and(|document| document.version == 1);
+        let mut document = loaded.unwrap_or(Document {
+            version: 2,
             ownership,
             records: Vec::new(),
+            public_policy: None,
+            policy_sequence: 0,
         });
+        if migrated {
+            document.version = 2;
+        }
         document.validate()?;
         if document.ownership != ownership {
             return Err(JournalError::WrongOwnership);
@@ -319,7 +334,7 @@ impl Journal {
             reconciled: BTreeSet::new(),
             poisoned: false,
         };
-        if fresh {
+        if fresh || migrated {
             journal.persist(journal.document.clone())?;
         }
         Ok(journal)
@@ -422,6 +437,14 @@ impl Journal {
                 self.reconciled.insert(id);
             }
             Reconciled::Absent => {
+                if let Some(policy) = &document.public_policy {
+                    if policy.id() == id {
+                        if !matches!(policy.phase(), PublicPolicyPhase::Removing { .. }) {
+                            return Err(JournalError::Conflict);
+                        }
+                        document.public_policy = None;
+                    }
+                }
                 document.records.remove(index);
                 self.persist(document)?;
                 self.reconciled.remove(&id);
@@ -433,6 +456,7 @@ impl Journal {
     /// ошибки новая попытка требует новой сверки ОС, даже без перезапуска helper.
     pub fn mark_cleanup(&mut self, ownership: Ownership, id: u64) -> Result<(), JournalError> {
         self.check(ownership)?;
+        self.check_public_removal(id)?;
         let index = self
             .document
             .records
@@ -452,6 +476,11 @@ impl Journal {
     /// оставляет неизвестный старый/новый результат до независимой сверки ОС.
     pub fn mark_update(&mut self, ownership: Ownership, id: u64) -> Result<(), JournalError> {
         self.check(ownership)?;
+        if self.document.public_policy.as_ref().is_some_and(|policy| {
+            policy.id() == id && !matches!(policy.phase(), PublicPolicyPhase::Present { .. })
+        }) {
+            return Err(JournalError::Conflict);
+        }
         let index = self
             .document
             .records
@@ -481,6 +510,11 @@ impl Journal {
         mut remove: impl FnMut(&Record) -> Result<(), CleanupFailed>,
     ) -> Result<CleanupReport, JournalError> {
         self.check(ownership)?;
+        if scope == Scope::PublicBlock {
+            if let Some(policy) = &self.document.public_policy {
+                self.check_public_removal(policy.id())?;
+            }
+        }
         let ids: Vec<_> = self
             .document
             .records
@@ -523,6 +557,13 @@ impl Journal {
             if remove(&self.document.records[index]).is_ok() {
                 let mut document = self.document.clone();
                 document.records.remove(index);
+                if document
+                    .public_policy
+                    .as_ref()
+                    .is_some_and(|policy| policy.id() == id)
+                {
+                    document.public_policy = None;
+                }
                 self.persist(document)?;
                 removed += 1;
             }

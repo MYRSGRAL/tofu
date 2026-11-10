@@ -1,4 +1,5 @@
 //! Типизированная публичная блокировка. Проверка принадлежности интерфейсов — задача адаптера.
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -35,7 +36,8 @@ impl fmt::Display for PolicyError {
 }
 impl std::error::Error for PolicyError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "IpPrefixDto")]
 pub struct IpPrefix {
     address: IpAddr,
     length: u8,
@@ -73,7 +75,8 @@ impl IpPrefix {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "PrivateRouteDto")]
 pub struct PrivateRoute {
     prefix: IpPrefix,
     vpn_ifindex: Option<NonZeroU32>,
@@ -87,7 +90,8 @@ impl PrivateRoute {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "LanExceptionDto")]
 pub struct LanException {
     prefix: IpPrefix,
     ifindex: NonZeroU32,
@@ -101,7 +105,7 @@ impl LanException {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TransportProtocol {
     Tcp,
     Udp,
@@ -115,7 +119,8 @@ impl TransportProtocol {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "BoundTransportDto")]
 pub struct BoundTransport {
     destination: IpAddr,
     protocol: TransportProtocol,
@@ -144,7 +149,8 @@ impl BoundTransport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "PublicBlockPolicyDto")]
 pub struct PublicBlockPolicy {
     loopback_ifindex: NonZeroU32,
     tun_ifindex: Option<NonZeroU32>,
@@ -330,6 +336,91 @@ impl PublicBlockPolicy {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpPrefixDto {
+    address: IpAddr,
+    length: u8,
+}
+impl TryFrom<IpPrefixDto> for IpPrefix {
+    type Error = PolicyError;
+    fn try_from(value: IpPrefixDto) -> Result<Self, Self::Error> {
+        Self::new(value.address, value.length)
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrivateRouteDto {
+    prefix: IpPrefix,
+    vpn_ifindex: Option<u32>,
+}
+impl TryFrom<PrivateRouteDto> for PrivateRoute {
+    type Error = PolicyError;
+    fn try_from(value: PrivateRouteDto) -> Result<Self, Self::Error> {
+        Self::new(value.prefix, value.vpn_ifindex)
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LanExceptionDto {
+    prefix: IpPrefix,
+    ifindex: u32,
+}
+impl TryFrom<LanExceptionDto> for LanException {
+    type Error = PolicyError;
+    fn try_from(value: LanExceptionDto) -> Result<Self, Self::Error> {
+        Self::new(value.prefix, value.ifindex)
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BoundTransportDto {
+    destination: IpAddr,
+    protocol: TransportProtocol,
+    port: u16,
+    ifindex: u32,
+    uid: u32,
+    mark: u32,
+}
+impl TryFrom<BoundTransportDto> for BoundTransport {
+    type Error = PolicyError;
+    fn try_from(value: BoundTransportDto) -> Result<Self, Self::Error> {
+        Self::new(
+            value.destination,
+            value.protocol,
+            value.port,
+            value.ifindex,
+            value.uid,
+            value.mark,
+        )
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicBlockPolicyDto {
+    loopback_ifindex: u32,
+    tun_ifindex: Option<u32>,
+    private_routes: Vec<PrivateRoute>,
+    lan: Vec<LanException>,
+    transport: Vec<BoundTransport>,
+    bootstrap_dns: Vec<BoundTransport>,
+    link_control: Vec<u32>,
+}
+impl TryFrom<PublicBlockPolicyDto> for PublicBlockPolicy {
+    type Error = PolicyError;
+    fn try_from(value: PublicBlockPolicyDto) -> Result<Self, Self::Error> {
+        Self::new(
+            value.loopback_ifindex,
+            value.tun_ifindex,
+            value.private_routes,
+            value.lan,
+            value.transport,
+            value.bootstrap_dns,
+        )?
+        .with_link_control(value.link_control)
+    }
+}
+
 fn interface(value: u32) -> Result<NonZeroU32, PolicyError> {
     NonZeroU32::new(value).ok_or(PolicyError::Interface)
 }
@@ -386,6 +477,66 @@ mod tests {
             11,
         )
         .expect("Тестовый endpoint")
+    }
+    #[test]
+    fn policy_codec_validates_every_nested_constructor_and_unknown_field() {
+        let original = policy(
+            vec![PrivateRoute::new(prefix("10.0.0.0", 8), Some(7)).unwrap()],
+            vec![LanException::new(prefix("192.168.0.0", 16), 2).unwrap()],
+            vec![endpoint("192.0.2.1")],
+        )
+        .with_link_control(vec![2])
+        .unwrap();
+        let value = serde_json::to_value(&original).unwrap();
+        assert_eq!(
+            serde_json::from_value::<PublicBlockPolicy>(value.clone()).unwrap(),
+            original
+        );
+        for pointer in [
+            "/loopback_ifindex",
+            "/tun_ifindex",
+            "/private_routes/0/vpn_ifindex",
+            "/lan/0/ifindex",
+            "/transport/0/port",
+            "/transport/0/ifindex",
+            "/transport/0/mark",
+            "/link_control/0",
+        ] {
+            let mut invalid = value.clone();
+            *invalid.pointer_mut(pointer).unwrap() = 0.into();
+            assert!(
+                serde_json::from_value::<PublicBlockPolicy>(invalid).is_err(),
+                "{pointer}"
+            );
+        }
+        for pointer in [
+            "",
+            "/private_routes/0",
+            "/private_routes/0/prefix",
+            "/lan/0",
+            "/transport/0",
+        ] {
+            let mut invalid = value.clone();
+            invalid
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("unknown".into(), true.into());
+            assert!(
+                serde_json::from_value::<PublicBlockPolicy>(invalid).is_err(),
+                "{pointer}"
+            );
+        }
+        let mut invalid = value.clone();
+        invalid["private_routes"][0]["prefix"]["address"] = "10.0.0.1".into();
+        assert!(serde_json::from_value::<PublicBlockPolicy>(invalid).is_err());
+        let mut invalid = value.clone();
+        invalid["transport"][0]["destination"] = "10.1.2.3".into();
+        assert!(serde_json::from_value::<PublicBlockPolicy>(invalid).is_err());
+        let mut invalid = value;
+        invalid["transport"] = serde_json::Value::Array(vec![invalid["transport"][0].clone(); 129]);
+        assert!(serde_json::from_value::<PublicBlockPolicy>(invalid).is_err());
     }
     #[test]
     fn rejects_noncanonical_and_default_prefixes_and_accepts_host_prefixes() {

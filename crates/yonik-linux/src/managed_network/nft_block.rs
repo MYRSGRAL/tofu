@@ -1,7 +1,12 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
-fn block_table(owner: Ownership, id: u64, table_id: u64, policy: &PublicBlockPolicy) -> Table {
+pub(super) fn block_table(
+    owner: Ownership,
+    id: u64,
+    table_id: u64,
+    policy: &PublicBlockPolicy,
+) -> Table {
     let mut table = Table::new(owner, Scope::PublicBlock, id, table_id, NftFamily::Inet);
     let mut hash = Sha256::new();
     hash.update(b"yonik-public-block-v1\0");
@@ -172,7 +177,7 @@ fn verify_rules(
 impl NftExecutor {
     /// Обновляет согласованные исключения без окна между снятием старой и
     /// установкой новой защиты. При конфликте handle откатывается весь batch.
-    pub async fn replace_public_block(
+    pub(super) async fn replace_public_block(
         &mut self,
         journal: &mut Journal,
         id: u64,
@@ -212,7 +217,7 @@ impl NftExecutor {
         journal.reconcile(self.owner, id, Reconciled::Owned)?;
         Ok(())
     }
-    async fn verify_public_block(
+    pub(super) async fn verify_public_block(
         &mut self,
         table: &Table,
         policy: &PublicBlockPolicy,
@@ -233,7 +238,7 @@ impl NftExecutor {
 
     /// Создание таблицы и всех правил — одна nft transaction. Повтор принимает
     /// только полное фактическое совпадение; имеющаяся таблица не flush-ится.
-    pub async fn ensure_public_block(
+    pub(super) async fn ensure_public_block(
         &mut self,
         journal: &mut Journal,
         id: u64,
@@ -268,7 +273,7 @@ impl NftExecutor {
 
     /// Внешний helper обязан отдельно авторизовать Unlock. Удаление сессионных
     /// ресурсов и Drop executor этот метод не вызывают.
-    pub async fn remove_public_block(
+    pub(super) async fn remove_public_block(
         &mut self,
         journal: &mut Journal,
         id: u64,
@@ -312,4 +317,4 @@ impl NftExecutor {
 
 #[cfg(test)]
 #[path = "nft_block_tests.rs"]
-mod tests;
+pub(super) mod tests;

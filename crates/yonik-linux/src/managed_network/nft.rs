@@ -443,3 +443,7 @@ mod tests;
 
 #[path = "nft_block.rs"]
 mod block;
+
+#[path = "nft_policy.rs"]
+mod policy;
+pub use policy::PublicPolicyRecovery;

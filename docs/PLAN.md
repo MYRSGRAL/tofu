@@ -40,14 +40,18 @@
    прошли, независимое ревью выполнено. PR #31 влит как `acff6c5` после всех
    пяти зелёных jobs в обоих workflows. Выявленный CI сбой очистки launcher на
    relatime исправлен в `ed770be`, все 100 Python-тестов прошли.
-   Реализован [nftables executor](specs/helper-nftables-executor.md), PR #32:
-   исходный head прошёл все пять jobs; перед слиянием добавлены исправление
-   повторной сверки `0a90a8e` и синхронизация benchmark-теста `d479217`, CI нового
-   head ожидается. [Evidence базового executor](validation/2026-11-10-helper-nftables.md).
+   [Nftables executor](specs/helper-nftables-executor.md) влит PR #32 (`dd82114`)
+   после всех пяти зелёных jobs, включая fixes `0a90a8e`/`d479217`.
+   [Evidence базового executor](validation/2026-11-10-helper-nftables.md).
    Добавлена [типизированная блокировка](specs/helper-public-block.md) с атомарной
    заменой правил: реальные TCP/UDP IPv4/IPv6, VPN/LAN, cold NDP, DNAT и Unlock
-   [проверены в namespace](validation/2026-11-10-helper-public-block.md).
-   Следом нужны durable policy storage, версионный IPC,
+   [проверены в namespace](validation/2026-11-10-helper-public-block.md),
+   PR #33 влит как `37401a4` с зелёным CI.
+   Добавлено [durable хранение и восстановление](specs/helper-policy-recovery.md):
+   schema v2, desired/previous/Unlock и шесть SIGKILL-границ в namespace;
+   [evidence](validation/2026-11-10-helper-policy-recovery.md): 427 workspace tests,
+   три namespace-сценария и независимое review.
+   Следом нужны версионный IPC, межпроцессный cgroup lifecycle,
    системный helper и TUN-сессия с явным
    владением ресурсами и cleanup; затем DNS/Fake-IP и атрибуцию приложений.
 3. Интегрировать приватные VPN/LAN/ru-direct, сценарии смены сети и полную
@@ -80,7 +84,7 @@
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, границы и journal существуют; добавлен [доверенный реестр](specs/helper-trusted-registry.md). Добавлен [брокер одноразовых artifacts](specs/helper-prepared-requests.md) с повторной авторизацией Prepare/claim. [Общий бюджет](specs/helper-memory-budget.md) влит PR #31 (`acff6c5`), CI зелёный. [Nftables executor](specs/helper-nftables-executor.md) дополнен [правилами публичной блокировки](specs/helper-public-block.md), реальные traffic/lifetime случаи проверены в namespace. Нужны durable policy storage, системный service/IPC и авторизованный Apply/Unlock, topology binding интерфейсов, остальные сетевые эффекты и reconciliation всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. Нужны системный service/IPC и авторизованный Apply/Unlock, межпроцессный cgroup lifecycle, topology binding интерфейсов, остальные сетевые эффекты и reconciliation всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
 | P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы есть. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |
