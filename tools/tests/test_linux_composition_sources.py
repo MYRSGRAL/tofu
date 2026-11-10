@@ -62,6 +62,97 @@ class SourceTests(unittest.TestCase):
             self.assertEqual(bad["status"], "unresolved")
             self.assertIn("h1 mismatch", bad["error"])
 
+    def test_publisher_association_cannot_upgrade_proof(self) -> None:
+        composition = json.loads(
+            (ROOT / "packaging/licenses/linux-composition.json").read_text()
+        )
+        original = scanner.read_file
+
+        def altered(path: Path, limit: int = scanner.MAX_FILE) -> bytes:
+            raw = original(path, limit)
+            if path.name == "xray-publisher.json":
+                value = json.loads(raw)
+                value["reproducible_source_proof"] = True
+                return json.dumps(value).encode()
+            return raw
+
+        with (
+            patch.object(scanner, "read_file", side_effect=altered),
+            self.assertRaisesRegex(ValueError, "publisher association"),
+        ):
+            scanner.validate_bundle(
+                ROOT / "packaging/licenses/composition", composition
+            )
+
+    def test_historical_qt_mismatch_cannot_upgrade(self) -> None:
+        composition = json.loads(
+            (ROOT / "packaging/licenses/linux-composition.json").read_text()
+        )
+        original = scanner.read_file
+
+        def altered(path: Path, limit: int = scanner.MAX_FILE) -> bytes:
+            raw = original(path, limit)
+            if path.name == "qt-historical-experiment.json":
+                value = json.loads(raw)
+                value["records"][0]["matches_arch_checksum"] = True
+                return json.dumps(value).encode()
+            return raw
+
+        with (
+            patch.object(scanner, "read_file", side_effect=altered),
+            self.assertRaisesRegex(ValueError, "historical Qt"),
+        ):
+            scanner.validate_bundle(
+                ROOT / "packaging/licenses/composition", composition
+            )
+
+    def test_release_zip_bounds_and_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            preserved = root / "preserved"
+            preserved.write_bytes(b"\x7fELFfixture")
+
+            def make(entries: list[tuple[str, bytes]]) -> bytes:
+                stream = io.BytesIO()
+                with zipfile.ZipFile(stream, "w") as archive:
+                    for name, raw in entries:
+                        archive.writestr(name, raw)
+                return stream.getvalue()
+
+            data = make([("xray", b"\x7fELFfixture"), ("LICENSE", b"raw\r\n")])
+            archive = root / "asset.zip"
+            archive.write_bytes(data)
+            result, text = scanner.compare_release_zip(
+                archive, preserved, scanner.sha(data)
+            )
+            self.assertTrue(result["elf_matches"])
+            self.assertEqual(text, b"raw\r\n")
+            with self.assertRaisesRegex(ValueError, "archive hash"):
+                scanner.compare_release_zip(archive, preserved, "0" * 64)
+            for name in ("../escape", "/absolute", "a\\b"):
+                invalid = make(
+                    [("xray", b"\x7fELFfixture"), ("LICENSE", b"raw"), (name, b"data")]
+                )
+                archive.write_bytes(invalid)
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    scanner.compare_release_zip(
+                        archive, preserved, scanner.sha(invalid)
+                    )
+
+    def test_release_zip_symlink_rejected(self) -> None:
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            info = zipfile.ZipInfo("xray")
+            info.create_system = 3
+            info.external_attr = 0o120777 << 16
+            archive.writestr(info, b"/target")
+            archive.writestr("LICENSE", b"raw")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "asset.zip"
+            path.write_bytes(stream.getvalue())
+            with self.assertRaises(ValueError):
+                scanner.compare_release_zip(path, path, scanner.sha(stream.getvalue()))
+
     def test_licensewizard_is_not_notice(self) -> None:
         name, raw = "example.org/a@v1.0.0/licensewizard.png", b"illustration"
         line = f"{hashlib.sha256(raw).hexdigest()}  {name}\n".encode()

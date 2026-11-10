@@ -1,0 +1,9 @@
+{
+  "vm_exit": 0,
+  "active_references": [],
+  "logical_bytes_removed": 1303247197,
+  "transient_removed": true,
+  "rust_builds": 0,
+  "link_map_replays": 0,
+  "data_asset_preserved": "local/validation/composition-followup/Xray-linux-64.zip"
+}

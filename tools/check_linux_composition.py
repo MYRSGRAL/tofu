@@ -12,6 +12,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path, PurePosixPath
 
 MAX_FILE = 128 * 1024 * 1024
@@ -245,6 +246,67 @@ def scan(package: Path, cores: list[Path]) -> dict:
     }
 
 
+def compare_release_zip(
+    path: Path, preserved: Path, expected_sha256: str
+) -> tuple[dict, bytes]:
+    """Сравнивает ELF как DATA; bounded ZIP, без извлечения и запуска файлов."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise ValueError("недопустимый archive SHA-256")
+    raw = read_file(path, 32 * 1024 * 1024)
+    if sha(raw) != expected_sha256:
+        raise ValueError("release archive hash mismatch")
+    entries = {}
+    binary_hash = None
+    license_bytes = None
+    total = 0
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        for index, entry in enumerate(archive.infolist()):
+            name = entry.filename
+            parsed = PurePosixPath(name)
+            total += entry.file_size
+            kind = stat.S_IFMT(entry.external_attr >> 16)
+            if (
+                index >= 64
+                or entry.file_size > 64 * 1024 * 1024
+                or total > 128 * 1024 * 1024
+                or parsed.is_absolute()
+                or ".." in parsed.parts
+                or "\\" in name
+                or str(parsed) != name.rstrip("/")
+                or name in entries
+                or "\x00" in entry.orig_filename
+                or entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                or entry.flag_bits & 1
+                or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
+                or (kind == stat.S_IFDIR and not entry.is_dir())
+            ):
+                raise ValueError("небезопасный ZIP member/лимит")
+            if entry.is_dir():
+                entries[name] = {"directory": True}
+                continue
+            data = archive.read(entry)
+            entries[name] = {"sha256": sha(data), "bytes": len(data)}
+            if name == "xray":
+                if not data.startswith(b"\x7fELF"):
+                    raise ValueError("release xray не ELF")
+                binary_hash = sha(data)
+            elif name == "LICENSE":
+                if len(data) > 4 * 1024 * 1024 or not data.strip():
+                    raise ValueError("release license пустой или слишком большой")
+                license_bytes = data
+    if binary_hash is None or license_bytes is None:
+        raise ValueError("в release нет xray/LICENSE")
+    preserved_hash = sha(read_file(preserved))
+    return {
+        "archive_sha256": sha(raw),
+        "entries": entries,
+        "preserved_elf_sha256": preserved_hash,
+        "release_elf_sha256": binary_hash,
+        "elf_matches": preserved_hash == binary_hash,
+        "source_proof": "не устанавливается сравнением publisher asset",
+    }, license_bytes
+
+
 def retained_archives(linkmap: str) -> dict:
     """Ненулевые input sections только после gold Memory map, исключая discarded."""
     headers = ("\nMemory map\n", "\nLinker script and memory map\n")
@@ -390,6 +452,9 @@ def validate_bundle(directory: Path, composition: dict) -> dict:
         "arch/arch-packages.json",
         "qt-runtime.json",
         "rust-build.json",
+        "xray-publisher.json",
+        "qt-historical-experiment.json",
+        "redistribution-scope.json",
     )
     reports = {}
     count = 0
@@ -437,6 +502,30 @@ def validate_bundle(directory: Path, composition: dict) -> dict:
     )
     if source["commit"] != revision:
         raise ValueError("sing-box source/buildinfo revision mismatch")
+    publisher = reports["xray-publisher.json"]
+    xray = next(
+        core for name, core in composition["cores"].items() if name.startswith("xray-")
+    )
+    if (
+        publisher["repository"]["full_name"] != "XTLS/Xray-core"
+        or publisher["release"]["tag"] != "v26.10.31"
+        or publisher["preserved_elf_sha256"] != xray["sha256"]
+        or publisher["release_elf_sha256"] != xray["sha256"]
+        or publisher["elf_matches"] is not True
+    ):
+        raise ValueError("Xray publisher/artifact binding mismatch")
+    if publisher["asset"]["digest"] != "sha256:" + publisher["archive_sha256"]:
+        raise ValueError("Xray asset/API digest mismatch")
+    dgst = read_file(directory / "Xray-linux-64.zip.dgst", 1024 * 1024)
+    if sha(dgst) != publisher["dgst_sha256"]:
+        raise ValueError("Xray dgst hash mismatch")
+    if (
+        publisher["dgst_signed"]
+        or publisher["signing_key_fingerprint"] is not None
+        or publisher["attestations"]["cryptographically_verified"]
+        or publisher["reproducible_source_proof"]
+    ):
+        raise ValueError("publisher association не заменяет signed/reproducible proof")
     runtime = reports["qt-runtime.json"]
     desktop = composition["elf"]["usr/bin/yonik-desktop"]["sha256"]
     if runtime["binary_sha256"] != desktop:
@@ -479,6 +568,25 @@ def validate_bundle(directory: Path, composition: dict) -> dict:
             or recipe["sha256"] != row["arch_recipe_sha256"]
         ):
             raise ValueError("Qt source/Arch recipe checksum mismatch")
+    previous_qt = {row["pkgbase"]: row for row in reports["qt-sources.json"]}
+    for row in reports["qt-historical-experiment.json"]["records"]:
+        previous = previous_qt[row["pkgbase"]]
+        if (
+            row["expected_commit"] != previous["commit"]
+            or row["expected_source_checksum"] != previous["arch_source_checksum"]
+            or row["previous_host_archive_sha256"] != previous["git_archive_sha256"]
+        ):
+            raise ValueError("historical Qt pinned inputs mismatch")
+        if row["status"] == "observed":
+            if row["actual_commit"] != previous["commit"] or row[
+                "matches_arch_checksum"
+            ] != (row["archive_sha256"] == previous["arch_source_checksum"]):
+                raise ValueError("historical Qt experiment binding mismatch")
+    scope = reports["redistribution-scope.json"]
+    if scope["package_sha256"] != composition["package_sha256"] or set(
+        scope["elf_payload_paths"]
+    ) != set(composition["elf"]):
+        raise ValueError("redistribution scope/artifact mismatch")
     rust = reports["rust-build.json"]
     if rust["status"] != "observed_new_build":
         raise ValueError("неверный статус новой Rust сборки")
@@ -502,8 +610,23 @@ def main() -> None:
     parser.add_argument("--go-sources", type=Path)
     parser.add_argument("--evidence-bundle", type=Path)
     parser.add_argument("--rust-evidence", type=Path)
+    parser.add_argument("--xray-release-zip", type=Path)
     args = parser.parse_args()
     result = scan(args.package, args.core)
+    if args.xray_release_zip:
+        if not args.evidence_bundle:
+            raise ValueError("--xray-release-zip требует --evidence-bundle")
+        publisher = json.loads(read_file(args.evidence_bundle / "xray-publisher.json"))
+        cores = [path for path in args.core if path.name == "xray"]
+        if len(cores) != 1:
+            raise ValueError("нужен единственный preserved xray")
+        observed, _ = compare_release_zip(
+            args.xray_release_zip, cores[0], publisher["archive_sha256"]
+        )
+        if any(
+            observed[key] != publisher[key] for key in observed if key != "source_proof"
+        ):
+            raise ValueError("Xray ZIP не соответствует publisher evidence")
     if args.rust_evidence:
         if not args.evidence_bundle:
             raise ValueError("--rust-evidence требует --evidence-bundle")
