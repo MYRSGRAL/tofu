@@ -1,6 +1,6 @@
 # Явный SOCKS endpoint загрузки подписки — 2026-11-10
 
-База: dd6962e7618d688660927bc58e2694940eba5598. Область: FetchHost и отдельный subscription_proxy fixture. Backend ещё должен передавать endpoint активной сессии; полный Pxx PASS этим срезом не заявляется.
+База fetch-core: dd6962e7618d688660927bc58e2694940eba5598; независимый fetch-core commit: bf98e984b691da9290245299c9e4f52bb6a82c94. Итоговая область PR: FetchHost, SOCKS fixture и desktop manual/scheduled wiring подтверждённой сессии. Полный Pxx PASS этим срезом не заявляется.
 
 `FetchHost::new(timeout)?.with_socks_endpoint(SocketAddr)?` выбирает loopback SOCKS5 listener явно. Нулевой порт и непетлевые адреса отвергаются. Без builder Proxy возвращает прежний UnsupportedPeerVerification. Direct сохраняет прежнюю проверку peer. System proxy/env не используются, fallback отсутствует.
 
@@ -19,3 +19,20 @@ Evidence: /home/myrs/projects/yonik/local/validation/subscription-proxy. RED: б
 - `rustfmt --edition 2024 --check` для обоих изменённых Rust файлов и `git diff --check`: PASS.
 - `cargo clippy -p yonik-linux --all-targets -- -D warnings`: BLOCKED существующим clippy::collapsible_match в crates/yonik-engine/src/lib.rs:165 на toolchain 1.97. Этот файл вне ownership и не изменялся.
 - `cargo clippy -p yonik-linux --all-targets --no-deps -- -D warnings`: PASS. Проверены все targets изменяемого пакета без lint зависимостей.
+
+## Сквозная desktop интеграция
+
+Desktop backend принимает и сохраняет `route=Proxy`. Endpoint берётся из immutable CompiledConfig запущенной сессии и допускается только после Connected от LocalSession::check. Выбранный UI порт и Preparing/Checking/Limited не подтверждают готовность. Каждому запуску назначается поколение; stop, выход процесса и потеря Connected отзывают lease. Переполнение поколения запрещает новый запуск.
+
+DesktopFetch фиксирует lease на manual operation или scheduler dispatch. Direct сохраняет прежний путь. Proxy проверяет lease перед подключением, отменяется при изменении watch и повторно проверяет поколение после fetch. Backend отменяет старую manual operation с существующим acknowledgement, удаляет устаревший review; scheduler при отзыве использованного proxy lease завершает shutdown с ACK и восстанавливает schedule из repository. HTTP/DNS/TLS защита FetchHost не менялась в desktop delta. SubscriptionService, его CAS и review/approval контракт не изменялись; новый bridge в subscriptions.rs не требуется.
+
+Проверки desktop delta:
+
+- `cargo test -p yonik-desktop --lib --test backend`: 19 unit + 33 integration passed, 1 native integration ignored по умолчанию.
+- `tests/proxy_native.py <backend-test-binary> /home/myrs/projects/yonik/local/engines`: native integration выполнен отдельно для sing-box 1.14.4 и Xray 26.10.31, оба PASS. Настоящий DesktopHost работает с private D-Bus, настоящими pinned cores, VLESS loopback peer и TLS endpoint с отдельным CA через SSL_CERT_FILE только дочернего процесса. Fixture повторно использует tools/engine_host.py::peer/https_server (provenance: configurable-health validation 2026-11-09). Ни host trust store, ни пользовательский keyring, ни маршруты/DNS хоста не меняются.
+- Native сценарий: bootstrap Direct → Connected → manual Proxy импорт; stop → Proxy отказ без новой HTTP попытки; новый host/новая подтверждённая сессия → scheduled Proxy review → discard; удержанный manual Proxy HTTP запрос → stop → Disconnected, busy=false, отсутствует stale pending.
+- Unit regression: смена поколения при том же endpoint отклоняется до accept; stop отменяет ожидание SOCKS handshake.
+- `cargo fmt --all --check`, Python ruff format/check и diff-check: PASS.
+
+Desktop evidence и SHA256 обоих ядер: /home/myrs/projects/yonik/local/validation/subscription-proxy/desktop. Предыдущие 440 Linux regression tests относятся к независимому fetch-core commit bf98e984b691da9290245299c9e4f52bb6a82c94; desktop delta его не меняет. Этот срез не объявляет полный Pxx PASS.
+- `cargo clippy -p yonik-desktop --all-targets --no-deps -- -D warnings`: PASS на итоговом desktop delta.
