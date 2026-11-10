@@ -49,3 +49,16 @@ PASS. Это адресные проверки; workspace/внешняя сет�
 Подтверждённого production-дефекта нет, исправления fetch не потребовались.
 Первый компиляционный прогон выявил отсутствие Debug у RefreshResult в тестовом
 expect_err; тест исправлен явным match. Это не RED production-регрессии.
+
+## Закрытие socket после отмены
+
+После acknowledgement Cancelled/StaleUpdate сервер сохраняет соединение открытым
+и ограниченно ждёт EOF/reset клиента до попытки дописать тело. Результат записи
+последнего байта больше не является единственным наблюдением cleanup.
+Отрицательный контроль держит client socket открытым и доказывает, что тот же
+EOF-oracle его отвергает; после drop client oracle принимает EOF.
+
+Четыре runtime tests PASS, scoped clippy и fmt PASS. Это усиление доказательства
+существующей отмены; production fetch в этом delta не менялся, behavioral RED
+продуктового дефекта не заявляется. Логи вне TTL:
+/home/myrs/projects/yonik/local/validation/pr69-eof-test/.

@@ -9,7 +9,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::watch,
 };
 use yonik_linux::{
@@ -238,6 +238,30 @@ async fn source_token_rotation_preserves_profile_id_and_favorite() {
     assert!(!requests[0].to_ascii_lowercase().contains("if-none-match:"));
 }
 
+async fn connection_closed(stream: &mut TcpStream, timeout: Duration) -> bool {
+    let mut byte = [0];
+    match tokio::time::timeout(timeout, stream.read(&mut byte)).await {
+        Ok(Ok(0)) => true,
+        Ok(Err(error)) => matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+        ),
+        _ => false,
+    }
+}
+
+#[tokio::test]
+async fn close_oracle_rejects_a_live_peer() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let client = TcpStream::connect(listener.local_addr().expect("адрес"))
+        .await
+        .expect("client");
+    let (mut server, _) = listener.accept().await.expect("accept");
+    assert!(!connection_closed(&mut server, Duration::from_millis(20)).await);
+    drop(client);
+    assert!(connection_closed(&mut server, Duration::from_secs(1)).await);
+}
+
 #[tokio::test]
 async fn cancelled_body_cannot_publish_a_late_complete_response() {
     let directory = TestDirectory::new();
@@ -280,7 +304,11 @@ async fn cancelled_body_cannot_publish_a_late_complete_response() {
                     .expect("барьер")
                     .await
                     .expect("разрешение позднего ответа");
-                // После отмены клиент вправе закрыть соединение до этой записи.
+                // Fixture сохраняет socket открытым, пока не увидит закрытие клиентом.
+                assert!(
+                    connection_closed(&mut stream, Duration::from_secs(2)).await,
+                    "отмена должна освободить соединение до завершения тела сервером"
+                );
                 let _ = stream
                     .write_all(&response.as_bytes()[response.len() - 1..])
                     .await;
