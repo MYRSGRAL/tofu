@@ -2038,3 +2038,32 @@ impl EncryptedSubscriptionRepository {
         .await
     }
 }
+
+impl EncryptedSubscriptionRepository {
+    /// Независимый versioned payload редактора; повреждённая запись не заменяется.
+    pub async fn routing_draft(&self) -> Result<Option<(i64, Zeroizing<Vec<u8>>)>> {
+        self.run(|db| {
+            db.connection.execute_batch("CREATE TABLE IF NOT EXISTS routing_draft(singleton INTEGER PRIMARY KEY CHECK(singleton=1),revision INTEGER NOT NULL CHECK(revision>0),payload BLOB NOT NULL)").map_err(storage)?;
+            let row: Option<(i64, Vec<u8>)> = db.connection.query_row("SELECT revision,payload FROM routing_draft WHERE singleton=1", [], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(storage)?;
+            row.map(|(revision, raw)| Ok((revision, decrypt(&db.key, &db.id, 8, 0, 0, revision, &raw, 262144)?))).transpose()
+        }).await
+    }
+    pub async fn save_routing_draft(&self, expected: i64, payload: Vec<u8>) -> Result<i64> {
+        if expected < 0 || payload.len() > 262144 {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.run(move |db| {
+            let revision = expected.checked_add(1).ok_or(RepositoryError::InvalidInput)?;
+            let encrypted = encrypt(&db.key, &db.id, 8, 0, 0, revision, &payload)?;
+            let tx = db.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+            let changed = if expected == 0 {
+                tx.execute("INSERT OR IGNORE INTO routing_draft(singleton,revision,payload) VALUES(1,?1,?2)", params![revision, encrypted]).map_err(storage)?
+            } else {
+                tx.execute("UPDATE routing_draft SET revision=?1,payload=?2 WHERE singleton=1 AND revision=?3", params![revision, encrypted, expected]).map_err(storage)?
+            };
+            if changed != 1 { return Err(RepositoryError::Conflict); }
+            tx.commit().map_err(storage)?;
+            Ok(revision)
+        }).await
+    }
+}

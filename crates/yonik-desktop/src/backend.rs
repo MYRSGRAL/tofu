@@ -105,6 +105,21 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    RoutingCatalog {
+        processes: bool,
+        query: String,
+        offset: usize,
+    },
+    EditRouting {
+        rule: crate::editor::RuleInput,
+        confirm_broad: bool,
+    },
+    RoutingOrder {
+        ids: Vec<u64>,
+    },
+    RoutingDefault {
+        action: String,
+    },
     SubscriptionVisibility {
         visible: bool,
     },
@@ -532,6 +547,8 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    routing_catalog: serde_json::Value,
+    routing: crate::editor::Draft,
     language: String,
     preferences_warning: bool,
     preferences_durability_warning: bool,
@@ -584,6 +601,8 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            routing: crate::editor::Draft::default(),
+            routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
             preferences_warning: false,
             preferences_durability_warning: false,
@@ -730,7 +749,9 @@ fn private_directory(path: &Path) -> Result<(PathBuf, File)> {
     Ok((canonical, directory))
 }
 
-async fn open(config: &mut HostConfig) -> Result<(SubscriptionService, File)> {
+async fn open(
+    config: &mut HostConfig,
+) -> Result<(SubscriptionService, File, EncryptedSubscriptionRepository)> {
     let path = config.data_dir.clone();
     let (directory, lock) = tokio::task::spawn_blocking(move || private_directory(&path))
         .await
@@ -750,10 +771,12 @@ async fn open(config: &mut HostConfig) -> Result<(SubscriptionService, File)> {
     let repo = EncryptedSubscriptionRepository::open(path, key)
         .await
         .map_err(|_| DesktopError("storage"))?;
-    Ok((SubscriptionService::new(repo), lock))
+    Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
 struct Actor {
+    routing_repository: EncryptedSubscriptionRepository,
+    routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
     service: SubscriptionService,
@@ -766,6 +789,21 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    async fn save_routing(&mut self, candidate: crate::editor::Draft) -> Result<()> {
+        candidate.policy().map_err(DesktopError)?;
+        let expected = self
+            .routing_revision
+            .ok_or(DesktopError("routing_storage"))?;
+        let revision = self
+            .routing_repository
+            .save_routing_draft(expected, candidate.json().into_bytes())
+            .await
+            .map_err(|_| DesktopError("routing_storage"))?;
+        self.routing_revision = Some(revision);
+        self.state.routing = candidate;
+        Ok(())
+    }
+
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
         let outcome = self
             .preferences_store
@@ -949,6 +987,54 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::RoutingCatalog {
+                processes,
+                query,
+                offset,
+            } => {
+                self.state.routing_catalog = tokio::task::spawn_blocking(move || {
+                    crate::editor::catalog(processes, &query, offset)
+                })
+                .await
+                .map_err(|_| DesktopError("catalog"))?
+                .map_err(DesktopError)?;
+                Ok(())
+            }
+            Command::EditRouting {
+                rule,
+                confirm_broad,
+            } => {
+                let mut candidate = self.state.routing.clone();
+                candidate.put(rule, confirm_broad).map_err(DesktopError)?;
+                self.save_routing(candidate).await
+            }
+            Command::RoutingDefault { action } => {
+                let mut candidate = self.state.routing.clone();
+                candidate.default_action = action;
+                candidate.policy().map_err(DesktopError)?;
+                self.save_routing(candidate).await
+            }
+            Command::RoutingOrder { ids } => {
+                let mut seen = std::collections::HashSet::new();
+                let mut rules = Vec::with_capacity(ids.len());
+                let available: std::collections::HashMap<_, _> =
+                    self.state.routing.rules.iter().map(|r| (r.id, r)).collect();
+                for id in ids {
+                    if !seen.insert(id) {
+                        return Err(DesktopError("id"));
+                    }
+                    rules.push(
+                        available
+                            .get(&id)
+                            .copied()
+                            .ok_or(DesktopError("id"))?
+                            .clone(),
+                    );
+                }
+                let mut candidate = self.state.routing.clone();
+                candidate.rules = rules;
+                self.save_routing(candidate).await
+            }
             Command::Reload => self.reload().await,
             Command::SourcePage { offset } => {
                 self.state.sources_offset = offset;
@@ -1401,9 +1487,11 @@ mod settings_tests {
         let directory = Directory(path);
         let mut config = HostConfig::new(directory.0.clone(), directory.0.join("engines"))
             .with_ephemeral_key([77; 32]);
-        let (service, _lock) = open(&mut config).await.expect("тестовая БД");
+        let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            routing_repository,
+            routing_revision: Some(0),
             preferences_store,
             preferences,
             service,
@@ -2019,7 +2107,7 @@ async fn run(
         Err(error) => Err(error),
     };
     state.busy = false;
-    let (service, _lock) = match opened {
+    let (service, _lock, routing_repository) = match opened {
         Ok(opened) => opened,
         Err(error) => {
             state.command_error(false, error.key());
@@ -2064,6 +2152,8 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        routing_repository,
+        routing_revision: Some(0),
         preferences_store,
         preferences,
         service,
@@ -2075,6 +2165,26 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
+    match actor.routing_repository.routing_draft().await {
+        Ok(None) => {}
+        Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
+            .ok()
+            .and_then(|s| crate::editor::Draft::parse(s).ok())
+        {
+            Some(draft) => {
+                actor.state.routing = draft;
+                actor.routing_revision = Some(revision);
+            }
+            None => {
+                actor.routing_revision = None;
+                actor.state.error = Some("routing_storage");
+            }
+        },
+        Err(_) => {
+            actor.routing_revision = None;
+            actor.state.error = Some("routing_storage");
+        }
+    }
     if let Err(error) = actor.reload().await {
         actor.state.command_error(true, error.key());
     }
