@@ -95,3 +95,23 @@ Cargo: Rust 1.85.1, jobs=2, собственный transient root под BSD flo
   cargo clean выполнен, собственный transient root удалён. Evidence сохранены.
 
 Независимый delta review назначает root; CI результаты не подменяются локальными.
+
+## Исправление PGID после повторного review
+
+Review e808a3ee450d360107944026711fcf698864017b обнаружил, что normal path
+вызывал Child::try_wait (reap), затем сигналил по освобождённому PGID. Теперь
+успех child наблюдается через waitid(WNOWAIT). Unreaped leader закрепляет PID
+до завершения TERM→KILL; только затем parent reaps группу. После начала reap
+групповые сигналы запрещены, включая unwind. Grace TERM ограничен 300 мс,
+последующий reap — 2 секундами.
+
+Новая регрессия завершает leader до cleanup и проверяет waitable identity
+перед первым сигналом. RED воспроизвёл потерю identity без опасного PID churn
+на host. GREEN прошёл также прежние hang-before-ready/упрямый потомок и полный
+сквозной provider gate. Сырые логи вне git:
+/home/myrs/projects/yonik/local/validation/pr60-pgid/.
+
+После исправления cargo +1.85.1 test -p yonik-desktop --locked прошёл:
+46 passed, 1 ignored и отдельный p10 gate exit 0. Workspace clippy
+--all-targets --locked -- -D warnings, fmt --check и diff --check прошли.
+Cargo.lock не менялся. Production code не затрагивался.

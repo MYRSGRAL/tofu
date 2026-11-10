@@ -1,5 +1,5 @@
 use crate::backend::{Directory, Harness, сделать_overdue};
-use rustix::process::{self, Pid, Signal, WaitOptions};
+use rustix::process::{self, Pid, Signal, WaitId, WaitIdOptions, WaitOptions};
 use serde_json::json;
 use std::{
     fs,
@@ -25,28 +25,35 @@ impl Group {
         if self.stopped {
             return;
         }
-        for (signal, budget) in [(Signal::TERM, 300), (Signal::KILL, 2000)] {
-            let _ = process::kill_process_group(self.pgid, signal);
-            let deadline = Instant::now() + Duration::from_millis(budget);
-            loop {
-                match process::waitpgid(self.pgid, WaitOptions::NOHANG) {
-                    Ok(Some(_)) => continue,
-                    Err(rustix::io::Errno::CHILD) => {
-                        self.stopped = true;
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(e) => panic!("reap собственной group: {e}"),
+        if process::waitid(
+            WaitId::Pid(self.pgid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        )
+        .is_err()
+        {
+            self.stopped = true;
+            panic!("leader должен удерживать PID до последнего group signal");
+        }
+        // Unreaped leader закрепляет PID/PGID до последнего group signal,
+        // даже если TERM уже завершил его и всех остальных членов группы.
+        let _ = process::kill_process_group(self.pgid, Signal::TERM);
+        thread::sleep(Duration::from_millis(300));
+        let _ = process::kill_process_group(self.pgid, Signal::KILL);
+        // После первого reap сигнализация запрещена и при unwind из проверки.
+        self.stopped = true;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match process::waitpgid(self.pgid, WaitOptions::NOHANG) {
+                Ok(Some(_)) => continue,
+                Err(rustix::io::Errno::CHILD) => {
+                    self.stopped = true;
+                    return;
                 }
-                assert!(
-                    signal != Signal::KILL || Instant::now() < deadline,
-                    "reap deadline"
-                );
-                if Instant::now() >= deadline {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
+                Ok(None) => {}
+                Err(e) => panic!("reap собственной group: {e}"),
             }
+            assert!(Instant::now() < deadline, "reap deadline");
+            thread::sleep(Duration::from_millis(10));
         }
     }
 }
@@ -106,8 +113,13 @@ fn supervised(mode: &str, timeout: Duration) -> (bool, std::path::PathBuf, Pid) 
     // Даже normal worker обязан завершиться до общего deadline.
     let success = if completed {
         loop {
-            if let Some(status) = group.child.try_wait().unwrap() {
-                break status.success();
+            if let Some(status) = process::waitid(
+                WaitId::Pid(pgid),
+                WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+            )
+            .unwrap()
+            {
+                break status.exit_status() == Some(0);
             }
             if Instant::now() >= deadline {
                 break false;
@@ -155,6 +167,7 @@ fn daemon() -> Child {
 
 pub fn run() {
     match std::env::args().nth(1).as_deref() {
+        Some("--exit-leader") => println!("done"),
         Some("--worker") => {
             worker();
             println!("done");
@@ -186,6 +199,10 @@ pub fn run() {
         }
         None => {
             process::set_child_subreaper(Some(process::getpid())).unwrap();
+            let (success, path, _) = supervised("--exit-leader", Duration::from_secs(2));
+            assert!(success);
+            assert!(!path.exists());
+            println!("P2 unreaped leader: GREEN");
             let (success, path, pgid) = supervised("--hang-before-ready", Duration::from_secs(2));
             assert!(!success, "ready не пришёл — timeout обязателен");
             assert!(!path.exists(), "parent удалил own DB/tree");
