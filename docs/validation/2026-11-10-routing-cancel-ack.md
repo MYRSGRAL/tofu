@@ -19,3 +19,8 @@ Rust CI f7b8067 падал на p10_e2e.rs:412 (provider ещё подключё
 Combined workspace: 593 passed, 0 failed, 24 ignored; отдельный P10 gate PASS.
 Workspace clippy all-targets --locked -D warnings прошёл. Из PR62 также включён
 02a2abf: ограниченное закрытие network monitor с cleanup failure outcome.
+
+CI 69fb734 подтвердил workspace tests/release Linux, затем portable check
+отказал на Linux-only applications import в editor::catalog. Функция catalog
+теперь gated target_os=linux; общий Draft остаётся переносимым. Новые Android
+инструменты не устанавливались; portable compile-check ожидается от CI.

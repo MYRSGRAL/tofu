@@ -149,6 +149,7 @@ impl Draft {
 }
 
 /// Только запрос пользователя; PID остаётся диагностикой и не входит в RuleInput.
+#[cfg(target_os = "linux")]
 pub fn catalog(
     processes: bool,
     query: &str,
