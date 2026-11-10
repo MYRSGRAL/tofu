@@ -1018,6 +1018,48 @@ ApplicationWindow {
                                     onClicked: window.send({command: "cancel_tcp"})
                                 }
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ActionButton {
+                                    objectName: "batchCheckButton"
+                                    text: window.tr("Проверить источник", "Check source")
+                                    enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !(window.state.batch && window.state.batch.busy)
+                                    onClicked: window.send({command: "check_batch"})
+                                }
+                                ActionButton {
+                                    objectName: "batchCancelButton"
+                                    text: window.tr("Отменить серию", "Cancel batch")
+                                    visible: !!window.state.batch && window.state.batch.busy
+                                    onClicked: window.send({command: "cancel_batch"})
+                                }
+                            }
+                            SmallLabel {
+                                objectName: "batchProgress"
+                                Layout.fillWidth: true
+                                text: window.state.batch ? (window.state.batch.invalidated ? window.tr("Результаты устарели", "Results invalidated") : window.state.batch.completed + " / " + window.state.batch.total + (window.state.batch.cancelled ? window.tr(" · отменено", " · cancelled") : "")) : ""
+                            }
+                            Repeater {
+                                model: window.state.batch ? window.state.batch.rows : []
+                                delegate: SmallLabel {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    text: modelData.name + " · " + modelData.host + ":" + modelData.port + " · " + window.tcpStatusText(modelData.status) + (modelData.connect_ms !== null ? " · " + modelData.connect_ms + " ms" : "")
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            RowLayout {
+                                visible: !!window.state.batch && window.state.batch.completed > 32
+                                ActionButton {
+                                    text: "←"
+                                    enabled: window.state.batch && window.state.batch.offset > 0
+                                    onClicked: window.send({command: "batch_page", offset: Math.max(0, window.state.batch.offset - 32)})
+                                }
+                                ActionButton {
+                                    text: "→"
+                                    enabled: window.state.batch && window.state.batch.offset + 32 < window.state.batch.completed
+                                    onClicked: window.send({command: "batch_page", offset: window.state.batch.offset + 32})
+                                }
+                            }
                             SmallLabel {
                                 Layout.fillWidth: true
                                 visible: !!window.state.tcp_busy
