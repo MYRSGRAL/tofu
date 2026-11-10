@@ -1,0 +1,48 @@
+# Снимок исходников; обновлять revision и checksum совместно после проверки.
+pkgname=yonik
+pkgver=0.1.0.r20261110
+pkgrel=1
+pkgdesc='Qt-клиент yonik и системный сетевой помощник'
+arch=('x86_64')
+url='https://github.com/MYRSGRAL/yonik'
+license=('GPL-3.0-only')
+depends=('ca-certificates' 'qt6-base' 'qt6-declarative' 'qt6-svg' 'sqlite' 'dbus' 'polkit' 'systemd' 'nftables' 'iproute2' 'gcc-libs' 'glibc')
+makedepends=('rust' 'clang' 'pkgconf')
+optdepends=('qt6-wayland: запуск в Wayland' 'gnome-keyring: провайдер Secret Service')
+options=('!debug')
+_revision=e33fa1908dfb3deb5434506341674de0b3a827b4
+source=("yonik-${_revision}.tar.gz::https://github.com/MYRSGRAL/yonik/archive/${_revision}.tar.gz")
+sha256sums=('f02df043825282f51ef8ad132d6eb7895532416112964b5d388b325e44c13b34')
+
+build() {
+    cd "$srcdir/yonik-$_revision"
+    # Target задаёт runner, удерживающий flock корня transient-каталога.
+    : "${CARGO_TARGET_DIR:?Укажите внешний transient target под flock}"
+    export CARGO_BUILD_JOBS=2
+    export YONIK_BUILD_ID="0.1.0+$_revision"
+    cargo build --locked --release -p yonik-desktop --features gui --bin yonik-desktop -p yonik-linux --bin yonik-helper --bin yonik-worker
+}
+
+package() {
+    cd "$srcdir/yonik-$_revision"
+    install -Dm755 "$CARGO_TARGET_DIR/release/yonik-desktop" "$pkgdir/usr/bin/yonik-desktop"
+    install -Dm755 "$CARGO_TARGET_DIR/release/yonik-helper" "$pkgdir/usr/lib/yonik/yonik-helper"
+    install -Dm755 "$CARGO_TARGET_DIR/release/yonik-worker" "$pkgdir/usr/lib/yonik/yonik-worker"
+    install -Dm644 packaging/systemd/* -t "$pkgdir/usr/lib/systemd/system/"
+    install -Dm644 packaging/sysusers/* -t "$pkgdir/usr/lib/sysusers.d/"
+    install -Dm644 packaging/dbus/*.conf -t "$pkgdir/usr/share/dbus-1/system.d/"
+    install -Dm644 packaging/dbus/*.service -t "$pkgdir/usr/share/dbus-1/system-services/"
+    install -Dm644 packaging/polkit/* -t "$pkgdir/usr/share/polkit-1/actions/"
+    install -Dm644 crates/yonik-desktop/assets/yonik.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/cloud.highpriority.yonik.svg"
+    install -dm755 "$pkgdir/usr/share/applications"
+    cat > "$pkgdir/usr/share/applications/cloud.highpriority.yonik.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=yonik
+Comment=Управление прокси-подключениями
+Exec=/usr/bin/yonik-desktop
+Icon=cloud.highpriority.yonik
+Terminal=false
+Categories=Network;
+DESKTOP
+}
