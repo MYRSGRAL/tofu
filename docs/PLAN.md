@@ -30,7 +30,8 @@ Android P03/P26 отложены пользователем. Следующий 
 `d0a281b` содержит принятые ниже срезы. Открытые #83/#85/#87/#88
 в этот результат не входят.
 
-- Системный runtime #49 прошёл изолированную libtest-матрицу 12/12: оба ядра,
+- [Системный runtime #49](validation/2026-11-10-system-session-matrix.md)
+  прошёл изолированную libtest-матрицу 12/12: оба ядра,
   TCP/UDP IPv4/IPv6, kill switch on/off и stop/restart/worker_exit. Это отдельное
   evidence от [production helper #73](validation/2026-11-10-production-helper-vm.md):
   его actual 4/4 относится к Xray/VLESS с kill switch, авторизации и восстановлению.
@@ -185,7 +186,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
 | P12 | Privileged helper и владение ресурсами | Частично | Production helper executable/system bus/polkit/TUN sandbox, typed client и recovery приняты отдельными срезами. Actual Xray protected4/4 не доказывает combined GUI/оба ядра/full transport. Нужны policy-bearing admission при минимальных правах, host topology reconciliation и полная установленная сессия с cleanup. [Production evidence](validation/2026-11-10-production-helper-vm.md), [IPC](specs/helper-service.md). |
-| P13 | Системный TUN обоих ядер / G-LINUX | Частично | SystemSessionHost прошёл изолированную libtest-матрицу12/12 обоих ядер/kill-switch/stop/restart/worker_exit/TCPUDPv4v6. Production helper Xray4/4 — отдельный ограниченный набор. Нужны combined GUI/production worker/политика/minimal privileges и полная transport/DNS матрица; system_tun:false сохраняется. [Production границы](validation/2026-11-10-production-helper-vm.md). |
+| P13 | Системный TUN обоих ядер / G-LINUX | Частично | [SystemSessionHost](validation/2026-11-10-system-session-matrix.md) прошёл изолированную libtest-матрицу12/12 обоих ядер/kill-switch/stop/restart/worker_exit/TCPUDPv4v6. Production helper Xray4/4 — отдельный ограниченный набор. Нужны combined GUI/production worker/политика/minimal privileges и полная transport/DNS матрица; system_tun:false сохраняется. [Production границы](validation/2026-11-10-production-helper-vm.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Единый DnsPolicy и рабочие native Real/Fake-IP IPv4/IPv6 обоих ядер реализованы, unknown mappings и disabled-family oracle проверены. TTL/epochs, positive exclusions, network reset, private DNS runtime revocation и системный D-01…D-07 ещё не приняты. [Evidence](validation/2026-11-11-dns-family-gate-review.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Приняты реальные executable/CIDR маршруты обоих ядер в изолированном стенде. Dedicated worker UID/minimal privileges, policy admission, packaging/PID reuse и стоимость owner lookup ещё не приняты. [Evidence](validation/2026-11-11-g-app.md). |
 | P16 | Приватные VPN, LAN и изменения сети | Частично | Read-only наблюдение topology/resolver реализовано. Нужны verified binding WG, split DNS, Apply и сохранение защиты при смене VPN/сети/sleep, затем корректное восстановление. [Наблюдение](validation/2026-11-09-network-observation.md), [topology](validation/2026-11-09-network-topology.md), [resolver](validation/2026-11-09-resolver-host.md). |
