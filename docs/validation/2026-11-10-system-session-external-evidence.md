@@ -87,3 +87,17 @@ Namespace gates повторно не запускались: новый сре�
 - `cargo +1.85.1 clippy --workspace --all-targets --locked -- -D warnings`: exit0.
 - `cargo +1.85.1 fmt --all -- --check`, `git diff --check`: exit0.
 - `libtest --list --exact` подтвердил наличие нового ignored case, без его запуска на host.
+
+## Flagged AF_SPEC/IPv6 после review
+
+Review 201ea95e90f7a42257b769212fe365d20b2790ed обнаружил отсутствие детализации
+для разрешённых comparator вариантов NLA_F_NESTED: AF_SPEC 0x801a и IPv6 0x800a.
+Для whitelist диагностики теперь канонизируются только эти два варианта.
+Исходный kind печатается до канонизации; unknown flags остаются opaque.
+NLA decoder и production predicates не меняются.
+
+RED: вложенный IPv6 kind 0x800a не выводил whitelist cacheinfo numeric_words.
+GREEN: все четыре комбинации flagged/unflagged AF_SPEC и IPv6 дают детализацию;
+контроль unknown 0x401a остаётся opaque. Полный Linux lib прогон — 333 passed,
+0 failed, 24 ignored. Логи вне git: local/validation/pr49-nla-diagnostic/.
+Это исправление диагностического покрытия, не исправление actual Evidence.

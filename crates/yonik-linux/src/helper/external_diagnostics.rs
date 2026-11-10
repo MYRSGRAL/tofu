@@ -130,6 +130,20 @@ fn leaf(s: &mut Sink, class: &str, path: &[u16], a: &[u8], b: &[u8], tun: bool) 
         b.len(),
         offsets(a, b)
     );
+    // Canonical path используется только для whitelist диагностики; исходный
+    // kind с флагами уже записан выше. Иные флаги остаются opaque.
+    if path.is_empty() || path.len() > 3 {
+        return;
+    }
+    let mut canonical = [0; 3];
+    canonical[..path.len()].copy_from_slice(path);
+    if class == "link" && canonical[0] == 0x801a {
+        canonical[0] = 26;
+    }
+    if class == "link" && canonical[0] == 26 && canonical[1] == 0x800a {
+        canonical[1] = 10;
+    }
+    let path = &canonical[..path.len()];
     if (class == "address" && path == [6] && a.len() == 16 && b.len() == 16)
         || (class == "route" && path == [12] && a.len() == 32 && b.len() == 32)
         || (class == "route" && path == [23] && a.len() == 4 && b.len() == 4)
@@ -504,6 +518,51 @@ pub(super) fn failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn attr(kind: u16, payload: &[u8]) -> Vec<u8> {
+        let len = 4 + payload.len();
+        let mut out = Vec::with_capacity((len + 3) & !3);
+        out.extend_from_slice(&(len as u16).to_ne_bytes());
+        out.extend_from_slice(&kind.to_ne_bytes());
+        out.extend_from_slice(payload);
+        out.resize((len + 3) & !3, 0);
+        out
+    }
+    #[test]
+    fn flagged_ipv6_nla_preserves_whitelisted_details() {
+        let mut before = vec![0; 16];
+        before[4..8].copy_from_slice(&1u32.to_ne_bytes());
+        let mut after = before.clone();
+        after[4..8].copy_from_slice(&2u32.to_ne_bytes());
+        for outer in [26, 0x801a] {
+            for family in [10, 0x800a] {
+                let mut sink = Sink::new(LIMIT);
+                leaf(
+                    &mut sink,
+                    "link",
+                    &[outer],
+                    &attr(family, &attr(5, &before)),
+                    &attr(family, &attr(5, &after)),
+                    false,
+                );
+                assert!(
+                    sink.lines
+                        .join("\n")
+                        .contains("numeric_words=[0, 1, 0, 0]=>[0, 2, 0, 0]"),
+                    "outer={outer} family={family}"
+                );
+            }
+        }
+        let mut sink = Sink::new(LIMIT);
+        leaf(
+            &mut sink,
+            "link",
+            &[0x401a],
+            &attr(10, &attr(5, &before)),
+            &attr(10, &attr(5, &after)),
+            false,
+        );
+        assert!(!sink.lines.join("\n").contains("numeric_words"));
+    }
     #[test]
     fn diagnostic_output_is_bounded_and_opaque_strings_are_not_rendered() {
         let mut sink = Sink::new(128);
