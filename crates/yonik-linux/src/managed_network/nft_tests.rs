@@ -395,3 +395,30 @@ async fn cancelled_generic_recheck_revokes_old_confirmation() {
     drop(journal);
     std::fs::remove_dir_all(path).unwrap();
 }
+
+#[tokio::test]
+async fn a_new_executor_waits_until_cancelled_command_is_reaped() {
+    use futures_util::FutureExt;
+    let (running, pid, _old_gate) = owned_test_child("/usr/bin/sleep", &["30"], DEADLINE).await;
+    let netns = File::open("/proc/thread-self/ns/net").unwrap();
+    let ns = namespace(&netns).unwrap();
+    let mut next = NftExecutor {
+        executable: File::open("/dev/null").unwrap(),
+        netns,
+        owner: Ownership::new(1000, 7, 9, ns.0, ns.1).unwrap(),
+        gate: Arc::new(Semaphore::new(1)),
+    };
+    let mut waiting = Box::pin(next.run(Action::List));
+    assert!(
+        waiting.as_mut().now_or_never().is_none(),
+        "Другой executor не обходит живую команду"
+    );
+    drop(running);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap(),
+        Err(NftError::Io)
+    );
+    assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+}

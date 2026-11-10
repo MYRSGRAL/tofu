@@ -15,7 +15,9 @@ use tokio::{
 };
 
 const MAX_OUTPUT: usize = 256 * 1024;
-static PROCESS_LIMIT: Semaphore = Semaphore::const_new(4);
+// Между executor-ами тоже нельзя обгонять отменённую команду: старый Child
+// удерживает общий permit до kill/wait, даже после Drop исходного executor.
+static PROCESS_LIMIT: Semaphore = Semaphore::const_new(1);
 const DEADLINE: Duration = Duration::from_secs(5);
 const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
