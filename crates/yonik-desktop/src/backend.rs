@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -38,6 +38,7 @@ pub struct HostConfig {
     engine_dir: PathBuf,
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
     listen_port: Option<NonZeroU16>,
+    system_subscription_policy: bool,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -46,6 +47,7 @@ impl HostConfig {
             engine_dir,
             ephemeral_key: None,
             listen_port: None,
+            system_subscription_policy: true,
         }
     }
     pub fn data_dir(&self) -> &Path {
@@ -56,6 +58,7 @@ impl HostConfig {
     }
     pub fn with_ephemeral_key(mut self, key: [u8; 32]) -> Self {
         self.ephemeral_key = Some(Zeroizing::new(key));
+        self.system_subscription_policy = false;
         self
     }
     pub fn with_listen_port(mut self, port: NonZeroU16) -> Self {
@@ -226,6 +229,7 @@ struct Control {
     priority: watch::Sender<Priority>,
     tcp_priority: watch::Sender<u64>,
     subscription_policy: watch::Sender<yonik_linux::SubscriptionPolicy>,
+    subscription_override: AtomicBool,
     subscription_visible: watch::Sender<bool>,
     closed: (Mutex<bool>, Condvar),
 }
@@ -268,6 +272,7 @@ impl DesktopHost {
             priority,
             tcp_priority,
             subscription_policy: watch::channel(Default::default()).0,
+            subscription_override: std::sync::atomic::AtomicBool::new(false),
             subscription_visible: watch::channel(false).0,
             closed: (Mutex::new(false), Condvar::new()),
         });
@@ -303,6 +308,9 @@ impl DesktopHost {
     }
     /// Доверенный platform provider. Unknown/default запрещает автоматические загрузки.
     pub fn set_subscription_policy(&self, policy: yonik_linux::SubscriptionPolicy) -> Result<()> {
+        self.control
+            .subscription_override
+            .store(true, Ordering::Release);
         self.control.subscription_policy.send_replace(policy);
         Ok(())
     }
@@ -1482,6 +1490,7 @@ mod network_tests {
             priority,
             tcp_priority,
             subscription_policy: watch::channel(Default::default()).0,
+            subscription_override: std::sync::atomic::AtomicBool::new(false),
             subscription_visible: watch::channel(false).0,
             closed: (Mutex::new(false), Condvar::new()),
         };
@@ -1989,6 +1998,16 @@ async fn run(
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
+    let (system_policy_sender, mut system_policy) = watch::channel(Default::default());
+    let provider_enabled = config.system_subscription_policy;
+    let provider = async move {
+        if provider_enabled {
+            yonik_linux::system_subscription_policy(system_policy_sender).await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::pin!(provider);
     let mut subscription_policy = control.subscription_policy.subscribe();
     let mut subscription_visible = control.subscription_visible.subscribe();
     let origin = tokio::time::Instant::now();
@@ -2055,6 +2074,12 @@ async fn run(
                 }
                 actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" };
                 actor.emit();
+            }
+            _ = &mut provider => {},
+            changed = system_policy.changed(), if provider_enabled => {
+                if changed.is_ok() && !control.subscription_override.load(Ordering::Acquire) {
+                    scheduled.policy = *system_policy.borrow_and_update();
+                }
             }
             _ = subscription_policy.changed() => {
                 scheduled.policy = *subscription_policy.borrow_and_update();
