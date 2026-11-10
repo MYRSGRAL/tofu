@@ -63,3 +63,20 @@ Rust 1.85.1, `CARGO_BUILD_JOBS=1`, отдельный transient target под BS
 
 Сборка и clippy завершены до введения глобального slot-wrapper; последующие
 тяжёлые команды обязаны использовать with-rust-slot. Изменений Cargo.lock нет.
+
+## Исправления fixture после независимого review
+
+Cipher-сценарий теперь передаёт корректный IV и ciphertext длиной 15 байт:
+отказ детерминирован, случайный валидный PKCS#7 padding исключён.
+Запуск daemon получает guard до чтения адреса. Чтение stdout асинхронное,
+ограничено 4097 байтами и deadline 3 секунды; пустой/неверный адрес отклоняется.
+При отмене/ошибке guard убивает и reaps только собственного child, удаляет
+собственный runtime. Новый тест проверяет прерываемость чтения и cleanup.
+
+Две регрессии RED (старый valid-block ciphertext и блокировка current-thread)
+→ GREEN. credentials_bus: 4 top-level tests PASS (включая child harness и
+19 private-bus комбинаций), scoped clippy и fmt PASS. Production credentials
+в этом delta не менялись. Логи вне TTL:
+/home/myrs/projects/yonik/local/validation/pr66-fixture-fix/.
+Внутренний трёхсекундный timeout проверен по коду; тест отдельно проверяет
+отмену внешним deadline 50 мс, не утверждает runtime-прогон истечения 3 секунд.

@@ -1,10 +1,10 @@
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader},
     os::unix::fs::PermissionsExt,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
 };
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const SERVICE: &str = "/org/freedesktop/secrets";
@@ -121,7 +121,11 @@ impl Item {
                 } else {
                     vec![]
                 },
-                vec![0; 16],
+                if self.case == "cipher" {
+                    vec![0; 15]
+                } else {
+                    vec![0; 16]
+                },
                 "application/octet-stream".into(),
             )),
         }
@@ -149,22 +153,18 @@ impl Fixture {
         // Нет servicedir: отсутствие имени не активирует настоящий keyring.
         let config = runtime.join("bus.conf");
         std::fs::write(&config, r#"<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>"#).unwrap();
-        let mut daemon = Command::new("dbus-daemon")
+        let daemon = Command::new("dbus-daemon")
             .arg("--config-file")
             .arg(&config)
             .args(["--nofork", "--nopidfile", "--print-address=1"])
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut address = String::new();
-        BufReader::new(daemon.stdout.take().unwrap())
-            .read_line(&mut address)
-            .unwrap();
-        let address = address.trim().to_owned();
-        let daemon = Daemon {
+        let mut daemon = Daemon {
             child: daemon,
             runtime: runtime.clone(),
         };
+        let address = daemon_address(&mut daemon.child).await.unwrap();
         let calls = Calls::default();
         let mut builder = zbus::connection::Builder::address(address.as_str()).unwrap();
         if case != "absent" {
@@ -228,5 +228,77 @@ impl Drop for Daemon {
         let _ = self.child.kill();
         let _ = self.child.wait();
         std::fs::remove_dir_all(&self.runtime).unwrap();
+    }
+}
+
+async fn daemon_address(child: &mut Child) -> std::io::Result<String> {
+    let stdout = tokio::process::ChildStdout::from_std(child.stdout.take().unwrap())?;
+    let mut reader = tokio::io::BufReader::new(stdout.take(4097));
+    let mut address = String::new();
+    let bytes = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        reader.read_line(&mut address),
+    )
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "адрес D-Bus не получен"))??;
+    if bytes == 0 || bytes > 4096 || !address.ends_with('\n') || !address.starts_with("unix:") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "неверный адрес fixture D-Bus",
+        ));
+    }
+    Ok(address.trim().to_owned())
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    #[test]
+    fn cipher_failure_is_not_a_valid_aes_block() {
+        let item = Item {
+            case: "cipher".into(),
+            calls: Calls::default(),
+        };
+        let secret = item.get_secret(path("/session/test")).unwrap();
+        assert_eq!(secret.1.len(), 16, "IV корректного размера");
+        assert_ne!(
+            secret.2.len() % 16,
+            0,
+            "ciphertext должен гарантированно отклоняться"
+        );
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn startup_read_is_interruptible_and_guard_reaps_child() {
+        let runtime =
+            std::env::temp_dir().join(format!("yonik-credentials-startup-{}", std::process::id()));
+        std::fs::create_dir(&runtime).unwrap();
+        let child = Command::new("python3")
+            .args([
+                "-c",
+                "import time; time.sleep(0.3); print('unix:path=/never-connect')",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut daemon = Daemon {
+            child,
+            runtime: runtime.clone(),
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            daemon_address(&mut daemon.child),
+        )
+        .await;
+        drop(daemon);
+        assert!(
+            result.is_err(),
+            "отсутствующая строка адреса не блокирует runtime"
+        );
+        assert!(!runtime.exists());
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "child reaped"
+        );
     }
 }
