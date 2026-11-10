@@ -1,0 +1,25 @@
+    Blocking waiting for file lock on build directory
+   Compiling yonik-desktop v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-desktop)
+warning: yonik-desktop@0.1.0: In file included from /usr/include/qt6/QtCore/qstring.h:15,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qhashfunctions.h:10,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qlist.h:12,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qstringlist.h:6,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QStringList:1,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/build/yonik-desktop-5bf1d4c3ad384433/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:11,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/build/yonik-desktop-5bf1d4c3ad384433/out/cxxqtbuild/include/cxx-qt-lib/qstring.h:9,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/build/yonik-desktop-5bf1d4c3ad384433/out/cxxqtgen/src/bridge.cxx.cpp:1:
+warning: yonik-desktop@0.1.0: /usr/include/qt6/QtCore/qchar.h:48:31: warning: defining 'QChar', which previously failed to be complete in a SFINAE context [-Wsfinae-incomplete=]
+warning: yonik-desktop@0.1.0:    48 | class QT6_ONLY(Q_CORE_EXPORT) QChar {
+warning: yonik-desktop@0.1.0:       |                               ^~~~~
+warning: yonik-desktop@0.1.0: In file included from /usr/include/c++/16/unordered_map:44,
+warning: yonik-desktop@0.1.0:                  from /usr/include/c++/16/functional:80,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcomparehelpers.h:29,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcompare.h:661,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qnamespace.h:14,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qbytearray.h:10,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QByteArray:1,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/build/yonik-desktop-5bf1d4c3ad384433/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:10:
+warning: yonik-desktop@0.1.0: /usr/include/c++/16/bits/range_access.h:325:24: note: here.  Use '-Wsfinae-incomplete=2' for a diagnostic at that point
+warning: yonik-desktop@0.1.0:   325 |     -> decltype(__cont.data())
+warning: yonik-desktop@0.1.0:       |                 ~~~~~~~^~~~
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 09s

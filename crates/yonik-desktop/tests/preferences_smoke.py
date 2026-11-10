@@ -90,5 +90,108 @@ def main() -> None:
         )
 
 
+def runtime_write_failure(binary: Path, output: Path, conflict: str) -> None:
+    """Ошибка после ready проверяется через видимый текст настоящего QML."""
+    import subprocess
+    import threading
+    import time
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory(prefix="yonik-preferences-fault-") as temporary:
+        root = Path(temporary)
+        (root / "data").mkdir(mode=0o700)
+        settings_path = root / "data" / "preferences.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "engine": "xray",
+                    "port": None,
+                    "probe_url": "https://www.gstatic.com/generate_204",
+                    "probe_status": 204,
+                    "language": "ru",
+                }
+            )
+        )
+        settings_path.chmod(0o600)
+        output.mkdir(parents=True, exist_ok=True)
+        injected = threading.Event()
+        faults: list[Exception] = []
+        threads: list[threading.Thread] = []
+        original_popen = subprocess.Popen
+
+        def launch(*args: object, **kwargs: object) -> subprocess.Popen:
+            process = original_popen(*args, **kwargs)
+
+            def inject() -> None:
+                deadline = time.monotonic() + 10
+                try:
+                    while time.monotonic() < deadline:
+                        trace = output / "trace.jsonl"
+                        if trace.exists() and '"ready":true' in trace.read_text():
+                            name = (
+                                f"preferences.tmp-{process.pid}"
+                                if conflict == "temp"
+                                else "preferences.json"
+                            )
+                            (root / "data" / name).write_bytes(b"foreign-preserve")
+                            injected.set()
+                            return
+                        time.sleep(0.01)
+                    raise RuntimeError("Нет ready для инъекции ошибки")
+                except Exception as error:
+                    faults.append(error)
+
+            thread = threading.Thread(target=inject)
+            threads.append(thread)
+            thread.start()
+            return process
+
+        with patch("desktop_ui_smoke.subprocess.Popen", launch):
+            execute(
+                binary,
+                root,
+                [
+                    ui("click", "settingsButton", when={"ready": True}),
+                    ui("click", "settingsAppearanceButton"),
+                    ui("key", "languageChoice", key="Down"),
+                    ui("key", "languageChoice", key="Enter"),
+                    ui(
+                        "click",
+                        "appearanceSaveError",
+                        capture="runtime-write-error.png",
+                        when={"error": "preferences_write"},
+                        expect={
+                            "window": {"language": "ru"},
+                            "languageChoice": {"currentIndex": 0},
+                            "appearanceSaveError": {
+                                "visible": True,
+                                "text": {"contains": "Не удалось сохранить"},
+                            },
+                        },
+                    ),
+                    {"when": {}, "command": {"command": "shutdown"}},
+                ],
+                output,
+                "1",
+            )
+        for thread in threads:
+            thread.join(timeout=12)
+            assert not thread.is_alive()
+        assert injected.is_set() and not faults, faults
+        names = list((root / "data").glob("preferences.*"))
+        assert any(path.read_bytes() == b"foreign-preserve" for path in names)
+        (output / "result.json").write_text(
+            json.dumps({"conflict": conflict, "visible_error": True, "language": "ru"})
+            + "\n"
+        )
+
+
 if __name__ == "__main__":
     main()
+    for conflict in ("temp", "changed"):
+        runtime_write_failure(
+            Path(sys.argv[1]).resolve(),
+            Path(sys.argv[2]).resolve() / conflict,
+            conflict,
+        )

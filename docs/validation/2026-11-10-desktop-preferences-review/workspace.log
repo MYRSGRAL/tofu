@@ -1,0 +1,858 @@
+    Blocking waiting for file lock on build directory
+   Compiling yonik-desktop v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-desktop)
+   Compiling yonik-linux v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-linux)
+   Compiling yonik-subscription v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-subscription)
+   Compiling yonik-application v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-application)
+   Compiling yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-engine)
+   Compiling yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-domain)
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-import)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 10s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_application-205f01ef2ec385ee)
+
+running 3 tests
+test plan::tests::exhausted_prepare_and_apply_do_not_start_or_replace_active_operation ... ok
+test tests::exhausted_request_cannot_partially_apply_or_cancel_running_operation ... ok
+test tests::exhausted_counters_leave_session_unchanged ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/prepared_plan.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/prepared_plan-bdfdebdab476189b)
+
+running 7 tests
+test apply_requires_matching_validated_plan_and_preserves_unapplied_generation ... ok
+test cancelled_plan_cannot_damage_replacement_session_even_if_environment_changed ... ok
+test config_digest_mismatch_is_not_allowed_to_start_engine ... ok
+test each_generation_change_rejects_plan_before_network_start ... ok
+test foreign_plan_cannot_advance_controller_with_identical_local_counters ... ok
+test lost_authorization_rejects_even_unchanged_generations ... ok
+test no_authorization_during_prepare_requires_a_new_attempt ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/session.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/session-b939e4870a97e82f)
+
+running 9 tests
+test cancel_preparation_and_duplicate_stop_do_not_revive_old_operation ... ok
+test check_invalidation_rejects_inactive_phases_without_mutation ... ok
+test failure_after_launch_keeps_reason_until_cleanup_and_restart ... ok
+test endpoint_failure_keeps_limited_session_and_can_be_rechecked ... ok
+test foreign_controller_token_cannot_advance_same_generation ... ok
+test engine_start_is_not_a_verified_connection ... ok
+test stop_invalidates_callbacks_and_requires_confirmed_cleanup ... ok
+test validation_failure_needs_no_network_cleanup_and_duplicate_events_are_stale ... ok
+test invalidated_check_keeps_applied_generation_and_rejects_stale_results ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_desktop-0ea4f5db9bf1a6ef)
+
+running 12 tests
+test backend::error_scope_tests::session_updates_and_source_commands_keep_independent_errors ... ok
+test backend::error_scope_tests::metadata_query_does_not_clear_download_error ... ok
+test backend::settings_tests::hwid_fetch_failures_have_specific_public_codes ... ok
+test backend::settings_tests::udp_collision_is_detected_without_touching_occupied_socket ... ok
+test backend::tcp_series_tests::cancelled_or_incomplete_series_cannot_publish_a_median ... ok
+test backend::network_tests::network_change_invalidates_tcp_commands_already_in_queue ... ok
+test backend::network_tests::new_network_removes_old_proof_without_stopping_core ... ok
+test backend::network_tests::late_success_from_previous_network_cannot_restore_connected ... ok
+test preferences::tests::foreign_temp_and_changed_file_are_preserved ... ok
+test preferences::tests::reopen_and_preserve_invalid_truncated_unknown_and_symlink ... ok
+test preferences::tests::directory_sync_failure_reports_publication_and_reopens_new_settings ... ok
+test backend::settings_tests::listen_port_is_busy_during_active_session_and_failed_cleanup ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/backend.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/backend-08c63c06ac175594)
+
+running 27 tests
+test existing_directory_permissions_are_never_rewritten ... ok
+test damaged_preferences_notify_and_survive_settings_commands ... ok
+test automatic_port_avoids_occupied_default_and_remains_stable_on_reload ... ok
+test health_target_settings_are_validated_without_disclosing_url ... ok
+test hwid_commands_reject_non_boolean_and_require_selection ... ok
+test cancel_refresh_checks_id_retains_busy_until_terminal_and_preserves_sources ... ok
+test automatic_port_collision_reselects_and_fixed_override_reports_busy ... ok
+test hwid_preferences_are_opt_in_persisted_and_refresh_selected_source ... ok
+test import_source_loads_profiles_and_clears_stale_filters ... ok
+test import_source_partial_requires_review_and_failed_fetch_keeps_sources ... ok
+test native_json_requires_approval_and_never_becomes_profile ... ok
+test listen_port_settings_are_strict_and_survive_reload ... ok
+test proxy_source_has_explicit_capability_error_and_custom_port_is_reported ... ok
+test import_hwid_opt_in_sends_stable_private_id_and_toggle_refreshes ... ok
+test next_connect_compiles_with_updated_listen_port ... ok
+test preferences_reopen_applies_engine_port_probe_and_language ... ok
+test import_and_hwid_toggle_stop_and_shutdown_cancel_fetch_and_reject_concurrent_changes ... ok
+test rename_and_delete_preserve_other_sources_and_choose_first_remaining ... ok
+test startup_failure_remains_closable_and_lock_is_exclusive ... ok
+test review_reasons_are_paginated_and_do_not_expose_source_data ... ok
+test real_subscription_approval_revision_and_favorite ... ok
+test shutdown_cancels_inflight_fetch_before_close_ack ... ok
+test strict_bounded_commands_and_priority_shutdown ... ok
+test tcp_cancel_bypasses_full_queue_and_invalidates_queued_probe ... ok
+test tcp_check_is_separate_from_session_and_bound_to_selected_profile ... ok
+test xray_json_auto_import_exposes_profiles_only_after_review ... ok
+test stop_and_shutdown_finish_a_pending_tcp_task_before_acknowledgement ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/network_changes.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/network_changes-e91aee4522383900)
+
+running 1 test
+test route_changes_invalidate_completed_and_inflight_tcp_checks ... ignored, только отдельный unshare network namespace с YONIK_HOST_NETWORK_NS
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_domain-12304d89202b2d77)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/dns_policy.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/dns_policy-5c2ef7b6f64219e8)
+
+running 13 tests
+test d01_private_cidr_precedes_user_domain_and_missing_vpn_blocks ... ok
+test d03_any_address_uses_first_rule_independent_of_answer_order ... ok
+test d04_private_public_or_different_vpn_answers_are_ambiguous ... ok
+test d07_stale_dns_requests_refresh_and_unknown_fake_mapping_is_rejected ... ok
+test d05_failed_or_partial_required_lookup_does_not_reach_younger_domain_rule ... ok
+test fake_address_cannot_enter_as_literal_or_real_dns_answer ... ok
+test d06_private_zone_never_requests_public_resolver ... ok
+test fake_ip_is_never_compared_with_real_cidr_and_mapping_is_session_bound ... ok
+test mapped_private_address_and_every_dns_epoch_are_checked ... ok
+test overlapping_vpn_owners_and_private_resolver_route_are_explicit ... ok
+test d02_domain_wins_without_lookup_over_younger_cidr ... ok
+test source_short_circuit_and_destination_or_do_not_trigger_needless_dns ... ok
+test idna_case_root_dot_and_suffix_label_boundary ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/policy-df79e5c1c608a363)
+
+running 5 tests
+test canonical_networks_and_boundaries ... ok
+test overlapping_private_networks_block_if_any_required_route_is_missing ... ok
+test source_and_destination_are_and_values_are_or ... ok
+test lan_user_preset_and_default_have_explicit_order ... ok
+test private_network_cannot_escape_to_lan_user_or_preset ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_engine-01210dc66757d2bb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_compile-c06de842830955af)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/cli-e0eb4e83c7dd3383)
+
+running 3 tests
+test default_output_is_metadata_and_sensitive_export_requires_flag ... ok
+test partial_native_and_bad_arguments_are_rejected_without_secrets ... ok
+test system_tun_cli_requires_complete_typed_settings_and_keeps_summary_safe ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/compiler.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/compiler-61c6a0c68475e933)
+
+running 11 tests
+test mapped_ipv4_and_localhost_dot_cannot_create_self_proxy ... ok
+test invalid_shadowsocks_2022_key_and_vmess_options_are_rejected ... ok
+test grpc_and_xhttp_have_engine_specific_capabilities ... ok
+test recursive_listener_and_public_xray_plaintext_are_rejected ... ok
+test tls_websocket_preserves_host_path_alpn_and_fingerprint ... ok
+test reality_validates_key_short_id_and_transport ... ok
+test vless_is_loopback_only_and_has_no_direct_fallback ... ok
+test unsafe_unknown_and_inapplicable_options_never_silently_disappear ... ok
+test six_protocols_and_credentials_survive_compilation ... ok
+test json_grpc_defaults_authority_and_blocking_options ... ok
+test json_reality_spider_path_preserves_query_and_defaults ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/policy_input.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/policy_input-b2cbc45ec2a49449)
+
+running 6 tests
+test defaults_and_normalization ... ok
+test rejects_invalid_semantics ... ok
+test ids_are_unique_in_each_group_including_disabled_rules ... ok
+test rejects_malformed_unknown_duplicate_and_missing_fields ... ok
+test read_is_bounded_and_errors_never_include_input ... ok
+test aggregate_rule_and_selector_limits ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/routing.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/routing-31898bfbd145098d)
+
+running 4 tests
+test unproven_native_combinations_are_errors_not_semantic_changes ... ok
+test ip_only_has_domain_rejection_and_private_protection_first ... ok
+test native_policy_keeps_order_and_authenticated_probe_override ... ok
+test probe_cannot_bypass_known_protected_destinations ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/system_tun.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/system_tun-ed0df490152b9d89)
+
+running 3 tests
+test malformed_runtime_settings_are_rejected_before_configuration ... ok
+test system_inbound_retains_profile_and_never_enables_automatic_network_control ... ok
+test system_policy_preserves_authenticated_probe_and_rejects_unproven_domain_input ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_import-f78dcb43a9b3f232)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_import-008bd2fd0906ce9b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/cli-b29a23d2bf61efd8)
+
+running 2 tests
+test argument_error_does_not_echo_secret_argument ... ok
+test stdin_summary_and_errors_do_not_reveal_credentials ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/failure_source.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/failure_source-ce25d051d61ef7e5)
+
+running 2 tests
+test fatal_errors_keep_original_bytes_without_debug_leakage ... ok
+test oversized_stream_retains_only_bounded_prefix_and_marks_it_incomplete ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/identity-9e0917d61f3a8b7a)
+
+running 9 tests
+test legacy_shadowsocks_uses_decoded_credentials ... ok
+test display_names_are_safe_bounded_and_source_is_unchanged ... ok
+test reserved_path_escape_does_not_collapse_different_options ... ok
+test query_encoding_order_and_unknown_options ... ok
+test unknown_json_numbers_never_round_to_the_same_identity ... ok
+test names_do_not_change_identity_for_all_protocols ... ok
+test vmess_recursive_canonicalization ... ok
+test vmess_keeps_nested_duplicate_keys_and_their_relative_order ... ok
+test every_protocol_tracks_credentials_and_options ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/import.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/import-e12bc95e7afc0ea1)
+
+running 7 tests
+test json_is_opaque_and_depth_limited ... ok
+test all_initial_protocols_parse_core_credentials ... ok
+test partial_import_reports_indices_without_echoing_input ... ok
+test standard_base64_one_layer_and_uri_list ... ok
+test vless_normalizes_endpoint_and_keeps_opaque_source ... ok
+test unknown_and_unsafe_parameters_are_retained_and_require_review ... ok
+test bounded_read_stops_before_consuming_unbounded_source ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/intent.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/intent-a36d7306c3b1bd59)
+
+running 6 tests
+test закрытый_контракт_и_ограничение_размера ... ok
+test сохраняет_http_host_с_портом_и_скрывает_ошибку_секрета ... ok
+test отклоняет_неизвестные_повторные_и_избыточные_поля ... ok
+test сохраняет_протоколы_и_секреты_не_попадают_в_debug ... ok
+test reality_xhttp_и_неподдерживаемые_опции ... ok
+test проверяет_endpoint_uuid_и_управляющие_символы ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/invalid.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/invalid-b12d82b88288c319)
+
+running 5 tests
+test aead_2022_userinfo_must_not_use_base64_wrapper ... ok
+test vmess_duplicate_or_mistyped_core_fields_are_rejected ... ok
+test oversized_uri_and_control_credentials_do_not_become_profiles ... ok
+test hostile_reader_errors_are_redacted_and_invalid_utf8_is_rejected ... ok
+test exact_contract_limits_accept_valid_input ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.60s
+
+     Running tests/matrix.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/matrix-8d660293dbb08f0e)
+
+running 8 tests
+test idna_и_ip_нормализуются_одинаково_в_uri_и_vmess ... ok
+test неизвестные_опции_сохраняются_и_требуют_review ... ok
+test алфавиты_base64_и_отказ_от_повторной_обёртки ... ok
+test опасные_uri_отклоняются_без_потери_соседней_записи ... ok
+test вложенность_считает_контейнеры_но_не_экранированные_строки ... ok
+test граница_размера_uri_в_обычном_и_base64_списке ... ok
+test непустые_отклонённые_записи_тоже_расходуют_лимит ... ok
+test граница_входа_измеряется_до_декодирования ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+
+     Running tests/review.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/review-bfb8325aa8c15d26)
+
+running 3 tests
+test vmess_json_accepts_bare_ipv6_and_normalizes_it ... ok
+test http_proxy_security_cannot_conflict_with_scheme ... ok
+test vmess_alter_id_rejects_malformed_values_and_flags_legacy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/variants.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/variants-ca0067e8356393d2)
+
+running 4 tests
+test json_brackets_in_strings_do_not_consume_nesting_budget ... ok
+test ipv6_idna_and_default_ports_are_normalized ... ok
+test shadowsocks_legacy_and_escaped_userinfo_keep_password_exact ... ok
+test urlsafe_unpadded_envelope_and_bom_are_supported ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/xray.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/xray-3e53f6585cbcb2f5)
+
+running 18 tests
+test explicitly_disabled_mux_and_plain_tcp_header_are_noops ... ok
+test disabled_tls_session_resumption_is_noop_but_enabled_or_malformed_is_blocked ... ok
+test endpoints_users_and_names_are_distinct_and_stable ... ok
+test grpc_boolean_mode_stays_visible_but_cannot_activate ... ok
+test maps_ws_grpc_xhttp_without_losing_parameters ... ok
+test rejects_duplicate_nested_auth_fields ... ok
+test grpc_and_reality_options_reject_non_string_values ... ok
+test remna_array_extracts_only_servers_and_keeps_native_json ... ok
+test shadowsocks_json_preserves_credentials_endpoints_and_native_source ... ok
+test shadowsocks_unknown_options_and_malformed_credentials_are_not_lost ... ok
+test grpc_gun_mode_is_preserved_without_accepting_unknown_siblings ... ok
+test tls_unsafe_and_unknown_nested_options_cannot_be_lost ... ok
+test unknown_protocol_and_malformed_credentials_are_reported ... ok
+test unrelated_native_numbers_keep_their_original_opaque_representation ... ok
+test unsupported_semantics_are_blocking_review_flags ... ok
+test escaped_root_keys_are_recognized_and_large_names_are_bounded ... ok
+test unknown_native_is_opaque_and_oversized_outbound_is_rejected ... ok
+test native_json_bounds_and_duplicate_security_fields_are_enforced ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_linux-31c1aeccd6b9ac4c)
+
+running 305 tests
+test credentials::tests::secret_service_readonly ... ignored, Требует доступного Secret Service; только чтение, ключи не создаются
+test fetch::tests::public_https_direct ... ignored, Требует публичной сети; проверяет реальный HTTPS/DNS/peer Direct
+test fetch::tests::public_addresses_reject_special_and_transition_ranges ... ok
+test fetch::tests::redirect_does_not_forward_resource_validators ... ok
+test fetch::tests::route_and_public_policy_fail_before_connecting ... ok
+test fetch::tests::source_and_validator_validation_and_redaction ... ok
+test fetch::tests::cancellation_and_timeout_cover_waiting_for_headers ... ok
+test helper::fence::tests::bounded_reader_rejects_oversized_input ... ok
+test helper::fence::tests::process_parser_fails_closed_and_detects_old_worker ... ok
+test helper::fence::tests::tree_budget_is_finite ... ok
+test helper::fence::tests::tree_checks_descendants_and_rejects_symlinks ... ok
+test helper::fence::tests::unified_membership_rejects_legacy_and_traversal ... ok
+test helper::memory::tests::reclaimer_registry_is_bounded_and_does_not_keep_owners_alive ... ok
+test helper::memory::tests::reservation_resize_overflow_and_drop_preserve_exact_usage ... ok
+test helper::memory::tests::simultaneous_reservations_never_exceed_shared_limit ... ok
+test fetch::tests::local_body_and_exact_resource_conditional_304 ... ok
+test fetch::tests::subscription_user_agent_selects_happ_json ... ok
+test helper::prepared::tests::exact_wire_handle_and_redacted_debug ... ok
+test helper::prepared::tests::denied_and_cancelled_auth_never_run_factory_and_reclaim_reservation ... ok
+test helper::prepared::tests::caps_and_cancel_reclaim_slots_before_work ... ok
+test fetch::tests::redirect_limit ... ok
+test helper::prepared::tests::factory_failure_size_disconnect_and_forget_during_work ... ok
+test helper::prepared::tests::expired_payload_is_reclaimed_before_reserve_in_same_or_other_store ... ok
+test helper::prepared::tests::fresh_auth_revoke_challenge_replay_and_wrong_unique_peer ... ok
+test helper::prepared::tests::payload_reservation_released_on_factory_failure_and_cancellation ... ok
+test helper::prepared::tests::simultaneous_claims_release_exactly_once ... ok
+test helper::prepared::tests::shared_payload_budget_follows_claimed_owner_and_reclaims_on_drop ... ok
+test helper::protection_host::tests::isolated_service_applies_preserves_and_unlocks_real_rules ... ignored, Требует отдельные user/net/mount/pid namespaces и приватные /run, /tmp
+test helper::protection_host::tests::artifact_debug_hides_payload ... ok
+test helper::protection_host::tests::lan_is_derived_only_from_live_connected_non_vpn_links ... ok
+test helper::registry::tests::budget_is_shared_between_registries_and_rejects_before_copy ... ok
+test helper::registry::tests::concurrent_cache_misses_allocate_one_image ... ok
+test helper::registry::tests::every_manifest_entry_is_strict_even_when_not_selected ... ok
+test helper::registry::tests::pinned_directory_and_source_fd_survive_path_replacement ... ok
+test helper::registry::tests::live_cache_never_bypasses_source_trust_or_replacement_hash ... ok
+test helper::registry::tests::subset_and_both_engines_create_sealed_snapshots_without_execution ... ok
+test helper::registry::tests::symlinks_directories_and_fifos_are_never_followed_or_read ... ok
+test helper::registry::tests::valid_manifest_does_not_claim_binary_verified_until_snapshot ... ok
+test helper::registry::tests::weak_cache_reuses_inode_and_releases_the_last_lease ... ok
+test helper::registry::tests::wrong_owner_modes_links_and_oversized_files_are_rejected ... ok
+test helper::prepared::tests::global_and_inflight_limits_expiry_reclaim ... ok
+test fetch::tests::rejects_bad_status_encoding_redirect_and_oversized_body ... ok
+test helper::service::tests::invalid_denied_challenged_stale_and_wrong_peer_have_no_effect ... ok
+test helper::session_network::tests::prefix_collision_handles_both_families_and_different_lengths ... ok
+test helper::session_network::tests::reserved_descriptors_are_helper_chosen_and_compiler_uses_same_tun ... ok
+test helper::session_network::tests::session_ids_do_not_collide_with_existing_public_protection_record ... ok
+test helper::prepared::tests::stale_context_digest_ttl_and_forget_invalidate ... ok
+test helper::service::tests::pending_authorization_does_not_lock_host_state ... ok
+test helper::systemd_worker::tests::cgroup_events_requires_a_single_zero_populated_field ... ok
+test helper::service::tests::real_bus_prepare_apply_replay_and_unlock_action ... ok
+test helper::systemd_worker::tests::closed_cancellation_source_preserves_dirty_state ... ok
+test helper::systemd_worker::tests::activation_waits_for_delayed_job_before_connect ... ok
+test helper::systemd_worker::tests::fixed_units_have_no_client_supplied_names ... ok
+test helper::systemd_worker::tests::identity_never_accepts_a_replacement_or_unbound_pid ... ok
+test helper::systemd_worker::tests::failed_systemd_job_is_not_readiness ... ok
+test helper::session_network::tests::exact_generation_and_all_seven_resources_required_before_external_verification ... ok
+test helper::systemd_worker::tests::loaded_service_contract_rejects_privilege_and_command_changes ... ok
+test helper::systemd_worker::tests::missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown ... ok
+test helper::tests::actions_and_prompt_are_closed_and_noninteractive_by_default ... ok
+test helper::systemd_worker::tests::replacement_ticket_never_stops_a_service ... ok
+test helper::tests::authority_replacement_during_check_cannot_authorize ... ok
+test helper::systemd_worker::tests::cancelled_cleanup_retains_transfer_until_recovery_waits_for_it ... ok
+test helper::tests::cancellation_after_owner_replacement_still_targets_original_authority ... ok
+test helper::tests::cancellation_and_closed_owner_cancel_remote_check_and_ignore_late_allow ... ok
+test helper::tests::concurrent_checks_have_distinct_ids_and_do_not_cross_cancel ... ok
+test helper::tests::forged_replies_cancel_pending_real_check_and_ignore_late_allow ... ok
+test helper::systemd_worker::tests::cleanup_stops_both_sockets_before_services_and_confirms_empty ... ok
+test helper::tests::peer_disconnected_during_check_cannot_receive_identity ... ok
+test helper::tests::missing_sender_non_call_and_oversized_message_are_rejected ... ok
+test helper::tests::queued_checks_are_cancellable_before_start ... ok
+test helper::systemd_worker::tests::inactive_state_cannot_confirm_cleanup_of_populated_cgroup ... ok
+test host::binary::budget_tests::source_growth_since_reservation_cannot_bypass_budget ... ok
+test host::binary::budget_tests::successful_copy_shrinks_reservation_to_actual_sealed_size ... ok
+test helper::tests::private_bus_allow_deny_challenge_and_closed_wire_contract ... ok
+test host::probe::tests::typed_tls_error_is_classified_without_parsing_sensitive_messages ... ok
+test host::session::tests::config_writer_rejects_oversize_before_buffer_growth ... ok
+test host::session::tests::invalidated_check_preserves_live_owned_process_until_explicit_stop ... ok
+test host::session::tests::invalidation_without_active_session_is_rejected ... ok
+test helper::tests::untrusted_authority_is_refused_without_query ... ok
+test host::tests::checked_config_cannot_bind_metadata_of_another_engine ... ok
+test host::probe::tests::socks5h_forwards_hostname_without_resolving_it_on_host ... ok
+test host::tests::fifo_and_oversized_regular_file_are_rejected_before_reading ... ok
+test helper::tests::timeout_cancels_remote_check_and_ignores_late_allow ... ok
+test host::tests::sealed_snapshot_executes_original_bytes_after_source_changes ... ok
+test host::tests::wrong_version_is_rejected_and_reaped ... ok
+test managed_network::firewall::tests::canonical_order_and_digest_ignore_duplicate_input_and_bind_identity ... ok
+test managed_network::firewall::tests::endpoint_has_complete_identity_and_ipv6_destination ... ok
+test managed_network::firewall::tests::link_control_is_explicit_bounded_and_not_generic_icmp ... ok
+test managed_network::firewall::tests::policy_codec_validates_every_nested_constructor_and_unknown_field ... ok
+test managed_network::firewall::tests::private_destinations_cannot_bypass_vpn_through_service_exception ... ok
+test managed_network::firewall::tests::private_guard_precedes_lan_and_tun_and_uses_longest_prefix ... ok
+test managed_network::firewall::tests::rejects_ambiguous_private_prefix_binding ... ok
+test managed_network::firewall::tests::rejects_noncanonical_and_default_prefixes_and_accepts_host_prefixes ... ok
+test managed_network::firewall::tests::rejects_zero_interface_port_mark_and_excessive_exceptions ... ok
+test managed_network::nft::block::tests::applied_requires_exact_rules_not_only_ownership_comment ... ok
+test managed_network::nft::block::tests::cancellation_of_recheck_invalidates_previous_evidence ... ok
+test managed_network::nft::block::tests::marker_binds_policy_and_every_resource_identity_field ... ok
+test managed_network::nft::block::tests::normalization_preserves_opposite_protocol_and_extra_predicates ... ok
+test managed_network::nft::block::tests::real_public_block_tcp_udp_dual_stack_and_lifetime ... ignored, Требует isolated user/net/mount/pid namespace с приватными /tmp, /run, proc и sysfs
+test managed_network::nft::policy::tests::cancelled_apply_preserves_durable_payload_before_first_effect ... ok
+test managed_network::nft::policy::tests::crash_worker ... ignored, Только дочерний процесс из изолированного crash-теста
+test managed_network::nft::policy::tests::legacy_records_are_not_reported_as_no_policy_or_unlocked ... ok
+test managed_network::nft::policy::tests::no_policy_shortcuts_reject_uncertain_journal_writes ... ok
+test managed_network::nft::policy::tests::sigkill_recovery_preserves_desired_previous_and_unlock_intents ... ignored, Требует явно изолированный user/net/mount/pid namespace с приватными /tmp и /run
+test managed_network::nft::tests::a_new_executor_waits_until_cancelled_command_is_reaped ... ok
+test managed_network::nft::tests::cancellation_reaps_child_before_releasing_executor_gate ... ok
+test managed_network::nft::tests::cancelled_generic_recheck_revokes_old_confirmation ... ok
+test helper::tests::malformed_and_oversized_polkit_replies_fail_closed ... ok
+test managed_network::nft::tests::commands_are_typed_exclusive_and_delete_only_by_handle ... ok
+test managed_network::nft::tests::complete_identity_fits_kernel_comment_and_changes_with_each_owner_field ... ok
+test managed_network::nft::tests::cleanup_replay_is_rejected_before_starting_any_command ... ok
+test managed_network::nft::tests::drain_enforces_limit_before_extending_buffer ... ok
+test managed_network::nft::tests::identity_requires_complete_canonical_comment ... ok
+test managed_network::nft::tests::parser_refuses_ambiguous_or_unbounded_evidence ... ok
+test managed_network::nft::tests::real_namespace_journal_create_reopen_foreign_and_stale_handle ... ignored, Требует явно изолированный network namespace и YONIK_NFT_TEST_HOST_NETNS
+test managed_network::nft::tests::system_nft_trust_check_is_read_only ... ok
+test managed_network::policy_state::tests::generic_removal_and_revision_replay_cannot_discard_desired_policy ... ok
+test managed_network::nft::tests::deadline_and_output_overflow_reap_children ... ok
+test managed_network::policy_state::tests::removing_schema_rejects_ambiguous_candidates_and_mismatched_resource ... ok
+test managed_network::policy_state::tests::pending_replacement_unlock_and_monotonic_reopen_are_atomic ... ok
+test managed_network::policy_state::tests::strict_migration_and_invalid_policy_binding_preserve_file ... ok
+test managed_network::storage::tests::owner_drop_unlocks_directory_with_duplicate_descriptor_alive ... ok
+test managed_network::storage::tests::reopen_retries_parent_sync_after_interrupted_directory_creation ... ok
+test managed_network::tun::config::tests::address_flags_and_lifetimes_are_not_silently_discarded ... ok
+test managed_network::tun::config::tests::metadata_normalization_does_not_hide_routing_selectors ... ok
+test managed_network::tun::config::tests::real_namespace_owned_addresses_routes_and_cleanup ... ignored, Требует отдельные user/net/mount/pid namespaces и приватные /run, /tmp
+test managed_network::tun::config::tests::teardown_accepts_only_exact_kernel_link_local_dependencies ... ok
+test managed_network::tun::config::tests::typed_configuration_rejects_unsafe_ranges_and_noncanonical_routes ... ok
+test managed_network::tun::rule::tests::matcher_rejects_every_additional_selector_and_metadata ... ok
+test managed_network::tun::rule::tests::priority_conflicts_include_other_tables_and_duplicates ... ok
+test managed_network::tun::rule::tests::real_namespace_owned_rpdb_and_cleanup ... ignored, Требует отдельные user/net/mount/pid namespaces и приватные /run, /tmp
+test managed_network::tun::rule::tests::references_require_confirmed_rule_and_complete_parent_anchor ... ok
+test managed_network::tun::rule::tests::rule_ranges_are_closed ... ok
+test managed_network::tun::rule::tests::table_requires_actual_confirmed_default_for_correct_family_and_no_foreign_route ... ok
+test managed_network::tun::session_tests::compiled_profile_crosses_owned_tun_and_proxy ... ignored, Требует отдельные namespaces и явно выбранный закреплённый engine
+test managed_network::tun::session_tests::compiled_worker_crosses_owned_tun_and_proxy ... ignored, Требует отдельные namespaces, engine и собранный yonik-worker
+test managed_network::tun::session_tests::unpatched_engine_is_rejected_before_network_effects ... ignored, Требует отдельные namespaces и явно выбранный unpatched sing-box
+test managed_network::tun::tests::cancelled_child_retains_operation_fence_until_reap ... ok
+test managed_network::tun::tests::creation_has_only_closed_single_queue_arguments ... ok
+test managed_network::tun::tests::ownership_requires_full_alias_kind_and_unambiguous_name ... ok
+test managed_network::tun::tests::real_namespace_tun_ownership_reopen_and_cleanup ... ignored, Требует отдельные user/net/mount/pid namespaces и приватные /run, /tmp
+test managed_network::tun::topology::tests::projection_preserves_unrelated_routes_rules_and_address_changes ... ok
+test managed_network::tun::topology::tests::projection_proves_ipv4_local_and_directed_broadcast_from_confirmed_prefix ... ok
+test host::tests::core_has_its_own_process_group_for_terminal_signal_isolation ... ok
+test managed_network::tun::topology::tests::projection_rejects_foreign_address_table_reference_and_nexthop ... ok
+test managed_network::tun::topology::tests::projection_rejects_foreign_mutations_missing_and_duplicate_resources ... ok
+test managed_network::tun::topology::tests::projection_removes_exact_confirmed_session_and_preserves_external_facts ... ok
+test host::tests::foreign_listener_is_not_owned_by_process ... ok
+test managed_network::tun::topology::tests::real_namespace_projection_matches_external_baseline ... ignored, Требует отдельный user/net namespace и YONIK_NFT_TEST_HOST_NETNS
+test managed_network::tun::topology::tests::real_namespace_session_plan_configure_capture_verify_cleanup ... ignored, Требует отдельный user/net namespace и YONIK_NFT_TEST_HOST_NETNS
+test managed_network::tun::write::tests::ack_requires_matching_outer_and_original_identity ... ok
+test managed_network::tun::write::tests::address_and_route_creation_are_exclusive_without_replace ... ok
+test managed_network::tun::write::tests::request_is_closed_and_targets_index_without_name ... ok
+test managed_network::tun::write::tests::rule_wire_image_has_only_fixed_selectors_and_exact_delete ... ok
+test network::bus::tests::cancellation_before_startup_closes_without_claiming_sources ... ok
+test network::bus::tests::invalidated_properties_invalidate_and_foreign_senders_do_not ... ok
+test network::bus::tests::malformed_current_owner_message_terminates_and_revokes_coverage ... ok
+test managed_network::tun::topology::tests::projection_removes_only_proven_ipv6_kernel_derivatives ... ok
+test network::bus::tests::manager_tracks_configuration_but_ignores_strength_and_statistics ... ok
+test network::bus::tests::only_bus_daemon_can_change_service_owner_and_malformed_owner_is_loss ... ok
+test network::bus::tests::owner_discovered_before_subscriptions_ready_does_not_claim_coverage ... ok
+test network::bus::tests::ownership_replacement_and_disappearance_invalidate ... ok
+test network::bus::tests::private_bus_disconnect_invalidates_ready_sources ... ok
+test network::bus::tests::private_bus_discovers_services_recovers_loses_and_cancels ... ok
+test network::bus::tests::resolver_dns_properties_and_invalidations_are_relevant ... ok
+test network::lookup::tests::ambiguous_multipath_is_preserved_without_selecting_first ... ok
+test network::lookup::tests::cancellation_is_checked_before_socket_open ... ok
+test network::lookup::tests::ipv6_and_source_family_validation ... ok
+test network::lookup::tests::rejects_duplicate_malformed_and_wrong_family ... ok
+test network::lookup::tests::rejects_invalid_deadline_before_opening_socket ... ok
+test network::lookup::tests::rejects_malformed_multipath_record ... ok
+test network::lookup::tests::request_carries_actual_selectors ... ok
+test network::lookup::tests::route_kinds_are_not_reachability_claims_and_debug_is_redacted ... ok
+test network::lookup::tests::selected_path_preserves_table_gateway_source_and_nexthop ... ok
+test network::read::tests::dump_interrupt_on_done_never_returns_partial_success ... ok
+test network::read::tests::error_ack_zero_is_not_a_dump_or_route_result ... ok
+test network::read::tests::multicast_changes_and_overrun_are_not_snapshot_records ... ok
+test network::read::tests::multicast_group_overrides_originating_request_sequence_and_pid_header ... ok
+test network::read::tests::multipart_requires_done_and_preserves_each_record ... ok
+test network::read::tests::native_queued_changes_invalidate_reader_and_final_fence ... ignored, Только новый network namespace с YONIK_HOST_NETWORK_NS
+test network::read::tests::shared_budget_bounds_all_dump_classes_without_silent_eviction ... ok
+test network::read::tests::single_lookup_requires_one_matching_nonmultipart_record ... ok
+test network::read::tests::truncation_and_invalid_frames_are_explicit_errors ... ok
+test network::read::tests::untrusted_sender_is_ignored_but_wrong_kernel_sequence_or_port_is_failure ... ok
+test network::route::tests::address_cache_lifetimes_are_noise_but_flags_change ... ok
+test network::route::tests::attribute_order_and_link_change_mask_are_noise ... ok
+test network::route::tests::batch_is_coalesced_and_unrelated_message_is_ignored ... ok
+test network::route::tests::cache_limit_is_loss_rather_than_silent_eviction ... ok
+test network::route::tests::deletion_of_each_rule_with_same_priority_invalidates ... ok
+test network::route::tests::deletions_invalidate_and_allow_recreation ... ok
+test network::route::tests::duplicate_and_statistics_do_not_invalidate_but_mtu_does ... ok
+test network::route::tests::malformed_and_truncated_datagrams_are_loss ... ok
+test network::route::tests::native_read_only_subscription_owns_nonblocking_close_on_exec_socket ... ignored, Требуется AF_NETLINK/NETLINK_ROUTE в окружении исполнения
+test network::route::tests::nested_ipv6_statistics_are_noise_but_ra_mtu_is_configuration ... ok
+test network::route::tests::route_expiration_is_noise_gateway_changes_are_events ... ok
+test network::route::tests::rule_and_nexthop_updates_are_observed ... ok
+test network::route::tests::untrusted_sender_cannot_mutate_dedup_cache ... ok
+test network::tests::coalescing_keeps_newest_generation_without_unbounded_queue ... ok
+test network::tests::exhausted_generation_never_revalidates_old_stamp ... ok
+test network::tests::readiness_and_loss_invalidate_previous_stamp ... ok
+test network::topology::tests::ecmp_and_groups_preserve_weights_and_references ... ok
+test network::topology::tests::flagged_scalar_is_retained_and_never_decoded_as_native_endian ... ok
+test network::topology::tests::invalid_deadline_and_cancellation_are_checked_before_opening_socket ... ok
+test network::topology::tests::ipv6_source_destination_and_gateway_keep_distinct_meaning ... ok
+test network::topology::tests::link_alias_is_bounded_redacted_and_unknown_flags_remain_opaque ... ok
+test network::topology::tests::link_and_address_keep_native_facts_and_debug_is_redacted ... ok
+test network::topology::tests::malformed_and_conflicting_attributes_fail_closed ... ok
+test network::topology::tests::malformed_link_alias_is_not_accepted_as_an_opaque_attribute ... ok
+test network::topology::tests::nested_link_details_are_preserved_and_conflicting_address_flags_fail ... ok
+test network::topology::tests::prefixes_tables_and_unknowns_are_explicit ... ok
+test network::topology::tests::rule_selectors_are_not_collapsed_into_table_priority ... ok
+test network::topology::tests::rules_keep_missing_priority_and_distinct_priorities ... ok
+test network::topology::tests::unsupported_data_marks_snapshot_incomplete_and_debug_only_has_counts ... ok
+test network::bus::tests::malformed_or_oversized_properties_are_loss_before_deserialization ... ok
+test managed_network::tun::topology::tests::projection_rejects_unconfirmed_cleanup_and_unsupported_journal_state ... ok
+test repository::tests::corrupt_catalog_counts_and_replayed_current_profile_are_rejected ... ok
+test repository::tests::catalog_identity_favorites_and_tamper ... ok
+test repository::tests::inherited_crash_fixture_path_cannot_open_database ... ok
+test repository::tests::failed_reconcile_rolls_back_snapshot_after_reopen ... ok
+test repository::tests::future_version_is_not_modified ... ok
+
+running 1 test
+test host::tests::cancellation_of_blocked_stdin_kills_and_reaps_owned_child ... ok
+test repository::tests::rebranding_preserves_stored_profile_fingerprint ... ok
+test repository::tests::metadata_cas_rejects_concurrent_change_without_resetting_snapshot ... ok
+test repository::tests::interrupted_transaction_recovers_after_reopen ... ok
+test managed_network::policy_state::tests::revision_overflow_capacity_and_debug_are_bounded ... ok
+test repository::tests::reopen_and_no_plaintext ... ok
+test repository::tests::migration_lazy_catalog_and_invalid_body ... ok
+test repository::tests::source_change_preserves_snapshot_and_cas_across_instances ... ok
+test repository::tests::source_ids_never_repeat_after_delete_and_reopen ... ok
+test resolver::config::tests::accepts_global_and_link_configuration_with_nullable_fields ... ok
+test resolver::config::tests::decodes_current_server_scoped_ipv6_and_known_modes ... ok
+test repository::tests::wrong_key_and_tampering_are_rejected ... ok
+test resolver::config::tests::preserves_dns_names_and_redacts_debug_output ... ok
+test resolver::config::tests::preserves_unknown_fields_modes_and_delegate_as_incomplete ... ok
+test resolver::config::tests::rejects_malformed_types_addresses_and_conflicting_scopes ... ok
+test resolver::config::tests::retains_false_empty_and_unset_separately ... ok
+test resolver::config::tests::retains_unknown_values_within_wire_frame_without_estimated_size_rejection ... ok
+test resolver::socket::tests::activation_root_or_service_uid_is_required ... ok
+test resolver::socket::tests::cancelled_or_expired_connect_does_not_access_endpoint ... ok
+test resolver::socket::tests::final_symlink_and_arbitrary_production_path_are_untrusted ... ok
+test resolver::socket::tests::trusted_private_socket_connects_without_sending_payload_and_closes ... ok
+test resolver::tests::invalid_startup_budget_never_reaches_daemon ... ok
+test resolver::tests::observation_counter_never_wraps ... ok
+test resolver::tests::subscription_preserves_source_advances_sequence_and_closes_on_cancel ... ok
+test resolver::wire::tests::already_visible_half_close_is_not_an_active_subscription ... ok
+test resolver::wire::tests::cancellation_during_idle_and_partial_frame_closes_fd ... ok
+test repository::tests::symlinks_permissions_and_limits ... ok
+test repository::tests::wrong_key_preserves_legacy_domain_and_data_after_reopen ... ok
+test resolver::wire::tests::eof_and_trailing_partial_are_not_successful_frames ... ok
+test resolver::wire::tests::errors_are_classified_and_close_fd ... ok
+test resolver::wire::tests::final_snapshot_accepts_half_close ... ok
+test resolver::wire::tests::invalid_operation_order_closes_stream ... ok
+test resolver::wire::tests::maximum_payload_is_accepted ... ok
+test resolver::config::tests::enforces_snapshot_wide_limits_and_string_bounds ... ok
+test resolver::wire::tests::snapshot_rejects_continuation_and_deep_json ... ok
+test resolver::wire::tests::split_bytewise_snapshot_and_fixed_request ... ok
+test resolver::wire::tests::startup_deadline_and_oversize_close_fd ... ok
+test resolver::wire::tests::strict_json_rejects_nested_and_top_level_duplicates ... ok
+test repository::tests::snapshot_corruption_fails_closed_after_reopen ... ok
+test resolver::wire::tests::subscription_preserves_coalesced_frames ... ok
+test resolver::wire::tests::subscription_requires_continuing_full_configuration ... ok
+test tcp_batch::tests::cancellation_and_receiver_close_stop_pending_io ... ok
+test tcp_batch::tests::cancellation_has_priority_over_ready_jobs_and_full_output ... ok
+test tcp_batch::tests::empty_valid_batch_finishes_without_jobs ... ok
+test tcp_batch::tests::full_output_keeps_polling_active_jobs_before_consumer_drains ... ok
+test tcp_batch::tests::full_output_stops_scheduling_and_cancellation_drops_jobs ... ok
+test tcp_batch::tests::ids_zero_and_max_are_delivered_once_and_job_error_does_not_abort ... ok
+test tcp_batch::tests::invalid_batch_never_starts_jobs ... ok
+test tcp_batch::tests::pending_jobs_obey_parallelism_and_batch_drop_destroys_them ... ok
+test tcp_batch::tests::real_loopback_series_deliver_all_ids_and_eof_without_payload ... ok
+test tcp_batch::tests::ten_thousand_loopback_series ... ignored, Явная нагрузочная проверка: 10000 серий, 30000 loopback-соединений
+test tcp_probe::tests::cancelled_dns_closes_unix_socket ... ok
+test tcp_probe::tests::connect_deadline_and_cancellation_have_separate_statuses ... ok
+test tcp_probe::tests::dns_timeout_closes_unix_socket ... ok
+test tcp_probe::tests::fake_dns_to_loopback ... ok
+test tcp_probe::tests::families_interleave_and_debug_is_redacted ... ok
+test tcp_probe::tests::literal_reachable_closes_socket_without_payload ... ok
+test tcp_probe::tests::oversized_and_malformed_reply ... ok
+test tcp_probe::tests::pending_ipv6_does_not_hide_ipv4_and_all_attempts_are_dropped ... ok
+test tcp_probe::tests::production_resolver_localhost_connects_and_closes_socket ... ignored, требует работающий системный systemd-resolved Varlink; только localhost
+test tcp_probe::tests::refused_and_invalid_timeout ... ok
+test tcp_probe::tests::rejects_empty_malformed_and_too_many_records ... ok
+test tcp_probe::tests::scoped_ipv6_deduplicates_by_ip_and_scope ... ok
+test tcp_probe::tests::series_cancel_during_dns_or_race_drops_pending_io ... ok
+test tcp_probe::tests::series_dns_consumes_the_same_deadline_as_samples ... ok
+test resolver::wire::tests::coalesced_partial_tail_has_its_own_deadline ... ok
+test tcp_probe::tests::series_global_deadline_does_not_restart_for_later_sample ... ok
+test tcp_probe::tests::series_median_is_middle_sample_value_not_mean_or_last ... ok
+test tcp_probe::tests::series_resolves_once_and_closes_three_sockets_without_payload ... ok
+test tcp_probe::tests::series_retains_partial_samples_and_stops_on_failure_or_cancel ... ok
+test tcp_probe::tests::series_validation_not_applicable_and_cancel_priority ... ok
+test tcp_probe::tests::socket_activation_root_and_service_uid_are_trusted_but_foreign_uid_is_not ... ok
+test tcp_probe::tests::series_pins_full_scoped_winner_drops_loser_and_excludes_dns_and_stagger ... ok
+test tcp_probe::tests::udp_and_unsupported_do_no_io ... ok
+test tcp_probe::tests::unavailable_and_untrusted_resolver_are_distinct ... ok
+test worker::tests::canonical_worker_process_check_and_run ... ignored, Нужны canonical ELF, собранный yonik-worker и собственный user namespace
+test worker::tests::header_rejects_every_truncation_and_unknown_discriminants ... ok
+test worker::tests::protocol_rejects_missing_extra_unsealed_and_mismatched_mode ... ok
+test worker::tests::received_descriptors_are_cloexec_and_executable_is_copied ... ok
+test tcp_probe::tests::two_blackholes_do_not_hide_a_later_reachable_address ... ok
+test worker::tests::unsealed_and_bad_hash_descriptors_are_rejected ... ok
+test worker::tests::streaming_config_bounds_hash_and_seals_the_only_plaintext_copy ... ok
+test resolver::wire::tests::partial_frame_uses_absolute_five_second_deadline ... ok
+test resolver::wire::tests::complete_coalesced_frame_survives_delayed_consumer ... ok
+test resolver::wire::tests::subscription_idle_has_no_five_second_timeout ... ok
+
+test result: ok. 285 passed; 0 failed; 20 ignored; 0 measured; 0 filtered out; finished in 6.69s
+
+     Running unittests src/helper_main.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_helper-1fde9972dd3910ff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_local-5970df749d45a220)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/worker_main.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_worker-85ee7556ea3bdc0a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/cli-01b870fc3d860223)
+
+running 1 test
+test partial_selection_requires_acknowledgement_and_explicit_index ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/contracts.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/contracts-837acadf2603ea4b)
+
+running 4 tests
+test hash_and_probe_url_validate_without_disclosing_input ... ok
+test probe_success_requires_the_configured_status ... ok
+test already_cancelled_validation_does_not_spawn_process ... ok
+test nonregular_and_wrong_hash_binary_cannot_become_snapshot ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/hwid.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/hwid-14f6aea31190c348)
+
+running 9 tests
+test changing_fetch_identity_invalidates_conditional_headers ... ok
+test disabled_source_still_rejects_malformed_stored_hwid ... ok
+test enabled_identity_keeps_validators_after_restart ... ok
+test opt_in_cancels_pending_approval_and_preserves_profiles_atomically ... ok
+test independent_sources_and_legacy_payload_start_disabled ... ok
+test provider_rejection_keeps_last_snapshot ... ok
+test provider_flags_precede_status_and_not_modified ... ok
+test opt_in_is_stable_private_and_reused_after_restart_and_disable ... ok
+test redirect_sends_hwid_only_within_same_origin ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/installed_tun.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/installed_tun-7d18244b28586281)
+
+running 2 tests
+test installed_real_cores_cross_owned_tun_and_proxy ... ignored, Только disposable root QEMU VM с установленными units и двумя staged ELF
+test refuses_without_explicit_vm_opt_in_before_effects ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/installed_worker.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/installed_worker-70c689092c9f0a3d)
+
+running 3 tests
+test installed_fixture_tree_and_helper_binds_to ... ignored, Только одноразовая root QEMU VM: fixture ELF, реальный KillMode и BindsTo
+test installed_real_cores_check_start_stop ... ignored, Только одноразовая root QEMU VM: установленный systemd worker и два canonical ELF
+test refuses_without_explicit_vm_opt_in_before_effects ... ok
+
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/network_journal.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/network_journal-1c6202f2f18a3373)
+
+running 27 tests
+test address_records_reject_invalid_address_scope_and_bounds ... ok
+test crash_writer_child ... ok
+test address_records_require_a_live_parent_in_the_same_document ... ok
+test directory_fd_pins_storage_even_if_parent_is_renamed ... ok
+test async_cleanup_requires_fresh_reconciliation_and_is_durable_before_effect ... ok
+test duplicate_and_wrong_identity_are_rejected_without_mutation ... ok
+test exclusive_writer_and_private_modes ... ok
+test failed_owner_rotation_preserves_disk_and_poison_blocks_retry ... ok
+test empty_owner_rotation_is_durable_and_rejects_the_previous_owner ... ok
+test failed_write_never_authorizes_an_effect_and_poison_requires_reopen ... ok
+test cleanup_orders_children_first_and_never_calls_parent_after_child_failure ... ok
+test interrupted_cleanup_keeps_write_ahead_state_and_requires_recheck ... ok
+test open_existing_recovers_owner_without_trusting_a_callers_identity ... ok
+test malformed_unknown_and_oversized_journals_are_preserved ... ok
+test open_existing_rejects_unsafe_or_corrupt_storage_without_replacing_it ... ok
+test process_exit_releases_lock_and_keeps_ambiguous_intent ... ok
+test owner_rotation_preserves_nonempty_resources_and_public_policy ... ok
+test route_descriptors_require_canonical_prefixes_and_duplicate_resources_conflict ... ok
+test routing_rule_tracks_kernel_protocol_for_ownership_reconciliation ... ok
+test recovery_requires_explicit_reconciliation_and_preserves_ambiguous_intent ... ok
+test unknown_fields_are_rejected_at_every_schema_level ... ok
+test symlink_hardlink_and_insecure_file_are_preserved ... ok
+test partial_cleanup_is_durable_and_public_block_has_independent_lifetime ... ok
+test unknown_ownership_remains_while_verified_resources_are_cleaned ... ok
+test update_is_durable_and_cannot_reverse_cleanup ... ok
+test tun_rule_is_typed_parent_child_and_blocks_route_cleanup_until_removed ... ok
+test bounded_records_reject_conflicts_and_invalid_descriptors ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests/profile_selection.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/profile_selection-d02f59bed361ce70)
+
+running 6 tests
+test favorite_changed_after_report_is_not_lost_at_snapshot_commit ... ok
+test service_selects_identity_after_rename_and_reorder_not_old_ordinal ... ok
+test service_rejects_unbounded_and_control_character_queries ... ok
+test service_collapses_duplicate_labels_and_does_not_transfer_favorite_to_new_credentials ... ok
+test service_favorites_survive_offline_reopen_removed_and_returned_profile ... ok
+test source_pages_expose_names_without_reading_snapshot_bodies ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/subscriptions.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/subscriptions-6741521c764971f9)
+
+running 13 tests
+test changed_source_rejects_stale_pending_and_preserves_old_snapshot ... ok
+test conditional_304_updates_validator_without_replacing_body ... ok
+test delete_removes_only_target_and_invalidates_pending_commit ... ok
+test approval_cannot_be_committed_to_another_repository_with_same_source_id ... ok
+test cancel_after_pending_prevents_commit ... ok
+test failed_http_and_empty_refresh_preserve_committed_snapshot ... ok
+test local_pending_commit_reopen_and_offline_without_server ... ok
+test newer_pending_invalidates_previous_approval ... ok
+test independent_services_still_enforce_repository_revision_cas ... ok
+test newer_refresh_cancels_previous_request_waiting_for_http_headers ... ok
+test proxy_policy_never_falls_back_to_direct ... ok
+test rename_preserves_hwid_credentials_snapshot_and_validators_without_fetch ... ok
+test partial_import_keeps_old_until_exact_report_is_approved ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/yonik_subscription-5916230f775bfad4)
+
+running 6 tests
+test scheduler::tests::bounded_queue_and_pending_cancellation ... ok
+test scheduler::tests::cancelled_work_retains_slot_and_stale_completion_is_rejected ... ok
+test scheduler::tests::due_and_daily_interval ... ok
+test scheduler::tests::time_and_serial_overflow_do_not_wrap ... ok
+test scheduler::tests::retry_budget_and_resume ... ok
+test scheduler::tests::policy_events_resume_without_ui_polling ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/update.rs (/var/tmp/codex-myrs/transient/yonik-preferences-review/target/debug/deps/update-a381d8c78cc88ed9)
+
+running 5 tests
+test foreign_ticket_and_approval_cannot_modify_another_subscription ... ok
+test failed_empty_and_unusable_refresh_preserve_last_snapshot ... ok
+test source_change_and_cancellation_invalidate_inflight_import ... ok
+test commit_is_single_use_and_native_json_is_explicitly_opaque ... ok
+test explicit_partial_approval_is_bound_to_the_exact_candidate ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests yonik_application
+
+running 3 tests
+test crates/yonik-application/src/plan.rs - plan::PreparedPlan (line 35) - compile fail ... ok
+test crates/yonik-application/src/plan.rs - plan::PreparedPlan (line 31) - compile fail ... ok
+test crates/yonik-application/src/plan.rs - plan::PreparedPlan (line 43) - compile fail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests yonik_desktop
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests yonik_domain
+
+running 1 test
+test crates/yonik-domain/src/policy.rs - policy::Route (line 14) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests yonik_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests yonik_import
+
+running 1 test
+test crates/yonik-import/src/intent.rs - intent::ServerIntent (line 110) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests yonik_linux
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests yonik_subscription
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

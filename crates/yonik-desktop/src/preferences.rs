@@ -31,10 +31,17 @@ impl Default for Preferences {
         }
     }
 }
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SaveOutcome {
+    Durable,
+    PublishedDurabilityUnknown,
+}
+
 pub(crate) struct Store {
     path: PathBuf,
     original: Option<Vec<u8>>,
     blocked: bool,
+    pub(crate) sync_directory: fn(&Path) -> std::io::Result<()>,
 }
 impl Store {
     pub fn open(directory: &Path) -> (Self, Preferences, bool) {
@@ -43,6 +50,7 @@ impl Store {
             path,
             original: None,
             blocked: false,
+            sync_directory: |path| File::open(path)?.sync_all(),
         };
         let settings = match store.read() {
             Ok(None) => Some(Preferences::default()),
@@ -86,7 +94,7 @@ impl Store {
         }
         Ok(Some(bytes))
     }
-    pub fn save(&mut self, settings: &Preferences) -> std::io::Result<()> {
+    pub fn save(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
         if self.blocked || !valid(settings) || self.read()? != self.original {
             return Err(std::io::Error::other(
                 "исходник настроек сохранён; запись заблокирована",
@@ -112,19 +120,27 @@ impl Store {
             }
             if self.original.is_none() {
                 fs::hard_link(&temp, &self.path)?;
-                fs::remove_file(&temp)?;
             } else {
                 fs::rename(&temp, &self.path)?;
             }
-            self.original = Some(bytes);
-            File::open(self.path.parent().expect("каталог настроек"))?.sync_all()
+            Ok(())
         })();
-        if result.is_err() && temp.exists() {
+        if temp.exists() {
             if let Err(error) = fs::remove_file(temp) {
                 log::warn!("Не удалось убрать временный файл настроек: {error}");
             }
         }
-        result
+        result?;
+        // После публикации откат не обещаем: память должна принять видимый файл.
+        self.original = Some(bytes);
+        Ok(
+            if (self.sync_directory)(self.path.parent().expect("каталог настроек")).is_ok()
+            {
+                SaveOutcome::Durable
+            } else {
+                SaveOutcome::PublishedDurabilityUnknown
+            },
+        )
     }
 }
 fn valid(p: &Preferences) -> bool {
@@ -140,7 +156,34 @@ fn valid(p: &Preferences) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Store, fs};
+    use super::{SaveOutcome, Store, fs};
+    #[test]
+    fn directory_sync_failure_reports_publication_and_reopens_new_settings() {
+        let dir =
+            std::env::temp_dir().join(format!("yonik-preferences-sync-{}", std::process::id()));
+        fs::create_dir(&dir).expect("fixture");
+        let (mut store, mut preferences, _) = Store::open(&dir);
+        store.save(&preferences).expect("начальное сохранение");
+        store.sync_directory = |_| Err(std::io::Error::other("инъекция dir fsync"));
+        preferences.language = "en".into();
+        let result = store.save(&preferences);
+        let (_, reopened, warning) = Store::open(&dir);
+        assert!(!warning);
+        assert_eq!(reopened.language, "en");
+        assert_eq!(
+            result.expect("опубликовано"),
+            SaveOutcome::PublishedDurabilityUnknown
+        );
+        store.sync_directory = |path| super::File::open(path)?.sync_all();
+        preferences.language = "ru".into();
+        assert_eq!(
+            store.save(&preferences).expect("повторная запись"),
+            SaveOutcome::Durable
+        );
+        assert_eq!(Store::open(&dir).1.language, "ru");
+        fs::remove_dir_all(dir).expect("очистка fixture");
+    }
+
     #[test]
     fn foreign_temp_and_changed_file_are_preserved() {
         let dir =

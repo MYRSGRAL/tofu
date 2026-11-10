@@ -1,6 +1,6 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
-use crate::preferences::{Preferences, Store};
+use crate::preferences::{Preferences, SaveOutcome, Store};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -491,6 +491,7 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
 struct Snapshot {
     language: String,
     preferences_warning: bool,
+    preferences_durability_warning: bool,
     build_id: &'static str,
     source_hwid_enabled: bool,
     ready: bool,
@@ -542,6 +543,7 @@ impl Snapshot {
         Self {
             language: "ru".into(),
             preferences_warning: false,
+            preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
             source_hwid_enabled: false,
             ready: false,
@@ -722,9 +724,12 @@ struct Actor {
 }
 impl Actor {
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        self.preferences_store
+        let outcome = self
+            .preferences_store
             .save(&preferences)
             .map_err(|_| DesktopError("preferences_write"))?;
+        self.state.preferences_durability_warning =
+            outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
         Ok(())
     }
@@ -1368,6 +1373,19 @@ mod settings_tests {
             .expect("команда настройки");
         actor.command(command).await.expect("сессия освобождена");
         assert_eq!(actor.state.port, 18889);
+        actor.preferences_store.sync_directory =
+            |_| Err(std::io::Error::other("инъекция dir fsync"));
+        actor
+            .command(
+                serde_json::from_str(r#"{"command":"set_language","language":"en"}"#)
+                    .expect("язык"),
+            )
+            .await
+            .expect("опубликованное изменение применено");
+        assert_eq!(actor.state.language, "en");
+        assert_eq!(actor.preferences.language, "en");
+        assert!(actor.state.preferences_durability_warning);
+        assert_eq!(Store::open(&directory.0).1.language, "en");
         actor.service.close().await.expect("закрытие БД");
     }
 }

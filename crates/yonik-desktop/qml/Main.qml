@@ -247,7 +247,7 @@ ApplicationWindow {
             keyring_locked: ["Хранилище секретов заблокировано. Разблокируйте системный кошелёк и повторите запуск.", "Secret storage is locked. Unlock the system wallet and restart."],
             keyring_missing: ["Системное хранилище секретов недоступно.", "System secret storage is unavailable."],
             storage: ["Ошибка локального хранилища. Проверьте доступ к данным приложения.", "Local storage error. Check access to application data."],
-            preferences_write: ["Не удалось сохранить настройки. Исходный файл сохранён; проверьте preferences.json в каталоге данных.", "Could not save settings. The original file is preserved; check preferences.json in the data directory."],
+            preferences_write: ["Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.", "Could not save settings. The change was not applied. Check preferences.json in the data directory."],
             invalid_input: ["Проверьте введённые данные и адрес подписки.", "Check the input and subscription URL."],
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
             source_in_use: ["Сначала отключите прокси, затем удалите подписку.", "Disconnect the proxy before deleting this subscription."],
@@ -711,6 +711,7 @@ ApplicationWindow {
                 spacing: 14
                 SectionTitle { text: window.tr("Настройки", "Settings") }
                 PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_warning; text: window.tr("Файл настроек повреждён или имеет неизвестный формат. Применены значения по умолчанию; исходник preferences.json сохранён, запись заблокирована.", "Settings are damaged or unsupported. Defaults are active; the original preferences.json is preserved and writes are blocked.") }
+                PlainLabel { objectName: "preferencesDurabilityWarning"; Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_durability_warning; color: "#e6bc83"; text: window.tr("Настройки применены, файл обновлён. Не удалось подтвердить синхронизацию каталога: сохранность при сбое питания неизвестна. Откат не выполнен.", "Settings were applied and the file was updated. Directory synchronization could not be confirmed: durability after power loss is unknown. No rollback was performed.") }
                 ColumnLayout {
                     visible: window.settingsSection === ""
                     Layout.fillWidth: true; Layout.fillHeight: true
@@ -775,9 +776,10 @@ ApplicationWindow {
             PlainLabel { text: window.tr("Интерфейс", "Appearance"); font.pixelSize: 19; font.weight: Font.DemiBold }
             RowLayout {
                 PlainLabel { Layout.fillWidth: true; text: window.tr("Язык", "Language") }
-                ComboBox { objectName: "languageChoice"; model: ["Русский", "English"]; currentIndex: window.language === "ru" ? 0 : 1; onActivated: window.send({command: "set_language", language: currentIndex === 0 ? "ru" : "en"}); Accessible.name: window.tr("Язык интерфейса", "Interface language") }
-                HelpButton { explanation: window.tr("Выбор действует до закрытия приложения.", "Applies until the app exits.") }
+                ComboBox { objectName: "languageChoice"; model: ["Русский", "English"]; currentIndex: window.state.language === "en" ? 1 : 0; onActivated: window.send({command: "set_language", language: currentIndex === 0 ? "ru" : "en"}); Accessible.name: window.tr("Язык интерфейса", "Interface language") }
+                HelpButton { explanation: window.tr("Язык сохраняется и применяется после перезапуска.", "The language is saved and restored after restarting.") }
             }
+            PlainLabel { objectName: "appearanceSaveError"; Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
             Item { Layout.fillHeight: true }
         }
     }
