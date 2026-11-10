@@ -90,13 +90,13 @@ impl TunRoute {
         self.priority
     }
 }
-fn ownership(executor: &TunExecutor, journal: &Journal) -> Result<(), TunError> {
+pub(super) fn ownership(executor: &TunExecutor, journal: &Journal) -> Result<(), TunError> {
     if journal.ownership() != executor.owner {
         return Err(JournalError::WrongOwnership.into());
     }
     Ok(())
 }
-fn parent_index(
+pub(super) fn parent_index(
     executor: &TunExecutor,
     journal: &Journal,
     tun_id: u64,
@@ -118,7 +118,7 @@ fn parent_index(
     }
     observed(&topology.links, *name_id, &alias(executor.owner, tun_id)?)
 }
-fn record_state(journal: &Journal, id: u64) -> Result<RecordState, TunError> {
+pub(super) fn record_state(journal: &Journal, id: u64) -> Result<RecordState, TunError> {
     journal
         .records()
         .iter()
@@ -173,7 +173,7 @@ fn observe_address(
     }
     Ok(true)
 }
-fn route_matches(value: &LinuxRoute, index: u32, expected: TunRoute) -> bool {
+pub(super) fn route_matches(value: &LinuxRoute, index: u32, expected: TunRoute) -> bool {
     value.family
         == if expected.destination.is_ipv4() {
             2
@@ -228,25 +228,22 @@ fn observe_route(
     }
     Ok(true)
 }
-fn check_route_rules(topology: &LinuxTopology, expected: TunRoute) -> Result<(), TunError> {
-    // Пока helper не владеет RPDB, даже пустая таблица может обслуживать чужое
-    // правило. Нельзя добавлять в неё маршрут и менять выбранный им путь.
-    if topology
-        .rules
-        .iter()
-        .any(|rule| rule.table == expected.table)
-    {
-        return Err(TunError::Foreign);
-    }
-    Ok(())
+fn check_route_rules(
+    topology: &LinuxTopology,
+    journal: &Journal,
+    index: u32,
+    expected: TunRoute,
+) -> Result<(), TunError> {
+    super::rule::check_references(topology, journal, index, expected.table, None)
 }
+
 fn check_route_table(
     topology: &LinuxTopology,
     journal: &Journal,
     index: u32,
     expected: TunRoute,
 ) -> Result<(), TunError> {
-    check_route_rules(topology, expected)?;
+    check_route_rules(topology, journal, index, expected)?;
     let known: BTreeMap<_, _> = journal
         .records()
         .iter()
@@ -616,7 +613,7 @@ impl TunExecutor {
         let before = self.configuration_snapshot().await?;
         let index =
             parent_index(self, journal, tun_id, &before, true)?.ok_or(TunError::Evidence)?;
-        check_route_rules(&before, route)?;
+        check_route_rules(&before, journal, index, route)?;
         let fresh = journal.intent(
             self.owner,
             Scope::Session,
@@ -697,8 +694,13 @@ impl TunExecutor {
             TunRoute::new(*destination, *prefix_len, *table, *priority)?,
             record.state(),
         );
+        // Удаление даже не-default маршрута не должно менять путь действующей RPDB.
+        if journal.records().iter().any(|record| matches!(record.resource(), Resource::TunRule { table, .. } if *table == route.table)) {
+            return Err(JournalError::Conflict.into());
+        }
         journal.require_reconciliation(self.owner, id)?;
         let topology = self.configuration_snapshot().await?;
+        check_route_rules(&topology, journal, index, route)?;
         if !observe_route(&topology, index, route)? {
             journal.reconcile(self.owner, id, Reconciled::Absent)?;
             return Ok(());

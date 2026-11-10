@@ -62,9 +62,15 @@
    namespace staging и чистого Cargo target в Ubuntu CI.
    [Адреса/маршруты и системный компилятор](specs/helper-tun-configuration.md)
    реализованы: [actual TUN→VLESS→echo](validation/2026-11-10-system-tun-configuration.md)
-   проверен для Xray и адаптера sing-box с external configuration; срез ждёт CI.
+   проверен для Xray и адаптера sing-box с external configuration; PR #37 влит
+   как `e9c4c1` после всех пяти зелёных jobs обоих workflows и исправления
+   гонки CLI-теста `8a148c2`.
+   [Управляемая RPDB](specs/helper-tun-rpdb.md) добавляет durable правила и
+   mark bypass; оба compiler-профиля проверены с peer за veth в отдельном netns.
+   Этот новый срез проходит review/CI отдельно и не закрывает P12/P13.
    Следом нужны системная установка/клиент, live reconcile и TUN-сессия с явным
-   владением ресурсами и cleanup; затем DNS/Fake-IP и атрибуцию приложений.
+   владением ресурсами и cleanup по [плану интеграции](superpowers/plans/2026-11-10-system-session-integration.md);
+   затем DNS/Fake-IP и атрибуцию приложений.
 3. Интегрировать приватные VPN/LAN/ru-direct, сценарии смены сети и полную
    Linux-матрицу. При включённом kill switch после исчерпания retries сеть
    блокируется; при выключенном восстанавливается обычная сеть.
@@ -95,7 +101,7 @@
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. [IPC v1, авторизованный Apply/Unlock и cgroup fence](specs/helper-service.md) реализованы и локально проверены с actual nft; сервис ещё не установлен. [Persistent TUN executor](specs/helper-owned-tun.md) локально проверен, но ещё не связан с session. [Адреса/маршруты и compiler](specs/helper-tun-configuration.md) проверены в namespace. Нужны системный клиент/GUI, live topology reconciliation (LAN пока unsupported), production RPDB, worker/service wiring и восстановление всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. [IPC v1, авторизованный Apply/Unlock и cgroup fence](specs/helper-service.md) реализованы и локально проверены с actual nft; сервис ещё не установлен. [Persistent TUN executor](specs/helper-owned-tun.md) локально проверен, но ещё не связан с session. [Адреса/маршруты и compiler](specs/helper-tun-configuration.md) проверены в namespace. [RPDB executor](specs/helper-tun-rpdb.md) проверен с mark bypass и cleanup. Нужны системный клиент/GUI, live topology reconciliation (LAN пока unsupported), worker/service wiring и восстановление всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
 | P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы и persistent single-queue TUN для обоих ядер проверены; [owned TUN](validation/2026-11-10-owned-tun.md). Системный compiler и TUN→VLESS→echo проверены; sing-box требует pinned external-configuration adapter. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |

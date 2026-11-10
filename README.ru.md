@@ -302,15 +302,21 @@ LAN до этого явно unsupported. [Контракт и evidence](docs/sp
 Типизированный persistent TUN executor записывает intent, проверяет полную
 метку владельца и очищает интерфейс по ifindex. Оба закреплённых ядра и
 адаптированный sing-box прошли single-queue traffic/lifecycle fixture;
-multi-queue не поддержан. Routes, DNS и service/GUI-сессия ещё не подключены.
+multi-queue не поддержан. Сетевые ресурсы реализованы отдельно;
+DNS и service/GUI-сессия ещё не подключены.
 [Контракт и evidence владения TUN](docs/specs/helper-owned-tun.md).
 
 Системный compiler сохраняет профиль и авторизованный probe; адресами и
 маршрутами владеет helper, policy-режим пока только IP. Xray и pinned адаптер
 sing-box с external configuration прошли TUN→VLESS→echo и crash cleanup.
 Обычный sing-box для этого режима отклоняется: auto_route=false всё ещё
-создаёт IPv6-эффекты. Service/GUI, production RPDB и DNS gates остаются открыты.
+создаёт IPv6-эффекты.
 [Контракт и evidence](docs/specs/helper-tun-configuration.md).
+RPDB executor с durable-журналом захватывает непомеченный трафик, а помеченные
+сокеты ядра продолжают существующую маршрутизацию. Оба ядра прошли TCP/UDP
+IPv4/IPv6 через peer за veth в соседнем namespace с очисткой своих ресурсов.
+Service/worker/GUI, live reconcile и DNS gates остаются открыты.
+[Контракт RPDB](docs/specs/helper-tun-rpdb.md).
 
 ### Rust-библиотеки и CLI
 

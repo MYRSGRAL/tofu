@@ -799,3 +799,61 @@ fn cleanup_orders_children_first_and_never_calls_parent_after_child_failure() {
         }
     }
 }
+
+#[test]
+fn tun_rule_is_typed_parent_child_and_blocks_route_cleanup_until_removed() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    let rule = Resource::TunRule {
+        tun_id: 1,
+        ifindex: 7,
+        priority: 10001,
+        table: 1001,
+        mark: 47,
+        ipv6: false,
+    };
+    assert_eq!(
+        journal.intent(owner(), Scope::Session, 3, rule.clone()),
+        Err(JournalError::Invalid)
+    );
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    journal
+        .intent(
+            owner(),
+            Scope::Session,
+            2,
+            Resource::Route {
+                table: 1001,
+                destination: "0.0.0.0".parse().unwrap(),
+                prefix_len: 0,
+                priority: 47,
+                protocol: 253,
+                ifindex: 7,
+            },
+        )
+        .unwrap();
+    journal.intent(owner(), Scope::Session, 3, rule).unwrap();
+    for id in [1, 2, 3] {
+        journal.reconcile(owner(), id, Reconciled::Owned).unwrap();
+    }
+    let mut visited = Vec::new();
+    let report = journal
+        .cleanup(owner(), Scope::Session, |record| {
+            visited.push(record.id());
+            Err(CleanupFailed)
+        })
+        .unwrap();
+    assert_eq!(report.removed, 0);
+    assert_eq!(visited, vec![3]);
+    drop(journal);
+    let mut journal = open(&area);
+    assert_eq!(journal.records().len(), 3);
+    for id in [1, 2, 3] {
+        journal.reconcile(owner(), id, Reconciled::Owned).unwrap();
+    }
+    let report = journal
+        .cleanup(owner(), Scope::Session, |_| Ok(()))
+        .unwrap();
+    assert_eq!(report.removed, 3);
+    assert_eq!(report.remaining, 0);
+}
