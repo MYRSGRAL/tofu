@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use base64::{
     Engine,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
@@ -5,6 +7,7 @@ use base64::{
 use yonik_import::{Credentials, ServerIntent, import_bytes};
 
 const SEED: u64 = 0x5040_4652_3037_2026;
+const INSERTIONS: &[u8] = b"%\\\"{}[]=@?#\0";
 const CORPUS: [&str; 3] = [
     include_str!("corpus/p04-seeded/uri.txt"),
     include_str!("corpus/p04-seeded/xray.json"),
@@ -73,6 +76,7 @@ fn снимок(bytes: Vec<u8>) -> String {
 #[test]
 fn seeded_мутации_детерминированы_и_сохраняют_вход() {
     let mut state = SEED;
+    let mut inserted = std::collections::BTreeSet::new();
     for source in CORPUS {
         for iteration in 0..512 {
             state ^= state << 13;
@@ -88,7 +92,9 @@ fn seeded_мутации_детерминированы_и_сохраняют_в
                     bytes.remove(index);
                 }
                 2 => {
-                    bytes.insert(index, b"%\\\"{}[]=@?#\0"[iteration % 12]);
+                    let value = INSERTIONS[(iteration / 4) % INSERTIONS.len()];
+                    inserted.insert(value);
+                    bytes.insert(index, value);
                 }
                 _ => {
                     bytes.truncate(index);
@@ -108,6 +114,7 @@ fn seeded_мутации_детерминированы_и_сохраняют_в
             }
         }
     }
+    assert_eq!(inserted, INSERTIONS.iter().copied().collect());
 }
 
 #[test]
@@ -119,11 +126,10 @@ fn генерируемые_credentials_endpoint_и_ручной_roundtrip() {
     ] {
         for port in [1, 443, 65535] {
             for password in ["p@ss:?/#%", "пароль", "a+b c", "%00"] {
-                let encoded: String = password
-                    .as_bytes()
-                    .iter()
-                    .map(|b| format!("%{b:02X}"))
-                    .collect();
+                let mut encoded = String::with_capacity(password.len() * 3);
+                for byte in password.as_bytes() {
+                    write!(&mut encoded, "%{byte:02X}").expect("Запись percent-encoding в String");
+                }
                 let source = format!("trojan://{encoded}@{host}:{port}");
                 for input in [
                     source.clone(),

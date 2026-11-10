@@ -47,3 +47,22 @@ Base64 при меньшем MAX_INPUT_BYTES; самостоятельное д�
 не заявляется. Ручной контракт общий для cores; engine config-check не запускался.
 Sing-box managed extraction отсутствует в этом API, проверена только сохранность
 native. Старые matrix45/VMess-Trojan51/ALPN/DNS72 не считаются новым покрытием.
+
+## Полнота алфавита вставок после review
+
+Root regression с проверкой фактически использованного набора воспроизвела
+3/12 символов. Выбор символа теперь использует счётчик вставок (`iteration / 4`),
+независимый от номера операции. Сама mutation-проверка требует появления всего
+алфавита; seed, 1536 мутаций и 9216 parser calls не изменились.
+
+После исправления общий suite дал 77 passed. All-targets Clippy выявил в этом
+же тесте `format_collect`: percent-encoding теперь пишется в один String с
+заданной capacity. После этой последней правки прошли четыре targeted tests,
+включая mutation и 108 roundtrips, и строгий all-targets Clippy через явно
+закреплённый driver 1.85.1. Это не расширяет доказательства на полноценный fuzz
+campaign или предельные memory/time budgets.
+
+Root evidence: `local/validation/pr81-mutation-alphabet/` основного workspace:
+`red.log`, `green.log`, `clippy-pinned-format-collect.log`, `final.log`.
+Оригинальный авторский `green.log` сохранён там как `author-green-original.log`;
+в repo-копии удалена только лишняя завершающая пустая строка ради diff-check.
