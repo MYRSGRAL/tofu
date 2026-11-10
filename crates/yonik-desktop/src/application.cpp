@@ -29,6 +29,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QWindow>
+#include <array>
 #include <memory>
 #include <functional>
 #include <unistd.h>
@@ -36,34 +37,50 @@
 namespace yonik {
 QIcon statusIcon(const QString& status)
 {
-    QPixmap pixels(32, 32);
-    pixels.fill(Qt::transparent);
-    QPainter painter(&pixels);
-    painter.setRenderHint(QPainter::Antialiasing);
+    static const QIcon brand(QStringLiteral(":/icons/yonik.svg"));
     const bool connected = status == QStringLiteral("Connected");
     const bool failed = status == QStringLiteral("Error") || status == QStringLiteral("CleanupError");
     const bool limited = status == QStringLiteral("Limited");
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(connected ? QColor("#376b51") : failed ? QColor("#a83835")
-                     : limited ? QColor("#8f630b") : QColor("#58645d"));
-    painter.drawRoundedRect(QRectF(2, 2, 28, 28), 6, 6);
-    painter.setPen(QPen(Qt::white, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    if (connected) {
-        painter.drawLine(QPointF(8, 16), QPointF(14, 22));
-        painter.drawLine(QPointF(14, 22), QPointF(24, 10));
-    } else if (failed) {
-        painter.drawLine(QPointF(10, 10), QPointF(22, 22));
-        painter.drawLine(QPointF(10, 22), QPointF(22, 10));
-    } else if (limited) {
-        painter.drawLine(QPointF(16, 8), QPointF(16, 18));
-        painter.drawPoint(QPointF(16, 24));
-    } else if (status == QStringLiteral("Disconnected")) {
-        painter.drawLine(QPointF(9, 16), QPointF(23, 16));
-    } else {
-        for (int x : {9, 16, 23}) painter.drawPoint(QPointF(x, 16));
+    const bool disconnected = status == QStringLiteral("Disconnected");
+    const std::size_t variant = connected ? 0 : failed ? 1 : limited ? 2 : disconnected ? 3 : 4;
+    // Все вызовы идут из GUI thread; повторный snapshot не перерисовывает семь размеров.
+    static std::array<QIcon, 5> cache;
+    if (!cache[variant].isNull()) return cache[variant];
+    QIcon icon;
+    for (const int size : {16, 22, 24, 32, 48, 64, 128}) {
+        QPixmap pixels(size, size);
+        pixels.fill(Qt::transparent);
+        QPainter painter(&pixels);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.scale(size / 32.0, size / 32.0);
+        painter.drawPixmap(QRect(0, 0, 32, 32), brand.pixmap(size, size));
+        // Статус остаётся различимым, а основной знак сохраняет узнаваемость в трее.
+        painter.translate(18, 18);
+        painter.scale(14.0 / 32.0, 14.0 / 32.0);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(connected ? QColor("#376b51") : failed ? QColor("#a83835")
+                         : limited ? QColor("#8f630b") : QColor("#58645d"));
+        painter.drawRoundedRect(QRectF(2, 2, 28, 28), 6, 6);
+        painter.setPen(QPen(Qt::white, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        if (connected) {
+            painter.drawLine(QPointF(8, 16), QPointF(14, 22));
+            painter.drawLine(QPointF(14, 22), QPointF(24, 10));
+        } else if (failed) {
+            painter.drawLine(QPointF(10, 10), QPointF(22, 22));
+            painter.drawLine(QPointF(10, 22), QPointF(22, 10));
+        } else if (limited) {
+            painter.drawLine(QPointF(16, 8), QPointF(16, 18));
+            painter.drawPoint(QPointF(16, 24));
+        } else if (status == QStringLiteral("Disconnected")) {
+            painter.drawLine(QPointF(9, 16), QPointF(23, 16));
+        } else {
+            for (int x : {9, 16, 23}) painter.drawPoint(QPointF(x, 16));
+        }
+        painter.end();
+        icon.addPixmap(pixels);
     }
-    painter.end();
-    return QIcon(pixels);
+    cache[variant] = icon;
+    return icon;
 }
 
 void captureWindow(QWindow* window, const QString& path, std::function<void(bool)> completed)

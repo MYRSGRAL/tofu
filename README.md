@@ -1,5 +1,7 @@
 # yonik
 
+<img src="crates/yonik-desktop/assets/yonik.svg" alt="yonik" width="112" height="112">
+
 [English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
 
 [Implementation plan and current progress](docs/PLAN.md) (Russian).
