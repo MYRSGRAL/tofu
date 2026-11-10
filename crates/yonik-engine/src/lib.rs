@@ -1,5 +1,7 @@
 //! Строгий компилятор одного proxy outbound. Не запускает ядро и не меняет сеть.
 
+mod dns;
+pub use dns::{DnsContract, DnsMode, compile_policy_with_dns};
 mod options;
 pub mod policy_input;
 mod routing;
