@@ -309,6 +309,50 @@ impl SystemClient {
                 .to_string(),
         })
     }
+    /// Только проверенное переносимое намерение; native config и пути не принимаются.
+    pub async fn prepare_profile(
+        &mut self,
+        server: &yonik_import::ServerIntent,
+        engine: yonik_engine::Engine,
+        kill_switch: bool,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<Prepared, ClientError> {
+        #[derive(serde::Serialize)]
+        struct Request<'a> {
+            version: u32,
+            mode: &'static str,
+            engine: &'static str,
+            kill_switch: bool,
+            server: &'a yonik_import::ServerIntent,
+        }
+        let request = serde_json::to_string(&Request {
+            version: 1,
+            mode: "system_profile",
+            engine: match engine {
+                yonik_engine::Engine::Xray => "xray",
+                yonik_engine::Engine::SingBox => "sing-box",
+            },
+            kill_switch,
+            server,
+        })
+        .map_err(|_| ClientError::InvalidRequest)?;
+        let reply: PreparedReply = decode(&self.call("Prepare", request, deadline, cancel).await?)?;
+        version(reply.version)?;
+        Ok(Prepared {
+            handle: reply.handle,
+            owner: self.owner.clone(),
+            peer: self
+                .connection
+                .unique_name()
+                .ok_or(ClientError::Unavailable)?
+                .to_string(),
+        })
+    }
+    /// Синхронная проверка fence для снимков GUI между RPC.
+    pub fn owner_lost(&self) -> bool {
+        *self.lost.borrow() || self.lost.has_changed().is_err()
+    }
     pub async fn apply(
         &mut self,
         prepared: Prepared,
