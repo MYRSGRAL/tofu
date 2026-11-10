@@ -1,6 +1,9 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
+#[path = "desktop_schedule.rs"]
+mod desktop_schedule;
 use crate::preferences::{Preferences, SaveOutcome, Store};
+use desktop_schedule::DesktopSchedule;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -83,6 +86,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    SubscriptionVisibility {
+        visible: bool,
+    },
     Reload,
     AddSource {
         name: String,
@@ -219,6 +225,8 @@ struct Control {
     generation: AtomicU64,
     priority: watch::Sender<Priority>,
     tcp_priority: watch::Sender<u64>,
+    subscription_policy: watch::Sender<yonik_linux::SubscriptionPolicy>,
+    subscription_visible: watch::Sender<bool>,
     closed: (Mutex<bool>, Condvar),
 }
 impl Control {
@@ -259,6 +267,8 @@ impl DesktopHost {
             generation: AtomicU64::new(0),
             priority,
             tcp_priority,
+            subscription_policy: watch::channel(Default::default()).0,
+            subscription_visible: watch::channel(false).0,
             closed: (Mutex::new(false), Condvar::new()),
         });
         let worker_control = control.clone();
@@ -291,6 +301,11 @@ impl DesktopHost {
             .map_err(|_| DesktopError("startup"))?;
         Ok(Self { commands, control })
     }
+    /// Доверенный platform provider. Unknown/default запрещает автоматические загрузки.
+    pub fn set_subscription_policy(&self, policy: yonik_linux::SubscriptionPolicy) -> Result<()> {
+        self.control.subscription_policy.send_replace(policy);
+        Ok(())
+    }
     pub fn dispatch(&self, request: &str) -> Result<()> {
         if request.len() > 16 * 1024 {
             return Err(DesktopError("invalid_input"));
@@ -319,6 +334,10 @@ impl DesktopHost {
         }
         validate(&command)?;
         match command {
+            Command::SubscriptionVisibility { visible } => {
+                self.control.subscription_visible.send_replace(visible);
+                Ok(())
+            }
             Command::Shutdown => {
                 self.shutdown();
                 Ok(())
@@ -1462,6 +1481,8 @@ mod network_tests {
             generation: AtomicU64::new(0),
             priority,
             tcp_priority,
+            subscription_policy: watch::channel(Default::default()).0,
+            subscription_visible: watch::channel(false).0,
             closed: (Mutex::new(false), Condvar::new()),
         };
         let (sender, mut receiver) = mpsc::channel(1);
@@ -1968,13 +1989,59 @@ async fn run(
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
+    let mut subscription_policy = control.subscription_policy.subscribe();
+    let mut subscription_visible = control.subscription_visible.subscribe();
+    let origin = tokio::time::Instant::now();
+    let mut scheduled = match DesktopSchedule::new() {
+        Ok(owner) => owner,
+        Err(error) => {
+            actor.state.command_error(true, error.key());
+            actor.state.ready = false;
+            actor.state.closed = actor.service.close().await.is_ok();
+            actor.state.emit(&actor.callback);
+            control.closed();
+            return;
+        }
+    };
+    scheduled.policy = *subscription_policy.borrow_and_update();
+    scheduled.visible = *subscription_visible.borrow_and_update();
+    if let Err(error) = scheduled.load(&actor.service, origin.elapsed()).await {
+        actor.state.command_error(true, error.key());
+        actor.emit();
+    }
+    let fetch_host = yonik_linux::FetchHost::new(Duration::from_secs(30))
+        .ok()
+        .map(Arc::new);
     loop {
+        let allowed = fetch_host.is_some()
+            && !quitting
+            && refreshing.is_none()
+            && actor.pending.is_none()
+            && scheduled.review.is_none();
+        let deadline = if allowed { scheduled.deadline() } else { None };
+
         tokio::select! {
             biased;
             changed = priority.changed() => {
                 if changed.is_err() { quitting = true; }
                 let action = *priority.borrow_and_update();
                 quitting |= action.shutdown;
+                // Сначала все сигналы отмены, затем любые await: spawned TCP не должен
+                // получить polling сети во время ожидания scheduler acknowledgement.
+                if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
+                if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
+                if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
+                scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
+                if !quitting {
+                    let policy = scheduled.policy;
+                    let visible = scheduled.visible;
+                    if let Ok(mut replacement) = DesktopSchedule::new() {
+                        replacement.policy = policy; replacement.visible = visible;
+                        if let Err(error) = replacement.load(&actor.service, origin.elapsed() + Duration::from_secs(86400)).await { actor.state.command_error(true, error.key()); }
+                        scheduled = replacement;
+                    }
+                }
                 actor.state.connection_error = None;
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
@@ -1988,6 +2055,51 @@ async fn run(
                 }
                 actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" };
                 actor.emit();
+            }
+            _ = subscription_policy.changed() => {
+                scheduled.policy = *subscription_policy.borrow_and_update();
+            }
+            _ = subscription_visible.changed() => {
+                scheduled.visible = *subscription_visible.borrow_and_update();
+            }
+            event = async {
+                if let Some(event) = scheduled.deferred.take() { return Ok(Some(event)); }
+                scheduled.runtime.next_event(|| origin.elapsed()).await
+            }, if scheduled.fetching || scheduled.deferred.is_some() => {
+                scheduled.fetching = false;
+                match event {
+                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Review { id })) => {
+                        scheduled.review = Some(id);
+                        actor.state.source_id = Some(id);
+                        actor.state.offset = 0;
+                        actor.clear_selection();
+                        if let Err(error) = actor.reload().await { actor.state.command_error(true, error.key()); }
+                        if let Some(pending) = scheduled.runtime.review(id) {
+                            match pending_dto(pending, 0) {
+                                Ok(dto) => actor.state.pending = Some(dto),
+                                Err(error) => actor.state.command_error(true, error.key()),
+                            }
+                        }
+                    }
+                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.command_error(true, map_subscription(error).key()),
+                    Ok(_) => {},
+                    Err(_) => actor.state.command_error(true, "storage"),
+                }
+                actor.emit();
+            }
+            _ = async {
+                match deadline {
+                    Some(due) => tokio::time::sleep_until(origin + due).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                if let Some(host) = fetch_host.as_ref() {
+                    let policy = scheduled.policy();
+                    match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
+                        Ok(()) => scheduled.fetching = true,
+                        Err(_) => actor.state.command_error(true, "storage"),
+                    }
+                }
             }
             changed = tcp_priority.changed() => {
                 let _ = changed;
@@ -2052,8 +2164,48 @@ async fn run(
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
                 let source_operation = envelope.command.is_source_operation();
+                let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
+                if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
+                    actor.state.command_error(true, "busy"); actor.emit(); continue;
+                }
+                let cancel_id = match &envelope.command {
+                    Command::DeleteSource { id } => Some(*id),
+                    Command::SetSourceHwid { .. } | Command::Refresh => actor.state.source_id,
+                    _ => None,
+                };
+                if let Some(id) = cancel_id {
+                    let cancelled_review = scheduled.review == Some(id);
+                    if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
+                        actor.state.command_error(true, error.key()); actor.emit(); continue;
+                    }
+                    if scheduled.deferred.is_some() && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
+                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
+                            actor.state.command_error(true, error.key());
+                        } else { actor.state.command_error(true, "busy"); }
+                        actor.emit(); continue;
+                    }
+                    if cancelled_review { actor.state.pending = None; }
+                }
                 actor.state.begin_command(&envelope.command);
                 let outcome = match envelope.command {
+                    Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
+                    Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
+                        let approve = matches!(envelope.command, Command::ApproveRefresh);
+                        let id = scheduled.review.take().expect("review guard");
+                        actor.state.pending = None;
+                        match scheduled.runtime.finish_review(&actor.service, id, approve, || origin.elapsed()).await {
+                            Ok(_) => { actor.clear_selection(); actor.page().await }
+                            Err(error) => Err(map_subscription(error)),
+                        }
+                    }
+                    Command::ReviewPage { offset } if scheduled.review.is_some() => {
+                        match scheduled.review.and_then(|id| scheduled.runtime.review(id)) {
+                            Some(pending) => pending_dto(pending, offset).map(|dto| actor.state.pending = Some(dto)),
+                            None => Err(DesktopError("review_required")),
+                        }
+                    }
+                    Command::SelectSource { .. } | Command::ImportSource { .. } | Command::AddSource { .. } if scheduled.review.is_some() => Err(DesktopError("review_required")),
+
                     Command::CancelRefresh { id, token } => {
                         match refreshing.as_ref() {
                             Some((_, cancel, _, source, current_token)) if *source == id && token == *current_token && !*cancel.borrow() => {
@@ -2129,7 +2281,7 @@ async fn run(
                     Command::Connect => {
                         if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
                         else if actor.selected.is_none() { Err(DesktopError("profile_required")) }
-                        else if actor.pending.is_some() { Err(DesktopError("review_required")) }
+                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
                         else if let Err(error) = actor.prepare_port() { Err(error) }
                         else if let Some(profile) = actor.selected.as_ref() {
                             if actor.pending.is_some() { Err(DesktopError("review_required")) }
@@ -2154,6 +2306,13 @@ async fn run(
                         } else { actor.command(command).await }
                     }
                 };
+                if reload_schedule || cancel_id.is_some() {
+                    if let Some(id) = cancel_id.or(actor.state.source_id) {
+                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed() + Duration::from_secs(86400)).await {
+                            actor.state.command_error(true, error.key());
+                        }
+                    }
+                }
                 if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }
                 actor.emit();
             }
@@ -2181,6 +2340,9 @@ async fn run(
             }
             break;
         }
+    }
+    if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
+        actor.state.command_error(true, "storage");
     }
     actor.pending = None;
     if let Some(monitor) = network_monitor {

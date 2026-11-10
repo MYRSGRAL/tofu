@@ -1341,3 +1341,225 @@ fn damaged_preferences_notify_and_survive_settings_commands() {
     app.close();
     assert_eq!(fs::read(path).expect("исходник"), b"{");
 }
+
+#[test]
+fn scheduled_clean_import_requires_review_before_commit_or_discard() {
+    for approve in [false, true] {
+        let dir = Directory::new();
+        let (url, server) = fixture(vec!["socks5://127.0.0.1:1080#Плановый"]);
+        let mut seed = Harness::new(dir.config());
+        seed.wait(|v| v["ready"] == true);
+        seed.send(json!({"command":"add_source", "name":"Плановый", "url":url,
+            "local_exception":true,"route":"direct"}));
+        seed.wait(|v| v["source_id"].is_i64());
+        seed.close();
+        let mut app = Harness::new(dir.config());
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"subscription_visibility","visible":true}));
+        app.host
+            .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+                online: true,
+                ..Default::default()
+            })
+            .expect("доверенный тестовый policy provider");
+        let review = app.wait(|v| !v["pending"].is_null());
+        assert_eq!(review["total"], 0);
+        assert_eq!(review["pending"]["accepted"], 1);
+        assert_eq!(review["can_connect"], false);
+        app.send(json!({"command": if approve {"approve_refresh"} else {"discard_refresh"}}));
+        let done =
+            app.wait(|v| v["pending"].is_null() && v["total"] == if approve { 1 } else { 0 });
+        assert!(done["error"].is_null());
+        app.close();
+        server.join().expect("loopback fixture");
+    }
+}
+
+#[test]
+fn scheduled_delete_and_shutdown_acknowledge_held_fetch() {
+    for action in ["shutdown", "delete", "hwid"] {
+        let dir = Directory::new();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let url = format!("http://{}/held", listener.local_addr().expect("адрес"));
+        let mut seed = Harness::new(dir.config());
+        seed.wait(|v| v["ready"] == true);
+        seed.send(
+            json!({"command":"add_source", "name":"Удерживаемый", "url":url,
+            "local_exception":true,"route":"direct"}),
+        );
+        let id = seed.wait(|v| v["source_id"].is_i64())["source_id"].clone();
+        seed.close();
+        let (accepted, receive) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("fetch");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .expect("timeout");
+            let mut bytes = [0; 4096];
+            assert!(stream.read(&mut bytes).expect("request") > 0);
+            accepted.send(()).expect("сигнал fetch");
+            loop {
+                if stream.read(&mut bytes).expect("cancel закрыл соединение") == 0 {
+                    break;
+                }
+            }
+            if action == "hwid" {
+                let (mut next, _) = listener.accept().expect("refresh нового поколения");
+                assert!(next.read(&mut bytes).expect("request") > 0);
+                let body = "socks5://127.0.0.1:1081#Новое поколение";
+                write!(
+                    next,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .expect("ответ");
+            }
+        });
+        let mut app = Harness::new(dir.config());
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"subscription_visibility","visible":true}));
+        app.host
+            .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+                online: true,
+                ..Default::default()
+            })
+            .expect("policy");
+        receive
+            .recv_timeout(Duration::from_secs(10))
+            .expect("реальный scheduled запрос");
+        if action == "delete" {
+            app.send(json!({"command":"delete_source","id":id}));
+            let removed = app.wait(|v| v["sources_total"] == 0);
+            assert!(removed["pending"].is_null());
+        }
+        if action == "hwid" {
+            app.send(json!({"command":"set_source_hwid","enabled":true}));
+            let refreshed = app.wait(|v| v["source_hwid_enabled"] == true && v["total"] == 1);
+            assert!(refreshed["error"].is_null());
+        }
+        app.close();
+        server.join().expect("fetch освобождён до closed");
+    }
+}
+
+#[test]
+fn queued_source_delete_does_not_wait_for_another_fetch_before_shutdown() {
+    let dir = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+    let url = format!("http://{}/held", listener.local_addr().expect("адрес"));
+    let mut seed = Harness::new(dir.config());
+    seed.wait(|v| v["ready"] == true);
+    let mut ids = Vec::new();
+    for name in ["Первый", "Второй"] {
+        seed.send(json!({"command":"add_source", "name":name, "url":url,
+            "local_exception":true,"route":"direct"}));
+        let state = seed.wait(|v| v["sources_total"] == ids.len() + 1);
+        ids.push(state["source_id"].as_i64().expect("source id"));
+    }
+    seed.close();
+    let (accepted, receive) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("fetch");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .expect("timeout");
+        let mut bytes = [0; 4096];
+        assert!(stream.read(&mut bytes).expect("request") > 0);
+        accepted.send(()).expect("fetch начался");
+        assert_eq!(stream.read(&mut bytes).expect("shutdown отменяет fetch"), 0);
+    });
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"subscription_visibility","visible":true}));
+    app.host
+        .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+            online: true,
+            ..Default::default()
+        })
+        .expect("policy");
+    receive
+        .recv_timeout(Duration::from_secs(10))
+        .expect("fetch первого источника");
+    app.send(json!({"command":"delete_source","id":ids[1]}));
+    // Удаление queued ID завершается, пока первый fetch удерживается.
+    app.wait(|v| v["sources_total"] == 1);
+    app.close();
+    server.join().expect("fetch отменён shutdown");
+}
+
+#[test]
+fn scheduler_metadata_pages_and_generation_follow_source_changes() {
+    let dir = Directory::new();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(async {
+            let repository = yonik_linux::EncryptedSubscriptionRepository::open(
+                dir.0.join("subscriptions.sqlite"),
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .expect("отдельная БД");
+            let service = yonik_linux::SubscriptionService::new(repository);
+            let mut ids = Vec::new();
+            for index in 0..65 {
+                ids.push(
+                    service
+                        .add(
+                            yonik_linux::SubscriptionSource::new(
+                                format!("Источник {index}"),
+                                "https://example.invalid/metadata".into(),
+                                false,
+                                yonik_linux::FetchRoute::Proxy,
+                            )
+                            .expect("source"),
+                        )
+                        .await
+                        .expect("add"),
+                );
+            }
+            let first = service.schedule_sources(0).await.expect("первая страница");
+            assert_eq!(first.len(), 64);
+            assert_eq!(
+                service
+                    .schedule_sources(64)
+                    .await
+                    .expect("вторая страница")
+                    .len(),
+                1
+            );
+            assert!(
+                service
+                    .schedule_sources(65)
+                    .await
+                    .expect("конец")
+                    .is_empty()
+            );
+            assert!(service.schedule_sources(20_001).await.is_err());
+            let id = ids[0];
+            let old = service
+                .schedule_generation(id)
+                .await
+                .expect("generation")
+                .expect("id");
+            service
+                .set_source_hwid(id, true)
+                .await
+                .expect("source change");
+            assert!(
+                service
+                    .schedule_generation(id)
+                    .await
+                    .expect("generation")
+                    .expect("id")
+                    > old
+            );
+            service.delete_source(id).await.expect("delete");
+            assert_eq!(
+                service.schedule_generation(id).await.expect("deleted"),
+                None
+            );
+            service.close().await.expect("close");
+        });
+}

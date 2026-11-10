@@ -115,6 +115,10 @@ impl SubscriptionScheduler {
         }
         Ok(())
     }
+    /// Только активная отмена требует acknowledgement; queued запись удалена сразу.
+    pub fn cancellation_pending(&self, id: i64) -> bool {
+        self.active.get(&id).is_some_and(|active| active.cancelled)
+    }
     /// Возвращает один bounded event. Отмена ожидания безопасна; повторить при
     /// следующем событии. Нет отдельного task или очереди на каждый сервер.
     pub async fn next_event(
