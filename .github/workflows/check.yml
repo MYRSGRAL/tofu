@@ -53,7 +53,7 @@ jobs:
           chmod -R a+rX "$yonik_ci_stage"
           (
             cd "$yonik_ci_stage"
-            cargo +1.85.1 test -p yonik-linux --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/yonik-network-tests.jsonl"
+            CARGO_TARGET_DIR="$yonik_ci_stage/target" cargo +1.85.1 test -p yonik-linux --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/yonik-network-tests.jsonl"
           )
           yonik_network_test="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="yonik_linux" and r.get("profile",{}).get("test") and r.get("executable")]; assert len(paths)==1, paths; print(paths[0])' "$RUNNER_TEMP/yonik-network-tests.jsonl")"
           install --mode=0755 "$yonik_network_test" "$yonik_ci_stage/yonik-linux-tests"
