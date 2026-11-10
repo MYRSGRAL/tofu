@@ -277,11 +277,15 @@ impl Policy {
                 if !rule.enabled || !condition.matches_source(flow.executable) {
                     continue;
                 }
-                let mut matches = condition.destinations.is_empty() && condition.domains.is_empty()
-                    || name.is_some_and(|name| {
+                if !condition.domains.is_empty()
+                    && !name.is_some_and(|name| {
                         condition.domains.iter().any(|domain| domain.matches(name))
-                    });
-                if !matches && !condition.destinations.is_empty() {
+                    })
+                {
+                    continue;
+                }
+                let mut matches = true;
+                if !condition.destinations.is_empty() {
                     let addresses = match facts.get(context) {
                         Ok(addresses) => addresses,
                         Err(result) => return result,

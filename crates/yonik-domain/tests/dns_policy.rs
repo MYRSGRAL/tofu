@@ -336,7 +336,7 @@ fn fake_ip_is_never_compared_with_real_cidr_and_mapping_is_session_bound() {
 }
 
 #[test]
-fn source_short_circuit_and_destination_or_do_not_trigger_needless_dns() {
+fn source_short_circuit_preserves_required_dns_for_mixed_rule() {
     let mut policy = Policy::default();
     let mut first = rule(1, &[], &["192.0.2.0/24"], Action::Block);
     first.conditions.executables.push("/usr/bin/other".into());
@@ -350,8 +350,8 @@ fn source_short_circuit_and_destination_or_do_not_trigger_needless_dns() {
         ),
     ]);
     assert_eq!(
-        action(evaluate(&policy, &name("one.test"), Resolution::Missing)),
-        Route::Direct
+        evaluate(&policy, &name("one.test"), Resolution::Missing),
+        Evaluation::NeedResolution(ResolverPath::Policy)
     );
 }
 
@@ -471,4 +471,185 @@ fn mapped_private_address_and_every_dns_epoch_are_checked() {
             Evaluation::NeedResolution(ResolverPath::Policy)
         );
     }
+}
+
+#[test]
+fn смешанные_группы_соединяются_через_и() {
+    for preset in [false, true] {
+        let mut policy = Policy::default();
+        let rules = if preset {
+            &mut policy.preset_rules
+        } else {
+            &mut policy.user_rules
+        };
+        rules.push(rule(
+            1,
+            &[
+                DomainPattern::Exact(name("other.test")),
+                DomainPattern::Suffix(name("example.test")),
+            ],
+            &["192.0.2.0/24", "2001:db8::/32"],
+            Action::Block,
+        ));
+        for host in ["example.test", "www.example.test", "other.test"] {
+            for address in ["192.0.2.3", "2001:db8::1"] {
+                assert_eq!(
+                    action(evaluate(&policy, &name(host), answer(&[ip(address)]))),
+                    Route::Block
+                );
+            }
+            for address in ["198.51.100.1", "2001:db9::1"] {
+                assert_eq!(
+                    action(evaluate(&policy, &name(host), answer(&[ip(address)]))),
+                    Route::Proxy
+                );
+            }
+        }
+        for resolution in [
+            Resolution::Missing,
+            Resolution::Failed,
+            answer(&[ip("192.0.2.3")]),
+        ] {
+            assert_eq!(
+                action(evaluate(&policy, &name("unrelated.test"), resolution)),
+                Route::Proxy
+            );
+        }
+        for address in ["192.0.2.3", "2001:db8::1"] {
+            assert_eq!(
+                action(policy.evaluate_destination(
+                    &DestinationFlow {
+                        executable: None,
+                        destination: Destination::Ip {
+                            address: ip(address),
+                            name: None
+                        }
+                    },
+                    &EvaluationContext::default()
+                )),
+                Route::Proxy
+            );
+        }
+    }
+}
+
+#[test]
+fn смешанное_правило_не_обходит_неподтверждённый_dns() {
+    let mut policy = Policy::default();
+    policy.user_rules.push(rule(
+        1,
+        &[DomainPattern::Exact(name("one.test"))],
+        &["192.0.2.0/24", "2001:db8::/32"],
+        Action::Direct,
+    ));
+    let host = name("one.test");
+    assert_eq!(
+        evaluate(&policy, &host, Resolution::Missing),
+        Evaluation::NeedResolution(ResolverPath::Policy)
+    );
+    assert_eq!(
+        evaluate(&policy, &host, Resolution::Failed),
+        Evaluation::Rejected(PolicyFault::DnsPolicyUnresolved)
+    );
+    let addresses = [ip("192.0.2.1"), ip("2001:db8::1")];
+    let Resolution::Answer(valid) = answer(&addresses) else {
+        unreachable!()
+    };
+    for index in 0..5 {
+        let mut set = valid;
+        match index {
+            0 => set.expires_at = 0,
+            1 => set.epoch.network = 1,
+            2 => set.epoch.engine = 1,
+            3 => set.epoch.resolver = 1,
+            _ => set.complete = false,
+        }
+        assert_eq!(
+            evaluate(&policy, &host, Resolution::Answer(set)),
+            if index == 4 {
+                Evaluation::Rejected(PolicyFault::DnsPolicyUnresolved)
+            } else {
+                Evaluation::NeedResolution(ResolverPath::Policy)
+            }
+        );
+    }
+    policy.user_rules[0]
+        .conditions
+        .executables
+        .push("/usr/bin/browser".into());
+    assert_eq!(
+        action(evaluate(&policy, &host, Resolution::Missing)),
+        Route::Proxy
+    );
+    assert_eq!(
+        policy.evaluate_destination(
+            &DestinationFlow {
+                executable: Some("/usr/bin/browser"),
+                destination: Destination::Name {
+                    name: &host,
+                    resolution: Resolution::Missing
+                }
+            },
+            &EvaluationContext::default()
+        ),
+        Evaluation::NeedResolution(ResolverPath::Policy)
+    );
+}
+
+#[test]
+fn смешанное_правило_проверяет_реальный_адрес_вместо_fake() {
+    for (pool, fake, real) in [
+        ("198.18.0.0/15", "198.18.0.2", "192.0.2.3"),
+        ("fd00::/8", "fd00::2", "2001:db8::1"),
+    ] {
+        let mut policy = Policy::default();
+        policy.user_rules.push(rule(
+            1,
+            &[DomainPattern::Exact(name("one.test"))],
+            &[pool],
+            Action::Block,
+        ));
+        let pools = [cidr(pool)];
+        let context = EvaluationContext {
+            fake_pools: &pools,
+            ..Default::default()
+        };
+        let mapping = FakeMapping {
+            address: ip(fake),
+            name: name("one.test"),
+            epoch: DnsEpoch::default(),
+            expires_at: 1000,
+        };
+        let addresses = [ip(real)];
+        let flow = DestinationFlow {
+            executable: None,
+            destination: Destination::Fake {
+                address: ip(fake),
+                mapping: Some(&mapping),
+                resolution: answer(&addresses),
+            },
+        };
+        assert_eq!(
+            action(policy.evaluate_destination(&flow, &context)),
+            Route::Proxy
+        );
+    }
+}
+
+#[test]
+fn пустые_группы_сохраняют_широкое_правило() {
+    let mut policy = Policy::default();
+    policy.user_rules.push(rule(1, &[], &[], Action::Direct));
+    assert_eq!(
+        action(evaluate(&policy, &name("one.test"), Resolution::Missing)),
+        Route::Direct
+    );
+    policy.user_rules[0]
+        .conditions
+        .executables
+        .push("/usr/bin/browser".into());
+    assert_eq!(
+        action(evaluate(&policy, &name("one.test"), Resolution::Missing)),
+        Route::Proxy
+    );
 }

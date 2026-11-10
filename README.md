@@ -533,8 +533,8 @@ flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --q
 use documentation destinations: edit them for your own rules. Schema version 1:
 `default_action`, `user_rules`, `preset_rules`, `lan`, `private_networks`, `private_domains`.
 Rules have `id`, `action`, optional `enabled` and `conditions` containing `domain`,
-`domain_suffix`, `ip_cidr`, `executable_paths` arrays. Destination values are OR;
-source and destination groups are AND. User order precedes presets. Protected unavailable
+`domain_suffix`, `ip_cidr`, `executable_paths` arrays. Группы executable, домена и CIDR соединены через И;
+значения внутри каждой группы — через ИЛИ. Пустая группа означает любое значение. User order precedes presets. Protected unavailable
 networks/zones precede LAN and user rules. `available: true` is not an authorization
 to use a VPN: native compilation requires a future verified NetworkHost binding.
 
