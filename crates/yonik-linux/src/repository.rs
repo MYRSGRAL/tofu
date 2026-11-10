@@ -781,6 +781,233 @@ mod tests {
         }
     }
 
+    async fn assert_original_snapshot(repo: &EncryptedSubscriptionRepository, source: i64) {
+        let stored = repo.load(source).await.expect("чтение").expect("источник");
+        assert_eq!(stored.source.payload.as_slice(), b"source");
+        let stored = stored.snapshot.expect("snapshot");
+        let expected = snapshot();
+        assert_eq!(stored.revision, 1);
+        assert_eq!(stored.source_generation, 1);
+        assert_eq!(*stored.body, expected.body);
+        assert_eq!(*stored.metadata, expected.metadata);
+        assert_eq!(stored.validators.as_deref(), expected.validators.as_ref());
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("каталог");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.snapshot_revision, 1);
+    }
+
+    #[tokio::test]
+    async fn failed_reconcile_rolls_back_snapshot_after_reopen() {
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo
+            .create_source(b"source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        repo.commit_snapshot(source, 1, 0, snapshot())
+            .await
+            .expect("snapshot");
+        repo.close().await.expect("закрытие");
+        let connection = Connection::open(dir.database()).expect("fixture");
+        // Отказ в конце reconcile: snapshot и profiles уже обновлены внутри tx.
+        connection.execute_batch("CREATE TRIGGER fail_catalog BEFORE INSERT ON profile_catalog BEGIN SELECT RAISE(ABORT, 'fixture'); END;").expect("триггер");
+        drop(connection);
+        let repo = dir.open().await;
+        let replacement = SnapshotInput {
+            body: b"trojan://replacement@new.invalid:8443#new".to_vec(),
+            metadata: b"new metadata".to_vec(),
+            validators: Some(b"new validators".to_vec()),
+        };
+        assert!(matches!(
+            repo.commit_snapshot(source, 1, 1, replacement).await,
+            Err(RepositoryError::Storage)
+        ));
+        repo.close().await.expect("закрытие");
+        let repo = dir.open().await;
+        assert_original_snapshot(&repo, source).await;
+        repo.close().await.expect("закрытие");
+    }
+
+    #[tokio::test]
+    async fn interrupted_transaction_recovers_after_reopen() {
+        use std::io::{Read, Write};
+        use std::process::Stdio;
+
+        const CHILD_PATH: &str = "YONIK_REPOSITORY_CRASH_FIXTURE";
+        if let Some(mode) = std::env::var_os(CHILD_PATH) {
+            // Переменная выбирает только протокол, никогда путь к данным.
+            assert_eq!(mode, "child-v1", "неподдерживаемый child-протокол");
+            let mut message = Vec::new();
+            std::io::stdin()
+                .take(16 * 1024)
+                .read_to_end(&mut message)
+                .expect("канал родителя");
+            let (path, nonce): (PathBuf, [u8; 32]) =
+                serde_json::from_slice(&message).expect("child-сообщение");
+            let marker = path.parent().expect("каталог fixture").join("crash-marker");
+            assert_eq!(fs::read(marker).expect("маркер fixture"), nonce);
+            assert!(path.is_file(), "родитель должен заранее создать БД");
+            let repo = EncryptedSubscriptionRepository::open(path, Zeroizing::new([7; 32]))
+                .await
+                .expect("дочернее открытие");
+            repo.run::<()>(|db| {
+                let tx = db.connection.transaction().map_err(storage)?;
+                tx.execute_batch(
+                    "DELETE FROM profiles; DELETE FROM profile_catalog; DELETE FROM snapshots;",
+                )
+                .map_err(storage)?;
+                // Без Drop/close: SQLite должен восстановить только committed состояние.
+                std::process::exit(73);
+            })
+            .await
+            .expect("дочерняя транзакция");
+            panic!("дочерний процесс должен завершиться внутри транзакции");
+        }
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo
+            .create_source(b"source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        repo.commit_snapshot(source, 1, 0, snapshot())
+            .await
+            .expect("snapshot");
+        repo.close().await.expect("закрытие");
+        let mut nonce = [0_u8; 32];
+        getrandom::getrandom(&mut nonce).expect("nonce fixture");
+        let marker = dir
+            .database()
+            .parent()
+            .expect("каталог fixture")
+            .join("crash-marker");
+        fs::write(marker, nonce).expect("маркер fixture");
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "repository::tests::interrupted_transaction_recovers_after_reopen",
+                ])
+                .env(CHILD_PATH, "child-v1")
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("дочерний процесс");
+        child
+            .stdin
+            .take()
+            .expect("канал fixture")
+            .write_all(&serde_json::to_vec(&(dir.database(), nonce)).expect("сообщение"))
+            .expect("отправка fixture");
+        let status = child.wait().expect("завершение child");
+        assert_eq!(status.code(), Some(73));
+        let repo = dir.open().await;
+        assert_original_snapshot(&repo, source).await;
+        repo.close().await.expect("закрытие");
+    }
+
+    #[test]
+    fn inherited_crash_fixture_path_cannot_open_database() {
+        let dir = TestDirectory::new();
+        fs::write(dir.database(), []).expect("посторонний пустой файл");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "repository::tests::interrupted_transaction_recovers_after_reopen",
+            ])
+            .env("YONIK_REPOSITORY_CRASH_FIXTURE", dir.database())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("дочерний процесс");
+        assert!(!output.status.success());
+        assert_ne!(output.status.code(), Some(73));
+        assert!(
+            fs::read(dir.database())
+                .expect("неизменённый файл")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_corruption_fails_closed_after_reopen() {
+        for sql in [
+            "UPDATE snapshots SET body=zeroblob(length(body))",
+            "UPDATE snapshots SET metadata=zeroblob(length(metadata))",
+            "UPDATE snapshots SET validators=zeroblob(length(validators))",
+            "UPDATE snapshots SET revision=revision+1",
+            "UPDATE snapshots SET source_generation=source_generation+1",
+        ] {
+            let dir = TestDirectory::new();
+            let repo = dir.open().await;
+            let source = repo
+                .create_source(b"source".to_vec())
+                .await
+                .expect("источник")
+                .id;
+            repo.commit_snapshot(source, 1, 0, snapshot())
+                .await
+                .expect("snapshot");
+            repo.close().await.expect("закрытие");
+            let connection = Connection::open(dir.database()).expect("fixture");
+            connection.execute_batch(sql).expect("повреждение");
+            drop(connection);
+            let repo = dir.open().await;
+            assert!(
+                matches!(repo.load(source).await, Err(RepositoryError::Corrupt)),
+                "{sql}"
+            );
+            repo.close().await.expect("закрытие");
+        }
+    }
+
+    #[tokio::test]
+    async fn wrong_key_preserves_legacy_domain_and_data_after_reopen() {
+        let dir = TestDirectory::new();
+        let repo = dir.open().await;
+        let source = repo
+            .create_source(b"source".to_vec())
+            .await
+            .expect("источник")
+            .id;
+        repo.commit_snapshot(source, 1, 0, snapshot())
+            .await
+            .expect("snapshot");
+        repo.close().await.expect("закрытие");
+        let connection = Connection::open(dir.database()).expect("fixture");
+        connection.execute_batch("DROP TABLE profiles; DROP TABLE profile_catalog; DROP TABLE source_sequence; PRAGMA user_version=1;").expect("legacy fixture");
+        let domain: (Vec<u8>, Vec<u8>) = connection
+            .query_row("SELECT id,sentinel FROM repository", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("домен");
+        drop(connection);
+        assert!(matches!(
+            EncryptedSubscriptionRepository::open(dir.database(), Zeroizing::new([0; 32])).await,
+            Err(RepositoryError::Corrupt)
+        ));
+        let connection = Connection::open(dir.database()).expect("fixture");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("версия");
+        assert_eq!(version, 1);
+        let unchanged: (Vec<u8>, Vec<u8>) = connection
+            .query_row("SELECT id,sentinel FROM repository", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("домен");
+        assert_eq!(domain, unchanged);
+        drop(connection);
+        let repo = dir.open().await;
+        assert_original_snapshot(&repo, source).await;
+        repo.close().await.expect("закрытие");
+        let repo = dir.open().await;
+        assert_original_snapshot(&repo, source).await;
+        repo.close().await.expect("закрытие");
+    }
+
     #[tokio::test]
     async fn source_ids_never_repeat_after_delete_and_reopen() {
         let dir = TestDirectory::new();
