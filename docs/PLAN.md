@@ -67,7 +67,11 @@
    гонки CLI-теста `8a148c2`.
    [Управляемая RPDB](specs/helper-tun-rpdb.md) добавляет durable правила и
    mark bypass; оба compiler-профиля проверены с peer за veth в отдельном netns.
-   Этот новый срез проходит review/CI отдельно и не закрывает P12/P13.
+   PR #38 влит как `3a48c40`, все пять jobs обоих workflows зелёные.
+   Срез [worker runtime](specs/helper-worker-runtime.md) добавляет sealed-FD
+   Check/Run, fixed systemd units и supervisor. Actual TUN/RPDB traffic обоих
+   ядер проверен с отдельным UID и только NET_ADMIN; Check без capability.
+   Остаются actual установленный unit/cgroup gate и подключение runtime к host.
    Следом нужны системная установка/клиент, live reconcile и TUN-сессия с явным
    владением ресурсами и cleanup по [плану интеграции](superpowers/plans/2026-11-10-system-session-integration.md);
    затем DNS/Fake-IP и атрибуцию приложений.

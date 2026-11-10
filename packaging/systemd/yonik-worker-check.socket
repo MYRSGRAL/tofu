@@ -1,0 +1,14 @@
+[Unit]
+Description=Yonik — приватный канал проверки ядра
+BindsTo=yonik-helper.service
+After=yonik-helper.service
+
+[Socket]
+ListenStream=/run/yonik-worker/check.sock
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+DirectoryMode=0700
+Accept=no
+RemoveOnStop=yes
+Service=yonik-worker-check.service

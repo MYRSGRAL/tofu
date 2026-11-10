@@ -312,6 +312,13 @@ use the existing routing policy. Both cores pass TCP/UDP IPv4/IPv6 through a pee
 in a separate namespace behind veth, followed by owned-resource cleanup.
 Service/worker/GUI wiring, live reconciliation and DNS gates remain open.
 [RPDB contract](docs/specs/helper-tun-rpdb.md).
+The new sealed-FD worker launcher separates Check and Run, preserves the PID
+across exec, and fixes the core arguments and environment. Both cores pass the
+TUN fixture under a distinct nonzero UID with NET_ADMIN only and no-new-privileges;
+the same profile passes Check with no capabilities. Fixed systemd units and a
+supervisor bind lifecycle to InvocationID and verified cgroup emptiness.
+Installed-unit acceptance and wiring into profile Prepare/Apply and the GUI
+remain pending. [Worker contract](docs/specs/helper-worker-runtime.md).
 
 ### Rust libraries and CLIs
 

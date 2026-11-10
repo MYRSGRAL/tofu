@@ -1,0 +1,47 @@
+[Unit]
+Description=Yonik — сетевое ядро
+BindsTo=yonik-helper.service
+After=yonik-helper.service
+
+[Service]
+Type=exec
+User=yonik-worker
+Group=yonik-worker
+ExecStart=/usr/lib/yonik/yonik-worker --run
+StandardInput=socket
+StandardOutput=null
+StandardError=null
+Sockets=yonik-worker.socket
+Slice=system.slice
+Restart=no
+KillMode=control-group
+KillSignal=SIGTERM
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+TimeoutStartSec=10s
+TimeoutStopSec=5s
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+PrivateNetwork=no
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/net/tun rw
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+LimitCORE=0
