@@ -14,6 +14,7 @@ from engine_smoke import install_signal_handlers, run_sandbox
 
 LOG = logging.getLogger("yonik.managed-network")
 CASES = {
+    "session-attach": "helper::protection_host::session_host::tests::real_namespace_persistent_tun_queue_contract",
     "tun-projection": "managed_network::tun::topology::tests::real_namespace_projection_matches_external_baseline",
     "session-network": "managed_network::tun::topology::tests::real_namespace_session_plan_configure_capture_verify_cleanup",
     "owned-tun": "managed_network::tun::tests::real_namespace_tun_ownership_reopen_and_cleanup",

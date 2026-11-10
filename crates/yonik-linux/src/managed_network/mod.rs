@@ -9,9 +9,11 @@
 pub mod firewall;
 pub mod nft;
 mod policy_state;
+mod session_state;
 mod storage;
 pub mod tun;
 pub use policy_state::{PublicPolicyPhase, PublicPolicyRecord};
+pub use session_state::SessionRecoveryRecord;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -267,10 +269,12 @@ struct Document {
     records: Vec<Record>,
     public_policy: Option<PublicPolicyRecord>,
     policy_sequence: u64,
+    #[serde(deserialize_with = "session_state::deserialize_recovery")]
+    session_recovery: Option<SessionRecoveryRecord>,
 }
 impl Document {
     fn validate(&self) -> Result<(), JournalError> {
-        if self.version != 2 {
+        if self.version != 3 {
             return Err(JournalError::Version);
         }
         self.ownership.validate()?;
@@ -378,9 +382,9 @@ impl Journal {
         let Some(mut document) = storage::read(&directory)? else {
             return Ok(None);
         };
-        let migrated = document.version == 1;
+        let migrated = matches!(document.version, 1 | 2);
         if migrated {
-            document.version = 2;
+            document.version = 3;
         }
         document.validate()?;
         let mut journal = Self {
@@ -399,7 +403,10 @@ impl Journal {
     pub fn reassign_empty_owner(&mut self, next: Ownership) -> Result<(), JournalError> {
         self.check(self.document.ownership)?;
         next.validate()?;
-        if !self.document.records.is_empty() || self.document.public_policy.is_some() {
+        if !self.document.records.is_empty()
+            || self.document.public_policy.is_some()
+            || self.document.session_recovery.is_some()
+        {
             return Err(JournalError::Conflict);
         }
         let mut document = self.document.clone();
@@ -415,16 +422,17 @@ impl Journal {
         let fresh = loaded.is_none();
         let migrated = loaded
             .as_ref()
-            .is_some_and(|document| document.version == 1);
+            .is_some_and(|document| matches!(document.version, 1 | 2));
         let mut document = loaded.unwrap_or(Document {
-            version: 2,
+            version: 3,
             ownership,
             records: Vec::new(),
             public_policy: None,
             policy_sequence: 0,
+            session_recovery: None,
         });
         if migrated {
-            document.version = 2;
+            document.version = 3;
         }
         document.validate()?;
         if document.ownership != ownership {

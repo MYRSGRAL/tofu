@@ -1,10 +1,16 @@
 //! Неизменяемый сетевой план системной сессии. Авторизацию и порядок worker/nft
 //! обеспечивает session host; этот модуль не публикует Applied/Connected.
+#[cfg(test)]
+#[path = "external_diagnostics.rs"]
+pub(in crate::helper) mod diagnostics;
 use crate::{
     LinuxTopology,
     managed_network::{
         Journal, Ownership, RecordState, Resource, Scope,
-        tun::{TunAddress, TunError, TunExecutor, TunRoute, TunRule, session_external_topology},
+        tun::{
+            TunAddress, TunError, TunExecutor, TunRoute, TunRule,
+            session_external_topology_with_framing,
+        },
     },
 };
 use std::{
@@ -25,6 +31,7 @@ const ALLOCATION_ATTEMPTS: usize = 8;
 /// Существование плана не доказывает готовность транспорта или DNS.
 pub struct SessionNetworkPlan {
     owner: Ownership,
+    vnet_hdr: bool,
     name: u32,
     table: u32,
     priority: u32,
@@ -51,6 +58,18 @@ impl SessionNetworkPlan {
         }
         Err(TunError::Foreign)
     }
+    pub(crate) fn reserve_for_engine(
+        owner: Ownership,
+        baseline: &LinuxTopology,
+        engine: yonik_engine::Engine,
+    ) -> Result<Self, TunError> {
+        let mut plan = Self::reserve(owner, baseline)?;
+        plan.vnet_hdr = match engine {
+            yonik_engine::Engine::Xray => true,
+            yonik_engine::Engine::SingBox => false,
+        };
+        Ok(plan)
+    }
     fn candidate(owner: Ownership, random: [u8; 24]) -> Result<Self, TunError> {
         let number = |offset| {
             u32::from_le_bytes([
@@ -62,6 +81,7 @@ impl SessionNetworkPlan {
         };
         Ok(Self {
             owner,
+            vnet_hdr: false,
             name: number(0).max(1),
             table: 10000 + number(4) % 20000,
             priority: 10000 + number(8) % 10000,
@@ -243,7 +263,9 @@ impl SessionNetworkPlan {
         journal: &mut Journal,
     ) -> Result<u32, TunError> {
         self.check_records(journal, 0, Some(0))?;
-        let index = executor.ensure_tun(journal, TUN, self.name).await?;
+        let index = executor
+            .ensure_tun_with_framing(journal, TUN, self.name, self.vnet_hdr)
+            .await?;
         executor
             .configure_link(journal, TUN, u32::from(MTU))
             .await?;
@@ -286,8 +308,78 @@ impl SessionNetworkPlan {
         index: u32,
     ) -> Result<(), TunError> {
         self.check_records(journal, index, Some(7))?;
-        let projected = session_external_topology(current, journal, TUN, MTU)?;
-        if &projected != baseline {
+        let projected =
+            session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)?;
+        if !crate::network::same_external_topology(&projected, baseline) {
+            return Err(TunError::Evidence);
+        }
+        Ok(())
+    }
+    pub(crate) fn verify_external_captured(
+        &self,
+        baseline: &LinuxTopology,
+        baseline_capture: crate::network::TopologyCapture,
+        current: LinuxTopology,
+        current_capture: crate::network::TopologyCapture,
+        journal: &Journal,
+        index: u32,
+    ) -> Result<(), TunError> {
+        let records = self.check_records(journal, index, Some(7));
+        #[cfg(test)]
+        let records = records.inspect_err(|&error| {
+            diagnostics::failure(
+                "records",
+                error,
+                (baseline, baseline_capture),
+                (&current, current_capture),
+                journal,
+                None,
+                (self, index),
+            );
+        });
+        records?;
+        #[cfg(test)]
+        let raw = diagnostics::snapshot(&current);
+        let projected =
+            match session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    #[cfg(test)]
+                    if let Some(raw) = raw.as_ref() {
+                        diagnostics::failure(
+                            "projection",
+                            error,
+                            (baseline, baseline_capture),
+                            (raw, current_capture),
+                            journal,
+                            None,
+                            (self, index),
+                        );
+                    }
+                    #[cfg(test)]
+                    if raw.is_none() {
+                        diagnostics::stage("projection", error);
+                    }
+                    return Err(error);
+                }
+            };
+        if !crate::network::same_captured_topology(
+            baseline,
+            baseline_capture,
+            &projected,
+            current_capture,
+        ) {
+            #[cfg(test)]
+            diagnostics::failure(
+                "equivalence",
+                TunError::Evidence,
+                (baseline, baseline_capture),
+                (&projected, current_capture),
+                journal,
+                raw.as_ref(),
+                (self, index),
+            );
             return Err(TunError::Evidence);
         }
         Ok(())

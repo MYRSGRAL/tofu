@@ -178,12 +178,33 @@ impl LinuxTopology {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct TopologyCapture {
+    addresses: [super::equivalence::CaptureWindow; 2],
+    routes: [super::equivalence::RouteCapture; 2],
+}
+impl TopologyCapture {
+    pub(crate) fn route(self, family: u8) -> super::equivalence::RouteCapture {
+        self.routes[usize::from(family == 10)]
+    }
+    pub(crate) fn family(self, family: u8) -> super::equivalence::CaptureWindow {
+        self.addresses[usize::from(family == 10)]
+    }
+}
 /// Ограничение действует на все запросы целиком, без автоматических повторов.
 /// Требует Tokio runtime с включёнными I/O и time; не выполняет Apply.
 pub async fn read_topology(
     cancel: &mut Cancellation,
     timeout: Duration,
 ) -> Result<LinuxTopology, NetworkReadError> {
+    read_topology_captured(cancel, timeout)
+        .await
+        .map(|(topology, _)| topology)
+}
+pub(crate) async fn read_topology_captured(
+    cancel: &mut Cancellation,
+    timeout: Duration,
+) -> Result<(LinuxTopology, TopologyCapture), NetworkReadError> {
     cancel.check().map_err(|_| NetworkReadError::Cancelled)?;
     if timeout.is_zero() || timeout > Duration::from_secs(5) {
         return Err(NetworkReadError::Limit);
@@ -204,21 +225,37 @@ pub async fn read_topology(
     {
         result.links.push(parse_link(&message.payload)?);
     }
-    for family in [2, 10] {
+    let now = tokio::time::Instant::now();
+    let mut capture = TopologyCapture {
+        addresses: [super::equivalence::CaptureWindow {
+            start: now,
+            end: now,
+        }; 2],
+        routes: [super::equivalence::RouteCapture::new(now, now); 2],
+    };
+    for (slot, family) in [2, 10].into_iter().enumerate() {
         let mut addr = [0; 8];
         addr[0] = family;
-        for message in reader
+        let start = tokio::time::Instant::now();
+        let messages = reader
             .request(ReadOperation::Addresses, &addr, cancel, deadline)
-            .await?
-        {
+            .await?;
+        capture.addresses[slot] = super::equivalence::CaptureWindow {
+            start,
+            end: tokio::time::Instant::now(),
+        };
+        for message in messages {
             result.addresses.push(parse_address(&message.payload)?);
         }
         let mut header = [0; 12];
         header[0] = family;
-        for message in reader
+        let start = tokio::time::Instant::now();
+        let messages = reader
             .request(ReadOperation::Routes, &header, cancel, deadline)
-            .await?
-        {
+            .await?;
+        capture.routes[slot] =
+            super::equivalence::RouteCapture::new(start, tokio::time::Instant::now());
+        for message in messages {
             result.routes.push(parse_route(&message.payload)?);
         }
         for message in reader
@@ -239,7 +276,7 @@ pub async fn read_topology(
     if tokio::time::Instant::now() >= deadline {
         return Err(NetworkReadError::Timeout);
     }
-    Ok(result)
+    Ok((result, capture))
 }
 
 type Error = NetworkReadError;

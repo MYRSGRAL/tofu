@@ -18,6 +18,10 @@ use std::{
 };
 use yonik_application::{ConfigDigest, EnvironmentStamp};
 
+#[path = "session_host.rs"]
+mod session_host;
+use session_host::{ActiveSession, SessionArtifact};
+
 const STATE_PATH: &str = "/run/yonik/network";
 const MAX_PLAN_BYTES: usize = 64 * 1024;
 const RT_SCOPE_LINK: u8 = 253;
@@ -38,6 +42,7 @@ struct GuardPlan {
 pub struct GuardArtifact {
     bytes: Vec<u8>,
     stamp: NetworkStamp,
+    session: Option<Arc<SessionArtifact>>,
 }
 impl std::fmt::Debug for GuardArtifact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,15 +55,27 @@ impl PreparedArtifact for GuardArtifact {
     }
     fn byte_len(&self) -> usize {
         self.bytes.len()
+            + self
+                .session
+                .as_ref()
+                .map_or(0, |value| value.payload.retained_bytes())
     }
     fn retained_bytes(&self) -> usize {
         self.bytes.capacity()
+            + self
+                .session
+                .as_ref()
+                .map_or(0, |value| value.retained_bytes())
     }
 }
 
 pub struct SystemProtectionHost {
     backend: Arc<Mutex<Backend>>,
+    operations: Arc<tokio::sync::Semaphore>,
+    stop_admission: Arc<tokio::sync::Semaphore>,
     _monitor: NetworkMonitor,
+    runtime: tokio::runtime::Handle,
+    _safety: Option<session_host::SafetyTask>,
 }
 struct Backend {
     path: PathBuf,
@@ -67,15 +84,30 @@ struct Backend {
     seed: u64,
     epoch: u64,
     bindings: Option<NetworkStamp>,
+    supervisor: Option<super::SystemWorkerSupervisor>,
+    worker_uncertain: bool,
+    active: Option<ActiveSession>,
+    registry: Option<super::TrustedRegistry>,
+    exited: Arc<tokio::sync::Notify>,
     #[cfg(test)]
     isolated: bool,
 }
 enum Operation {
     Prepare(u32, bool),
+    PrepareProfile(u32, Box<super::service::SystemProfileRequest>),
     Apply(u32, GuardPlan, NetworkStamp),
+    ApplyProfile(u32, Arc<SessionArtifact>, NetworkStamp),
     State(u32),
     Stop(u32),
     Unlock(u32),
+    #[cfg(test)]
+    RuntimeProbe(tokio::sync::oneshot::Sender<()>),
+    #[cfg(test)]
+    RetentionProbe {
+        entered: tokio::sync::oneshot::Sender<()>,
+        resume: tokio::sync::oneshot::Receiver<()>,
+        finished: tokio::sync::oneshot::Sender<()>,
+    },
 }
 enum Reply {
     Prepared(GuardArtifact),
@@ -115,6 +147,8 @@ impl SystemProtectionHost {
         let mut random = [0; 8];
         getrandom::getrandom(&mut random).map_err(unavailable)?;
         let seed = u64::from_le_bytes(random).max(1);
+        let exited = Arc::new(tokio::sync::Notify::new());
+        let backend_exited = Arc::clone(&exited);
         let backend = tokio::task::spawn_blocking(move || {
             let journal = Journal::open_existing(&path).map_err(unavailable)?;
             if journal
@@ -131,35 +165,64 @@ impl SystemProtectionHost {
                 seed,
                 epoch: 1,
                 bindings: None,
+                supervisor: None,
+                worker_uncertain: false,
+                active: None,
+                registry: None,
+                exited: backend_exited,
                 #[cfg(test)]
                 isolated,
             })
         })
         .await
         .map_err(unavailable)??;
+        let backend = Arc::new(Mutex::new(backend));
+        let runtime = tokio::runtime::Handle::current();
+        let operations = Arc::new(tokio::sync::Semaphore::new(1));
+        let safety = session_host::spawn_safety(
+            session_host::SessionEvents::new(monitor.watch(), exited),
+            Arc::downgrade(&backend),
+            runtime.clone(),
+            Arc::clone(&operations),
+            session_host::reconcile_network_event,
+        );
         Ok(Self {
-            backend: Arc::new(Mutex::new(backend)),
+            backend,
+            operations,
+            stop_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             _monitor: monitor,
+            runtime,
+            _safety: Some(safety),
         })
     }
     async fn job(&self, operation: Operation, cancel: Cancellation) -> Result<Reply, ServiceError> {
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
+        let shared = Arc::clone(&self.backend);
+        let runtime = self.runtime.clone();
+        if matches!(operation, Operation::Stop(_)) {
+            // Единственный допущенный Stop ожидает FIFO gate до spawn_blocking.
+            // Drop caller не отменяет уже допущенную задачу и durable cleanup.
+            let slot = Arc::clone(&self.stop_admission)
+                .try_acquire_owned()
+                .map_err(|_| super::service::busy_at("stop_admission_capacity"))?;
+            let operations = Arc::clone(&self.operations);
+            return tokio::spawn(async move {
+                let mut cancel = cancel;
+                let permit =
+                    wait_for_stop(operations, &mut cancel, super::service::STOP_WAIT_BOUND).await?;
+                execute_job(shared, runtime, operation, cancel, (permit, Some(slot))).await
+            })
+            .await
+            .map_err(unavailable)?;
+        }
+        let permit = Arc::clone(&self.operations)
+            .try_acquire_owned()
+            .map_err(|_| super::service::busy_at("backend_operation_capacity"))?;
         drop(self.backend.try_lock().map_err(|error| match error {
-            std::sync::TryLockError::WouldBlock => ServiceError::Busy,
+            std::sync::TryLockError::WouldBlock => super::service::busy_at("backend_job_preflight"),
             _ => ServiceError::Unavailable,
         })?);
-        let shared = Arc::clone(&self.backend);
-        // Даже если вызывающий future отменён, задача заканчивает durable
-        // переход и reap. Mutex не допускает следующий эффект раньше неё.
-        tokio::task::spawn_blocking(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(unavailable)?;
-            let mut backend = shared.lock().map_err(unavailable)?;
-            runtime.block_on(backend.perform(operation, cancel))
-        })
-        .await
-        .map_err(unavailable)?
+        execute_job(shared, runtime, operation, cancel, (permit, None)).await
     }
     #[cfg(test)]
     pub(super) async fn fixture(
@@ -168,6 +231,35 @@ impl SystemProtectionHost {
     ) -> Result<Self, ServiceError> {
         Self::create(path, &mut cancel, true).await
     }
+}
+async fn wait_for_stop(
+    operations: Arc<tokio::sync::Semaphore>,
+    cancel: &mut Cancellation,
+    bound: Duration,
+) -> Result<tokio::sync::OwnedSemaphorePermit, ServiceError> {
+    tokio::select! {
+        biased;
+        _=cancel.cancelled()=>Err(ServiceError::Cancelled),
+        result=tokio::time::timeout(bound,operations.acquire_owned())=>result.map_err(|_|ServiceError::Prepared(PreparedError::Timeout))?.map_err(unavailable),
+    }
+}
+async fn execute_job(
+    shared: Arc<Mutex<Backend>>,
+    runtime: tokio::runtime::Handle,
+    operation: Operation,
+    cancel: Cancellation,
+    permits: (
+        tokio::sync::OwnedSemaphorePermit,
+        Option<tokio::sync::OwnedSemaphorePermit>,
+    ),
+) -> Result<Reply, ServiceError> {
+    tokio::task::spawn_blocking(move || {
+        let _permits = permits;
+        let mut backend = shared.lock().map_err(unavailable)?;
+        runtime.block_on(backend.perform(operation, cancel))
+    })
+    .await
+    .map_err(unavailable)?
 }
 impl Backend {
     fn snapshot(&self) -> Result<crate::NetworkSnapshot, ServiceError> {
@@ -182,8 +274,11 @@ impl Backend {
             if journal.ownership().owner_uid() == uid {
                 return Ok(journal.ownership());
             }
-            if !journal.records().is_empty() || journal.public_policy().is_some() {
-                return Err(ServiceError::Busy);
+            if !journal.records().is_empty()
+                || journal.public_policy().is_some()
+                || journal.session_recovery().is_some()
+            {
+                return Err(super::service::busy_at("backend_owner_uid"));
             }
         }
         let ns = namespace()?;
@@ -231,6 +326,9 @@ impl Backend {
     }
     async fn observe_state(&mut self, uid: u32) -> Result<ProtectionState, ServiceError> {
         let owner = self.owner(uid)?;
+        if self.has_session() || self.worker_uncertain {
+            return self.observe_session(uid).await;
+        }
         if self.journal.is_none() {
             return Ok(ProtectionState::NoManagedPolicy);
         }
@@ -256,7 +354,37 @@ impl Backend {
     ) -> Result<Reply, ServiceError> {
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
         match operation {
+            #[cfg(test)]
+            Operation::RuntimeProbe(completed) => {
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    let _ = completed.send(());
+                });
+                Ok(Reply::State(ProtectionState::NoManagedPolicy))
+            }
+            #[cfg(test)]
+            Operation::RetentionProbe {
+                entered,
+                resume,
+                finished,
+            } => {
+                let _ = entered.send(());
+                resume.await.map_err(unavailable)?;
+                let _ = finished.send(());
+                Ok(Reply::State(ProtectionState::NoManagedPolicy))
+            }
+            Operation::PrepareProfile(uid, request) => self
+                .prepare_profile(uid, *request, &mut cancel)
+                .await
+                .map(Reply::Prepared),
+            Operation::ApplyProfile(uid, artifact, stamp) => self
+                .apply_profile(uid, artifact, stamp, &mut cancel)
+                .await
+                .map(Reply::State),
             Operation::Prepare(uid, allow_lan) => {
+                if self.has_session() || self.worker_uncertain {
+                    return Err(super::service::busy_at("backend_prepare_active"));
+                }
                 // До live-reconciler нельзя сохранять разрешающие LAN bindings
                 // после смены topology; RPC явно отказывает, а не ослабляет защиту.
                 if allow_lan {
@@ -289,9 +417,16 @@ impl Backend {
                 if bytes.len() > MAX_PLAN_BYTES {
                     return Err(ServiceError::Unavailable);
                 }
-                Ok(Reply::Prepared(GuardArtifact { bytes, stamp }))
+                Ok(Reply::Prepared(GuardArtifact {
+                    bytes,
+                    stamp,
+                    session: None,
+                }))
             }
             Operation::Apply(uid, plan, stamp) => {
+                if self.has_session() || self.worker_uncertain {
+                    return Err(super::service::busy_at("backend_apply_active"));
+                }
                 if plan.version != 1
                     || plan.uid != uid
                     || plan.stamp != stamp.to_string()
@@ -330,11 +465,17 @@ impl Backend {
             Operation::Stop(uid) => {
                 self.owner(uid)?;
                 self.invalidate()?;
+                if self.has_session() || self.worker_uncertain {
+                    return self.finish_session(uid, false).await.map(Reply::State);
+                }
                 self.observe_state(uid).await.map(Reply::State)
             }
             Operation::Unlock(uid) => {
                 let owner = self.owner(uid)?;
                 self.invalidate()?;
+                if self.has_session() || self.worker_uncertain {
+                    return self.finish_session(uid, true).await.map(Reply::State);
+                }
                 if let Some(journal) = &self.journal {
                     let id = journal.public_policy().map(|p| p.id()).unwrap_or(1);
                     let mut executor = self.executor(owner)?;
@@ -402,6 +543,24 @@ fn compile_protection(
 }
 impl ProtectionHost for SystemProtectionHost {
     type Artifact = GuardArtifact;
+    async fn prepare_profile(
+        &mut self,
+        uid: u32,
+        request: super::service::SystemProfileRequest,
+        cancel: Cancellation,
+    ) -> Result<(GuardArtifact, PreparedContext), ServiceError> {
+        let Reply::Prepared(artifact) = self
+            .job(Operation::PrepareProfile(uid, Box::new(request)), cancel)
+            .await?
+        else {
+            return Err(ServiceError::Unavailable);
+        };
+        let context = self.context(uid)?;
+        if !self._monitor.watch().current().is_current(artifact.stamp) {
+            return Err(stale());
+        }
+        Ok((artifact, context))
+    }
     async fn prepare(
         &mut self,
         uid: u32,
@@ -423,7 +582,7 @@ impl ProtectionHost for SystemProtectionHost {
         self.backend
             .try_lock()
             .map_err(|error| match error {
-                std::sync::TryLockError::WouldBlock => ServiceError::Busy,
+                std::sync::TryLockError::WouldBlock => super::service::busy_at("backend_context"),
                 _ => ServiceError::Unavailable,
             })?
             .context(uid)
@@ -434,6 +593,18 @@ impl ProtectionHost for SystemProtectionHost {
         artifact: &GuardArtifact,
         cancel: Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
+        if let Some(session) = &artifact.session {
+            return match self
+                .job(
+                    Operation::ApplyProfile(uid, Arc::clone(session), artifact.stamp),
+                    cancel,
+                )
+                .await?
+            {
+                Reply::State(state) => Ok(state),
+                _ => Err(ServiceError::Unavailable),
+            };
+        }
         let plan: GuardPlan =
             serde_json::from_slice(&artifact.bytes).map_err(|_| ServiceError::InvalidRequest)?;
         match self

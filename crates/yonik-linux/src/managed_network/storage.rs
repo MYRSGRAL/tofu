@@ -162,32 +162,56 @@ pub(super) fn read(directory: &File) -> Result<Option<Document>, JournalError> {
     if bytes.len() > MAX_JOURNAL_BYTES {
         return Err(JournalError::Limit);
     }
-    // v1 разбирается отдельной строгой схемой: новые поля нельзя незаметно
-    // протащить через миграцию старого формата.
+    // Каждая историческая версия разбирается собственной строгой схемой:
+    // новые поля нельзя незаметно протащить через миграцию старого формата.
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
-    if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct LegacyDocument {
-            version: u32,
-            ownership: super::Ownership,
-            records: Vec<super::Record>,
-        }
-        let legacy: LegacyDocument =
-            serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
-        Ok(Some(Document {
-            version: legacy.version,
-            ownership: legacy.ownership,
-            records: legacy.records,
-            public_policy: None,
-            policy_sequence: 0,
-        }))
-    } else {
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| JournalError::Corrupt)
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyV1 {
+        version: u32,
+        ownership: super::Ownership,
+        records: Vec<super::Record>,
     }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyV2 {
+        version: u32,
+        ownership: super::Ownership,
+        records: Vec<super::Record>,
+        public_policy: Option<super::PublicPolicyRecord>,
+        policy_sequence: u64,
+    }
+    let document = match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(1) => {
+            let legacy: LegacyV1 =
+                serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
+            Document {
+                version: legacy.version,
+                ownership: legacy.ownership,
+                records: legacy.records,
+                public_policy: None,
+                policy_sequence: 0,
+                session_recovery: None,
+            }
+        }
+        Some(2) => {
+            let legacy: LegacyV2 =
+                serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
+            Document {
+                version: legacy.version,
+                ownership: legacy.ownership,
+                records: legacy.records,
+                public_policy: legacy.public_policy,
+                policy_sequence: legacy.policy_sequence,
+                session_recovery: None,
+            }
+        }
+        Some(3) => serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?,
+        Some(_) => return Err(JournalError::Version),
+        None => return Err(JournalError::Corrupt),
+    };
+    Ok(Some(document))
 }
 
 pub(super) fn write(directory: &File, document: &Document) -> Result<(), JournalError> {

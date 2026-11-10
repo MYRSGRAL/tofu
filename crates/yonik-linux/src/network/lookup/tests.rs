@@ -169,3 +169,67 @@ async fn cancellation_is_checked_before_socket_open() {
         Some(NetworkReadError::Cancelled)
     );
 }
+
+#[test]
+fn route_cache_info_is_preserved_as_known_metadata() {
+    let cache = vec![0; 32];
+    let mut bytes = response(1);
+    add_attribute(&mut bytes, 12, &cache);
+    let route = parse(&bytes).unwrap();
+    assert!(route.incomplete.is_empty());
+    assert_eq!(
+        route.attributes,
+        vec![NetworkAttribute {
+            kind: 12,
+            value: cache
+        }]
+    );
+}
+#[test]
+fn route_cache_unknown_shapes_flags_errors_and_duplicates_fail_closed() {
+    for (kind, length) in [(12, 31), (12, 33), (0x400c, 32), (0x800c, 32)] {
+        let mut bytes = response(1);
+        let cache = vec![0; length];
+        add_attribute(&mut bytes, kind, &cache);
+        let route = parse(&bytes).unwrap();
+        assert!(
+            route
+                .incomplete
+                .contains(&LookupIncomplete::UnknownAttributes)
+        );
+        assert_eq!(
+            route.attributes,
+            vec![NetworkAttribute { kind, value: cache }]
+        );
+    }
+    let mut bytes = response(1);
+    add_attribute(&mut bytes, 12, &[0; 32]);
+    add_attribute(&mut bytes, 0x400c, &[0; 32]);
+    assert_eq!(parse(&bytes).err(), Some(NetworkReadError::Malformed));
+    let mut bytes = response(1);
+    add_attribute(&mut bytes, 12, &[0; 32]);
+    add_attribute(&mut bytes, 222, &[1]);
+    assert!(
+        parse(&bytes)
+            .unwrap()
+            .incomplete
+            .contains(&LookupIncomplete::UnknownAttributes)
+    );
+}
+
+#[test]
+fn cached_route_error_is_not_a_usable_endpoint_path() {
+    let mut cache = vec![0; 32];
+    cache[12..16].copy_from_slice(&113u32.to_ne_bytes());
+    let mut bytes = response(1);
+    add_attribute(&mut bytes, 12, &cache);
+    let route = parse(&bytes).unwrap();
+    assert_eq!(route.incomplete, vec![LookupIncomplete::CachedError]);
+    assert_eq!(
+        route.attributes,
+        vec![NetworkAttribute {
+            kind: 12,
+            value: cache
+        }]
+    );
+}

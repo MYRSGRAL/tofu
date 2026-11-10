@@ -10,11 +10,21 @@ use std::net::IpAddr;
 #[path = "tun_topology_tests.rs"]
 mod tests;
 
-pub(crate) fn session_external_topology(
+#[cfg(test)]
+fn session_external_topology(
+    topology: LinuxTopology,
+    journal: &Journal,
+    tun_id: u64,
+    mtu: u16,
+) -> Result<LinuxTopology, TunError> {
+    session_external_topology_with_framing(topology, journal, tun_id, mtu, false)
+}
+pub(crate) fn session_external_topology_with_framing(
     mut topology: LinuxTopology,
     journal: &Journal,
     tun_id: u64,
     mtu: u16,
+    vnet_hdr: bool,
 ) -> Result<LinuxTopology, TunError> {
     if !(1280..=9000).contains(&mtu) {
         return Err(TunError::Invalid);
@@ -64,7 +74,7 @@ pub(crate) fn session_external_topology(
         || link.flags & 0x1091 != 0x1091
         || link.flags & !0x110d1 != 0
         || !matches!(link.operational_state, None | Some(0 | 2 | 6))
-        || !link_metadata(&link.unknown, journal.ownership().owner_uid())
+        || !link_metadata(&link.unknown, journal.ownership().owner_uid(), vnet_hdr)
     {
         return Err(TunError::Foreign);
     }
@@ -316,7 +326,26 @@ fn attributes(bytes: &[u8]) -> Option<Vec<(u16, &[u8])>> {
     }
     Some(result)
 }
-fn tun_info(bytes: &[u8], uid: u32) -> bool {
+pub(super) fn addrgen_none(link: &crate::LinuxLink) -> bool {
+    let Some(families) = link
+        .unknown
+        .iter()
+        .find(|a| a.kind == 26)
+        .and_then(|a| attributes(&a.value))
+    else {
+        return false;
+    };
+    families
+        .into_iter()
+        .find(|(kind, _)| *kind == 10)
+        .and_then(|(_, value)| attributes(value))
+        .is_some_and(|attrs| {
+            attrs
+                .into_iter()
+                .any(|(kind, value)| kind == 8 && value == [1])
+        })
+}
+fn tun_info(bytes: &[u8], uid: u32, vnet_hdr: bool) -> bool {
     let Some(attrs) = attributes(bytes) else {
         return false;
     };
@@ -338,9 +367,10 @@ fn tun_info(bytes: &[u8], uid: u32) -> bool {
                 for (key, value) in attrs {
                     let valid = match key {
                         1 => value == uid.to_ne_bytes(),
-                        3 => value == [1],         // IFF_TUN
-                        4 | 5 | 7 => value == [0], // NO_PI, без VNET_HDR/MULTI_QUEUE.
-                        6 => value == [1],         // persistent
+                        3 => value == [1],     // IFF_TUN
+                        4 | 7 => value == [0], // NO_PI, без MULTI_QUEUE.
+                        5 => value == [u8::from(vnet_hdr)],
+                        6 => value == [1], // persistent
                         8 => value == 1u32.to_ne_bytes(),
                         9 => value == 0u32.to_ne_bytes(),
                         _ => false,
@@ -381,7 +411,7 @@ fn family_metadata(bytes: &[u8]) -> bool {
         })
     })
 }
-fn link_metadata(attrs: &[crate::NetworkAttribute], uid: u32) -> bool {
+fn link_metadata(attrs: &[crate::NetworkAttribute], uid: u32, vnet_hdr: bool) -> bool {
     let mut seen = BTreeSet::new();
     attrs.iter().all(|a| {
         seen.insert(a.kind)
@@ -396,7 +426,7 @@ fn link_metadata(attrs: &[crate::NetworkAttribute], uid: u32) -> bool {
                 7 => a.value.len() == 96,
                 14 => a.value.len() == 32 && a.value.iter().all(|v| *v == 0),
                 17 | 39 => a.value == [0],
-                18 => tun_info(&a.value, uid),
+                18 => tun_info(&a.value, uid, vnet_hdr),
                 23 => matches!(a.value.len(), 192 | 200),
                 26 => family_metadata(&a.value),
                 27 | 30 | 61 => a.value == [0; 4], // group, promiscuity, allmulti

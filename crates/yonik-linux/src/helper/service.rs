@@ -26,6 +26,7 @@ const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.N
 #[serde(rename_all = "snake_case")]
 pub enum ProtectionState {
     NoManagedPolicy,
+    TunnelStarting,
     VerifiedRules,
     RecoveryRequired,
     Unknown,
@@ -40,6 +41,25 @@ pub enum ServiceError {
     Prepared(PreparedError),
     Unavailable,
     Cancelled,
+}
+pub(super) const STOP_WAIT_BOUND: Duration = Duration::from_secs(30);
+async fn wait_for_host<'a, H>(
+    host: &'a Mutex<H>,
+    cancel: &mut Cancellation,
+    bound: Duration,
+) -> Result<tokio::sync::MutexGuard<'a, H>, ServiceError> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(ServiceError::Cancelled),
+        result = tokio::time::timeout(bound, host.lock()) => result.map_err(|_| ServiceError::Prepared(PreparedError::Timeout)),
+    }
+}
+pub(super) fn busy_at(_stage: &str) -> ServiceError {
+    #[cfg(test)]
+    if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!("session busy stage={_stage}");
+    }
+    ServiceError::Busy
 }
 impl From<PreparedError> for ServiceError {
     fn from(error: PreparedError) -> Self {
@@ -61,16 +81,30 @@ impl ServiceError {
     fn code(self) -> &'static str {
         match self {
             Self::InvalidRequest => "invalid_request",
-            Self::Unsupported => "unsupported",
+            Self::Unsupported | Self::Prepared(PreparedError::Unsupported) => "unsupported",
             Self::Busy | Self::Prepared(PreparedError::Capacity) => "busy",
             Self::Authorization(_) | Self::Prepared(PreparedError::Authorization(_)) => {
                 "authorization"
             }
             Self::Prepared(PreparedError::InvalidHandle) => "invalid_handle",
             Self::Prepared(PreparedError::Stale) => "stale",
+            Self::Prepared(PreparedError::Timeout) => "timeout",
             Self::Cancelled | Self::Prepared(PreparedError::Cancelled) => "cancelled",
             Self::Prepared(_) | Self::Unavailable => "unavailable",
         }
+    }
+}
+
+/// Проверенные transport-поля; UID приходит только из доверенного D-Bus transport.
+/// JSON разбирается закрытым bounded контрактом до создания этого значения.
+pub struct SystemProfileRequest {
+    pub server: yonik_import::ServerIntent,
+    pub engine: yonik_engine::Engine,
+    pub kill_switch: bool,
+}
+impl std::fmt::Debug for SystemProfileRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SystemProfileRequest(<скрыто>)")
     }
 }
 
@@ -83,6 +117,14 @@ pub trait ProtectionHost: Send + 'static {
         allow_lan: bool,
         cancel: Cancellation,
     ) -> impl Future<Output = Result<(Self::Artifact, PreparedContext), ServiceError>> + Send;
+    fn prepare_profile(
+        &mut self,
+        _uid: u32,
+        _request: SystemProfileRequest,
+        _cancel: Cancellation,
+    ) -> impl Future<Output = Result<(Self::Artifact, PreparedContext), ServiceError>> + Send {
+        async { Err(ServiceError::Unsupported) }
+    }
     fn context(&self, uid: u32) -> Result<PreparedContext, ServiceError>;
     fn apply(
         &mut self,
@@ -114,6 +156,28 @@ struct PrepareRequest {
     mode: String,
     allow_lan: bool,
 }
+// Первый проход выбирает только закрытую схему; второй запрещает все лишние поля.
+#[derive(Deserialize)]
+struct PrepareRoute {
+    version: u32,
+    mode: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProfileEngine {
+    Xray,
+    SingBox,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfilePrepareRequest<'a> {
+    version: u32,
+    mode: String,
+    engine: ProfileEngine,
+    kill_switch: bool,
+    #[serde(borrow)]
+    server: &'a serde_json::value::RawValue,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ApplyRequest {
@@ -128,6 +192,7 @@ struct EmptyRequest {
 
 enum Request {
     Prepare(bool),
+    PrepareProfile(Box<SystemProfileRequest>),
     Apply(PreparedHandle),
     Stop,
     Unlock,
@@ -156,15 +221,47 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
         .map_err(|_| ServiceError::InvalidRequest)?;
     match header.member().map(|v| v.as_str()) {
         Some("Prepare") => {
-            let dto: PrepareRequest =
+            let route: PrepareRoute =
                 serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
-            if dto.version != 1 {
+            if route.version != 1 {
                 return Err(ServiceError::InvalidRequest);
             }
-            if dto.mode != "public_protection" || dto.allow_lan {
-                return Err(ServiceError::Unsupported);
+            match route.mode.as_str() {
+                "public_protection" => {
+                    let dto: PrepareRequest =
+                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                    if dto.version != 1 || dto.mode != "public_protection" {
+                        return Err(ServiceError::InvalidRequest);
+                    }
+                    if dto.allow_lan {
+                        return Err(ServiceError::Unsupported);
+                    }
+                    Ok(Request::Prepare(dto.allow_lan))
+                }
+                "system_profile" => {
+                    let dto: ProfilePrepareRequest<'_> =
+                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                    if dto.version != 1 || dto.mode != "system_profile" {
+                        return Err(ServiceError::InvalidRequest);
+                    }
+                    let server = yonik_import::ServerIntent::parse_json(dto.server.get()).map_err(
+                        |error| match error {
+                            yonik_import::IntentError::Unsupported => ServiceError::Unsupported,
+                            _ => ServiceError::InvalidRequest,
+                        },
+                    )?;
+                    let engine = match dto.engine {
+                        ProfileEngine::Xray => yonik_engine::Engine::Xray,
+                        ProfileEngine::SingBox => yonik_engine::Engine::SingBox,
+                    };
+                    Ok(Request::PrepareProfile(Box::new(SystemProfileRequest {
+                        server,
+                        engine,
+                        kill_switch: dto.kill_switch,
+                    })))
+                }
+                _ => Err(ServiceError::Unsupported),
             }
-            Ok(Request::Prepare(dto.allow_lan))
         }
         Some("Apply") => {
             let dto: ApplyRequest =
@@ -246,7 +343,7 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
                 if message.header().message_type() != Type::MethodCall { continue; }
                 let permit = match permits.clone().try_acquire_owned() {
                     Ok(permit) => permit,
-                    Err(_) => { send_result(&connection, &message, Err(ServiceError::Busy)).await; continue; }
+                    Err(_) => { send_result(&connection, &message, Err(busy_at("rpc_in_flight_capacity"))).await; continue; }
                 };
                 let broker = broker.clone(); let host = host.clone(); let child_cancel = worker_cancel.clone();
                 tasks.spawn(async move {
@@ -308,8 +405,25 @@ async fn dispatch<H: ProtectionHost>(
         Request::Prepare(allow_lan) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
-                    let mut host = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    let mut host = host.try_lock().map_err(|_| {
+                        let _ = busy_at("prepare_outer_host");
+                        PreparedError::Capacity
+                    })?;
                     host.prepare(uid, allow_lan, cancel.clone())
+                        .await
+                        .map_err(as_prepared)
+                })
+                .await?;
+            serde_json::json!({"version":1,"handle":handle.as_bytes()})
+        }
+        Request::PrepareProfile(request) => {
+            let handle = broker
+                .prepare(message, Prompt::Allow, cancel.clone(), || async {
+                    let mut host = host.try_lock().map_err(|_| {
+                        let _ = busy_at("prepare_outer_host");
+                        PreparedError::Capacity
+                    })?;
+                    host.prepare_profile(uid, *request, cancel.clone())
                         .await
                         .map_err(as_prepared)
                 })
@@ -320,7 +434,10 @@ async fn dispatch<H: ProtectionHost>(
             let mut guard = None;
             let artifact = broker
                 .claim_for_apply(message, handle, Prompt::Allow, cancel.clone(), || {
-                    let locked = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    let locked = host.try_lock().map_err(|_| {
+                        let _ = busy_at("apply_outer_host");
+                        PreparedError::Capacity
+                    })?;
                     let context = locked.context(uid).map_err(as_prepared)?;
                     guard = Some(locked);
                     Ok(context)
@@ -331,7 +448,7 @@ async fn dispatch<H: ProtectionHost>(
             serde_json::json!({"version":1,"state":state})
         }
         Request::State => {
-            let mut host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            let mut host = host.try_lock().map_err(|_| busy_at("state_outer_host"))?;
             let state = host.state(uid, cancel).await?;
             serde_json::json!({"version":1,"state":state})
         }
@@ -348,7 +465,7 @@ async fn dispatch<H: ProtectionHost>(
             if peer.uid() != uid {
                 return Err(ServiceError::Authorization(AuthorizationError::PeerGone));
             }
-            let mut host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            let mut host = wait_for_host(host, &mut cancel, STOP_WAIT_BOUND).await?;
             let state = if matches!(request, Request::Unlock) {
                 host.unlock(uid, cancel).await?
             } else {
@@ -368,6 +485,7 @@ fn as_prepared(error: ServiceError) -> PreparedError {
         ServiceError::Prepared(error) => error,
         ServiceError::Authorization(error) => PreparedError::Authorization(error),
         ServiceError::Busy => PreparedError::Capacity,
+        ServiceError::Unsupported => PreparedError::Unsupported,
         ServiceError::Cancelled => PreparedError::Cancelled,
         _ => PreparedError::Unavailable,
     }

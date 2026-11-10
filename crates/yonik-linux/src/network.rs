@@ -1,7 +1,15 @@
 //! Событийное наблюдение окружения. Не применяет маршруты, DNS или TUN.
 
 mod bus;
+mod equivalence;
+#[cfg(test)]
+pub(crate) use equivalence::diagnostic_class_matches;
+pub(crate) use equivalence::{
+    same_captured_kernel_route, same_captured_topology, same_external_topology,
+};
 mod lookup;
+pub(crate) use equivalence::RouteCapture;
+pub(crate) use lookup::lookup_route_captured;
 mod read;
 mod route;
 mod topology;
@@ -13,6 +21,7 @@ pub use topology::{
     IpPrefix, LinuxAddress, LinuxLink, LinuxNexthop, LinuxRoute, LinuxRule, LinuxTopology,
     NexthopMember, RouteNexthop, read_topology,
 };
+pub(crate) use topology::{TopologyCapture, read_topology_captured};
 
 use std::fmt;
 use tokio::sync::watch;

@@ -23,7 +23,7 @@ mod config;
 mod rule;
 #[path = "tun_topology.rs"]
 mod topology;
-pub(crate) use topology::session_external_topology;
+pub(crate) use topology::session_external_topology_with_framing;
 #[cfg(test)]
 #[path = "tun_session_tests.rs"]
 mod session_tests;
@@ -208,7 +208,7 @@ impl TunExecutor {
         })
     }
     #[cfg(test)]
-    fn isolated_fixture(owner: Ownership) -> Result<Self, TunError> {
+    pub(crate) fn isolated_fixture(owner: Ownership) -> Result<Self, TunError> {
         let netns = File::open("/proc/thread-self/ns/net").map_err(|_| TunError::Namespace)?;
         let actual = namespace(&netns)?;
         let host = std::env::var("YONIK_NFT_TEST_HOST_NETNS").map_err(|_| TunError::Namespace)?;
@@ -246,10 +246,23 @@ impl TunExecutor {
         }
         Ok(snapshot.links)
     }
+    #[cfg(test)]
     async fn create(&self, name_id: u32, lease: Arc<OperationLease>) -> Result<(), TunError> {
+        self.create_with_framing(name_id, false, lease).await
+    }
+    async fn create_with_framing(
+        &self,
+        name_id: u32,
+        vnet_hdr: bool,
+        lease: Arc<OperationLease>,
+    ) -> Result<(), TunError> {
         self.check_namespace()?;
+        let mut arguments = create_arguments(name_id, self.owner.owner_uid())?;
+        if vnet_hdr {
+            arguments.push("vnet_hdr".into());
+        }
         let child = Command::new(format!("/proc/self/fd/{}", self.executable.as_raw_fd()))
-            .args(create_arguments(name_id, self.owner.owner_uid())?)
+            .args(arguments)
             .env_clear()
             .current_dir("/")
             .stdin(Stdio::null())
@@ -265,6 +278,16 @@ impl TunExecutor {
         journal: &mut Journal,
         id: u64,
         name_id: u32,
+    ) -> Result<u32, TunError> {
+        self.ensure_tun_with_framing(journal, id, name_id, false)
+            .await
+    }
+    pub(crate) async fn ensure_tun_with_framing(
+        &mut self,
+        journal: &mut Journal,
+        id: u64,
+        name_id: u32,
+        vnet_hdr: bool,
     ) -> Result<u32, TunError> {
         let operation = lease().await?;
         self.check_namespace()?;
@@ -286,7 +309,8 @@ impl TunExecutor {
             journal.reconcile(self.owner, id, Reconciled::Owned)?;
             return Ok(index);
         }
-        self.create(name_id, Arc::clone(&operation)).await?;
+        self.create_with_framing(name_id, vnet_hdr, Arc::clone(&operation))
+            .await?;
         // Только successful create этого вызова разрешает отметить новый объект.
         // После crash его отсутствие alias не даёт права повторного присвоения.
         let links = self.links().await?;

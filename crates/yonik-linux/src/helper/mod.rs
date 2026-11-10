@@ -9,6 +9,7 @@ mod protection_host;
 mod session_network;
 pub use session_network::SessionNetworkPlan;
 mod systemd_worker;
+pub use protection_host::SystemProtectionHost as SystemSessionHost;
 pub use protection_host::{GuardArtifact, SystemProtectionHost};
 pub use systemd_worker::{
     SystemWorkerSupervisor, WorkerLiveness, WorkerSupervisorError, WorkerTicket,
@@ -352,4 +353,6 @@ async fn bounded<T>(
 mod tests;
 
 mod service;
-pub use service::{ProtectionHost, ProtectionState, ServiceError, run_system_service};
+pub use service::{
+    ProtectionHost, ProtectionState, ServiceError, SystemProfileRequest, run_system_service,
+};

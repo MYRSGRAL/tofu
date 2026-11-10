@@ -1,7 +1,7 @@
 use super::*;
 use crate::{LinuxLink, LinuxRoute, LinuxTopology, NetworkNamespace};
 
-fn link(index: u32, kind: Option<&[u8]>, loopback: bool) -> LinuxLink {
+pub(super) fn link(index: u32, kind: Option<&[u8]>, loopback: bool) -> LinuxLink {
     LinuxLink {
         index,
         link_type: if loopback { 772 } else { ARPHRD_ETHER },
@@ -111,6 +111,7 @@ async fn artifact_debug_hides_payload() {
     let artifact = GuardArtifact {
         bytes: b"fixture-private-value".to_vec(),
         stamp: monitor.watch().current().stamp,
+        session: None,
     };
     assert_eq!(format!("{artifact:?}"), "GuardArtifact(<скрыто>)");
     monitor.shutdown().await;
