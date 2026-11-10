@@ -1,0 +1,17 @@
+[
+  {
+    "name": "xray-26.10.31",
+    "url": "https://raw.githubusercontent.com/XTLS/Xray-core/v26.10.31/LICENSE",
+    "license_observed": "MPL-2.0",
+    "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+    "binary_composition": "unknown"
+  },
+  {
+    "name": "sing-box-c005f353",
+    "url": "https://raw.githubusercontent.com/SagerNet/sing-box/c005f35300ce76427dc285481ec5695f5b179cd2/LICENSE",
+    "license_observed": "GPL-3.0-or-later",
+    "sha256": "650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c",
+    "binary_composition": "unknown",
+    "additional_condition": "Ограничение использования имени и подразумеваемой связи; см. оригинал LICENSE, не SPDX exception"
+  }
+]

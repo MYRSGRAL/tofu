@@ -538,3 +538,33 @@ async fn cancellation_after_owner_replacement_still_targets_original_authority()
     let (result, ()) = tokio::join!(query, server);
     assert_eq!(result, Err(AuthorizationError::Cancelled));
 }
+
+#[test]
+fn system_polkit_account_is_closed_and_unambiguous() {
+    use super::parse_polkit_uid;
+    assert_eq!(
+        parse_polkit_uid(
+            "root:x:0:0:root:/root:/bin/sh\npolkitd:x:102:102:PolicyKit:/:/usr/bin/nologin\n"
+        ),
+        Ok(102)
+    );
+    assert_eq!(parse_polkit_uid("root:x:0:0:root:/root:/bin/sh\n"), Ok(0));
+    for bad in [
+        "polkitd:x:0:0::/:/bin/false",
+        "polkitd:x:1000:1000::/:/bin/false",
+        "polkitd:x:abc:102::/:/bin/false",
+        "polkitd:x:102:102::/:/bin/false\npolkitd:x:103:103::/:/bin/false",
+        "polkitd:x:102:102::/:/bin/false\nintruder:x:102:102::/:/bin/false",
+        "polkitd:x:102",
+    ] {
+        assert!(parse_polkit_uid(bad).is_err(), "{bad}");
+    }
+}
+#[test]
+fn polkit_account_lookup_failure_is_closed() {
+    assert!(
+        super::trusted_polkit_uid(std::path::Path::new("/nonexistent-yonik-polkit-passwd"))
+            .is_err()
+    );
+    assert!(super::trusted_polkit_uid(std::path::Path::new("/dev/null")).is_err());
+}

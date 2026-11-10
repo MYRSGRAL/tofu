@@ -119,6 +119,71 @@ impl PeerIdentity {
     }
 }
 
+// polkit использует отдельный системный аккаунт на современных дистрибутивах.
+// Источник фиксирован: клиент и окружение не выбирают доверенный UID.
+fn system_polkit_uid() -> Result<u32, AuthorizationError> {
+    trusted_polkit_uid(std::path::Path::new("/etc/passwd"))
+}
+fn trusted_polkit_uid(path: &std::path::Path) -> Result<u32, AuthorizationError> {
+    use std::{io::Read, os::unix::fs::MetadataExt};
+    const MAX_ACCOUNT_BYTES: u64 = 1024 * 1024;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|_| AuthorizationError::Unavailable)?;
+    let file = std::fs::File::from(fd);
+    let metadata = file
+        .metadata()
+        .map_err(|_| AuthorizationError::Unavailable)?;
+    if !metadata.is_file()
+        || metadata.uid() != 0
+        || metadata.mode() & 0o022 != 0
+        || metadata.nlink() != 1
+    {
+        return Err(AuthorizationError::UntrustedAuthority);
+    }
+    let mut contents = String::new();
+    file.take(MAX_ACCOUNT_BYTES + 1)
+        .read_to_string(&mut contents)
+        .map_err(|_| AuthorizationError::Unavailable)?;
+    if contents.len() as u64 > MAX_ACCOUNT_BYTES {
+        return Err(AuthorizationError::Unavailable);
+    }
+    parse_polkit_uid(&contents)
+}
+fn parse_polkit_uid(contents: &str) -> Result<u32, AuthorizationError> {
+    const MAX_SYSTEM_ACCOUNT_UID: u32 = 999;
+    let invalid = AuthorizationError::UntrustedAuthority;
+    let mut polkit_uid = None;
+    let mut uids = HashMap::new();
+    for line in contents.lines().filter(|line| !line.is_empty()) {
+        let fields: Vec<_> = line.splitn(8, ':').collect();
+        if fields.len() != 7 {
+            return Err(invalid);
+        }
+        let uid: u32 = fields[2].parse().map_err(|_| invalid)?;
+        *uids.entry(uid).or_insert(0usize) += 1;
+        if fields[0] == "polkitd" {
+            // Поддерживаем отдельный системный UID Linux; иное требует явной настройки поставки.
+            if polkit_uid.is_some() || !(1..=MAX_SYSTEM_ACCOUNT_UID).contains(&uid) {
+                return Err(invalid);
+            }
+            polkit_uid = Some(uid);
+        }
+    }
+    match polkit_uid {
+        Some(uid) if uids.get(&uid) == Some(&1) => Ok(uid),
+        Some(_) => Err(invalid),
+        // Старые поставки запускают authority от root без отдельного аккаунта.
+        None => Ok(0),
+    }
+}
+
 /// Один экземпляр на helper server: общий предел одновременно выполняемых проверок.
 /// Конструктор не читает DBUS_SYSTEM_BUS_ADDRESS и не использует session bus.
 pub struct PeerAuthorizer {
@@ -140,7 +205,7 @@ impl PeerAuthorizer {
         .await?;
         Ok(Self {
             connection,
-            expected_authority_uid: 0,
+            expected_authority_uid: system_polkit_uid()?,
             checks: Semaphore::new(MAX_CHECKS),
             noninteractive_timeout: SETUP_TIMEOUT,
             interactive_timeout: INTERACTIVE_TIMEOUT,
@@ -172,7 +237,8 @@ impl PeerAuthorizer {
         let (uid, owner) = bounded(&mut cancel, setup_deadline(deadline), async {
             let uid = self.uid(&sender).await?;
             let owner = self.owner().await?;
-            if self.uid(&owner).await? != self.expected_authority_uid {
+            let authority_uid = self.uid(&owner).await?;
+            if authority_uid != 0 && authority_uid != self.expected_authority_uid {
                 return Err(AuthorizationError::UntrustedAuthority);
             }
             Ok((uid, owner))

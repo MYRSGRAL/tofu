@@ -42,6 +42,8 @@ fetch-контракт не изменён. Смена источника/revisi
 
 Итог интеграции и сквозные runtime gates: [integrated.md](integrated.md).
 
+Combined merge актуального main: [main-merge.md](main-merge.md).
+
 ## Границы первоначального среза
 
 Нет нового end-to-end batch-прогона на 10 000 сетевых целей и нового batch-теста

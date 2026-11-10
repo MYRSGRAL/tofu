@@ -75,3 +75,6 @@ pub use subscription_policy::{system_subscription_policy, system_subscription_po
 
 #[cfg(all(target_os = "linux", feature = "test-support"))]
 pub mod policy_test_support;
+
+#[cfg(target_os = "linux")]
+pub mod system_client;
