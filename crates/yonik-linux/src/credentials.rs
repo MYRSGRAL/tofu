@@ -1,5 +1,6 @@
 //! Ключи snapshot остаются в Secret Service; plaintext fallback отсутствует.
 
+use futures_util::FutureExt;
 use secret_service::{EncryptionType, SecretService};
 use std::{
     collections::HashMap,
@@ -94,6 +95,18 @@ fn creation_lock() -> Result<File, CredentialError> {
     Ok(directory)
 }
 
+fn secret_error(error: secret_service::Error) -> CredentialError {
+    match error {
+        secret_service::Error::Locked => CredentialError::Locked,
+        secret_service::Error::Zbus(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "org.freedesktop.Secret.Error.IsLocked" =>
+        {
+            CredentialError::Locked
+        }
+        _ => CredentialError::Unavailable,
+    }
+}
+
 async fn load_key(allow_create: bool) -> Result<Zeroizing<[u8; 32]>, CredentialError> {
     let service = SecretService::connect(EncryptionType::Dh)
         .await
@@ -117,9 +130,13 @@ async fn load_key(allow_create: bool) -> Result<Zeroizing<[u8; 32]>, CredentialE
     }
     if let Some(item) = found.unlocked.first() {
         let secret = Zeroizing::new(
-            item.get_secret()
+            // secret-service 4.0.0 паникует при неверной длине IV от сервиса.
+            // Ограничиваем перехват декодированием ответа, не меняя panic hook.
+            std::panic::AssertUnwindSafe(item.get_secret())
+                .catch_unwind()
                 .await
-                .map_err(|_| CredentialError::Unavailable)?,
+                .map_err(|_| CredentialError::Unavailable)?
+                .map_err(secret_error)?,
         );
         let bytes: [u8; 32] = secret
             .as_slice()
