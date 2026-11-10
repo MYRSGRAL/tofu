@@ -11,3 +11,5 @@ pub use backend::{DesktopError, DesktopHost, HostConfig};
 mod preferences;
 
 pub mod editor;
+
+pub mod diagnostics;

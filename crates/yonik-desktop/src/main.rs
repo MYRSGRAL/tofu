@@ -101,6 +101,16 @@ mod bridge_impl {
             }
         }
 
+        pub fn copy_diagnostics(self: Pin<&mut Self>) -> bool {
+            let Some(metadata) =
+                yonik_desktop::diagnostics::export_snapshot(&self.snapshot_json().to_string())
+            else {
+                return false;
+            };
+            ffi::copy_diagnostic_metadata(&QString::from(&metadata));
+            true
+        }
+
         pub fn shutdown(self: Pin<&mut Self>) {
             if let Some(host) = self.host.as_ref() {
                 host.shutdown();

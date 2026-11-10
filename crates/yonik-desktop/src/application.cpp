@@ -3,6 +3,7 @@
 #include "yonik-desktop/src/bridge.cxxqt.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDir>
@@ -35,6 +36,11 @@
 #include <unistd.h>
 
 namespace yonik {
+void copy_diagnostic_metadata(const QString& value)
+{
+    QGuiApplication::clipboard()->setText(value, QClipboard::Clipboard);
+}
+
 QIcon statusIcon(const QString& status)
 {
     static const QIcon brand(QStringLiteral(":/icons/yonik.svg"));
