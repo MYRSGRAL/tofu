@@ -40,3 +40,6 @@ workspace = true
 [[bin]]
 name = "yonik-worker"
 path = "src/worker_main.rs"
+
+[features]
+test-support = []

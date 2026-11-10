@@ -18,9 +18,9 @@ use std::{
 use yonik_desktop::{DesktopHost, HostConfig};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
-struct Directory(PathBuf);
+pub(crate) struct Directory(pub(crate) PathBuf);
 impl Directory {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
             "yonik-desktop-test-{}-{}",
             std::process::id(),
@@ -32,7 +32,7 @@ impl Directory {
             .expect("собственный каталог");
         Self(path)
     }
-    fn config(&self) -> HostConfig {
+    pub(crate) fn config(&self) -> HostConfig {
         HostConfig::new(self.0.clone(), self.0.join("engines")).with_ephemeral_key([77; 32])
     }
 }
@@ -41,13 +41,13 @@ impl Drop for Directory {
         fs::remove_dir_all(&self.0).expect("очистка только своего тестового каталога");
     }
 }
-struct Harness {
-    host: DesktopHost,
+pub(crate) struct Harness {
+    pub(crate) host: DesktopHost,
     receiver: mpsc::Receiver<String>,
     snapshots: Vec<String>,
 }
 impl Harness {
-    fn new(config: HostConfig) -> Self {
+    pub(crate) fn new(config: HostConfig) -> Self {
         Self::with_hook(config, |_| {})
     }
     fn with_hook(config: HostConfig, hook: impl Fn(&str) + Send + Sync + 'static) -> Self {
@@ -63,7 +63,7 @@ impl Harness {
             snapshots: Vec::new(),
         }
     }
-    fn wait(&mut self, predicate: impl Fn(&Value) -> bool) -> Value {
+    pub(crate) fn wait(&mut self, predicate: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = self
@@ -77,10 +77,10 @@ impl Harness {
             }
         }
     }
-    fn send(&self, command: Value) {
+    pub(crate) fn send(&self, command: Value) {
         self.host.dispatch(&command.to_string()).expect("команда");
     }
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.host.shutdown();
         self.wait(|value| value["closed"] == true);
         assert!(self.host.wait_closed(Duration::from_secs(2)));
@@ -1343,7 +1343,7 @@ fn damaged_preferences_notify_and_survive_settings_commands() {
 }
 
 // Старые integration-сценарии явно создают overdue metadata вместо ожидания суток.
-fn сделать_overdue(dir: &Directory) {
+pub(crate) fn сделать_overdue(dir: &Directory) {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -1660,6 +1660,3 @@ fn p2_ручной_b_не_пересекается_с_плановым_a_и_не
     app.close();
     server.join().unwrap();
 }
-
-#[path = "support/p10_e2e.rs"]
-mod p10_e2e;

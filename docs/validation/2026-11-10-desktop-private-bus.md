@@ -1,79 +1,97 @@
-# P10: DesktopHost и private system bus
+# P10: DesktopHost и private system bus, исправление PR60 P2
 
-База: `b6d2891fbdbafc001ba9908dff33f11aa7714576` (HEAD подготовленного worktree).
-P10 целиком не закрывается. FR-06 и performance прочитаны вместе с отчётами
-scheduler, policy review и persisted due. helper/network/session не изменялись.
+Исходная база P10: `b6d2891fbdbafc001ba9908dff33f11aa7714576`.
+База исправления PR60: `8945aa5a99b97804ad0d2b8e5319317a9d47521c`.
+Предыдущая версия отчёта переоценивала barriers и cleanup: Python ack означал
+отправку сигнала, а kill только test subprocess оставлял descendants и child DB.
+Эти результаты заменены описанной ниже приёмкой. P10 целиком не закрывается.
 
-`backend::p10_e2e::private_bus_desktop_gate` запускает отдельный subprocess
-текущего Rust test binary. Только этому subprocess передаётся собственный
-DBUS_SYSTEM_BUS_ADDRESS. Fake NM/UPower/PPD работают через существующий Python
-PyGObject/Gio, настоящий dbus-daemon и Properties/GetAll/PropertiesChanged/
-NameOwnerChanged. Нужны установленные dbus-daemon и Python с gi; тест не
-устанавливает пакеты и не пропускается молча при их отсутствии. Новых Cargo
-зависимостей нет. Все fetch направлены на собственный loopback listener;
-encrypted SQLite и ключ [77;32] эфемерны. Глобальное окружение не меняется.
-Штатный NetworkMonitor DesktopHost остаётся включённым: он читает netlink ОС,
-но system bus направлен на fixture, host network не перенастраивается.
+`cargo test -p yonik-desktop --test p10_gate` — исполняемый harness=false binary,
+не ignored. В штатном CI `cargo +1.85.1 test --workspace --locked` запускает его.
+Существующий Rust CI уже устанавливает dbus-daemon; workflow не менялся.
+Python/PyGObject fixture удалена полностью. Rust fake NM/UPower/PPD находится
+в yonik-linux::policy_test_support, доступен только с feature test-support,
+которую desktop подключает через dev-features существующего path dependency.
+Новых crates/версий/разрешённых зависимостей нет. В production default fake API
+не экспортируется. Штатный policy provider, owner fencing/backoff, explicit
+policy override и default ephemeral guard не менялись.
 
-Единственное production изменение — доверенный builder
-HostConfig::with_system_subscription_policy(bool). Его вызывают после
-with_ephemeral_key: последний по-прежнему отключает provider по умолчанию.
-GUI JSON не получает настройки policy; set_subscription_policy и приоритет
-explicit override не менялись. Новый тест не вызывает set_subscription_policy.
+Parent создаёт единственное собственное временное дерево, назначает worker
+его cwd и собственный DBUS_SYSTEM_BUS_ADDRESS. Child не использует inherited
+YONIK_* flags/path, не выбирает и не удаляет чужое дерево. Parent удаляет свой
+каталог после завершения всей собственной process group. Worker, dbus-daemon
+и потомки находятся в отдельной group. Только отдельный harness становится
+subreaper: TERM, 300 мс grace, затем KILL и bounded reap через waitpgid своей
+pgid; общий deadline worker 45 секунд. Pipe reader завершается после уничтожения
+всех group writers. Daemon ready ограничен 3 секундами; zbus fixture operations
+3 секундами; observer 8 секундами. Неограниченных ack/clients/read ожиданий нет.
 
-RED: компиляция нового gate завершилась E0599 — builder отсутствовал.
-Первый GREEN прошёл; затем сценарий усилен двумя реальными fetch.
+Регрессия timeout запускает worker, реальную encrypted DB и dbus-daemon,
+потомка sleep, игнорирующего TERM, и зависает до ready. Parent получает marker
+создания ресурсов, через 2 секунды завершает group, reaps descendants, проверяет
+ESRCH для pgid и отсутствие своего дерева/DB. Временные пути создаёт сам parent;
+child не принимает произвольные cleanup paths из окружения.
 
-Проверяемые сценарии:
+Trusted HostConfig observer получает копию effective scheduler policy и признак
+успешной загрузки persisted schedule в начале рабочей итерации DesktopHost.
+Observer не меняет policy, GUI JSON его не настраивает. Все negative проверки
+стартуют после exact healthy hidden + loaded, затем ждут exact target policy и
+visibility. Сигнал fake provider сам по себе barrier не является.
 
-- Startup: настоящий provider получает unknown metered=0 через GetAll;
-  видимый DesktopHost не делает запрос. Subscribe-before-snapshot и отмена
-  старого GetAll при racing PropertiesChanged отдельно проверяются существующим
-  private-bus regression в yonik-linux, который входит в релевантный прогон.
-- Metered=1 и power-saver с unmetered=2 блокируют новые запросы.
-- ReleaseName NM блокирует запрос; RequestName возвращает владельца;
-  balanced/unmetered при hidden продолжает блокировать запрос.
-- Переход visible после reacquire допускает настоящий FetchHost HTTP request.
-  До approve total=0; после approve total=1.
-- Второй DesktopHost с подготовленным overdue переживает kill/wait daemon.
-  Во время outage запросов нет, ожидание пересекает первую секундную retry;
-  daemon запускается на прежнем socket path, сервисы регистрируются заново.
-  После восстановления visible допускает второй fetch и review/approval.
-- shutdown/wait_closed завершаются; ListNames private bus после каждого
-  shutdown содержит ровно одно уникальное имя — сам fake provider. Клиентские
-  соединения и связанные bus subscriptions больше не существуют.
-- Reopen той же encrypted DB с future persisted due, healthy provider и visible
-  не создаёт повторный запрос; повторный shutdown также оставляет одного клиента.
+Проверены:
 
-Граница clock: overdue подготавливается существующим persist_schedule API
-между закрытыми DesktopHost. Рабочий DesktopHost использует настоящий clock;
-будущий due после completion проверяется коротким окном наблюдения. Сутки
-не проматываются. Расчёт rollback/remaining/full backoff 1..30 и healthy reset
-подтверждают прежние детерминированные тесты, а данный интеграционный сценарий
-проверяет реальный outage/recovery, без измерения всех retry интервалов.
-Отрицательные проверки наблюдают listener 350 мс после 200 мс settling события;
-это ограниченное окно регрессии, а не доказательство энергетического idle.
-Qt/Wayland, реальная батарея, suspend/resume, PSS/CPU/wakeups/энергозамеры,
-Android и полная приёмка P10 этим отчётом не заявляются.
+- healthy startup GetAll → effective online/unmetered/balanced + loaded;
+- unknown metered=0, metered=1, power-saver при visible запрещают fetch;
+- hidden при healthy запрещает fetch;
+- NM owner loss даёт default forbidden, reacquire возвращает healthy;
+- visible healthy после reacquire допускает реальный loopback FetchHost;
+- review сохраняет прежний total, approve публикует новый snapshot;
+- новый DesktopHost переживает kill daemon, запрещает fetch в outage, затем
+  восстанавливает healthy после daemon restart и выполняет второй fetch/review;
+- shutdown/wait_closed и ListNames оставляют только fake provider, без клиентов;
+- reopen той же encrypted DB ждёт healthy+visible+loaded до проверки отсутствия
+  повторного fetch с будущим due.
 
-Сырые RED/GREEN/validation logs вне git и TTL:
-`/home/myrs/.local/state/codex-evidence/yonik-p10-e2e`.
-Rust 1.85.1, jobs=2, target в собственном transient root под BSD flock.
+Deliberate delayed GetAll удерживается 600 мс и для unknown negative, и для
+reopen. Отдельный waiter exact policy не завершается до освобождения GetAll;
+после освобождения подтверждает applied state, только затем проверяется absence.
+150 мс после barrier — окно наблюдения listener, не замена обработки события.
+Fake fixture/worker запускаются с PATH, содержащим только dbus-daemon/sh/sleep;
+python/python3 отсутствуют, а полный gate проходит.
 
-Итоговые проверки кандидата:
+Три mutation RED с последующим GREEN сохранены вне git:
+
+- orphan: воспроизведён прежний kill только leader; pgid всё ещё существует,
+  assertion fails. Перед failure исправленный group cleanup убирает все ресурсы.
+- barrier: reopen принимает первое initial-unknown observation вместо exact
+  healthy; delayed GetAll regression падает до освобождения снимка.
+- dependency: прежний обязательный Python launch в PATH без Python падает ENOENT;
+  Rust/zbus replacement работает в том же restricted PATH.
+
+Clock: overdue готовится существующим persist_schedule API между закрытыми
+hosts; рабочий clock не подменяется. Reopen не ждёт сутки. Полный backoff 1..30
+и healthy reset покрыты прежними unit tests, gate пересекает первую retry при
+реальном outage. Subscribe-before-snapshot race покрыта прежним private-bus
+provider regression в релевантном прогоне. Qt/Wayland, suspend/resume, батарея,
+энергия/PSS/CPU/wakeups и полная P10 приёмка остаются открытыми.
+Штатный NetworkMonitor читает netlink, сеть ОС не меняется; system bus направлен
+на fixture. Keyring/helper/session/network code не менялись.
+
+Evidence вне git/TTL: `/home/myrs/.local/state/codex-evidence/yonik-p10-p2`.
+Cargo: Rust 1.85.1, jobs=2, собственный transient root под BSD flock.
+
+Финальная проверка исправления:
 
 - `cargo +1.85.1 test -p yonik-desktop -p yonik-linux -p yonik-subscription`:
-  440 passed, 0 failed, 24 ignored; отдельный вывод child gate не считается дважды.
+  439 passed, 0 failed, 24 ignored + отдельный p10_gate exit 0.
+- `cargo +1.85.1 test -p yonik-desktop --test p10_gate --locked`: exit 0,
+  повторён после последнего уточнения wait в hang fixture.
 - `cargo +1.85.1 clippy --workspace --all-targets -- -D warnings`: exit 0.
+  Первый clippy потребовал явный wait в намеренно зависающей fixture; worker
+  теперь ждёт ребёнка, а parent timeout всё так же завершает и reaps group.
 - `cargo +1.85.1 fmt --all -- --check`, `git diff --check`: exit 0.
-- Python fixture: compile и фактическое выполнение прошли; ruff отсутствует,
-  пакеты не устанавливались. Gio сообщает existing API deprecation warning.
-- Промежуточный усиленный сценарий выявил неверное ожидание fixture total=0
-  во втором review после первого approval; исправлено на previous_total=1.
-  Это не production finding. Остальных production fixes не потребовалось.
-- Cargo.lock восстановлен после проверки семантического равенства TOML
-  (Cargo изменял только порядок). Generated logs/archives не входят в git.
-- После окончания Cargo/test процессов lsof не нашёл открытых файлов target;
-  штатный cargo clean выполнен, собственный transient root удалён.
+- Cargo.lock семантически совпадает с базой и восстановлен без перестановок.
+- После завершения проверок lsof не нашёл открытых файлов собственного target;
+  cargo clean выполнен, собственный transient root удалён. Evidence сохранены.
 
-Независимый review и CI не подменяются этими локальными проверками.
+Независимый delta review назначает root; CI результаты не подменяются локальными.

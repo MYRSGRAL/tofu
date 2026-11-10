@@ -41,3 +41,11 @@ cxx-gen = { version = "=0.7.176", optional = true }
 # Backend запрещает unsafe в lib.rs; binary разрешает только generated FFI.
 [lints.rust]
 unsafe_code = "deny"
+
+[dev-dependencies]
+yonik-linux = { path = "../yonik-linux", features = ["test-support"] }
+
+[[test]]
+name = "p10_gate"
+path = "tests/p10_gate.rs"
+harness = false
