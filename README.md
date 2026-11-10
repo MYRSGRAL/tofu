@@ -296,6 +296,12 @@ provided, but it is not installed or wired to the GUI. System TUN and live
 reconciliation remain open; LAN is explicitly unsupported until then.
 [Service contract and evidence](docs/specs/helper-service.md).
 
+A typed persistent TUN executor now records intent, verifies a full ownership
+alias and cleans up by ifindex. Both pinned engines and the adapted sing-box
+pass the single-queue traffic/lifecycle fixture; multi-queue is unsupported.
+Routes, DNS and service/GUI session wiring remain open.
+[Owned TUN contract and evidence](docs/specs/helper-owned-tun.md).
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses

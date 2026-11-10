@@ -14,10 +14,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Разместить сборку вне checkout
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/yonik-target" >> "$GITHUB_ENV"
-      - name: Установить SQLite и частный D-Bus для тестов
+      - name: Установить SQLite, D-Bus и сетевые тестовые инструменты
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libsqlite3-dev pkg-config dbus-daemon
+          sudo apt-get install --yes --no-install-recommends libsqlite3-dev pkg-config dbus-daemon iproute2 nftables
+      - name: Подготовить Arch-пути только для namespace fixtures Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          for yonik_tool in ip nft; do
+            if [[ ! -e "/usr/bin/$yonik_tool" ]]; then
+              test -x "/usr/sbin/$yonik_tool"
+              sudo ln --symbolic "/usr/sbin/$yonik_tool" "/usr/bin/$yonik_tool"
+            fi
+          done
       - name: Установить Rust и проверки
         run: rustup toolchain install 1.85.1 --profile minimal --component rustfmt --component clippy
       - name: Проверить форматирование
@@ -28,6 +38,15 @@ jobs:
         run: cargo +1.85.1 clippy --workspace --all-targets --locked -- -D warnings
       - name: Выполнить тесты
         run: cargo +1.85.1 test --workspace --locked
+      - name: Проверить настоящие TUN, firewall и recovery в отдельных namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.85.1 test -p yonik-linux --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/yonik-network-tests.jsonl"
+          yonik_network_test="$(python3 -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="yonik_linux" and r.get("profile",{}).get("test") and r.get("executable")]; assert len(paths)==1, paths; print(paths[0])' "$RUNNER_TEMP/yonik-network-tests.jsonl")"
+          for yonik_case in owned-tun public-block durable-policy service; do
+            sudo /usr/bin/python3 tools/managed_network_smoke.py "$yonik_network_test" --case "$yonik_case"
+          done
       - name: Проверить пакет из 10000 TCP-серий на loopback
         run: cargo +1.85.1 test -p yonik-linux --lib --locked -- --ignored --exact tcp_batch::tests::ten_thousand_loopback_series
       - name: Собрать release
@@ -83,6 +102,17 @@ jobs:
           flock -s "$yonik_native_root" go -C "$yonik_native_root/build-source-sing-box" test -mod=readonly ./adapter ./common/dialer ./dns ./route ./route/rule ./protocol/direct ./option
           flock -s "$yonik_native_root" go -C "$yonik_native_root/build-source-sing-box" test -mod=readonly -race ./adapter ./common/dialer ./dns ./route ./route/rule ./protocol/direct ./option -count=1
           flock -s "$yonik_native_root" git -C "$yonik_native_root/build-source-sing-box" diff --exit-code -- go.mod go.sum
+      - name: Проверить persistent TUN адаптированного sing-box
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends iproute2
+          if [ ! -e /usr/bin/ip ]; then
+            test -x /usr/sbin/ip
+            sudo ln --symbolic /usr/sbin/ip /usr/bin/ip
+          fi
+          sudo flock -s "$RUNNER_TEMP/yonik-native-adapter" /usr/bin/python3 tools/owned_tun_smoke.py sing-box "$RUNNER_TEMP/yonik-native-artifact/sing-box"
   desktop:
     runs-on: ubuntu-latest
     env:

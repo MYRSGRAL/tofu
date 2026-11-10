@@ -25,6 +25,8 @@ pub struct LinuxLink {
     pub link_type: u16,
     pub flags: u32,
     pub name: Vec<u8>,
+    /// IFLA_IFALIAS не является секретом, но Debug его не раскрывает.
+    pub alias: Option<Vec<u8>>,
     pub mtu: Option<u32>,
     pub master: Option<u32>,
     pub parent: Option<u32>,
@@ -329,6 +331,7 @@ pub(super) fn parse_link(bytes: &[u8]) -> Result<LinuxLink, Error> {
     }
     let mut a = Attrs::new(&bytes[16..])?;
     let name = a.name(3)?.ok_or(Error::Malformed)?;
+    let alias = a.take(20).map(link_alias).transpose()?;
     let mtu = a.u32(4)?;
     let master = a.u32(10)?;
     let parent = a.u32(5)?;
@@ -368,6 +371,7 @@ pub(super) fn parse_link(bytes: &[u8]) -> Result<LinuxLink, Error> {
         link_type: read::u16_value(&h[2..4])?,
         flags: read::u32_value(&h[8..12])?,
         name,
+        alias,
         mtu,
         master,
         parent,
@@ -375,6 +379,17 @@ pub(super) fn parse_link(bytes: &[u8]) -> Result<LinuxLink, Error> {
         operational_state,
         unknown,
     })
+}
+fn link_alias(value: &[u8]) -> Result<Vec<u8>, Error> {
+    // IFALIASZ=256 из Linux uapi/linux/if.h; dump включает завершающий NUL.
+    if value.is_empty()
+        || value.len() > 256
+        || value.last() != Some(&0)
+        || value[..value.len() - 1].contains(&0)
+    {
+        return Err(Error::Malformed);
+    }
+    Ok(value[..value.len() - 1].to_vec())
 }
 pub(super) fn parse_address(bytes: &[u8]) -> Result<LinuxAddress, Error> {
     let h = header(bytes, 8)?;
