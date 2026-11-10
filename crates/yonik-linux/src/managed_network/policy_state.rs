@@ -410,11 +410,12 @@ mod tests {
         legacy["version"] = 1.into();
         legacy.as_object_mut().unwrap().remove("public_policy");
         legacy.as_object_mut().unwrap().remove("policy_sequence");
+        legacy.as_object_mut().unwrap().remove("session_recovery");
         fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
         let mut journal = area.open();
         let migrated: serde_json::Value =
             serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-        assert_eq!(migrated["version"], 2);
+        assert_eq!(migrated["version"], 3);
         journal
             .begin_public_policy(owner(), 7, 9, policy(2))
             .unwrap();

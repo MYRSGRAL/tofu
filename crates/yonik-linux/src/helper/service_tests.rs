@@ -57,6 +57,7 @@ impl PreparedArtifact for Artifact {
 }
 struct Host {
     effects: Arc<AtomicUsize>,
+    profile_prepares: Arc<AtomicUsize>,
     generation: Arc<AtomicUsize>,
 }
 impl ProtectionHost for Host {
@@ -68,6 +69,20 @@ impl ProtectionHost for Host {
         _: Cancellation,
     ) -> Result<(Artifact, PreparedContext), ServiceError> {
         Ok((Artifact, self.context(0)?))
+    }
+    async fn prepare_profile(
+        &mut self,
+        uid: u32,
+        request: SystemProfileRequest,
+        _: Cancellation,
+    ) -> Result<(Artifact, PreparedContext), ServiceError> {
+        assert_eq!(uid, rustix::process::getuid().as_raw());
+        assert_eq!(request.engine, yonik_engine::Engine::Xray);
+        assert!(request.kill_switch);
+        let server = request.server.into_server().unwrap();
+        assert_eq!(server.endpoint().host(), "192.0.2.1");
+        self.profile_prepares.fetch_add(1, Ordering::SeqCst);
+        Ok((Artifact, self.context(uid)?))
     }
     fn context(&self, _: u32) -> Result<PreparedContext, ServiceError> {
         Ok(PreparedContext::new(
@@ -124,6 +139,7 @@ impl Fixture {
         let generation = Arc::new(AtomicUsize::new(1));
         let host = Host {
             effects: effects.clone(),
+            profile_prepares: Arc::new(AtomicUsize::new(0)),
             generation: generation.clone(),
         };
         Self::with_host(host, effects, generation).await
@@ -404,3 +420,132 @@ async fn pending_authorization_does_not_lock_host_state() {
         f.shutdown().await;
     }
 }
+
+fn profile_frame() -> String {
+    let imported = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@192.0.2.1:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    serde_json::json!({"version":1,"mode":"system_profile","engine":"xray","kill_switch":true,"server":yonik_import::ServerIntent::from_server(&imported.servers[0]).unwrap()}).to_string()
+}
+fn prepare_message(json: &str) -> Message {
+    Message::method(SERVICE_PATH, "Prepare")
+        .unwrap()
+        .interface(SERVICE_INTERFACE)
+        .unwrap()
+        .build(&(json,))
+        .unwrap()
+}
+#[test]
+fn typed_profile_prepare_uses_closed_bounded_server_frame() {
+    let json = profile_frame();
+    assert!(parse(&prepare_message(&json)).is_ok());
+    for key in [
+        "uid",
+        "unit",
+        "argv",
+        "environment",
+        "tun_id",
+        "mark",
+        "table",
+        "raw_config",
+    ] {
+        let mut payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        payload[key] = serde_json::json!("forbidden");
+        assert!(
+            parse(&prepare_message(&payload.to_string())).is_err(),
+            "{key}"
+        );
+    }
+    assert!(parse(&prepare_message(&json.replacen("{", r#"{"version":1,"#, 1))).is_err());
+    let mut payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+    payload["engine"] = serde_json::json!("arbitrary");
+    assert!(parse(&prepare_message(&payload.to_string())).is_err());
+    payload["engine"] = serde_json::json!("sing-box");
+    payload["server"]["credentials"]["uuid"] = serde_json::json!(123456789);
+    let error = parse(&prepare_message(&payload.to_string())).err().unwrap();
+    assert!(!format!("{error:?} {error}").contains("123456789"));
+}
+
+#[tokio::test]
+async fn profile_prepare_and_apply_require_fresh_auth_same_peer_and_generation() {
+    let effects = Arc::new(AtomicUsize::new(0));
+    let generation = Arc::new(AtomicUsize::new(1));
+    let prepares = Arc::new(AtomicUsize::new(0));
+    let host = Host {
+        effects: effects.clone(),
+        generation: generation.clone(),
+        profile_prepares: prepares.clone(),
+    };
+    let f = Fixture::with_host(host, effects.clone(), generation.clone()).await;
+    let request = profile_frame();
+    f.allowed.store(false, Ordering::SeqCst);
+    assert!(f.call("Prepare", &request).await.is_err());
+    assert_eq!(prepares.load(Ordering::SeqCst), 0);
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    f.allowed.store(true, Ordering::SeqCst);
+    let prepared = f.call("Prepare", &request).await.unwrap();
+    assert_eq!(prepares.load(Ordering::SeqCst), 1);
+    let apply = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    let other = f._bus.connect().await;
+    assert!(
+        other
+            .call_method(
+                Some(SERVICE_NAME),
+                SERVICE_PATH,
+                Some(SERVICE_INTERFACE),
+                "Apply",
+                &(apply.as_str(),)
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    generation.store(2, Ordering::SeqCst);
+    assert!(f.call("Apply", &apply).await.is_err());
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    let prepared = f.call("Prepare", &request).await.unwrap();
+    let apply = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    f.allowed.store(false, Ordering::SeqCst);
+    assert!(f.call("Apply", &apply).await.is_err());
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    f.allowed.store(true, Ordering::SeqCst);
+    let prepared = f.call("Prepare", &request).await.unwrap();
+    let apply = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    f.call("Apply", &apply).await.unwrap();
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert!(f.call("Apply", &apply).await.is_err());
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert_eq!(prepares.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        f.call("Capabilities", r#"{"version":1}"#).await.unwrap()["system_tun"],
+        false
+    );
+    f.shutdown().await;
+}
+#[tokio::test]
+async fn malformed_profile_frame_is_rejected_before_authorization_or_host() {
+    let f = Fixture::new().await;
+    let original = profile_frame();
+    for request in [
+        original.replacen("{", r#"{"uid":0,"#, 1),
+        original.replacen(r#""host":"#, r#""host":"malicious","host":"#, 1),
+        " ".repeat(MAX_WIRE_BYTES) + &original,
+    ] {
+        assert!(f.call("Prepare", &request).await.is_err());
+    }
+    assert_eq!(f.checks.load(Ordering::SeqCst), 0);
+    assert_eq!(f.effects.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        as_prepared(ServiceError::Unsupported),
+        PreparedError::Unsupported
+    );
+    assert_eq!(
+        ServiceError::Prepared(PreparedError::Unsupported).code(),
+        "unsupported"
+    );
+    f.shutdown().await;
+}
+
+#[path = "installed_session_tests.rs"]
+mod installed_session;

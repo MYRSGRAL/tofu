@@ -4,7 +4,7 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     use yonik_linux::{
         Cancellation,
-        helper::{SystemProtectionHost, fence::verify_worker_fence, run_system_service},
+        helper::{SystemSessionHost, fence::verify_worker_fence, run_system_service},
     };
     let mut args = std::env::args_os().skip(1);
     if let Some(argument) = args.next() {
@@ -41,7 +41,7 @@ fn main() -> ExitCode {
             tokio::select! {_ = tokio::signal::ctrl_c()=>{},_ = term.recv()=>{}}
             signal.send_replace(true);
         });
-        let result = match SystemProtectionHost::system(cancel.clone()).await {
+        let result = match SystemSessionHost::system(cancel.clone()).await {
             Ok(host) => run_system_service(host, cancel).await,
             Err(error) => Err(error),
         };

@@ -857,3 +857,195 @@ fn tun_rule_is_typed_parent_child_and_blocks_route_cleanup_until_removed() {
     assert_eq!(report.removed, 3);
     assert_eq!(report.remaining, 0);
 }
+
+#[test]
+fn session_recovery_decision_survives_reopen_and_conflicts_are_non_mutating() {
+    for kill_switch in [false, true] {
+        let area = Area::new();
+        let mut journal = open(&area);
+        assert!(journal.session_recovery().is_none());
+        journal.begin_session(owner(), kill_switch).unwrap();
+        let original = fs::read(area.journal().join("journal.json")).unwrap();
+        let foreign = Ownership::new(1001, 11, 1, 4, 99).unwrap();
+        assert_eq!(
+            journal.begin_session(foreign, kill_switch),
+            Err(JournalError::WrongOwnership)
+        );
+        assert_eq!(
+            journal.clear_session(foreign),
+            Err(JournalError::WrongOwnership)
+        );
+        journal.begin_session(owner(), kill_switch).unwrap();
+        assert_eq!(
+            journal.begin_session(owner(), !kill_switch),
+            Err(JournalError::Conflict)
+        );
+        assert_eq!(
+            fs::read(area.journal().join("journal.json")).unwrap(),
+            original
+        );
+        let next = Ownership::new(1001, 22, 2, 4, 99).unwrap();
+        assert_eq!(
+            journal.reassign_empty_owner(next),
+            Err(JournalError::Conflict)
+        );
+        drop(journal);
+        let mut journal = Journal::open_existing(&area.journal()).unwrap().unwrap();
+        assert_eq!(
+            journal.session_recovery().unwrap().kill_switch(),
+            kill_switch
+        );
+        journal.clear_session(owner()).unwrap();
+        journal.clear_session(owner()).unwrap();
+        journal.reassign_empty_owner(next).unwrap();
+        drop(journal);
+        assert!(
+            Journal::open_existing(&area.journal())
+                .unwrap()
+                .unwrap()
+                .session_recovery()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn clear_session_waits_for_all_session_records_and_preserves_public_policy() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    journal.begin_session(owner(), true).unwrap();
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    let policy = firewall::PublicBlockPolicy::new(1, None, vec![], vec![], vec![], vec![]).unwrap();
+    journal.begin_public_policy(owner(), 2, 7, policy).unwrap();
+    assert_eq!(journal.clear_session(owner()), Err(JournalError::Conflict));
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    journal.mark_cleanup(owner(), 1).unwrap();
+    assert_eq!(journal.clear_session(owner()), Err(JournalError::Conflict));
+    journal.reconcile(owner(), 1, Reconciled::Absent).unwrap();
+    journal.clear_session(owner()).unwrap();
+    assert!(journal.public_policy().is_some());
+    assert_eq!(journal.records().len(), 1);
+    drop(journal);
+    let journal = open(&area);
+    assert!(journal.session_recovery().is_none());
+    assert!(journal.public_policy().is_some());
+}
+
+#[test]
+fn failed_session_write_poison_blocks_begin_clear_and_rotation() {
+    for clearing in [false, true] {
+        let area = Area::new();
+        let mut journal = open(&area);
+        if clearing {
+            journal.begin_session(owner(), false).unwrap();
+        }
+        let file = area.journal().join("journal.json");
+        let original = fs::read(&file).unwrap();
+        let target = area.0.join("untouched");
+        fs::write(&target, b"preserve").unwrap();
+        symlink(&target, area.journal().join("journal.next")).unwrap();
+        let result = if clearing {
+            journal.clear_session(owner())
+        } else {
+            journal.begin_session(owner(), true)
+        };
+        assert_eq!(result, Err(JournalError::UnsafePath));
+        assert_eq!(
+            journal.begin_session(owner(), true),
+            Err(JournalError::UncertainWrite)
+        );
+        assert_eq!(
+            journal.clear_session(owner()),
+            Err(JournalError::UncertainWrite)
+        );
+        assert_eq!(
+            journal.reassign_empty_owner(owner()),
+            Err(JournalError::UncertainWrite)
+        );
+        assert_eq!(fs::read(file).unwrap(), original);
+        assert_eq!(fs::read(target).unwrap(), b"preserve");
+    }
+}
+
+#[test]
+fn legacy_migrations_preserve_records_public_policy_and_sequence() {
+    for version in [1, 2] {
+        let area = Area::new();
+        let mut journal = open(&area);
+        journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+        journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+        journal.mark_cleanup(owner(), 1).unwrap();
+        if version == 2 {
+            let policy =
+                firewall::PublicBlockPolicy::new(1, None, vec![], vec![], vec![], vec![]).unwrap();
+            journal.begin_public_policy(owner(), 2, 7, policy).unwrap();
+        }
+        drop(journal);
+        let file = area.journal().join("journal.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        legacy["version"] = version.into();
+        legacy.as_object_mut().unwrap().remove("session_recovery");
+        if version == 1 {
+            legacy.as_object_mut().unwrap().remove("public_policy");
+            legacy.as_object_mut().unwrap().remove("policy_sequence");
+        }
+        fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let recovered = Journal::open_existing(&area.journal()).unwrap().unwrap();
+        assert!(recovered.session_recovery().is_none());
+        assert!(recovered.needs_reconciliation(1));
+        let migrated: serde_json::Value =
+            serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(migrated["version"], 3);
+        for field in ["ownership", "records"] {
+            assert_eq!(migrated[field], legacy[field]);
+        }
+        if version == 2 {
+            for field in ["public_policy", "policy_sequence"] {
+                assert_eq!(migrated[field], legacy[field]);
+            }
+        }
+    }
+}
+
+#[test]
+fn strict_session_schema_rejects_missing_bad_boolean_and_legacy_smuggling() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    journal.begin_session(owner(), true).unwrap();
+    drop(journal);
+    let file = area.journal().join("journal.json");
+    let valid: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut cases = Vec::new();
+    for session in [
+        serde_json::json!({}),
+        serde_json::json!({"kill_switch":null}),
+        serde_json::json!({"kill_switch":1}),
+        serde_json::json!({"kill_switch":true,"extra":true}),
+    ] {
+        let mut bad = valid.clone();
+        bad["session_recovery"] = session;
+        cases.push(bad);
+    }
+    let mut missing = valid.clone();
+    missing.as_object_mut().unwrap().remove("session_recovery");
+    cases.push(missing);
+    for version in [1, 2] {
+        let mut bad = valid.clone();
+        bad["version"] = version.into();
+        if version == 1 {
+            bad.as_object_mut().unwrap().remove("public_policy");
+            bad.as_object_mut().unwrap().remove("policy_sequence");
+        }
+        cases.push(bad);
+    }
+    for bad in cases {
+        let bytes = serde_json::to_vec(&bad).unwrap();
+        fs::write(&file, &bytes).unwrap();
+        assert!(matches!(
+            Journal::open_existing(&area.journal()),
+            Err(JournalError::Corrupt)
+        ));
+        assert_eq!(fs::read(&file).unwrap(), bytes);
+    }
+}

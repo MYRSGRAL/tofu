@@ -160,6 +160,7 @@ impl From<u8> for RouteKind {
 pub enum LookupIncomplete {
     Multipath,
     UnknownAttributes,
+    CachedError,
     UnknownRouteKind,
     MissingTable,
     MissingOutputInterface,
@@ -359,8 +360,24 @@ fn parse_reply(
             }
         }
     }
-    if route.attributes.iter().any(|attribute| attribute.kind != 9) {
+    // RTA_CACHEINFO — фиксированные восемь u32 UAPI, не новый selector.
+    // Сохраняем байты для последующей проверки expires/error/id; неизвестные
+    // layouts и NLA flags по-прежнему не объявляются поддержанными.
+    let cache_info =
+        |attribute: &NetworkAttribute| attribute.kind == 12 && attribute.value.len() == 32;
+    if route
+        .attributes
+        .iter()
+        .any(|attribute| attribute.kind != 9 && !cache_info(attribute))
+    {
         route.incomplete.push(LookupIncomplete::UnknownAttributes);
+    }
+    if route
+        .attributes
+        .iter()
+        .any(|attribute| cache_info(attribute) && attribute.value[12..16] != [0; 4])
+    {
+        route.incomplete.push(LookupIncomplete::CachedError);
     }
     if matches!(route.kind, RouteKind::Unknown(_) | RouteKind::Unspecified) {
         route.incomplete.push(LookupIncomplete::UnknownRouteKind);

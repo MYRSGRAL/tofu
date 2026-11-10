@@ -1,6 +1,8 @@
 //! Событийное наблюдение окружения. Не применяет маршруты, DNS или TUN.
 
 mod bus;
+mod equivalence;
+pub(crate) use equivalence::{same_external_topology, same_kernel_route};
 mod lookup;
 mod read;
 mod route;

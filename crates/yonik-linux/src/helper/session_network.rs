@@ -287,7 +287,7 @@ impl SessionNetworkPlan {
     ) -> Result<(), TunError> {
         self.check_records(journal, index, Some(7))?;
         let projected = session_external_topology(current, journal, TUN, MTU)?;
-        if &projected != baseline {
+        if !crate::network::same_external_topology(&projected, baseline) {
             return Err(TunError::Evidence);
         }
         Ok(())

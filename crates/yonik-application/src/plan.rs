@@ -19,6 +19,10 @@ impl ConfigDigest {
     pub const fn new(sha256: [u8; 32]) -> Self {
         Self(sha256)
     }
+
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 }
 
 impl std::fmt::Debug for ConfigDigest {

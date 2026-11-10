@@ -26,6 +26,7 @@ const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.N
 #[serde(rename_all = "snake_case")]
 pub enum ProtectionState {
     NoManagedPolicy,
+    TunnelStarting,
     VerifiedRules,
     RecoveryRequired,
     Unknown,
@@ -61,7 +62,7 @@ impl ServiceError {
     fn code(self) -> &'static str {
         match self {
             Self::InvalidRequest => "invalid_request",
-            Self::Unsupported => "unsupported",
+            Self::Unsupported | Self::Prepared(PreparedError::Unsupported) => "unsupported",
             Self::Busy | Self::Prepared(PreparedError::Capacity) => "busy",
             Self::Authorization(_) | Self::Prepared(PreparedError::Authorization(_)) => {
                 "authorization"
@@ -74,6 +75,19 @@ impl ServiceError {
     }
 }
 
+/// Проверенные transport-поля; UID приходит только из доверенного D-Bus transport.
+/// JSON разбирается закрытым bounded контрактом до создания этого значения.
+pub struct SystemProfileRequest {
+    pub server: yonik_import::ServerIntent,
+    pub engine: yonik_engine::Engine,
+    pub kill_switch: bool,
+}
+impl std::fmt::Debug for SystemProfileRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SystemProfileRequest(<скрыто>)")
+    }
+}
+
 /// Единственный владелец привилегированных эффектов; dispatcher сериализует доступ.
 pub trait ProtectionHost: Send + 'static {
     type Artifact: PreparedArtifact;
@@ -83,6 +97,14 @@ pub trait ProtectionHost: Send + 'static {
         allow_lan: bool,
         cancel: Cancellation,
     ) -> impl Future<Output = Result<(Self::Artifact, PreparedContext), ServiceError>> + Send;
+    fn prepare_profile(
+        &mut self,
+        _uid: u32,
+        _request: SystemProfileRequest,
+        _cancel: Cancellation,
+    ) -> impl Future<Output = Result<(Self::Artifact, PreparedContext), ServiceError>> + Send {
+        async { Err(ServiceError::Unsupported) }
+    }
     fn context(&self, uid: u32) -> Result<PreparedContext, ServiceError>;
     fn apply(
         &mut self,
@@ -114,6 +136,28 @@ struct PrepareRequest {
     mode: String,
     allow_lan: bool,
 }
+// Первый проход выбирает только закрытую схему; второй запрещает все лишние поля.
+#[derive(Deserialize)]
+struct PrepareRoute {
+    version: u32,
+    mode: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProfileEngine {
+    Xray,
+    SingBox,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProfilePrepareRequest<'a> {
+    version: u32,
+    mode: String,
+    engine: ProfileEngine,
+    kill_switch: bool,
+    #[serde(borrow)]
+    server: &'a serde_json::value::RawValue,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ApplyRequest {
@@ -128,6 +172,7 @@ struct EmptyRequest {
 
 enum Request {
     Prepare(bool),
+    PrepareProfile(Box<SystemProfileRequest>),
     Apply(PreparedHandle),
     Stop,
     Unlock,
@@ -156,15 +201,47 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
         .map_err(|_| ServiceError::InvalidRequest)?;
     match header.member().map(|v| v.as_str()) {
         Some("Prepare") => {
-            let dto: PrepareRequest =
+            let route: PrepareRoute =
                 serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
-            if dto.version != 1 {
+            if route.version != 1 {
                 return Err(ServiceError::InvalidRequest);
             }
-            if dto.mode != "public_protection" || dto.allow_lan {
-                return Err(ServiceError::Unsupported);
+            match route.mode.as_str() {
+                "public_protection" => {
+                    let dto: PrepareRequest =
+                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                    if dto.version != 1 || dto.mode != "public_protection" {
+                        return Err(ServiceError::InvalidRequest);
+                    }
+                    if dto.allow_lan {
+                        return Err(ServiceError::Unsupported);
+                    }
+                    Ok(Request::Prepare(dto.allow_lan))
+                }
+                "system_profile" => {
+                    let dto: ProfilePrepareRequest<'_> =
+                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                    if dto.version != 1 || dto.mode != "system_profile" {
+                        return Err(ServiceError::InvalidRequest);
+                    }
+                    let server = yonik_import::ServerIntent::parse_json(dto.server.get()).map_err(
+                        |error| match error {
+                            yonik_import::IntentError::Unsupported => ServiceError::Unsupported,
+                            _ => ServiceError::InvalidRequest,
+                        },
+                    )?;
+                    let engine = match dto.engine {
+                        ProfileEngine::Xray => yonik_engine::Engine::Xray,
+                        ProfileEngine::SingBox => yonik_engine::Engine::SingBox,
+                    };
+                    Ok(Request::PrepareProfile(Box::new(SystemProfileRequest {
+                        server,
+                        engine,
+                        kill_switch: dto.kill_switch,
+                    })))
+                }
+                _ => Err(ServiceError::Unsupported),
             }
-            Ok(Request::Prepare(dto.allow_lan))
         }
         Some("Apply") => {
             let dto: ApplyRequest =
@@ -316,6 +393,17 @@ async fn dispatch<H: ProtectionHost>(
                 .await?;
             serde_json::json!({"version":1,"handle":handle.as_bytes()})
         }
+        Request::PrepareProfile(request) => {
+            let handle = broker
+                .prepare(message, Prompt::Allow, cancel.clone(), || async {
+                    let mut host = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    host.prepare_profile(uid, *request, cancel.clone())
+                        .await
+                        .map_err(as_prepared)
+                })
+                .await?;
+            serde_json::json!({"version":1,"handle":handle.as_bytes()})
+        }
         Request::Apply(handle) => {
             let mut guard = None;
             let artifact = broker
@@ -368,6 +456,7 @@ fn as_prepared(error: ServiceError) -> PreparedError {
         ServiceError::Prepared(error) => error,
         ServiceError::Authorization(error) => PreparedError::Authorization(error),
         ServiceError::Busy => PreparedError::Capacity,
+        ServiceError::Unsupported => PreparedError::Unsupported,
         ServiceError::Cancelled => PreparedError::Cancelled,
         _ => PreparedError::Unavailable,
     }
