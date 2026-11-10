@@ -47,6 +47,7 @@ enum WireError {
     Error(String),
 }
 struct Server {
+    system_tun: bool,
     response: Arc<Mutex<String>>,
     effects: Arc<AtomicUsize>,
 }
@@ -61,11 +62,22 @@ impl Server {
         Ok(response)
     }
     async fn capabilities(&self, _request: &str) -> String {
-        "{\"version\":1,\"public_protection\":true,\"system_tun\":false,\"allow_lan\":false}".into()
+        serde_json::json!({"version":1,"public_protection":true,"system_tun":self.system_tun,"allow_lan":false}).to_string()
     }
     async fn prepare(&self, request: &str) -> String {
         let value: serde_json::Value = serde_json::from_str(request).unwrap();
-        assert_eq!(value["mode"], "public_protection");
+        if value["mode"] == "system_profile" {
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            assert_eq!(value["version"], 1);
+            assert!(matches!(
+                value["engine"].as_str(),
+                Some("xray" | "sing-box")
+            ));
+            assert!(value["kill_switch"].is_boolean());
+            yonik_import::ServerIntent::parse_json(&value["server"].to_string()).unwrap();
+        } else {
+            assert_eq!(value["mode"], "public_protection");
+        }
         serde_json::json!({"version":1,"handle":vec![42;32]}).to_string()
     }
     async fn apply(&self, request: &str) -> String {
@@ -98,6 +110,7 @@ async fn real_bus_contract_errors_cancellation_and_owner_fence() {
         .at(
             SERVICE_PATH,
             Server {
+                system_tun: false,
                 response: response.clone(),
                 effects: effects.clone(),
             },
@@ -318,4 +331,161 @@ async fn closed_json_replies_require_objects_and_pinned_error_sender() {
         outcomes.push(result);
     }
     assert_eq!(outcomes, vec![Err(ClientError::Protocol); 4]);
+}
+
+#[tokio::test]
+async fn typed_profile_private_bus_pipeline() {
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    server
+        .object_server()
+        .at(
+            SERVICE_PATH,
+            Server {
+                system_tun: false,
+                response: Arc::new(Mutex::new("{\"version\":1,\"state\":\"unknown\"}".into())),
+                effects: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .await
+        .unwrap();
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let (_keep, cancel) = Cancellation::new();
+    let mut client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let report = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    let intent = yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap();
+    for engine in [yonik_engine::Engine::Xray, yonik_engine::Engine::SingBox] {
+        let prepared = client
+            .prepare_profile(&intent, engine, true, deadline(), cancel.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            client.apply(prepared, deadline(), cancel.clone()).await,
+            Ok(State::VerifiedRules)
+        );
+    }
+    let mut invalid = serde_json::to_value(&intent).unwrap();
+    invalid["credentials"]["password"] = serde_json::json!("synthetic-unexpected");
+    assert!(yonik_import::ServerIntent::parse_json(&invalid.to_string()).is_err());
+    assert!(yonik_import::ServerIntent::parse_json("{malformed").is_err());
+}
+
+#[path = "../../yonik-desktop/src/system_session.rs"]
+#[allow(dead_code)]
+mod system_session;
+
+#[tokio::test]
+async fn adapter_gate_revision_and_unknown_cleanup() {
+    use system_session::{ProfileRevision, SystemSession};
+    for system_tun in [false, true] {
+        let bus = Bus::new();
+        let server = bus.connect().await;
+        let effects = Arc::new(AtomicUsize::new(0));
+        server
+            .object_server()
+            .at(
+                SERVICE_PATH,
+                Server {
+                    system_tun,
+                    response: Arc::new(Mutex::new(
+                        "{\"version\":1,\"state\":\"tunnel_starting\"}".into(),
+                    )),
+                    effects: effects.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        server.request_name(SERVICE_NAME).await.unwrap();
+        let (_keep, cancel) = Cancellation::new();
+        let client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+            .await
+            .unwrap();
+        let revision = ProfileRevision {
+            source: 1,
+            profile: 1,
+            generation: 1,
+        };
+        let mut adapter = SystemSession::new(client, revision);
+        let report = yonik_import::import_bytes(
+            b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+        )
+        .unwrap();
+        let intent = yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap();
+        assert_eq!(
+            adapter
+                .prepare(
+                    revision,
+                    &intent,
+                    yonik_engine::Engine::Xray,
+                    true,
+                    deadline(),
+                    cancel.clone()
+                )
+                .await,
+            if system_tun {
+                let (stop, cancelled) = Cancellation::new();
+                stop.send(true).unwrap();
+                assert_eq!(
+                    adapter.apply(revision, deadline(), cancelled).await,
+                    Err(ClientError::Cancelled)
+                );
+                assert_eq!(adapter.snapshot(), State::Unknown);
+                adapter
+                    .prepare(
+                        revision,
+                        &intent,
+                        yonik_engine::Engine::Xray,
+                        true,
+                        deadline(),
+                        cancel.clone(),
+                    )
+                    .await
+                    .unwrap();
+                Ok(())
+            } else {
+                Err(ClientError::Unsupported)
+            }
+        );
+        if system_tun {
+            assert_eq!(
+                adapter.apply(revision, deadline(), cancel.clone()).await,
+                Ok(State::VerifiedRules)
+            );
+            assert_eq!(
+                adapter.apply(revision, deadline(), cancel.clone()).await,
+                Err(ClientError::InvalidHandle)
+            );
+        }
+        assert_eq!(
+            adapter.state(deadline(), cancel.clone()).await,
+            Ok(State::TunnelStarting)
+        );
+        adapter.revise(ProfileRevision {
+            generation: 2,
+            ..revision
+        });
+        assert_eq!(
+            adapter.apply(revision, deadline(), cancel.clone()).await,
+            Err(ClientError::Stale)
+        );
+        assert_eq!(
+            adapter
+                .stop(Instant::now() + Duration::from_millis(20), cancel.clone())
+                .await,
+            Err(ClientError::Deadline)
+        );
+        assert_eq!(adapter.snapshot(), State::Unknown);
+        server.release_name(SERVICE_NAME).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            adapter.state(deadline(), cancel).await,
+            Err(ClientError::OwnerLost)
+        );
+        assert_eq!(adapter.snapshot(), State::Unknown);
+    }
 }
