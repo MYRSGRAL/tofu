@@ -232,6 +232,8 @@ async fn listen(
             _ = observe(&connection, &publisher) => {},
         }
     }
+    // Не оставляем закрытие socket отложенным cleanup tasks после shutdown ack.
+    let _ = connection.close().await;
     publisher.lost(NetworkSource::Resolver);
     publisher.lost(NetworkSource::Manager);
 }
