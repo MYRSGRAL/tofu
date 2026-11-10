@@ -102,6 +102,29 @@ ApplicationWindow {
         commandContext = sourceCommands.indexOf(command.command) >= 0 ? "source" : "connection"
         if (!state.closed) backend.dispatch(JSON.stringify(command))
     }
+    property bool routingPending: false
+    property double routingRequestId: 0
+    property double routingExpectedSavedId: 0
+    property var routingFeedback: null
+    function completeRouting(ack) {
+        if (!routingPending || !ack || ack.request_id !== routingRequestId) return
+        if (!ack.error && routingExpectedSavedId && ack.saved_id !== routingExpectedSavedId)
+            ack = {request_id: ack.request_id, error: "routing_ack_identity", saved_id: null}
+        routingFeedback = ack
+        routingPending = false
+    }
+    function sendRouting(command) {
+        if (routingPending || state.closed) return 0
+        routingRequestId += 1
+        command.request_id = routingRequestId
+        if (command.expected_revision === undefined) command.expected_revision = state.routing_revision
+        routingExpectedSavedId = command.command === "edit_routing" ? command.rule.id : 0
+        routingFeedback = null
+        routingPending = true
+        commandContext = "routing"
+        backend.dispatch(JSON.stringify(command))
+        return routingRequestId
+    }
     function query(offset) {
         if (!state.ready || state.source_id === null) { searchQueued = false; return }
         if (state.busy || state.pending) { searchQueued = true; return }
@@ -115,6 +138,7 @@ ApplicationWindow {
             const next = JSON.parse(raw)
             if (next && Object.keys(next).length === 0) return
             if (next && typeof next.error === "string" && !Array.isArray(next.sources) && !Array.isArray(next.profiles)) {
+                if (commandContext === "routing") completeRouting({request_id: routingRequestId, error: next.error, saved_id: null})
                 state = Object.assign({}, state, commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error})
                 parseError = ""
                 return
@@ -132,6 +156,7 @@ ApplicationWindow {
             if (desiredProfileId === next.selected_profile) desiredProfileId = null
             if (next.language) language = next.language
             state = next
+            completeRouting(next.routing_ack)
             if (searchQueued && !next.busy && !next.pending) searchDelay.restart()
             parseError = ""
             if (next.pending && !reviewDialog.visible) reviewDialog.open()
@@ -277,7 +302,17 @@ ApplicationWindow {
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
-        const pair = messages[key]
+        const editorMessages = {
+            routing_stale: ["Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.", "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one."],
+            routing_ack_identity: ["Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.", "Save response did not match the rule. Input is preserved; check the draft."],
+            routing_storage: ["Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.", "Draft not saved: damaged database or conflict. Original preserved; restart the application."],
+            domain: ["Некорректный домен", "Invalid domain"], cidr: ["Некорректный IP/CIDR: проверьте биты сети", "Invalid IP/CIDR: check network bits"],
+            executable: ["Нужен абсолютный путь без . и ..", "An absolute path without . and .. is required"],
+            broad: ["Подтвердите правило для любого трафика", "Confirm matching all traffic"],
+            id: ["Недопустимый или повторяющийся ID", "Invalid or duplicate ID"],
+            limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
+        }
+        const pair = messages[key] || editorMessages[key]
         return pair ? tr(pair[0], pair[1]) : tr("Операция не выполнена. Проверьте настройки и повторите попытку.", "Operation failed. Check the settings and try again.")
     }
 
@@ -718,6 +753,7 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     spacing: 10
                     SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
+                    SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
                     SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                     SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
                     SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
@@ -730,12 +766,140 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     visible: window.settingsSection !== ""
                     active: window.page === 2 && window.settingsSection !== ""
-                    sourceComponent: window.settingsSection === "diagnostics" ? diagnosticsPanel
+                    sourceComponent: window.settingsSection === "routing" ? routingPanel : window.settingsSection === "diagnostics" ? diagnosticsPanel
                         : window.settingsSection === "appearance" ? appearancePanel
                         : window.settingsSection === "about" ? aboutPanel : connectionPanel
                     onLoaded: if (item && !window.reducedMotion) panelEntrance.restart()
                     NumberAnimation { id: panelEntrance; target: settingsPanel; property: "opacity"; from: 0.6; to: 1; duration: 160 }
                 }
+            }
+        }
+    }
+    Component {
+        id: routingPanel
+        PanelScroll {
+            id: routingScroll
+            ColumnLayout {
+                id: editor
+                objectName: "routingEditor"
+                enabled: window.state.ready && !window.state.closed && !window.routingPending
+                property var formRevision: window.state.routing_revision
+                property double pendingRequest: 0
+                property string saveError: ""
+                function settle() {
+                    const ack = window.routingFeedback
+                    if (!pendingRequest || !ack || ack.request_id !== pendingRequest) return
+                    pendingRequest = 0
+                    saveError = ack.error || ""
+                    if (!saveError) {
+                        selectedId = ack.saved_id
+                        formRevision = window.state.routing_revision
+                    }
+                }
+                Connections { target: window; function onRoutingFeedbackChanged() { editor.settle() } }
+                width: routingScroll.availableWidth
+                spacing: 12
+                property bool advanced: false
+                property double selectedId: 0
+                property int simpleGroup: 0
+                function values(text) { return text.split("\n").map(s => s.trim()).filter(s => s.length > 0) }
+                function load(rule) {
+                    selectedId = rule.id
+                    formRevision = window.state.routing_revision
+                    saveError = ""
+                    executableInput.text = rule.executables.join("\n")
+                    domainInput.text = rule.domains.join("\n")
+                    cidrInput.text = rule.destinations.join("\n")
+                    actionInput.currentIndex = ["proxy", "direct", "block"].indexOf(rule.action)
+                    enabledInput.checked = rule.enabled
+                    broadInput.checked = false
+                }
+                function order(id, delta, remove) {
+                    let ids = window.state.routing.rules.map(r => r.id)
+                    let index = ids.indexOf(id)
+                    if (remove) {
+                        window.sendRouting({command: "routing_delete", id: id})
+                        return
+                    }
+                    if (index + delta >= 0 && index + delta < ids.length) {
+                        let other = ids[index + delta]; ids[index + delta] = id; ids[index] = other
+                    }
+                    window.sendRouting({command: "routing_order", ids: ids})
+                }
+                SectionTitle { text: window.tr("Черновик маршрутизации", "Routing draft") }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
+                ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
+                RowLayout {
+                    PlainLabel { text: window.tr("Остальной трафик", "Other traffic") }
+                    ComboBox { model: ["Proxy", "Direct", "Block"]; currentIndex: window.state.routing ? ["proxy", "direct", "block"].indexOf(window.state.routing.default_action) : 0; onActivated: window.sendRouting({command: "routing_default", action: ["proxy", "direct", "block"][currentIndex]}) }
+                }
+                Repeater {
+                    model: window.state.routing ? window.state.routing.rules : []
+                    delegate: ColumnLayout {
+                        id: ruleRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
+                        SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules") }
+                        RowLayout {
+                            ActionButton { text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
+                            ActionButton { text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
+                            ActionButton { text: "↓"; Accessible.name: window.tr("Ниже", "Move down"); onClicked: editor.order(ruleRow.modelData.id, 1, false) }
+                            ActionButton { text: "×"; Accessible.name: window.tr("Удалить", "Delete"); onClicked: editor.order(ruleRow.modelData.id, 0, true) }
+                        }
+                        ActionButton { text: window.tr("Дублировать", "Duplicate"); onClicked: { editor.load(ruleRow.modelData); editor.selectedId = 0; editor.formRevision = window.state.routing_revision } }
+                        Divider {}
+                    }
+                }
+                ComboBox { visible: !editor.advanced; model: [window.tr("Программа", "Executable"), window.tr("Домен", "Domain"), "IP / CIDR"]; onActivated: editor.simpleGroup = currentIndex }
+                TextField { id: catalogQuery; Layout.fillWidth: true; placeholderText: window.tr("Поиск программы", "Search applications") }
+                CheckBox { id: processCatalog; text: window.tr("Запущенные процессы", "Running processes") }
+                ActionButton { text: window.tr("Загрузить каталог", "Load catalog"); onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: 0}) }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Каталог читается только по запросу. Wrapper/интерпретатор может быть неподдержан. PID — диагностика; выбор сохраняет только точный executable для следующих запусков.", "Catalog is read on demand. Wrappers/interpreters may be unsupported. PID is diagnostic; selection saves only the exact executable for future launches.") }
+                SmallLabel { visible: window.state.routing_catalog && window.state.routing_catalog.incomplete; text: window.tr("Каталог неполный: достигнут лимит или нет доступа", "Incomplete catalog: limit reached or access denied") }
+                Repeater {
+                    model: window.state.routing_catalog ? window.state.routing_catalog.items : []
+                    delegate: ActionButton {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.name + (modelData.pid ? " · PID " + modelData.pid : "") + (modelData.executable ? " · " + modelData.executable : window.tr(" · не поддерживается: ", " · unsupported: ") + modelData.unsupported)
+                        enabled: !!modelData.executable
+                        onClicked: executableInput.text = modelData.executable
+                    }
+                }
+                RowLayout {
+                    ActionButton { text: window.tr("Назад", "Previous"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset > 0; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: Math.max(0, window.state.routing_catalog.offset - 32)}) }
+                    ActionButton { text: window.tr("Далее", "Next"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset + 32 < window.state.routing_catalog.total; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: window.state.routing_catalog.offset + 32}) }
+                }
+                PlainLabel { objectName: "routingRuleIdentity"; text: editor.selectedId ? window.tr("Редактирование #", "Editing #") + editor.selectedId : window.tr("Новое правило", "New rule") }
+                SmallLabel { visible: editor.advanced || editor.simpleGroup === 0; Layout.fillWidth: true; text: window.tr("Точный путь программы (для следующих запусков, без наследования дочерними процессами)", "Exact executable path (future launches, no child process inheritance)") }
+                TextArea { visible: editor.advanced || editor.simpleGroup === 0; id: executableInput; objectName: "routingExecutable"; Layout.fillWidth: true; placeholderText: "/usr/bin/browser"; wrapMode: TextEdit.Wrap; selectByMouse: true }
+                SmallLabel { visible: editor.advanced || editor.simpleGroup === 1; text: window.tr("Домен или *.суффикс", "Domain or *.suffix") }
+                TextArea { visible: editor.advanced || editor.simpleGroup === 1; id: domainInput; objectName: "routingDomain"; Layout.fillWidth: true; placeholderText: "example.org"; wrapMode: TextEdit.Wrap; selectByMouse: true }
+                SmallLabel { visible: editor.advanced || editor.simpleGroup === 2; text: window.tr("IP или канонический CIDR", "IP or canonical CIDR") }
+                TextArea { visible: editor.advanced || editor.simpleGroup === 2; id: cidrInput; objectName: "routingCidr"; Layout.fillWidth: true; placeholderText: "192.0.2.0/24"; wrapMode: TextEdit.Wrap; selectByMouse: true }
+                SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Порты, протоколы, process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Ports, protocols, process names, UID, cgroup and PID are unsupported by the current model.") }
+                ComboBox { id: actionInput; model: ["Proxy", "Direct", "Block"] }
+                CheckBox { id: enabledInput; checked: true; text: window.tr("Правило включено", "Rule enabled") }
+                CheckBox { id: broadInput; text: window.tr("Подтверждаю правило для любого трафика", "Confirm matching all traffic") }
+                RowLayout {
+                    ActionButton {
+                        objectName: "routingSaveRule"
+                        text: window.tr("Подтвердить", "Confirm")
+                        onClicked: {
+                            const rules = window.state.routing.rules
+                            const id = editor.selectedId || (rules.reduce((n, r) => Math.max(n, r.id), 0) + 1)
+                            editor.saveError = ""
+                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
+                            editor.settle()
+                        }
+                    }
+                    ActionButton { text: window.tr("Как новое", "As new"); onClicked: { editor.selectedId = 0; editor.formRevision = window.state.routing_revision; editor.saveError = "" } }
+                }
+                PlainLabel { objectName: "routingSaveError"; Layout.fillWidth: true; visible: !!editor.saveError || !!(window.routingFeedback && window.routingFeedback.error); text: window.errorText(editor.saveError || (window.routingFeedback ? window.routingFeedback.error : "")) }
+                ActionButton { text: window.tr("Применить к сети", "Apply to network"); enabled: false }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Недоступно: system_tun=false. Системный путь и атрибуция потоков ещё не подтверждены. Изменения черновика сеть не меняют.", "Unavailable: system_tun=false. System routing and flow attribution are not verified. Draft edits do not change the network.") }
             }
         }
     }
@@ -802,7 +966,7 @@ ApplicationWindow {
             }
             RowLayout {
                 PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
-                HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея закрытие отключает прокси и завершает приложение.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, closing disconnects the proxy and exits.") }
+                HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея окно остаётся открытым для управления.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, the window stays open for control.") }
             }
             ActionButton { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
             Item { Layout.fillHeight: true }
