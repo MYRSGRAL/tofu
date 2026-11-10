@@ -38,7 +38,9 @@ fetch-контракт не изменён. Смена источника/revisi
 Бинарник сохранён вне TTL: `local/artifacts/batch-diagnostics/yonik-desktop`.
 Сгенерированные evidence и бинарник не включены в коммит.
 
-## Границы доказательств
+Продолжение приёмки и bulk API: [acceptance.md](acceptance.md).
+
+## Границы первоначального среза
 
 Нет нового end-to-end batch-прогона на 10 000 сетевых целей и нового batch-теста
 с реальным переходом network namespace/epoch. Для них остаются отдельные gates;

@@ -1,5 +1,7 @@
 //! Зашифрованное хранилище подписок. Ключ предоставляется вызывающей стороной.
 
+mod batch_targets;
+
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
