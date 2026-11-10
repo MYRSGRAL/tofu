@@ -2,7 +2,7 @@
 
 mod bus;
 mod equivalence;
-pub(crate) use equivalence::{same_external_topology, same_kernel_route};
+pub(crate) use equivalence::{same_captured_topology, same_external_topology, same_kernel_route};
 mod lookup;
 mod read;
 mod route;
@@ -15,6 +15,7 @@ pub use topology::{
     IpPrefix, LinuxAddress, LinuxLink, LinuxNexthop, LinuxRoute, LinuxRule, LinuxTopology,
     NexthopMember, RouteNexthop, read_topology,
 };
+pub(crate) use topology::{TopologyCapture, read_topology_captured};
 
 use std::fmt;
 use tokio::sync::watch;

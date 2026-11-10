@@ -292,6 +292,27 @@ impl SessionNetworkPlan {
         }
         Ok(())
     }
+    pub(crate) fn verify_external_captured(
+        &self,
+        baseline: &LinuxTopology,
+        baseline_capture: crate::network::TopologyCapture,
+        current: LinuxTopology,
+        current_capture: crate::network::TopologyCapture,
+        journal: &Journal,
+        index: u32,
+    ) -> Result<(), TunError> {
+        self.check_records(journal, index, Some(7))?;
+        let projected = session_external_topology(current, journal, TUN, MTU)?;
+        if !crate::network::same_captured_topology(
+            baseline,
+            baseline_capture,
+            &projected,
+            current_capture,
+        ) {
+            return Err(TunError::Evidence);
+        }
+        Ok(())
+    }
     /// Host обязан сначала подтвердить пустую worker cgroup. Сам план не умеет
     /// подтверждать остановку процесса и не снимает публичную блокировку.
     pub async fn cleanup_after_worker(

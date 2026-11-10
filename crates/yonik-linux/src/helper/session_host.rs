@@ -14,7 +14,7 @@ use crate::{
     Cancellation, KernelRoute, LinuxLink, LinuxTopology, NetworkStamp, RouteKind, RouteQuery,
     lookup_route,
     managed_network::{Resource, Scope, tun::TunExecutor},
-    network::{same_external_topology, same_kernel_route},
+    network::{TopologyCapture, read_topology_captured, same_captured_topology, same_kernel_route},
     read_topology,
     worker::WorkerPayload,
 };
@@ -226,6 +226,7 @@ pub(super) struct SessionArtifact {
     pub(super) payload: Arc<WorkerPayload>,
     plan: SessionNetworkPlan,
     baseline: LinuxTopology,
+    baseline_capture: TopologyCapture,
     route: KernelRoute,
     context: PreparedContext,
     uid: u32,
@@ -412,7 +413,9 @@ impl Backend {
         let context = self.context(uid)?;
         let stamp = self.snapshot()?.stamp;
         let owner = self.owner(uid)?;
-        let baseline = read_topology(cancel, DEADLINE).await.map_err(unavailable)?;
+        let (baseline, baseline_capture) = read_topology_captured(cancel, DEADLINE)
+            .await
+            .map_err(unavailable)?;
         let bytes = topology_bytes(&baseline);
         if bytes > MAX_BASELINE_BYTES {
             return Err(ServiceError::Unavailable);
@@ -483,10 +486,11 @@ impl Backend {
         self.worker_uncertain = false;
         let context_matches = self.context(uid)? == context;
         let stamp_matches = self.snapshot()?.is_current(stamp);
-        let topology_matches = same_external_topology(
-            &baseline,
-            &read_topology(cancel, DEADLINE).await.map_err(unavailable)?,
-        );
+        let (current, current_capture) = read_topology_captured(cancel, DEADLINE)
+            .await
+            .map_err(unavailable)?;
+        let topology_matches =
+            same_captured_topology(&baseline, baseline_capture, &current, current_capture);
         let uid_matches = worker_uid == self::worker_uid()?;
         if !context_matches || !stamp_matches || !topology_matches || !uid_matches {
             #[cfg(test)]
@@ -508,6 +512,7 @@ impl Backend {
             payload,
             plan,
             baseline,
+            baseline_capture,
             route,
             context,
             uid,
@@ -535,13 +540,18 @@ impl Backend {
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }
+        let (current, current_capture) = read_topology_captured(cancel, DEADLINE)
+            .await
+            .map_err(unavailable)?;
         if artifact.uid != uid
             || self.context(uid)? != artifact.context
             || !self.snapshot()?.is_current(stamp)
             || artifact.worker_uid != worker_uid()?
-            || !same_external_topology(
-                &read_topology(cancel, DEADLINE).await.map_err(unavailable)?,
+            || !same_captured_topology(
                 &artifact.baseline,
+                artifact.baseline_capture,
+                &current,
+                current_capture,
             )
             || !same_kernel_route(
                 &lookup_route(artifact.query(), cancel, DEADLINE)
@@ -715,7 +725,9 @@ impl Backend {
             return Err(ServiceError::Unavailable);
         }
         verify_worker_process(active.ticket.pid(), active.artifact.worker_uid)?;
-        let current = read_topology(cancel, DEADLINE).await.map_err(unavailable)?;
+        let (current, current_capture) = read_topology_captured(cancel, DEADLINE)
+            .await
+            .map_err(unavailable)?;
         let link = current
             .links
             .iter()
@@ -727,9 +739,11 @@ impl Backend {
         active
             .artifact
             .plan
-            .verify_external(
+            .verify_external_captured(
                 &active.artifact.baseline,
+                active.artifact.baseline_capture,
                 current,
+                current_capture,
                 self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
                 active.index,
             )
