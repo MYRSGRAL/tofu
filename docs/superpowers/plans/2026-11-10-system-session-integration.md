@@ -19,6 +19,11 @@ Private-bus tests подтверждают отмену, asynchronous jobs и li
 прошли отдельную проверку dedicated user, cgroup tree, setsid, BindsTo/recover
 и TUN traffic. Session host и упрямый потомок для TERM→KILL ещё не приняты.
 
+[Типизированный ServerIntent и SessionNetworkPlan](../../specs/helper-session-network.md)
+готовят следующий шаг: закрытый bounded профиль, одинаковые compiler/TUN
+дескрипторы и проекция внешней topology. Оба новых namespace gates проходят;
+полного own-link binding и session host пока нет.
+
 ## Порядок интеграции
 
 - [x] Отдельный закреплённый systemd worker template, как предусмотрено

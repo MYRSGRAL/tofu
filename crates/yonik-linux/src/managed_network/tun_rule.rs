@@ -50,7 +50,7 @@ impl std::fmt::Debug for TunRule {
         f.write_str("TunRule(<скрыто>)")
     }
 }
-fn rule_matches(value: &LinuxRule, expected: TunRule) -> bool {
+pub(super) fn rule_matches(value: &LinuxRule, expected: TunRule) -> bool {
     let unspecified = if expected.ipv6 {
         std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)
     } else {

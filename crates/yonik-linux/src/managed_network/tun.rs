@@ -21,6 +21,9 @@ use tokio::{
 mod config;
 #[path = "tun_rule.rs"]
 mod rule;
+#[path = "tun_topology.rs"]
+mod topology;
+pub(crate) use topology::session_external_topology;
 #[cfg(test)]
 #[path = "tun_session_tests.rs"]
 mod session_tests;
