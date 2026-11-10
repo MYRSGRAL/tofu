@@ -84,6 +84,7 @@ async fn call(connection: &zbus::Connection, method: &str, value: Value) -> Resu
     let (body,): (String,) = response.body().deserialize()?;
     let value: Value = serde_json::from_str(&body)?;
     require(value["version"] == 1, "Неверная версия ответа")?;
+    eprintln!("RPC {method}: state={}", value["state"]);
     Ok(value)
 }
 
@@ -114,8 +115,59 @@ async fn production_helper_denies_unprivileged_uid() -> Result {
 }
 
 #[tokio::test]
+#[ignore = "Выделенный авторизованный UID только в production helper VM"]
+async fn production_helper_authorized_uid_lifecycle() -> Result {
+    guard()?;
+    require(
+        !rustix::process::geteuid().is_root(),
+        "Нужен выделенный UID",
+    )?;
+    let connection = zbus::Connection::system().await?;
+    let empty = json!({"version":1});
+    let prepared = call(
+        &connection,
+        "Prepare",
+        json!({"version":1,"mode":"public_protection","allow_lan":false}),
+    )
+    .await?;
+    require(
+        call(
+            &connection,
+            "Apply",
+            json!({"version":1,"handle":prepared["handle"]}),
+        )
+        .await?["state"]
+            == "verified_rules",
+        "Apply UID",
+    )?;
+    require(
+        call(&connection, "State", empty.clone()).await?["state"] == "verified_rules",
+        "State UID",
+    )?;
+    require(
+        call(&connection, "Stop", empty.clone()).await?["state"] == "verified_rules",
+        "Stop UID",
+    )?;
+    require(
+        call(&connection, "Unlock", empty).await?["state"] == "no_managed_policy",
+        "Unlock UID",
+    )?;
+    Ok(())
+}
+
+#[tokio::test]
 #[ignore = "Root controller только в собственной disposable VM, настоящий установленный helper"]
 async fn production_helper_public_policy_survives_sigkill() -> Result {
+    lifecycle(false).await
+}
+
+#[tokio::test]
+#[ignore = "Только production helper VM с синтетическим peer и trusted registry"]
+async fn production_helper_system_profile_survives_sigkill() -> Result {
+    lifecycle(true).await
+}
+
+async fn lifecycle(profile: bool) -> Result {
     guard()?;
     require(
         rustix::process::geteuid().is_root(),
@@ -129,12 +181,15 @@ async fn production_helper_public_policy_survives_sigkill() -> Result {
         "VM не чистая",
     )?;
     let original_pid = helper_pid()?;
-    let prepared = call(
-        &connection,
-        "Prepare",
-        json!({"version":1,"mode":"public_protection","allow_lan":false}),
-    )
-    .await?;
+    let prepare = if profile {
+        let imported = yonik_import::import_bytes(
+            b"vless://00112233-4455-6677-8899-aabbccddeeff@10.203.0.2:24443?security=none".to_vec(),
+        )?;
+        json!({"version":1,"mode":"system_profile","engine":"xray","kill_switch":true,"server":yonik_import::ServerIntent::from_server(&imported.servers[0])?})
+    } else {
+        json!({"version":1,"mode":"public_protection","allow_lan":false})
+    };
+    let prepared = call(&connection, "Prepare", prepare).await?;
     require(
         prepared["handle"].as_array().is_some_and(|v| v.len() == 32),
         "Неверный handle",
@@ -146,13 +201,27 @@ async fn production_helper_public_policy_survives_sigkill() -> Result {
             json!({"version":1,"handle":prepared["handle"]}),
         )
         .await?["state"]
-            == "verified_rules",
+            == if profile {
+                "tunnel_starting"
+            } else {
+                "verified_rules"
+            },
         "Apply не подтвердил policy",
     )?;
-    require(
-        call(&connection, "Stop", empty.clone()).await?["state"] == "recovery_required",
-        "Stop снял защиту",
-    )?;
+    if !profile {
+        require(
+            call(&connection, "Stop", empty.clone()).await?["state"] == "verified_rules",
+            "Stop снял защиту",
+        )?;
+    }
+    if profile {
+        require(
+            !fs::read_to_string("/sys/fs/cgroup/system.slice/yonik-worker.service/cgroup.procs")?
+                .trim()
+                .is_empty(),
+            "Worker не работает перед SIGKILL",
+        )?;
+    }
     require(
         Command::new("/usr/bin/systemctl")
             .args([
@@ -182,6 +251,20 @@ async fn production_helper_public_policy_survives_sigkill() -> Result {
             "Helper не восстановился",
         )?;
         tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    require(
+        call(&connection, "Stop", empty.clone()).await?["state"] == "recovery_required",
+        "Stop после recovery",
+    )?;
+    if profile {
+        for group in ["yonik-worker", "yonik-worker-check"] {
+            let path = format!("/sys/fs/cgroup/system.slice/{group}.service/cgroup.procs");
+            match fs::read_to_string(path) {
+                Ok(procs) => require(procs.trim().is_empty(), "Worker остался после recovery")?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
     require(
         call(&connection, "Unlock", empty.clone()).await?["state"] == "no_managed_policy",

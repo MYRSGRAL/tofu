@@ -39,6 +39,10 @@ def install(payload: Path) -> None:
         or marker.read_text() != "yonik-production-helper-disposable-v1\n"
     ):
         raise RuntimeError("Нет безопасного VM marker")
+    if not Path("/usr/bin/pkcheck").exists():
+        raise RuntimeError(
+            "В VM отсутствует polkit; установите подписанный пакет до fixture"
+        )
     files = {
         "yonik-helper": ("/usr/lib/yonik/yonik-helper", "0755"),
         "yonik-worker": ("/usr/lib/yonik/yonik-worker", "0755"),
@@ -81,6 +85,7 @@ def install(payload: Path) -> None:
         for relative, (target, mode) in files.items():
             checked(["install", "-D", "-m", mode, str(payload / relative), target])
         checked(["systemd-sysusers", "/usr/lib/sysusers.d/yonik-worker.conf"])
+        checked(["useradd", "--system", "--no-create-home", "yonik-vm-allowed"])
         # Реальный polkit, VM-local rule. Отрицательный UID — nobody.
         rule = Path("/etc/polkit-1/rules.d/00-yonik-vm.rules")
         if rule.exists():
@@ -88,7 +93,7 @@ def install(payload: Path) -> None:
         rule.write_text("""polkit.addRule(function(action, subject) {
     if (action.id === "cloud.highpriority.tofu.manage-network" ||
         action.id === "cloud.highpriority.tofu.unlock-network") {
-        return subject.user === "root" ? polkit.Result.YES : polkit.Result.NO;
+        return (subject.user === "root" || subject.user === "yonik-vm-allowed") ? polkit.Result.YES : polkit.Result.NO;
     }
 });
 """)
