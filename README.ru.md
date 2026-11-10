@@ -321,8 +321,10 @@ Service/worker/GUI, live reconcile и DNS gates остаются открыты.
 argv/среду ядра. Оба ядра проходят TUN fixture с отдельным ненулевым UID,
 только NET_ADMIN и no-new-privileges; тот же профиль проходит Check без capability.
 Закреплённые systemd units и supervisor связывают lifecycle с InvocationID и
-подтверждённой пустой cgroup. Приёмка установленного unit и подключение к
-profile Prepare/Apply и GUI ещё нужны. [Контракт worker](docs/specs/helper-worker-runtime.md).
+подтверждённой пустой cgroup. Установленные units, dedicated UID, setsid,
+helper crash/recover и TUN traffic обоих ядер прошли
+[проверку в одноразовой Arch VM](docs/validation/2026-11-10-installed-worker.md).
+Подключение к profile Prepare/Apply и GUI, полная TERM→KILL приёмка ещё нужны. [Контракт worker](docs/specs/helper-worker-runtime.md).
 
 ### Rust-библиотеки и CLI
 

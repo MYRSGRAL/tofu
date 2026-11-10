@@ -317,8 +317,11 @@ across exec, and fixes the core arguments and environment. Both cores pass the
 TUN fixture under a distinct nonzero UID with NET_ADMIN only and no-new-privileges;
 the same profile passes Check with no capabilities. Fixed systemd units and a
 supervisor bind lifecycle to InvocationID and verified cgroup emptiness.
-Installed-unit acceptance and wiring into profile Prepare/Apply and the GUI
-remain pending. [Worker contract](docs/specs/helper-worker-runtime.md).
+Installed units, a dedicated UID, setsid descendants, helper crash/recovery,
+and both cores’ TUN traffic passed in a
+[disposable Arch VM](docs/validation/2026-11-10-installed-worker.md).
+Profile Prepare/Apply and GUI integration, plus stubborn-child TERM/KILL
+acceptance, remain pending. [Worker contract](docs/specs/helper-worker-runtime.md).
 
 ### Rust libraries and CLIs
 

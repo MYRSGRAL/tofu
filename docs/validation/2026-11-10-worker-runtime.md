@@ -74,9 +74,32 @@ release-nonroot-worker-tun-*.log и unit-verify.log. Использованы т
 
 ## Что не закрыто
 
-Нужны установленный systemd gate с dedicated системным пользователем,
-реальное дерево cgroup/fork/setsid и helper crash/restart, SystemSessionHost,
+Последующая [проверка в одноразовой Arch VM](2026-11-10-installed-worker.md)
+подтвердила установленные units, dedicated UID, cgroup/setsid и helper crash/recover.
+Отдельно остаётся упрямый потомок для доказательства TERM→KILL, SystemSessionHost,
 типизированный profile Prepare/Apply, controller и GUI. DNS/Fake-IP, private VPN,
 LAN/reconcile и полная Linux-матрица остаются отдельными критериями.
 `system_tun:false` сохранён. P12/P13 остаются частичными; общий план —
 **3/26 (11,5%)**, полностью закрыть осталось 23 пункта.
+
+## Диагностика native CI
+
+На первом head PR #39 Check launcher не укладывался в фиксированный пятисекундный
+Ack deadline. Для проверки гипотезы SHA-256 собран с существующим feature
+`sha2/force-soft`; пять собственных CPU contenders и test harness закреплены
+на одном CPU. Debug launcher воспроизвёл WouldBlock через 5,239 с, причём Check
+процесс ещё работал. Release launcher в тех же условиях прошёл полный TUN gate.
+Native CI теперь проверяет release launcher с software SHA, без увеличения
+deadline и без отключения проверок целостности. Это воспроизведение зависимости
+от профиля/CPU, а не доказательство конкретной модели CPU GitHub runner.
+Логи: `local/validation/systemd-vm/soft-contended-{debug,release}.log`.
+
+В Rust job на следующем head обнаружено отдельное `Busy` при открытии Journal
+сразу после Drop. Параллельный subprocess мог наследовать CLOEXEC lock-FD
+до exec: flock принадлежит open file description, поэтому одного закрытия FD
+родителя недостаточно. Приватный RAII LockedDirectory явно снимает блокировку
+при Drop, включая ранние ошибки чтения/валидации. Детерминированная регрессия
+удерживает дубликат того же description: до Drop второй writer запрещён,
+после Drop новый writer разрешён, закрытие старого дубликата не снимает новый
+lock. Без исправления тест падает с Busy, с исправлением проходит.
+Независимое узкое review не нашло замечаний. Параллельность тестов сохранена.
