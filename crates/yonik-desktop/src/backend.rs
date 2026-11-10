@@ -2724,11 +2724,13 @@ async fn run(
     let provider_closed = !provider_enabled || provider.as_mut().await.is_ok();
     drop(provider);
     actor.pending = None;
-    if let Some(monitor) = network_monitor {
-        monitor.shutdown().await;
-    }
+    let network_closed = if let Some(monitor) = network_monitor {
+        monitor.shutdown().await
+    } else {
+        true
+    };
     actor.selected = None;
-    let closed = actor.service.close().await.is_ok() && provider_closed;
+    let closed = actor.service.close().await.is_ok() && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;

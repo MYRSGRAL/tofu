@@ -59,3 +59,20 @@ Policy admission, owner fencing и backoff не изменены; ошибка �
 p10 gate exit 0; workspace clippy --all-targets --locked -- -D warnings,
 fmt --check и diff --check прошли. Retained-clone RED/GREEN сохранён как
 explicit-red.log / explicit-green.log, общий прогон — explicit-all.log.
+
+## Ограниченное закрытие NetworkMonitor
+
+Review delta 032b6d8 выявил неограниченный Connection::close: отложенная
+запись zbus может удерживать socket mutex. Закрытие bus теперь ограничено
+двумя секундами; NetworkMonitor ожидает обе задачи с общим deadline три
+секунды и отменяет зависшие задачи. Результат false при timeout, panic или
+ошибке close передаётся в backend: cleanup_failed, closed=false.
+
+Регрессия с незавершающимся observer дала RED по внешнему deadline 4 секунды,
+после исправления GREEN за 3 секунды с отрицательным cleanup outcome. Она
+проверяет общий предел supervisor, а не воспроизводит блокировку сокета zbus.
+Логи monitor-red.log / monitor-green.log и полный monitor-all.log сохранены
+рядом с предыдущим evidence вне git.
+
+Финальный прогон: 428 passed / 24 ignored, отдельный p10 gate PASS;
+workspace clippy --all-targets --locked -D warnings и fmt PASS.

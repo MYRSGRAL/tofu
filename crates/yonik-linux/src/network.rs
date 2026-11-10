@@ -82,11 +82,11 @@ impl fmt::Display for NetworkMonitorError {
 }
 impl std::error::Error for NetworkMonitorError {}
 
-/// Владелец двух задач и их отмены. Нормальное завершение дожидается обеих.
+/// Владелец двух задач и их отмены. Завершение ограничено общим deadline.
 pub struct NetworkMonitor {
     watch: NetworkWatch,
     cancel: watch::Sender<bool>,
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    tasks: Vec<tokio::task::JoinHandle<bool>>,
 }
 impl NetworkMonitor {
     pub fn start() -> Result<Self, NetworkMonitorError> {
@@ -109,13 +109,14 @@ impl NetworkMonitor {
         let route_task = runtime.spawn(async move {
             let _guard = SourceGuard(routes.clone(), vec![NetworkSource::Routes]);
             route::run(routes, route_cancel).await;
+            true
         });
         let bus_task = runtime.spawn(async move {
             let _guard = SourceGuard(
                 publisher.clone(),
                 vec![NetworkSource::Resolver, NetworkSource::Manager],
             );
-            bus::run(publisher, cancelled).await;
+            bus::run(publisher, cancelled).await
         });
         Ok(Self {
             watch: NetworkWatch(receiver),
@@ -126,11 +127,21 @@ impl NetworkMonitor {
     pub fn watch(&self) -> NetworkWatch {
         self.watch.clone()
     }
-    pub async fn shutdown(mut self) {
+    pub async fn shutdown(mut self) -> bool {
         self.cancel.send_replace(true);
-        for task in self.tasks.drain(..) {
-            let _ = task.await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut closed = true;
+        for mut task in self.tasks.drain(..) {
+            match tokio::time::timeout_at(deadline, &mut task).await {
+                Ok(Ok(true)) => {}
+                Ok(_) => closed = false,
+                Err(_) => {
+                    task.abort();
+                    closed = false;
+                }
+            }
         }
+        closed
     }
 }
 impl Drop for NetworkMonitor {
@@ -199,6 +210,20 @@ impl NetworkPublisher {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn shutdown_bounds_unresponsive_observer() {
+        let (_, receiver) = publisher();
+        let (cancel, _) = tokio::sync::watch::channel(false);
+        let monitor = super::NetworkMonitor {
+            watch: super::NetworkWatch(receiver),
+            cancel,
+            tasks: vec![tokio::spawn(std::future::pending())],
+        };
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(4), monitor.shutdown())
+            .await
+            .expect("зависший observer не блокирует shutdown бессрочно");
+        assert!(!closed, "timeout не подтверждает cleanup");
+    }
     use super::*;
 
     fn publisher() -> (NetworkPublisher, watch::Receiver<NetworkSnapshot>) {
