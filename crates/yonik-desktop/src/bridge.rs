@@ -11,6 +11,7 @@ pub mod ffi {
 
     unsafe extern "C++" {
         include!("application.h");
+        fn copy_diagnostic_metadata(value: &QString);
         fn run_application(
             data_dir: &QString,
             smoke_test: bool,
@@ -34,5 +35,7 @@ pub mod ffi {
         fn dispatch(self: Pin<&mut DesktopBridge>, request: QString);
         #[qinvokable]
         fn shutdown(self: Pin<&mut DesktopBridge>);
+        #[qinvokable]
+        fn copy_diagnostics(self: Pin<&mut DesktopBridge>) -> bool;
     }
 }
