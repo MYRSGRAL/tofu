@@ -21,19 +21,31 @@ def run(binary: Path, output: Path) -> None:
         runtime.mkdir(mode=0o700)
         os.environ["XDG_RUNTIME_DIR"] = str(runtime)
         steps = [
-            {"when": {"ready": True, "closed": False},
-             "ui_when": {"window": {"visible": True}},
-             "ui": {"action": "close"}},
-            {"when": {"ready": True, "closed": False},
-             "ui_when": {"window": {"visible": True}},
-             "ui": {"action": "quit"}, "capture_name": "after-close.png"},
+            {
+                "when": {"ready": True, "closed": False},
+                "ui_when": {"window": {"visible": True}},
+                "ui": {"action": "close"},
+            },
+            {
+                "when": {"ready": True, "closed": False},
+                "ui_when": {"window": {"visible": True}},
+                "ui": {"action": "quit"},
+                "capture_name": "after-close.png",
+            },
         ]
         events = execute(binary, root, steps, output, "1")
         if any(event.get("tray_available") is not False for event in events):
             raise RuntimeError("Gate требует Qt без доступного трея")
         (output / "result.json").write_text(
-            json.dumps({"steps": len(steps), "events": len(events),
-                        "closed": events[-1]["closed"]}, indent=2) + "\n"
+            json.dumps(
+                {
+                    "steps": len(steps),
+                    "events": len(events),
+                    "closed": events[-1]["closed"],
+                },
+                indent=2,
+            )
+            + "\n"
         )
 
 
@@ -46,9 +58,17 @@ def main() -> int:
     args = parser.parse_args()
     if not args.isolated:
         return subprocess.run(
-            ["dbus-run-session", "--", "python", str(Path(__file__).resolve()),
-             str(args.binary.resolve()), "--output", str(args.output.resolve()),
-             "--isolated"], check=False,
+            [
+                "dbus-run-session",
+                "--",
+                "python",
+                str(Path(__file__).resolve()),
+                str(args.binary.resolve()),
+                "--output",
+                str(args.output.resolve()),
+                "--isolated",
+            ],
+            check=False,
         ).returncode
     run(args.binary.resolve(strict=True), args.output.resolve())
     return 0
