@@ -235,7 +235,16 @@ async fn compiled_worker(
         crate::BinarySnapshot::load(binary, crate::Sha256(hash.finalize().into()), engine).unwrap();
     let payload = WorkerPayload::new(snapshot, config).unwrap();
     let (mut checker, stream) = worker_channel(area, true);
-    let ack = payload.send(&stream, WorkerMode::Check).unwrap();
+    let began = std::time::Instant::now();
+    let ack = payload
+        .send(&stream, WorkerMode::Check)
+        .unwrap_or_else(|error| {
+            panic!(
+                "Worker Check: {error:?}, elapsed={:?}, status={:?}",
+                began.elapsed(),
+                checker.0.try_wait()
+            );
+        });
     assert_eq!(ack.status, WorkerStatus::Checked);
     assert_eq!(ack.pid, checker.0.id());
     tokio::time::timeout(DEADLINE, async {

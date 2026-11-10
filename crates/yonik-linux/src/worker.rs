@@ -319,9 +319,18 @@ impl WorkerPayload {
                         .ok_or(WorkerError::Timeout)?,
                 ))
                 .map_err(|_| WorkerError::Io)?;
-            let read = stream
-                .read(&mut ack[offset..])
-                .map_err(|_| WorkerError::Io)?;
+            let read = stream.read(&mut ack[offset..]).map_err(|error| {
+                #[cfg(test)]
+                eprintln!(
+                    "Ожидание worker Ack: kind={:?}, errno={:?}, elapsed={:?}",
+                    error.kind(),
+                    error.raw_os_error(),
+                    started.elapsed()
+                );
+                #[cfg(not(test))]
+                let _ = error;
+                WorkerError::Io
+            })?;
             if read == 0 {
                 return Err(WorkerError::Protocol);
             }
