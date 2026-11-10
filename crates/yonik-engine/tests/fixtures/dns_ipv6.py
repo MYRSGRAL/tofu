@@ -7,6 +7,7 @@ import struct
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "tools"))
@@ -15,6 +16,9 @@ from dns_fixture import (
     dns_query,
     engine_process,
     make_response,
+    question_bytes,
+    read_question,
+    response_addresses,
     validated_binary,
     verify_namespace,
 )
@@ -28,6 +32,13 @@ queries = []
 errors = []
 
 
+def upstream_response(packet: bytes) -> bytes:
+    name, qtype, _ = read_question(packet)
+    queries.append(dict(name=name, qtype=qtype, wire=packet.hex()))
+    addresses = {1: ("192.0.2.20",), 28: ("2001:db8::20",)}.get(qtype, ())
+    return make_response(packet, Reply(addresses=addresses, ttl=1))
+
+
 def upstream() -> None:
     with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as s:
         s.bind(("::1", 1053))
@@ -37,10 +48,7 @@ def upstream() -> None:
                 packet, peer = s.recvfrom(4096)
             except socket.timeout:
                 continue
-            queries.append(packet.hex())
-            s.sendto(
-                make_response(packet, Reply(addresses=("2001:db8::20",), ttl=1)), peer
-            )
+            s.sendto(upstream_response(packet), peer)
 
 
 def proxy() -> None:
@@ -118,7 +126,38 @@ def blocked(address: str) -> None:
     assert not success and len(seen) == count, (address, seen)
 
 
-threads = [threading.Thread(target=f) for f in (upstream, proxy, endpoint)]
+def disabled_family_reply() -> dict[str, int]:
+    name = "disabled.test"
+    identifier = os.urandom(2)
+    request = (
+        identifier + struct.pack("!HHHHH", 0x0100, 1, 0, 0, 0) + question_bytes(name, 1)
+    )
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.settimeout(2)
+        client.connect(("127.0.0.1", 1054))
+        client.send(request)
+        packet = client.recv(65535)
+    if len(packet) < 12:
+        raise ValueError("Обрезан ответ отключённого семейства")
+    flags = struct.unpack_from("!H", packet, 2)[0]
+    rcode = flags & 15
+    # Timeout/SERVFAIL/ошибка протокола не доказывают запрет семейства.
+    assert rcode in (0, 3, 5), ("disabled DNS rcode", rcode)
+    checked = packet[:2] + struct.pack("!H", flags & ~15) + packet[4:]
+    assert not response_addresses(checked, identifier, name, 1), "IPv4 адрес получен"
+    return dict(rcode=rcode, bytes=len(packet))
+
+
+def guarded(worker: Callable[[], None]) -> None:
+    try:
+        worker()
+    except Exception as error:
+        errors.append(f"{worker.__name__}: {error!r}")
+
+
+threads = [
+    threading.Thread(target=guarded, args=(f,)) for f in (upstream, proxy, endpoint)
+]
 for t in threads:
     t.start()
 results = []
@@ -147,12 +186,12 @@ try:
                 if mode == "FakeIp":
                     assert len(queries) == before
                     blocked("fc00:3fff:ffff:ffff:ffff:ffff:ffff:ffff")
-                # Отключённое семейство не должно выдавать IPv4 адреса.
-                try:
-                    disabled = dns_query("disabled.test", qtype=1, port=1054)
-                except (OSError, ValueError):
-                    disabled = []
-                assert not disabled, disabled
+                before_disabled = len(queries)
+                disabled = disabled_family_reply()
+                assert not any(
+                    row["name"] == "disabled.test" and row["qtype"] == 1
+                    for row in queries[before_disabled:]
+                ), "Отключённый A запрос попал в upstream"
                 assert child.poll() is None
                 results.append(
                     dict(
@@ -160,6 +199,7 @@ try:
                         mode=mode,
                         answers=answers,
                         ttl=ttls,
+                        disabled=disabled,
                         socks=seen[-1],
                         unknown_blocked=mode == "FakeIp",
                     )
@@ -171,11 +211,14 @@ try:
                     time.sleep(0.4)
                     blocked(answers[0])
                 results[-1]["empty_session_old_mapping_blocked"] = True
-    assert not errors, errors
 finally:
     stop.set()
     for t in threads:
         t.join(3)
+        if t.is_alive():
+            errors.append("Fixture thread не завершился")
     (base / "ipv6-results.json").write_text(
         json.dumps(dict(results=results, queries=queries, errors=errors), indent=2)
     )
+
+assert not errors, errors
