@@ -61,9 +61,7 @@ impl SystemSession {
     ) -> Result<(), ClientError> {
         self.fence(revision)?;
         self.prepared = None;
-        if !matches!(self.snapshot(), State::NoManagedPolicy | State::Unknown) {
-            return Err(ClientError::Busy);
-        }
+        // Публичная блокировка не означает активную сессию: admission проверяет helper.
         if !self
             .client
             .capabilities(deadline, cancel.clone())

@@ -489,3 +489,82 @@ async fn adapter_gate_revision_and_unknown_cleanup() {
         assert_eq!(adapter.snapshot(), State::Unknown);
     }
 }
+
+#[tokio::test]
+async fn adapter_retained_policy_can_prepare_without_unlock() {
+    use system_session::{ProfileRevision, SystemSession};
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    let response = Arc::new(Mutex::new(String::new()));
+    let effects = Arc::new(AtomicUsize::new(0));
+    server
+        .object_server()
+        .at(
+            SERVICE_PATH,
+            Server {
+                system_tun: true,
+                response: response.clone(),
+                effects: effects.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let (_keep, cancel) = Cancellation::new();
+    let client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let revision = ProfileRevision {
+        source: 1,
+        profile: 1,
+        generation: 1,
+    };
+    let mut adapter = SystemSession::new(client, revision);
+    let report = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    let intent = yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap();
+    for (wire, state) in [
+        ("verified_rules", State::VerifiedRules),
+        ("recovery_required", State::RecoveryRequired),
+    ] {
+        *response.lock().await = serde_json::json!({"version":1,"state":wire}).to_string();
+        assert_eq!(adapter.state(deadline(), cancel.clone()).await, Ok(state));
+        assert_eq!(
+            adapter
+                .prepare(
+                    revision,
+                    &intent,
+                    yonik_engine::Engine::Xray,
+                    true,
+                    deadline(),
+                    cancel.clone()
+                )
+                .await,
+            Ok(())
+        );
+    }
+    assert_eq!(
+        adapter.stop(deadline(), cancel.clone()).await,
+        Ok(State::VerifiedRules)
+    );
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        adapter
+            .prepare(
+                revision,
+                &intent,
+                yonik_engine::Engine::Xray,
+                true,
+                deadline(),
+                cancel.clone()
+            )
+            .await,
+        Ok(())
+    );
+    assert_eq!(
+        adapter.unlock(deadline(), cancel).await,
+        Ok(State::NoManagedPolicy)
+    );
+}

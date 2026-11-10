@@ -36,3 +36,8 @@ GREEN: `cargo +1.85.1 test -p yonik-linux --test system_client` — 6 passed,
 включая финальный повтор после добавления отменённого Apply.
 `cargo +1.85.1 clippy -p yonik-linux -p yonik-desktop --all-targets -- -D warnings`
 — успешно. `cargo +1.85.1 fmt --all -- --check` и `git diff --check` — успешно.
+
+
+## Повтор Prepare при сохранённой блокировке
+
+Локальная проверка adapter ошибочно считала `VerifiedRules`/`RecoveryRequired` доказательством активной системной сессии. Она удалена: admission, наличие сессии и worker uncertainty по-прежнему проверяет helper; capability gate и revision/one-shot fencing сохранены. Private-bus regression воспроизвела `Err(Busy)` вместо успешного Prepare (RED). GREEN: семь integration tests, включая оба retained-policy состояния и успешный Stop → Prepare без Unlock; scoped Linux all-targets clippy и fmt прошли. Состояние после Stop в fixture — VerifiedRules, RecoveryRequired отдельно приходит через State. Это проверка adapter/RPC, не production TUN/GUI и не доказательство разрешения helper при реально активной сессии. Логи: `local/validation/pr77-retained-policy/` основного workspace.
