@@ -1,0 +1,27 @@
+test_bounds_and_malformed_json (test_check_diagnostic_export.ExportTests.test_bounds_and_malformed_json) ... ok
+test_canaries_and_unknown_fields (test_check_diagnostic_export.ExportTests.test_canaries_and_unknown_fields) ... ok
+test_catalog_and_maximum_document (test_check_diagnostic_export.ExportTests.test_catalog_and_maximum_document) ... ok
+test_cli_no_partial_output_or_input_echo (test_check_diagnostic_export.ExportTests.test_cli_no_partial_output_or_input_echo) ... ok
+test_controls (test_check_diagnostic_export.ExportTests.test_controls) ... ok
+test_known_error_gap (test_check_diagnostic_export.ExportTests.test_known_error_gap) ... ERROR
+test_roundtrip_and_languages (test_check_diagnostic_export.ExportTests.test_roundtrip_and_languages) ... ok
+test_strict_types_and_schema (test_check_diagnostic_export.ExportTests.test_strict_types_and_schema) ... ok
+
+======================================================================
+ERROR: test_known_error_gap (test_check_diagnostic_export.ExportTests.test_known_error_gap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/tools/tests/test_check_diagnostic_export.py", line 35, in test_known_error_gap
+    export.export_metadata(json.dumps(value).encode())
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/tools/check_diagnostic_export.py", line 94, in export_metadata
+    reject()
+    ~~~~~~^^
+  File "/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/tools/check_diagnostic_export.py", line 33, in reject
+    raise ExportError("Диагностические метаданные отклонены")
+check_diagnostic_export.ExportError: Диагностические метаданные отклонены
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.038s
+
+FAILED (errors=1)

@@ -1,0 +1,79 @@
+    Checking zerofrom v0.1.8
+    Checking yoke v0.8.4
+    Checking zerovec v0.11.9
+    Checking tinystr v0.8.5
+    Checking icu_locale_core v2.1.1
+   Compiling thiserror v1.0.69
+    Checking zerotrie v0.2.5
+    Checking potential_utf v0.1.6
+    Checking icu_collections v2.1.1
+    Checking icu_provider v2.1.1
+   Compiling serde_core v1.0.229
+    Checking serde v1.0.229
+   Compiling clang-format v0.3.0
+   Compiling cxx-qt-gen v0.10.0
+    Checking tokio v1.54.1
+    Checking icu_properties v2.1.2
+    Checking icu_normalizer v2.1.1
+   Compiling zmij v1.0.23
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling qt-build-utils v0.10.0
+   Compiling serde_json v1.0.154
+    Checking idna_adapter v1.2.1
+    Checking futures-util v0.3.34
+    Checking idna v1.1.0
+   Compiling cxx-qt-build v0.10.0
+    Checking ring v0.17.14
+    Checking tracing v0.1.44
+    Checking url v2.5.8
+    Checking enumflags2 v0.7.12
+    Checking rustls-webpki v0.103.16
+   Compiling cxx-qt v0.10.0
+    Checking zvariant v4.2.0
+    Checking hyper v1.12.0
+    Checking rustls v0.23.46
+    Checking tower v0.5.3
+    Checking hyper-util v0.1.21
+    Checking tokio-rustls v0.26.6
+    Checking yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-import)
+    Checking zbus_names v3.0.0
+   Compiling cxx-qt-lib v0.10.0
+    Checking link-cplusplus v1.0.12
+    Checking foldhash v0.2.0
+    Checking cxx v1.0.176
+    Checking zbus v4.4.0
+    Checking serde_urlencoded v0.7.1
+    Checking hyper-rustls v0.27.10
+    Checking tower-http v0.6.11
+    Checking yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-domain)
+   Compiling cxx-qt-macro v0.10.0
+    Checking reqwest v0.12.28
+    Checking yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-engine)
+    Checking secret-service v4.0.0
+    Checking yonik-subscription v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-subscription)
+   Compiling yonik-desktop v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-desktop)
+    Checking yonik-linux v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-linux)
+warning: yonik-desktop@0.1.0: In file included from /usr/include/qt6/QtCore/qstring.h:15,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qhashfunctions.h:10,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qlist.h:12,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qstringlist.h:6,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QStringList:1,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/p11-catalog/target/debug/build/yonik-desktop-b74ba5baeea15ba9/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:11,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/p11-catalog/target/debug/build/yonik-desktop-b74ba5baeea15ba9/out/cxxqtbuild/include/cxx-qt-lib/qstring.h:9,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/p11-catalog/target/debug/build/yonik-desktop-b74ba5baeea15ba9/out/cxxqtgen/src/bridge.cxx.cpp:1:
+warning: yonik-desktop@0.1.0: /usr/include/qt6/QtCore/qchar.h:48:31: warning: defining 'QChar', which previously failed to be complete in a SFINAE context [-Wsfinae-incomplete=]
+warning: yonik-desktop@0.1.0:    48 | class QT6_ONLY(Q_CORE_EXPORT) QChar {
+warning: yonik-desktop@0.1.0:       |                               ^~~~~
+warning: yonik-desktop@0.1.0: In file included from /usr/include/c++/16/unordered_map:44,
+warning: yonik-desktop@0.1.0:                  from /usr/include/c++/16/functional:80,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcomparehelpers.h:29,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcompare.h:661,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qnamespace.h:14,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qbytearray.h:10,
+warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QByteArray:1,
+warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/p11-catalog/target/debug/build/yonik-desktop-b74ba5baeea15ba9/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:10:
+warning: yonik-desktop@0.1.0: /usr/include/c++/16/bits/range_access.h:325:24: note: here.  Use '-Wsfinae-incomplete=2' for a diagnostic at that point
+warning: yonik-desktop@0.1.0:   325 |     -> decltype(__cont.data())
+warning: yonik-desktop@0.1.0:       |                 ~~~~~~~^~~~
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 06s

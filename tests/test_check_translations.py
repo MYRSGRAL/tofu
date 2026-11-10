@@ -20,6 +20,21 @@ class TranslationTests(unittest.TestCase):
         self.assertGreater(inline, 0)
         self.assertGreater(keys, 0)
 
+    def test_tray_pairs(self) -> None:
+        source = (ROOT / "crates/yonik-desktop/src/application.cpp").read_text()
+        self.assertEqual(checker.check_cpp_source(source), 9)
+        with self.assertRaises(checker.CatalogError):
+            checker.check_cpp_source(
+                source.replace('QStringLiteral("Connect")', 'QStringLiteral("")')
+            )
+
+    def test_owned_component(self) -> None:
+        path = ROOT / checker.CATALOG.parent / "DiagnosticsExport.qml"
+        source = path.read_text()
+        self.assertEqual(checker.check_source(source, False), (4, 0))
+        with self.assertRaises(checker.CatalogError):
+            checker.check_source(source.replace('"Copied"', '""'), False)
+
     def test_corruptions(self) -> None:
         for old, new in [
             ('"Готово", "Ready"', '"Готово"'),
