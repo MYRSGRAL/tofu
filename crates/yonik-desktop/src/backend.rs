@@ -640,6 +640,7 @@ struct Snapshot {
     connection_mode: ConnectionMode,
     system_state: &'static str,
     can_unlock: bool,
+    system_recovery_pending: bool,
     system_busy: bool,
     status: &'static str,
     selected_profile: Option<i64>,
@@ -701,6 +702,7 @@ impl Snapshot {
             connection_mode: ConnectionMode::Local,
             system_state: "Unknown",
             can_unlock: false,
+            system_recovery_pending: false,
             system_busy: false,
             status: "Disconnected",
             selected_profile: None,
@@ -2578,6 +2580,8 @@ async fn run(
                 None => std::future::pending().await,
             } } => {
                 if let Some(flight) = system_flight.take() {
+                    // После долгого State recovery-действия получают окно до следующего poll.
+                    system_poll.reset();
                     let stale = (flight.connecting && system_stop) || flight.generation != control.generation.load(Ordering::SeqCst)
                         || (flight.connecting && flight.revision != system_revision(&actor));
                     match result {
@@ -2937,7 +2941,7 @@ async fn run(
                         } }
                     }
                     Command::SetConnectionMode { mode } => {
-                        if actor.state.can_stop || actor.state.can_unlock || system_flight.is_some() || system_stop { Err(DesktopError("busy")) }
+                        if actor.state.can_stop || actor.state.system_recovery_pending || system_flight.is_some() || system_stop { Err(DesktopError("busy")) }
                         else { actor.state.connection_mode = mode; actor.state.status = "Disconnected"; Ok(()) }
                     }
                     Command::SystemState | Command::SystemUnlock => {
@@ -3359,10 +3363,17 @@ fn record_system(snapshot: &mut Snapshot, state: SystemState) {
     };
     snapshot.system_state = label;
     snapshot.status = label;
-    snapshot.can_unlock = matches!(
-        state,
-        SystemState::VerifiedRules | SystemState::RecoveryRequired
-    );
+    // Unknown — потеря доказательства, а не доказательство отсутствия ресурсов.
+    match state {
+        SystemState::NoManagedPolicy => snapshot.system_recovery_pending = false,
+        SystemState::TunnelStarting
+        | SystemState::VerifiedRules
+        | SystemState::RecoveryRequired => {
+            snapshot.system_recovery_pending = true;
+        }
+        SystemState::Unknown => {}
+    }
+    snapshot.can_unlock = snapshot.system_recovery_pending;
 }
 fn system_error(error: ClientError) -> &'static str {
     match error {
@@ -3445,5 +3456,47 @@ impl Flight {
             connecting,
             mutating,
         }
+    }
+}
+
+#[cfg(test)]
+mod system_recovery_tests {
+    use super::*;
+
+    #[test]
+    fn неопределённый_state_сохраняет_барьер_и_unlock() {
+        for retained in [
+            SystemState::VerifiedRules,
+            SystemState::RecoveryRequired,
+            SystemState::TunnelStarting,
+        ] {
+            let mut snapshot = Snapshot::new(true);
+            record_system(&mut snapshot, retained);
+            for error in [
+                ClientError::Timeout,
+                ClientError::Unavailable,
+                ClientError::OwnerLost,
+            ] {
+                record_system(&mut snapshot, SystemState::Unknown);
+                snapshot.command_error(false, system_error(error));
+                assert!(snapshot.system_recovery_pending);
+                assert!(snapshot.can_unlock);
+                assert_eq!(snapshot.system_state, "Unknown");
+            }
+        }
+    }
+
+    #[test]
+    fn подтверждённая_очистка_снимает_барьер() {
+        let mut snapshot = Snapshot::new(true);
+        record_system(&mut snapshot, SystemState::VerifiedRules);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(snapshot.system_recovery_pending);
+        // И State, и Unlock передают сюда только принятый typed ответ helper.
+        record_system(&mut snapshot, SystemState::NoManagedPolicy);
+        assert!(!snapshot.system_recovery_pending);
+        assert!(!snapshot.can_unlock);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(!snapshot.system_recovery_pending);
     }
 }

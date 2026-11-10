@@ -97,12 +97,50 @@ def fixture(address: str, scenario: str, log: Path) -> None:
             else:
                 ok(reply)
 
-        @dbus.service.method(NAME, in_signature="s", out_signature="s")
-        def State(self, request: str) -> str:
+        @dbus.service.method(
+            NAME, in_signature="s", out_signature="s", async_callbacks=("ok", "error")
+        )
+        def State(self, request: str, ok: object, error: object) -> None:
+            nonlocal state
             record("State")
+            if scenario.startswith("retained-") and state == "verified_rules":
+                if scenario == "retained-timeout-unlock":
+                    GLib.timeout_add(
+                        35000,
+                        lambda: (
+                            ok(json.dumps(dict(version=1, state="verified_rules"))),
+                            False,
+                        )[1],
+                    )
+                else:
+                    if scenario == "retained-error-state":
+                        state = "no_managed_policy"
+                    if scenario == "retained-owner-unlock":
+
+                        def restart() -> bool:
+                            record("OwnerLost")
+                            bus.release_name(NAME)
+
+                            def returned() -> bool:
+                                bus.request_name(NAME)
+                                record("OwnerReturned")
+                                return False
+
+                            GLib.timeout_add(250, returned)
+                            return False
+
+                        GLib.timeout_add(100, restart)
+                    error(
+                        dbus.exceptions.DBusException(
+                            json.dumps(dict(version=1, error="unavailable")),
+                            name=NAME + ".Error",
+                        )
+                    )
+                return
             if scenario == "stopunknown" and state == "unknown":
-                return json.dumps(dict(version=1, state="no_managed_policy"))
-            return json.dumps(dict(version=1, state=state))
+                ok(json.dumps(dict(version=1, state="no_managed_policy")))
+                return
+            ok(json.dumps(dict(version=1, state=state)))
 
         @dbus.service.method(NAME, in_signature="s", out_signature="s")
         def Stop(self, request: str) -> str:
@@ -221,6 +259,74 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                         "when": {"status": "Preparing"},
                         "command": {"command": "shutdown"},
                     }
+                ]
+            elif scenario.startswith("retained-"):
+                steps += [
+                    ui("click", "mainConnectButton", when={"status": "TunnelStarting"}),
+                    ui(
+                        "click",
+                        "settingsButton",
+                        when={"status": "VerifiedRules", "can_stop": False},
+                    ),
+                    ui("click", "settingsConnectionButton"),
+                    ui("click", "systemStateButton", when={"system_busy": False}),
+                ]
+                error = (
+                    "system_timeout"
+                    if scenario == "retained-timeout-unlock"
+                    else "system_unavailable"
+                )
+                if scenario == "retained-owner-unlock":
+                    steps += [
+                        ui(
+                            "key",
+                            "systemStateButton",
+                            key="Tab",
+                            when={"connection_error": error, "system_busy": False},
+                        )
+                        for _ in range(20)
+                    ]
+                steps += [
+                    {
+                        "when": {
+                            "connection_error": error,
+                            "system_busy": False,
+                            "can_stop": False,
+                        },
+                        "command": {"command": "set_connection_mode", "mode": "local"},
+                    }
+                ]
+                cleanup = (
+                    "systemStateButton"
+                    if scenario == "retained-error-state"
+                    else "systemUnlockButton"
+                )
+                steps += [
+                    ui(
+                        "click",
+                        cleanup,
+                        when={
+                            "connection_mode": "system",
+                            "error": "busy",
+                            "system_busy": False,
+                        },
+                        expect={
+                            "connectionModeChoice": {"enabled": False},
+                            "systemUnlockButton": {"enabled": True},
+                        },
+                    ),
+                    {
+                        "when": {
+                            "system_state": "NoManagedPolicy",
+                            "can_unlock": False,
+                            "system_busy": False,
+                        },
+                        "command": {"command": "set_connection_mode", "mode": "local"},
+                    },
+                    {
+                        "when": {"connection_mode": "local"},
+                        "command": {"command": "shutdown"},
+                    },
                 ]
             elif scenario == "owner":
                 steps += [
@@ -344,6 +450,12 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                 )
                 stopped = next(row["at"] for row in records if row["method"] == "Stop")
                 assert stopped - started < 1.5, "Stop не ждёт долгий RPC"
+            if scenario == "retained-owner-unlock":
+                assert (
+                    calls.index("OwnerLost")
+                    < calls.index("OwnerReturned")
+                    < calls.index("Unlock")
+                )
             if scenario == "normal":
                 assert calls.count("Prepare") == 2 and calls.count("Apply") == 2
             if scenario == "unsupported":
@@ -387,6 +499,10 @@ if __name__ == "__main__":
             "recovery",
             "stopunknown",
             "timeout",
+            "retained-error-unlock",
+            "retained-timeout-unlock",
+            "retained-owner-unlock",
+            "retained-error-state",
         ]:
             run(
                 Path(sys.argv[1]).resolve(),
