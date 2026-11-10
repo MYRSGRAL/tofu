@@ -76,3 +76,31 @@ fn config_writer_rejects_oversize_before_buffer_growth() {
     assert_eq!(exact.0.len(), crate::helper::MAX_ARTIFACT_BYTES);
     assert!(exact.0.capacity() <= crate::helper::MAX_RETAINED_CONFIG_BYTES);
 }
+
+#[tokio::test]
+async fn event_log_observes_real_process_stop_and_reap() {
+    use crate::event_log::{EventCode, EventLog, EventSource, LogFilter};
+    let log = EventLog::new();
+    let mut session = LocalSession::new().unwrap().with_event_log(log.clone());
+    advance(&mut session, None);
+    session.child = Some(
+        tokio::process::Command::new("/usr/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap(),
+    );
+    let pid = session.engine_pid().unwrap();
+    session.stop().await.unwrap();
+    assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+    let page = log.read(0, LogFilter::default(), 256).unwrap();
+    assert_eq!(
+        page.events.iter().map(|e| e.code).collect::<Vec<_>>(),
+        vec![
+            EventCode::StopRequested,
+            EventCode::ProcessExited,
+            EventCode::CleanupConfirmed
+        ]
+    );
+    assert_eq!(page.events[1].source, EventSource::Engine);
+}
