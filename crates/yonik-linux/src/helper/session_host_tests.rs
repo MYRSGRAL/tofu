@@ -503,3 +503,103 @@ async fn pidfd_exit_wakes_safety_without_network_event_or_rpc() {
     assert_eq!(*observed.borrow(), (2, 1));
     assert_eq!(*network.borrow(), 0);
 }
+
+#[tokio::test]
+#[ignore = "Диагностическая регрессия: только отдельные namespaces через safe runner"]
+async fn real_namespace_persistent_tun_queue_contract() {
+    use crate::managed_network::{Journal, Ownership, tun::TunExecutor};
+    use std::os::unix::fs::MetadataExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let ns = std::fs::metadata("/proc/thread-self/ns/net").unwrap();
+    let owner = Ownership::new(
+        rustix::process::getuid().as_raw(),
+        77,
+        99,
+        ns.dev(),
+        ns.ino(),
+    )
+    .unwrap();
+    // До эффектов fixture требует отличный от host namespace и явный marker.
+    let mut executor = TunExecutor::isolated_fixture(owner).unwrap();
+    let (_keep, mut cancel) = crate::Cancellation::new();
+    let baseline = crate::read_topology(&mut cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let plan = crate::helper::SessionNetworkPlan::reserve(owner, &baseline).unwrap();
+    let mut journal =
+        Journal::open(std::path::Path::new("/tmp/yonik-attach-diagnostic"), owner).unwrap();
+    let index = plan.configure(&mut executor, &mut journal).await.unwrap();
+    // Отдельный causal control только в уже проверенном собственном namespace.
+    // Production configure и fencing этим экспериментом не меняются.
+    if std::env::var_os("YONIK_TUN_DIAGNOSTIC_ADDRGEN_NONE").as_deref()
+        == Some(std::ffi::OsStr::new("1"))
+    {
+        let current = crate::read_topology(&mut cancel, super::DEADLINE)
+            .await
+            .unwrap();
+        let link = current
+            .links
+            .iter()
+            .find(|link| link.index == index)
+            .unwrap();
+        assert!(
+            tokio::process::Command::new("/usr/bin/ip")
+                .args([
+                    "link",
+                    "set",
+                    "dev",
+                    std::str::from_utf8(&link.name).unwrap(),
+                    "addrgenmode",
+                    "none"
+                ])
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+    }
+    let before = crate::read_topology(&mut cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let before = before.links.into_iter().find(|l| l.index == index).unwrap();
+    let script = "import sys,fcntl,struct\nf=open('/dev/net/tun','r+b',buffering=0)\nfcntl.ioctl(f,0x400454ca,struct.pack('16sH',sys.argv[1].encode(),0x1001)+bytes(22))\nprint('READY',flush=True)\nsys.stdin.buffer.read(1)\n";
+    let mut child = tokio::process::Command::new("/usr/bin/python3")
+        .args(["-c", script, std::str::from_utf8(&before.name).unwrap()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut output = tokio::io::BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        output.read_line(&mut ready),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(ready, "READY\n");
+    let after = crate::read_topology(&mut cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let after = after.links.into_iter().find(|l| l.index == index).unwrap();
+    super::diagnostic_link("raw", &before, &after);
+    let same = same_link_contract(&before, &after);
+    child.stdin.take().unwrap().write_all(b"x").await.unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    plan.cleanup_after_worker(&mut executor, &mut journal, index)
+        .await
+        .unwrap();
+    // Намеренный RED диагностического gate; неизвестные поля не маскируются.
+    assert!(
+        same,
+        "Контракт persistent TUN изменился при открытии очереди"
+    );
+}

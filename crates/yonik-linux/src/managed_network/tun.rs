@@ -208,7 +208,7 @@ impl TunExecutor {
         })
     }
     #[cfg(test)]
-    fn isolated_fixture(owner: Ownership) -> Result<Self, TunError> {
+    pub(crate) fn isolated_fixture(owner: Ownership) -> Result<Self, TunError> {
         let netns = File::open("/proc/thread-self/ns/net").map_err(|_| TunError::Namespace)?;
         let actual = namespace(&netns)?;
         let host = std::env::var("YONIK_NFT_TEST_HOST_NETNS").map_err(|_| TunError::Namespace)?;

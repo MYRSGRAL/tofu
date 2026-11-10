@@ -31,6 +31,74 @@ use std::{
     time::Duration,
 };
 
+// Диагностика доступна только lib-test и явно включается в disposable fixture.
+fn diagnostic_result<T, E: std::fmt::Debug>(_stage: &str, result: Result<T, E>) -> Result<T, E> {
+    #[cfg(test)]
+    if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!(
+            "session diagnostic {}: {:?}",
+            _stage,
+            result.as_ref().map(|_| ())
+        );
+    }
+    result
+}
+fn diagnostic_value<T: std::fmt::Debug, E: std::fmt::Debug>(
+    _stage: &str,
+    result: Result<T, E>,
+) -> Result<T, E> {
+    #[cfg(test)]
+    if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!("session diagnostic {}: {:?}", _stage, result);
+    }
+    result
+}
+#[cfg(test)]
+fn diagnostic_link(stage: &str, expected: &LinuxLink, actual: &LinuxLink) {
+    if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return;
+    }
+    for (label, link) in [("baseline", expected), ("current", actual)] {
+        eprintln!(
+            "TUN {stage} {label}: index={} type={} flags={:#x} mtu={:?} master={:?} parent={:?} operstate={:?}",
+            link.index,
+            link.link_type,
+            link.flags,
+            link.mtu,
+            link.master,
+            link.parent,
+            link.operational_state
+        );
+    }
+    let before: std::collections::BTreeMap<_, _> =
+        expected.unknown.iter().map(|a| (a.kind, a)).collect();
+    let after: std::collections::BTreeMap<_, _> =
+        actual.unknown.iter().map(|a| (a.kind, a)).collect();
+    for kind in before
+        .keys()
+        .chain(after.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let before = before.get(&kind).copied();
+        let after = after.get(&kind).copied();
+        if before == after {
+            continue;
+        }
+        for (label, value) in [("baseline", before), ("current", after)] {
+            match value {
+                Some(a) => eprintln!(
+                    "TUN {stage} {label} kind={} len={} value={:02x?}",
+                    kind,
+                    a.value.len(),
+                    &a.value[..a.value.len().min(8192)]
+                ),
+                None => eprintln!("TUN {stage} {label} kind={kind}: отсутствует"),
+            }
+        }
+    }
+}
+
 const DEADLINE: Duration = Duration::from_secs(3);
 const MAX_BASELINE_BYTES: usize = 3 * 1024 * 1024;
 const MAX_PASSWD_BYTES: u64 = 1024 * 1024;
@@ -186,7 +254,31 @@ fn verify_worker_process(pid: u32, uid: u32) -> Result<(), ServiceError> {
     if bytes.len() as u64 > MAX_STATUS_BYTES {
         return Err(ServiceError::Unavailable);
     }
-    verify_worker_status(&bytes, uid)
+    let result = verify_worker_status(&bytes, uid);
+    #[cfg(test)]
+    if result.is_err()
+        && std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+    {
+        eprintln!("worker status expected uid={uid}");
+        for line in String::from_utf8_lossy(&bytes).lines().filter(|line| {
+            [
+                "Uid:",
+                "CapInh:",
+                "CapPrm:",
+                "CapEff:",
+                "CapBnd:",
+                "CapAmb:",
+                "NoNewPrivs:",
+                "State:",
+            ]
+            .iter()
+            .any(|prefix| line.starts_with(prefix))
+        }) {
+            eprintln!("worker status {line}");
+        }
+    }
+    result
 }
 fn verify_worker_status(bytes: &[u8], uid: u32) -> Result<(), ServiceError> {
     if bytes.len() as u64 > MAX_STATUS_BYTES {
@@ -579,9 +671,12 @@ impl Backend {
             .map_err(unavailable)?;
         // С этого момента cancellation caller не освобождает journal/worker.
         // Любая ошибка проходит через независимый worker-first cleanup.
-        let result = self.start_profile(owner, artifact, cancel).await;
+        let result = diagnostic_result(
+            "start_profile",
+            self.start_profile(owner, artifact, cancel).await,
+        );
         if result.is_err() {
-            let cleanup = self.finish_session(uid, false).await;
+            let cleanup = diagnostic_result("error_cleanup", self.finish_session(uid, false).await);
             if cleanup.is_err() {
                 return Ok(ProtectionState::RecoveryRequired);
             }
@@ -705,13 +800,18 @@ impl Backend {
             .map_err(unavailable)?;
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
         self.worker_uncertain = true;
-        let ticket = self
-            .supervisor()
-            .await?
-            .start(Arc::clone(&artifact.payload), cancel)
-            .await
-            .map_err(unavailable)?;
-        let exit_watch = watch_worker_exit(ticket.pid(), Arc::clone(&self.exited))?;
+        let ticket = diagnostic_result(
+            "worker_start",
+            self.supervisor()
+                .await?
+                .start(Arc::clone(&artifact.payload), cancel)
+                .await,
+        )
+        .map_err(unavailable)?;
+        let exit_watch = diagnostic_result(
+            "pidfd_watch",
+            watch_worker_exit(ticket.pid(), Arc::clone(&self.exited)),
+        )?;
         let active = ActiveSession {
             _exit_watch: exit_watch,
             artifact,
@@ -729,38 +829,47 @@ impl Backend {
     async fn verify_session(&mut self, cancel: &mut Cancellation) -> Result<(), ServiceError> {
         let active = self.active.as_ref().ok_or(ServiceError::Unavailable)?;
         let supervisor = self.supervisor.as_ref().ok_or(ServiceError::Unavailable)?;
-        if supervisor
-            .observe(&active.ticket)
-            .await
+        if diagnostic_value("observe_before", supervisor.observe(&active.ticket).await)
             .map_err(unavailable)?
             != WorkerLiveness::Running
         {
-            return Err(ServiceError::Unavailable);
+            return diagnostic_result(
+                "verification_state_mismatch",
+                Err(ServiceError::Unavailable),
+            );
         }
-        verify_worker_process(active.ticket.pid(), active.artifact.worker_uid)?;
-        let (current, current_capture) = read_topology_captured(cancel, DEADLINE)
-            .await
-            .map_err(unavailable)?;
+        diagnostic_result(
+            "worker_status",
+            verify_worker_process(active.ticket.pid(), active.artifact.worker_uid),
+        )?;
+        let (current, current_capture) = diagnostic_result(
+            "topology_read",
+            read_topology_captured(cancel, DEADLINE).await,
+        )
+        .map_err(unavailable)?;
         let link = current
             .links
             .iter()
             .find(|link| link.index == active.index)
-            .ok_or(ServiceError::Unavailable)?;
+            .ok_or(ServiceError::Unavailable);
+        let link = diagnostic_result("own_link_present", link)?;
         if !same_link_contract(&active.link, link) {
-            return Err(stale());
+            #[cfg(test)]
+            diagnostic_link("raw", &active.link, link);
+            return diagnostic_result("same_link_contract", Err(stale()));
         }
-        active
-            .artifact
-            .plan
-            .verify_external_captured(
+        diagnostic_result(
+            "external_verification",
+            active.artifact.plan.verify_external_captured(
                 &active.artifact.baseline,
                 active.artifact.baseline_capture,
                 current,
                 current_capture,
                 self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
                 active.index,
-            )
-            .map_err(unavailable)?;
+            ),
+        )
+        .map_err(unavailable)?;
         let (route, route_capture) =
             lookup_route_captured(active.artifact.query(), cancel, DEADLINE)
                 .await
@@ -770,7 +879,7 @@ impl Backend {
             &route,
             Some((active.artifact.route_capture, route_capture)),
         ) {
-            return Err(stale());
+            return diagnostic_result("escape_route_contract", Err(stale()));
         }
         let owner = self
             .journal
@@ -778,26 +887,40 @@ impl Backend {
             .ok_or(ServiceError::Unavailable)?
             .ownership();
         if !matches!(
-            self.executor(owner)?
-                .recover_public_policy(self.journal.as_mut().ok_or(ServiceError::Unavailable)?)
-                .await
-                .map_err(unavailable)?,
+            diagnostic_value(
+                "recover_public_policy",
+                self.executor(owner)?
+                    .recover_public_policy(self.journal.as_mut().ok_or(ServiceError::Unavailable)?)
+                    .await
+            )
+            .map_err(unavailable)?,
             PublicPolicyRecovery::DesiredRules { .. }
         ) {
-            return Err(ServiceError::Unavailable);
+            return diagnostic_result(
+                "verification_state_mismatch",
+                Err(ServiceError::Unavailable),
+            );
         }
         let active = self.active.as_ref().ok_or(ServiceError::Unavailable)?;
-        verify_worker_process(active.ticket.pid(), active.artifact.worker_uid)?;
-        if self
-            .supervisor
-            .as_ref()
-            .ok_or(ServiceError::Unavailable)?
-            .observe(&active.ticket)
-            .await
-            .map_err(unavailable)?
+        diagnostic_result(
+            "worker_status",
+            verify_worker_process(active.ticket.pid(), active.artifact.worker_uid),
+        )?;
+        if diagnostic_value(
+            "observe_after",
+            self.supervisor
+                .as_ref()
+                .ok_or(ServiceError::Unavailable)?
+                .observe(&active.ticket)
+                .await,
+        )
+        .map_err(unavailable)?
             != WorkerLiveness::Running
         {
-            return Err(ServiceError::Unavailable);
+            return diagnostic_result(
+                "verification_state_mismatch",
+                Err(ServiceError::Unavailable),
+            );
         }
         Ok(())
     }
@@ -1071,8 +1194,18 @@ fn same_link_contract(expected: &LinuxLink, actual: &LinuxLink) -> bool {
         Some(link)
     }
     match (stable(expected), stable(actual)) {
-        (Some(expected), Some(actual)) => expected == actual,
-        _ => false,
+        (Some(expected), Some(actual)) => {
+            #[cfg(test)]
+            if expected != actual {
+                diagnostic_link("stable", &expected, &actual);
+            }
+            expected == actual
+        }
+        _ => {
+            #[cfg(test)]
+            let _ = diagnostic_result::<(), _>("stable_link_shape", Err(ServiceError::Unavailable));
+            false
+        }
     }
 }
 fn normalize_nested(

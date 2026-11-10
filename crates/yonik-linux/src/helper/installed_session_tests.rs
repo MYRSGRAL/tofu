@@ -213,3 +213,24 @@ async fn real_installed_profile_rpc_tunnel_and_restart_cleanup() {
         }
     }
 }
+
+#[tokio::test]
+#[ignore = "Только disposable systemd VM: один диагностический Xray Prepare/Apply/Stop"]
+async fn diagnose_first_xray_apply() {
+    let _gate = guest_guard().unwrap();
+    assert!(
+        endpoint_reachable().await,
+        "Peer должен быть доступен до effects"
+    );
+    let f = fixture().await;
+    let prepared = f.call("Prepare", &profile("xray", false)).await.unwrap();
+    let request = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    let apply = f.call("Apply", &request).await;
+    eprintln!("Первый Xray Apply: {:?}", apply);
+    let stop = f.call("Stop", r#"{"version":1}"#).await;
+    eprintln!("Диагностический Stop: {:?}", stop);
+    f.shutdown().await;
+    assert_eq!(apply.unwrap()["state"], "tunnel_starting");
+    assert_eq!(stop.unwrap()["state"], "no_managed_policy");
+    assert_clean().await;
+}
