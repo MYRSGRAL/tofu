@@ -1,5 +1,7 @@
 //! Только собственная disposable QEMU VM: настоящий host/registry/systemd/nft/TUN,
 //! D-Bus/polkit transport fixture и синтетический VLESS peer за отдельным veth.
+#[path = "state_acceptance.rs"]
+mod state_acceptance;
 use super::*;
 use std::{
     fs::{File, OpenOptions},
@@ -163,9 +165,20 @@ async fn real_installed_profile_rpc_tunnel_and_restart_cleanup() {
                 assert_eq!(result["state"], "tunnel_starting");
                 assert!(f.call("Apply", &request).await.is_err());
                 traffic().await;
-                assert_eq!(
-                    f.call("State", r#"{"version":1}"#).await.unwrap()["state"],
-                    "tunnel_starting"
+                let (_state_owner, mut state_cancel) = Cancellation::new();
+                let fresh = state_acceptance::wait_for_tunnel_state(
+                    &f.peer,
+                    &mut state_cancel,
+                    state_acceptance::Policy::default(),
+                )
+                .await
+                .unwrap();
+                assert_eq!(fresh.state, "tunnel_starting");
+                eprintln!(
+                    "Fresh State: busy={} calls={} elapsed_ms={}",
+                    fresh.busy,
+                    fresh.calls,
+                    fresh.elapsed.as_millis()
                 );
                 let f = if ending == "restart" {
                     f.shutdown().await;
