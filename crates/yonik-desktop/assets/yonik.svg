@@ -1,4 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#191919"/>
-  <path d="M30 28h19l15 28 15-28h19L73 73v27H55V73Z" fill="#c3a6ef"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="310 310 980 980">
+  <title>yonik</title>
+  <defs>
+    <linearGradient id="right" x1="800" y1="380" x2="1135" y2="1220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d0bcea"/>
+      <stop offset="1" stop-color="#d6baf2"/>
+    </linearGradient>
+    <linearGradient id="left" x1="462" y1="460" x2="800" y2="1120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#514064"/>
+      <stop offset="1" stop-color="#503c66"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="553" y1="1036" x2="753" y2="1191" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b2c4a"/>
+      <stop offset="1" stop-color="#242127"/>
+    </linearGradient>
+  </defs>
+  <rect x="310" y="310" width="980" height="980" rx="148" fill="#1c1c1e"/>
+  <path d="M800 380C790 380 783 382 772 386L520 462C483 473 462 502 462 536V776C462 974 563 1097 776 1213Q800 1227 824 1213C1037 1097 1135 974 1135 776V536C1135 502 1116 477 1080 464L826 386C816 382 809 380 800 380Z" fill="url(#right)"/>
+  <path d="M800 380C790 380 783 382 772 386L520 462C483 473 462 502 462 536V776C462 974 563 1097 776 1213L800 1219Z" fill="url(#fold)"/>
+  <path d="M800 380C790 380 783 382 772 386L520 462C483 473 462 502 462 536V776C462 875 487 953 541 1017C585 1069 636 1105 692 1117C728 1126 754 1105 754 1064V894C754 873 749 855 740 839L602 596H680C701 596 710 603 722 624L800 762Z" fill="url(#left)"/>
+  <path d="M602 596H680C701 596 710 603 722 624L800 762L877 624C889 603 898 596 921 596H995L859 835C849 853 843 871 843 895V1094C843 1148 817 1181 777 1190C759 1194 744 1191 729 1184C667 1152 592 1089 541 1017C585 1069 636 1105 692 1117C728 1126 754 1105 754 1064V894C754 873 749 855 740 839Z" fill="#1c1c1e"/>
 </svg>
