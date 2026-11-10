@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Yonik</vendor>
+  <!-- Идентификаторы сохранены для совместимости с установленными правилами. -->
+  <action id="cloud.highpriority.tofu.manage-network">
+    <description>Manage Yonik network protection</description>
+    <description xml:lang="ru">Управление сетевой защитой Yonik</description>
+    <message>Authentication is required to change Yonik network protection</message>
+    <message xml:lang="ru">Для изменения сетевой защиты Yonik нужна аутентификация</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+  <action id="cloud.highpriority.tofu.unlock-network">
+    <description>Unlock the network managed by Yonik</description>
+    <description xml:lang="ru">Снятие сетевой защиты Yonik</description>
+    <message>Authentication is required to unlock the network managed by Yonik</message>
+    <message xml:lang="ru">Для снятия сетевой защиты Yonik нужна аутентификация</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

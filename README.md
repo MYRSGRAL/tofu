@@ -279,15 +279,22 @@ effect. Commands have bounded output, concurrency and execution time.
 TUN and tightly bound service exceptions. Applied state requires the complete
 kernel ruleset to match; replacement preserves protection in one transaction.
 The library can preserve the public block after session cleanup and remove it
-explicitly on Unlock. GUI/service authorization and full platform integration
+explicitly on Unlock. Full system-session and GUI integration
 remain unfinished. [Public-block contract](docs/specs/helper-public-block.md).
 
 Journal schema v2 persists the desired/previous policy and Unlock intent in the
 same atomic file as owned resources. Durable Apply/Unlock entrypoints and
 startup recovery compare actual rules; recovery never replays stored interface
 exceptions automatically. Live-process command fencing and crash-boundary
-tests are included. System-service/cgroup recovery remains open.
+tests are included. Full session recovery remains open.
 [Policy recovery contract](docs/specs/helper-policy-recovery.md).
+
+`yonik-helper` now provides versioned D-Bus Prepare/Apply/Stop/Unlock/State for
+durable public blocking, with fresh polkit checks and a startup cgroup fence.
+Private-bus and real isolated nft traffic tests pass. Service packaging is
+provided, but it is not installed or wired to the GUI. System TUN and live
+reconciliation remain open; LAN is explicitly unsupported until then.
+[Service contract and evidence](docs/specs/helper-service.md).
 
 ### Rust libraries and CLIs
 

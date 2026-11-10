@@ -40,6 +40,140 @@ fn open(area: &Area) -> Journal {
 }
 
 #[test]
+fn open_existing_recovers_owner_without_trusting_a_callers_identity() {
+    let area = Area::new();
+    assert!(Journal::open_existing(&area.journal()).unwrap().is_none());
+    let mut journal = open(&area);
+    journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+    journal.reconcile(owner(), 1, Reconciled::Owned).unwrap();
+    assert!(matches!(
+        Journal::open_existing(&area.journal()),
+        Err(JournalError::Busy)
+    ));
+    drop(journal);
+
+    let mut recovered = Journal::open_existing(&area.journal()).unwrap().unwrap();
+    assert_eq!(recovered.ownership(), owner());
+    assert_eq!(recovered.records().len(), 1);
+    assert_eq!(recovered.records()[0].state(), RecordState::Confirmed);
+    assert!(recovered.needs_reconciliation(1));
+    assert_eq!(
+        recovered.cleanup(owner(), Scope::Session, |_| Ok(())),
+        Err(JournalError::ReconcileRequired)
+    );
+}
+
+#[test]
+fn empty_owner_rotation_is_durable_and_rejects_the_previous_owner() {
+    let area = Area::new();
+    let next = Ownership::new(1001, 22, 2, 4, 99).unwrap();
+    let mut journal = open(&area);
+    journal.reassign_empty_owner(next).unwrap();
+    assert_eq!(journal.ownership(), next);
+    assert_eq!(
+        journal.intent(owner(), Scope::Session, 1, tun()),
+        Err(JournalError::WrongOwnership)
+    );
+    drop(journal);
+
+    assert!(matches!(
+        Journal::open(&area.journal(), owner()),
+        Err(JournalError::WrongOwnership)
+    ));
+    let mut recovered = Journal::open_existing(&area.journal()).unwrap().unwrap();
+    assert_eq!(recovered.ownership(), next);
+    assert!(recovered.records().is_empty());
+    assert!(recovered.intent(next, Scope::Session, 1, tun()).unwrap());
+}
+
+#[test]
+fn owner_rotation_preserves_nonempty_resources_and_public_policy() {
+    let next = Ownership::new(1001, 22, 2, 4, 99).unwrap();
+    for public_policy in [false, true] {
+        let area = Area::new();
+        let mut journal = open(&area);
+        if public_policy {
+            let policy =
+                firewall::PublicBlockPolicy::new(1, None, vec![], vec![], vec![], vec![]).unwrap();
+            journal.begin_public_policy(owner(), 1, 7, policy).unwrap();
+        } else {
+            journal.intent(owner(), Scope::Session, 1, tun()).unwrap();
+        }
+        let original = fs::read(area.journal().join("journal.json")).unwrap();
+        assert_eq!(
+            journal.reassign_empty_owner(next),
+            Err(JournalError::Conflict)
+        );
+        assert_eq!(journal.ownership(), owner());
+        assert_eq!(
+            fs::read(area.journal().join("journal.json")).unwrap(),
+            original
+        );
+        drop(journal);
+        let recovered = Journal::open_existing(&area.journal()).unwrap().unwrap();
+        assert_eq!(recovered.ownership(), owner());
+        assert_eq!(recovered.records().len(), 1);
+        assert_eq!(recovered.public_policy().is_some(), public_policy);
+    }
+}
+
+#[test]
+fn failed_owner_rotation_preserves_disk_and_poison_blocks_retry() {
+    let area = Area::new();
+    let mut journal = open(&area);
+    let next = Ownership::new(1001, 22, 2, 4, 99).unwrap();
+    let file = area.journal().join("journal.json");
+    let original = fs::read(&file).unwrap();
+    let target = area.0.join("untouched");
+    fs::write(&target, b"preserve").unwrap();
+    symlink(&target, area.journal().join("journal.next")).unwrap();
+    assert_eq!(
+        journal.reassign_empty_owner(next),
+        Err(JournalError::UnsafePath)
+    );
+    assert_eq!(
+        journal.reassign_empty_owner(next),
+        Err(JournalError::UncertainWrite)
+    );
+    assert_eq!(journal.ownership(), owner());
+    assert_eq!(fs::read(&file).unwrap(), original);
+    assert_eq!(fs::read(&target).unwrap(), b"preserve");
+    drop(journal);
+    assert_eq!(
+        Journal::open_existing(&area.journal())
+            .unwrap()
+            .unwrap()
+            .ownership(),
+        owner()
+    );
+}
+
+#[test]
+fn open_existing_rejects_unsafe_or_corrupt_storage_without_replacing_it() {
+    for corrupt in [false, true] {
+        let area = Area::new();
+        drop(open(&area));
+        let file = area.journal().join("journal.json");
+        if corrupt {
+            fs::write(&file, b"{broken").unwrap();
+        } else {
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let original = fs::read(&file).unwrap();
+        let expected = if corrupt {
+            JournalError::Corrupt
+        } else {
+            JournalError::UnsafePath
+        };
+        assert!(matches!(
+            Journal::open_existing(&area.journal()),
+            Err(error) if error == expected
+        ));
+        assert_eq!(fs::read(&file).unwrap(), original);
+    }
+}
+
+#[test]
 fn recovery_requires_explicit_reconciliation_and_preserves_ambiguous_intent() {
     let area = Area::new();
     let mut journal = open(&area);

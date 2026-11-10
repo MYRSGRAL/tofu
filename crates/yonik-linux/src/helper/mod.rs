@@ -4,6 +4,10 @@
 //! `PeerIdentity` — снимок, а не разрешение на будущий Apply: перед каждым
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
+pub mod fence;
+mod protection_host;
+pub use protection_host::{GuardArtifact, SystemProtectionHost};
+
 pub(crate) mod memory;
 pub use memory::{
     MAX_CONFIG_MEMORY_BYTES, MAX_CONFIG_STORES, MAX_EXECUTABLE_BYTES, MAX_RETAINED_CONFIG_BYTES,
@@ -340,3 +344,6 @@ async fn bounded<T>(
 
 #[cfg(test)]
 mod tests;
+
+mod service;
+pub use service::{ProtectionHost, ProtectionState, ServiceError, run_system_service};

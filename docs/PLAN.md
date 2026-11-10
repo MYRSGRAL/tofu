@@ -51,8 +51,11 @@
    schema v2, desired/previous/Unlock и шесть SIGKILL-границ в namespace;
    [evidence](validation/2026-11-10-helper-policy-recovery.md): 427 workspace tests,
    три namespace-сценария и независимое review.
-   Следом нужны версионный IPC, межпроцессный cgroup lifecycle,
-   системный helper и TUN-сессия с явным
+   PR #34 влит как `cef982a`, все пять jobs зелёные.
+   Реализован [IPC v1 и public-protection host](specs/helper-service.md),
+   добавлены service packaging и cgroup fence; [проверки](validation/2026-11-10-helper-service.md)
+   охватывают private-bus/реальный nft и inert restart. Срез ожидает собственного CI.
+   Следом нужны системная установка/клиент, live reconcile и TUN-сессия с явным
    владением ресурсами и cleanup; затем DNS/Fake-IP и атрибуцию приложений.
 3. Интегрировать приватные VPN/LAN/ru-direct, сценарии смены сети и полную
    Linux-матрицу. При включённом kill switch после исчерпания retries сеть
@@ -84,7 +87,7 @@
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. Нужны системный service/IPC и авторизованный Apply/Unlock, межпроцессный cgroup lifecycle, topology binding интерфейсов, остальные сетевые эффекты и reconciliation всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. [IPC v1, авторизованный Apply/Unlock и cgroup fence](specs/helper-service.md) реализованы и локально проверены с actual nft; сервис ещё не установлен. Нужны системный клиент/GUI, live topology reconciliation (LAN пока unsupported), остальные сетевые эффекты и восстановление всей сессии после crash. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
 | P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы есть. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |
