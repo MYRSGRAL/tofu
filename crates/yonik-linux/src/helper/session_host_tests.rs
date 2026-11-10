@@ -749,6 +749,14 @@ async fn dropped_authorized_stop_caller_keeps_bounded_slot_until_cleanup_ack() {
 async fn stop_wait_preserves_timeout_cancellation_and_no_effect_before_admission() {
     let operations = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
     let (_keep, mut cancel) = crate::Cancellation::new();
+    let timeout = super::super::wait_for_stop(
+        operations.clone(),
+        &mut cancel,
+        std::time::Duration::from_millis(1),
+    )
+    .await
+    .expect_err("permit удерживается");
+    assert_eq!(timeout.to_string(), "timeout");
     assert!(matches!(
         super::super::wait_for_stop(
             operations.clone(),

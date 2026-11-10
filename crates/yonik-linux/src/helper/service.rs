@@ -43,6 +43,17 @@ pub enum ServiceError {
     Cancelled,
 }
 pub(super) const STOP_WAIT_BOUND: Duration = Duration::from_secs(30);
+async fn wait_for_host<'a, H>(
+    host: &'a Mutex<H>,
+    cancel: &mut Cancellation,
+    bound: Duration,
+) -> Result<tokio::sync::MutexGuard<'a, H>, ServiceError> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(ServiceError::Cancelled),
+        result = tokio::time::timeout(bound, host.lock()) => result.map_err(|_| ServiceError::Prepared(PreparedError::Timeout)),
+    }
+}
 pub(super) fn busy_at(_stage: &str) -> ServiceError {
     #[cfg(test)]
     if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -77,6 +88,7 @@ impl ServiceError {
             }
             Self::Prepared(PreparedError::InvalidHandle) => "invalid_handle",
             Self::Prepared(PreparedError::Stale) => "stale",
+            Self::Prepared(PreparedError::Timeout) => "timeout",
             Self::Cancelled | Self::Prepared(PreparedError::Cancelled) => "cancelled",
             Self::Prepared(_) | Self::Unavailable => "unavailable",
         }
@@ -453,11 +465,7 @@ async fn dispatch<H: ProtectionHost>(
             if peer.uid() != uid {
                 return Err(ServiceError::Authorization(AuthorizationError::PeerGone));
             }
-            let mut host = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return Err(ServiceError::Cancelled),
-                result = tokio::time::timeout(STOP_WAIT_BOUND,host.lock()) => result.map_err(|_| ServiceError::Unavailable)?,
-            };
+            let mut host = wait_for_host(host, &mut cancel, STOP_WAIT_BOUND).await?;
             let state = if matches!(request, Request::Unlock) {
                 host.unlock(uid, cancel).await?
             } else {

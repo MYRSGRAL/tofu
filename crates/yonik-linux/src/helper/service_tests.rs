@@ -549,3 +549,22 @@ async fn malformed_profile_frame_is_rejected_before_authorization_or_host() {
 
 #[path = "installed_session_tests.rs"]
 mod installed_session;
+
+#[tokio::test]
+async fn stop_outer_wait_exposes_timeout_and_preserves_cancellation() {
+    let host = Mutex::new(());
+    let _held = host.lock().await;
+    let (_keep, mut cancel) = Cancellation::new();
+    let error = wait_for_host(&host, &mut cancel, Duration::from_millis(1))
+        .await
+        .expect_err("mutex удерживается");
+    assert_eq!(error.code(), "timeout");
+    let (signal, mut cancel) = Cancellation::new();
+    signal.send_replace(true);
+    assert_eq!(
+        wait_for_host(&host, &mut cancel, Duration::from_secs(1))
+            .await
+            .expect_err("отмена до ожидания"),
+        ServiceError::Cancelled
+    );
+}

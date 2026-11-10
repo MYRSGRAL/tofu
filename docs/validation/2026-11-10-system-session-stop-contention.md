@@ -86,3 +86,18 @@ Root назначает следующий exact-head actual case и review; P09
 Полные логи: red.log, green.log, workspace-tests.log, clippy.log, gate-*.log,
 xray-attach.log, sing-box-attach.log. Готовый lib-test соответствует новому
 commit; source base и SHA-256 фиксируются в binary-provenance.json.
+
+## Исправление RPC timeout после review
+
+Review head 96baf2c30e880a0e93409426a0a82a8dbb393e40 обнаружил, что оба
+истечения Stop wait сериализовались как unavailable. Outer host mutex теперь
+возвращает PreparedError::Timeout, как внутренний operations permit;
+ServiceError::code сохраняет отдельный публичный код timeout. Authorization,
+30-секундные bounds, приоритет cancellation и durable cleanup не меняются.
+
+Две регрессии на удерживаемых mutex/permit подтвердили RED unavailable вместо
+timeout. GREEN: cargo +1.85.1 test -p yonik-linux --lib —
+324 passed, 0 failed, 23 ignored. Outer helper дополнительно проверяет cancelled.
+Сырые логи: local/validation/pr49-stop-timeout/ вне git; это unit/code-contract
+проверки, не новый actual D-Bus/VM PASS. Exact lib-test сохраняется рядом
+для следующего actual Apply→Stop; historical Unavailable остаётся открытым.
