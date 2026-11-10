@@ -1,7 +1,8 @@
 //! Событийный исполнитель: host объединяет next_deadline с сетевыми событиями.
 //! Один владелец управляет schedule/cancel и review; фоновых таймеров нет.
 use crate::{
-    PendingRefresh, RefreshResult, SubscriptionError, SubscriptionFetch, SubscriptionService,
+    PendingRefresh, RefreshResult, ScheduleState, SubscriptionError, SubscriptionFetch,
+    SubscriptionService,
 };
 use futures_util::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
@@ -27,11 +28,13 @@ struct Active {
     cancel: watch::Sender<bool>,
     cancelled: bool,
     review: Option<Box<PendingRefresh>>,
-    decision: Option<BoxFuture<'static, Result<Option<i64>, SubscriptionError>>>,
+    decision: Option<BoxFuture<'static, Decision>>,
 }
-type Completion = (Work, Result<RefreshResult, SubscriptionError>);
+type Decision = (Result<Option<i64>, SubscriptionError>, bool);
+type Completion = (Work, Result<RefreshResult, SubscriptionError>, bool);
 
 pub struct SubscriptionScheduler {
+    wall_clock: Arc<dyn Fn() -> u64 + Send + Sync>,
     scheduler: Scheduler,
     scheduled: BTreeSet<i64>,
     active: BTreeMap<i64, Active>,
@@ -39,7 +42,27 @@ pub struct SubscriptionScheduler {
 }
 impl SubscriptionScheduler {
     pub fn new(identity: NonZeroU64, capacity: usize, parallelism: usize) -> Result<Self, Error> {
+        Self::with_wall_clock(
+            identity,
+            capacity,
+            parallelism,
+            Arc::new(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .min(i64::MAX as u64 - 86400)
+            }),
+        )
+    }
+    pub fn with_wall_clock(
+        identity: NonZeroU64,
+        capacity: usize,
+        parallelism: usize,
+        wall_clock: Arc<dyn Fn() -> u64 + Send + Sync>,
+    ) -> Result<Self, Error> {
         Ok(Self {
+            wall_clock,
             scheduled: BTreeSet::new(),
             scheduler: Scheduler::new(identity, capacity, parallelism)?,
             active: BTreeMap::new(),
@@ -48,6 +71,16 @@ impl SubscriptionScheduler {
     }
     pub fn schedule(&mut self, id: i64, generation: i64, due: Duration) -> Result<(), Error> {
         self.scheduler.schedule(id, generation, due)?;
+        self.scheduled.insert(id);
+        Ok(())
+    }
+    pub fn restore(
+        &mut self,
+        id: i64,
+        generation: i64,
+        state: yonik_subscription::scheduler::RetryState,
+    ) -> Result<(), Error> {
+        self.scheduler.restore(id, generation, state)?;
         self.scheduled.insert(id);
         Ok(())
     }
@@ -80,11 +113,26 @@ impl SubscriptionScheduler {
                     decision: None,
                 },
             );
+            let failures = self.scheduler.failures(work.id()).ok_or(Error::Stale)?;
+            let wall = self.wall_clock.clone();
             self.futures.push(Box::pin(async move {
+                if let Err(error) = persist(&service, work, failures, Some(86400), wall()).await {
+                    return (work, Err(error), false);
+                }
+                let cancelled = receiver.clone();
                 let result = service
                     .refresh_with_host(work.id(), Some(work.generation()), host.as_ref(), receiver)
                     .await;
-                (work, result)
+                if !*cancelled.borrow() && !matches!(result, Ok(RefreshResult::Pending(_))) {
+                    let success = matches!(result, Ok(RefreshResult::NotModified));
+                    let state = Scheduler::completion_state(failures, Duration::ZERO, success);
+                    let failures = state.failures;
+                    let delay = state.due.map(|due| due.as_secs());
+                    if let Err(error) = persist(&service, work, failures, delay, wall()).await {
+                        return (work, Err(error), false);
+                    }
+                }
+                (work, result, true)
             }));
         }
         Ok(())
@@ -101,14 +149,14 @@ impl SubscriptionScheduler {
                 if let Some(decision) = active.decision.take() {
                     self.futures.push(Box::pin(async move {
                         let _ = decision.await;
-                        (work, Err(SubscriptionError::StaleUpdate))
+                        (work, Err(SubscriptionError::StaleUpdate), true)
                     }));
                 }
                 if let Some(pending) = active.review.take() {
                     let service = active.service.clone();
                     self.futures.push(Box::pin(async move {
                         service.discard_refresh(*pending).await;
-                        (work, Err(SubscriptionError::StaleUpdate))
+                        (work, Err(SubscriptionError::StaleUpdate), true)
                     }));
                 }
             }
@@ -126,7 +174,7 @@ impl SubscriptionScheduler {
         clock: impl Fn() -> Duration,
     ) -> Result<Option<SubscriptionScheduleEvent>, Error> {
         loop {
-            let Some((work, result)) = self.futures.next().await else {
+            let Some((work, result, persisted)) = self.futures.next().await else {
                 return Ok(None);
             };
             let now = clock();
@@ -136,7 +184,7 @@ impl SubscriptionScheduler {
                     let service = active.service.clone();
                     self.futures.push(Box::pin(async move {
                         service.discard_refresh(*pending).await;
-                        (work, Err(SubscriptionError::StaleUpdate))
+                        (work, Err(SubscriptionError::StaleUpdate), true)
                     }));
                     continue;
                 }
@@ -158,6 +206,9 @@ impl SubscriptionScheduler {
                 },
             };
             self.active.remove(&work.id());
+            if !persisted {
+                self.scheduler.cancel(work.id());
+            }
             self.scheduler.complete(
                 work,
                 now,
@@ -184,8 +235,15 @@ impl SubscriptionScheduler {
         if active.decision.is_none() {
             let pending = active.review.take().ok_or(SubscriptionError::StaleUpdate)?;
             let service = service.clone();
+            let wall = self.wall_clock.clone();
+            let work = active.work;
+            let cancelled = active.cancel.subscribe();
+            let failures = self
+                .scheduler
+                .failures(id)
+                .ok_or(SubscriptionError::StaleUpdate)?;
             active.decision = Some(Box::pin(async move {
-                if approve {
+                let result = if approve {
                     service
                         .commit(pending.approve_after_review())
                         .await
@@ -193,10 +251,20 @@ impl SubscriptionScheduler {
                 } else {
                     service.discard_refresh(*pending).await;
                     Ok(None)
+                };
+                if *cancelled.borrow() {
+                    return (result, true);
                 }
+                let state = Scheduler::completion_state(failures, Duration::ZERO, result.is_ok());
+                let failures = state.failures;
+                let delay = state.due.map(|due| due.as_secs());
+                if let Err(error) = persist(&service, work, failures, delay, wall()).await {
+                    return (Err(error), false);
+                }
+                (result, true)
             }));
         }
-        let result = active
+        let (result, persisted) = active
             .decision
             .as_mut()
             .ok_or(SubscriptionError::StaleUpdate)?
@@ -204,6 +272,9 @@ impl SubscriptionScheduler {
         let now = clock();
         let work = active.work;
         self.active.remove(&id);
+        if !persisted {
+            self.scheduler.cancel(id);
+        }
         self.scheduler
             .complete(work, now, result.is_ok())
             .map_err(|_| SubscriptionError::StaleUpdate)?;
@@ -218,4 +289,33 @@ impl SubscriptionScheduler {
         while self.next_event(|| now).await?.is_some() {}
         Ok(())
     }
+}
+
+async fn persist(
+    service: &SubscriptionService,
+    work: Work,
+    failures: u32,
+    delay: Option<u64>,
+    wall: u64,
+) -> Result<(), SubscriptionError> {
+    let token = service
+        .schedule_metadata(work.id())
+        .await?
+        .ok_or(SubscriptionError::NotFound)?;
+    if token.generation != work.generation() {
+        return Err(SubscriptionError::StaleUpdate);
+    }
+    let due_wall = delay.and_then(|delay| wall.checked_add(delay));
+    service
+        .persist_schedule(
+            token,
+            ScheduleState {
+                version: 1,
+                recorded_wall: wall,
+                due_wall,
+                failures,
+                paused: due_wall.is_none(),
+            },
+        )
+        .await
 }

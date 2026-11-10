@@ -762,7 +762,7 @@ impl Actor {
             Err(error) => Err(error),
         }
     }
-    fn refresh(&mut self, generation: u64) -> Result<RefreshTask> {
+    async fn refresh(&mut self, generation: u64) -> Result<RefreshTask> {
         let id = self
             .state
             .source_id
@@ -778,6 +778,14 @@ impl Actor {
         self.state.pending = None;
         let service = self.service.clone();
         let (cancel, receiver) = watch::channel(false);
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        service
+            .reserve_manual_schedule(id, wall)
+            .await
+            .map_err(map_subscription)?;
         let task =
             tokio::spawn(
                 async move { service.refresh(id, Duration::from_secs(30), receiver).await },
@@ -995,10 +1003,14 @@ impl Actor {
                     .commit(pending.approve_after_review())
                     .await
                     .map_err(map_subscription)?;
+                self.persist_refresh_completion(true).await?;
                 self.clear_selection();
                 self.page().await
             }
             Command::DiscardRefresh => {
+                if self.pending.is_some() {
+                    self.persist_refresh_completion(true).await?;
+                }
                 self.pending = None;
                 self.state.pending = None;
                 Ok(())
@@ -1139,28 +1151,49 @@ impl Actor {
             _ => Err(DesktopError("invalid_input")),
         }
     }
+    async fn persist_refresh_completion(&self, success: bool) -> Result<()> {
+        let id = self
+            .state
+            .source_id
+            .ok_or(DesktopError("source_required"))?;
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.service
+            .record_schedule_completion(id, success, wall)
+            .await
+            .map_err(map_subscription)
+    }
     async fn refreshed(
         &mut self,
         result: std::result::Result<RefreshResult, SubscriptionError>,
     ) -> Result<()> {
-        match result.map_err(map_subscription)? {
-            RefreshResult::NotModified => self.page().await,
-            RefreshResult::Pending(pending) => {
-                let summary = pending.summary();
-                if summary.needs_review() {
-                    self.state.pending = Some(pending_dto(&pending, 0)?);
-                    self.pending = Some(pending);
-                    Ok(())
-                } else {
-                    self.service
-                        .commit(pending.accept_clean().map_err(map_subscription)?)
-                        .await
-                        .map_err(map_subscription)?;
-                    self.clear_selection();
-                    self.page().await
+        let outcome = match result.map_err(map_subscription) {
+            Err(error) => Err(error),
+            Ok(result) => match result {
+                RefreshResult::NotModified => self.page().await,
+                RefreshResult::Pending(pending) => {
+                    let summary = pending.summary();
+                    if summary.needs_review() {
+                        self.state.pending = Some(pending_dto(&pending, 0)?);
+                        self.pending = Some(pending);
+                        Ok(())
+                    } else {
+                        self.service
+                            .commit(pending.accept_clean().map_err(map_subscription)?)
+                            .await
+                            .map_err(map_subscription)?;
+                        self.clear_selection();
+                        self.page().await
+                    }
                 }
-            }
+            },
+        };
+        if self.pending.is_none() {
+            self.persist_refresh_completion(outcome.is_ok()).await?;
         }
+        outcome
     }
 }
 
@@ -2038,7 +2071,7 @@ async fn run(
                     let visible = scheduled.visible;
                     if let Ok(mut replacement) = DesktopSchedule::new() {
                         replacement.policy = policy; replacement.visible = visible;
-                        if let Err(error) = replacement.load(&actor.service, origin.elapsed() + Duration::from_secs(86400)).await { actor.state.command_error(true, error.key()); }
+                        if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await { actor.state.command_error(true, error.key()); }
                         scheduled = replacement;
                     }
                 }
@@ -2153,7 +2186,12 @@ async fn run(
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.source_error = None; }
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting && !*cancel.borrow() {
                     let outcome = match result { Ok(result) => actor.refreshed(result).await, Err(_) => Err(DesktopError("fetch")) };
+                    let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
+                    if let Some(id) = actor.state.source_id {
+                        if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await { actor.state.command_error(true, error.key()); }
+                        else if !storage_failed { if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await { actor.state.command_error(true, error.key()); } }
+                    }
                 }
                 actor.emit();
             }
@@ -2187,6 +2225,7 @@ async fn run(
                     if cancelled_review { actor.state.pending = None; }
                 }
                 actor.state.begin_command(&envelope.command);
+                let manual_review_completion = scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh);
                 let outcome = match envelope.command {
                     Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
                     Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
@@ -2250,7 +2289,7 @@ async fn run(
                             match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation) {
+                                    match actor.refresh(envelope.generation).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -2263,7 +2302,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else {
                             match actor.command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation) {
+                                Ok(()) => match actor.refresh(envelope.generation).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -2273,7 +2312,7 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else { match actor.refresh(envelope.generation) {
+                        else { match actor.refresh(envelope.generation).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
@@ -2306,9 +2345,16 @@ async fn run(
                         } else { actor.command(command).await }
                     }
                 };
+                if manual_review_completion {
+                    let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
+                    if let Some(id) = actor.state.source_id {
+                        if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await { actor.state.command_error(true, error.key()); }
+                        else if !storage_failed { if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await { actor.state.command_error(true, error.key()); } }
+                    }
+                }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
-                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed() + Duration::from_secs(86400)).await {
+                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         }
                     }

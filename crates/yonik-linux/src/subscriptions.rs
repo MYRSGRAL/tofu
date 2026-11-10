@@ -18,7 +18,9 @@ use std::{
 };
 use tokio::sync::{Mutex, Semaphore, watch};
 use yonik_import::{ImportReport, import_bytes};
-pub use yonik_subscription::scheduler::Policy as SubscriptionPolicy;
+pub use yonik_subscription::scheduler::{
+    Policy as SubscriptionPolicy, RetryState as SubscriptionRetryState,
+};
 use yonik_subscription::{ApprovedUpdate, StagedUpdate, Subscription, Summary};
 
 /// Подменяемая граница транспорта; реализация обязана соблюдать route и отмену.
@@ -84,6 +86,56 @@ impl From<RepositoryError> for SubscriptionError {
     }
 }
 
+/// Время в целых секундах UNIX; содержимое остаётся внутри encrypted source payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleState {
+    pub version: u8,
+    pub due_wall: Option<u64>,
+    pub recorded_wall: u64,
+    pub failures: u32,
+    pub paused: bool,
+}
+impl ScheduleState {
+    pub fn validate(self) -> Result<(), SubscriptionError> {
+        if self.version != 1
+            || self.failures > 5
+            || self.paused != self.due_wall.is_none()
+            || (self.failures == 5 && !self.paused)
+            || self.recorded_wall > i64::MAX as u64
+            || self.due_wall.is_some_and(|due| {
+                due < self.recorded_wall
+                    || due - self.recorded_wall > 86400
+                    || due > i64::MAX as u64
+            })
+        {
+            return Err(SubscriptionError::InvalidSource);
+        }
+        Ok(())
+    }
+    pub fn deadline(self, wall: u64, monotonic: Duration) -> Duration {
+        let remaining = if wall < self.recorded_wall {
+            self.due_wall
+                .unwrap_or(wall)
+                .saturating_sub(self.recorded_wall)
+        } else {
+            self.due_wall.unwrap_or(wall).saturating_sub(wall)
+        }
+        .min(86400);
+        monotonic
+            .checked_add(Duration::from_secs(remaining))
+            .unwrap_or(monotonic)
+    }
+}
+
+/// CAS token без публичного доступа к URL/credentials.
+pub struct ScheduleMetadata {
+    pub id: i64,
+    pub generation: i64,
+    pub state: Option<ScheduleState>,
+    payload: zeroize::Zeroizing<Vec<u8>>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceData {
@@ -96,6 +148,8 @@ struct SourceData {
     hwid_enabled: bool,
     #[serde(default)]
     hwid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schedule: Option<ScheduleState>,
 }
 
 /// Debug намеренно не реализован: имя и URL могут содержать секреты.
@@ -115,6 +169,7 @@ impl SubscriptionSource {
             proxy: route == FetchRoute::Proxy,
             hwid_enabled: false,
             hwid: None,
+            schedule: None,
         });
         value.validate()?;
         Ok(value)
@@ -137,6 +192,9 @@ impl SubscriptionSource {
     }
 
     fn validate(&self) -> Result<Source, SubscriptionError> {
+        if let Some(state) = self.0.schedule {
+            state.validate()?;
+        }
         if self.0.version != 1
             || self.0.name.trim().is_empty()
             || self.0.name.len() > 512
@@ -330,6 +388,114 @@ impl SubscriptionService {
         Ok(self.repository.create_source(source.encode()?).await?.id)
     }
 
+    pub async fn schedule_metadata(
+        &self,
+        id: i64,
+    ) -> Result<Option<ScheduleMetadata>, SubscriptionError> {
+        self.repository
+            .source_record_by_id(id)
+            .await?
+            .map(Self::schedule_record)
+            .transpose()
+    }
+    fn schedule_record(record: crate::SourceRecord) -> Result<ScheduleMetadata, SubscriptionError> {
+        let data: SourceData = serde_json::from_slice(&record.payload)
+            .map_err(|_| SubscriptionError::InvalidSource)?;
+        if let Some(state) = data.schedule {
+            state.validate()?;
+        }
+        Ok(ScheduleMetadata {
+            id: record.id,
+            generation: record.generation,
+            state: data.schedule,
+            payload: record.payload,
+        })
+    }
+    pub async fn schedule_metadata_page(
+        &self,
+        offset: usize,
+    ) -> Result<Vec<ScheduleMetadata>, SubscriptionError> {
+        self.repository
+            .source_records(offset, 64)
+            .await?
+            .records
+            .into_iter()
+            .map(Self::schedule_record)
+            .collect()
+    }
+    pub async fn persist_schedule(
+        &self,
+        token: ScheduleMetadata,
+        state: ScheduleState,
+    ) -> Result<(), SubscriptionError> {
+        state.validate()?;
+        let mut data: SourceData =
+            serde_json::from_slice(&token.payload).map_err(|_| SubscriptionError::InvalidSource)?;
+        data.schedule = Some(state);
+        let payload = serde_json::to_vec(&data).map_err(|_| SubscriptionError::InvalidSource)?;
+        self.repository
+            .update_source_metadata(token.id, token.generation, token.payload, payload)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn reserve_manual_schedule(
+        &self,
+        id: i64,
+        wall: u64,
+    ) -> Result<(), SubscriptionError> {
+        let token = self
+            .schedule_metadata(id)
+            .await?
+            .ok_or(SubscriptionError::NotFound)?;
+        let failures = token
+            .state
+            .map_or(0, |s| if s.paused { 0 } else { s.failures });
+        self.persist_schedule(
+            token,
+            ScheduleState {
+                version: 1,
+                due_wall: wall.checked_add(86400),
+                recorded_wall: wall,
+                failures,
+                paused: false,
+            },
+        )
+        .await
+    }
+
+    /// Завершение ручной операции использует тот же retry-контракт.
+    pub async fn record_schedule_completion(
+        &self,
+        id: i64,
+        success: bool,
+        wall: u64,
+    ) -> Result<(), SubscriptionError> {
+        let token = self
+            .schedule_metadata(id)
+            .await?
+            .ok_or(SubscriptionError::NotFound)?;
+        let state = yonik_subscription::scheduler::Scheduler::completion_state(
+            token.state.map_or(0, |s| s.failures),
+            Duration::ZERO,
+            success,
+        );
+        let due_wall = state
+            .due
+            .and_then(|delay| wall.checked_add(delay.as_secs()));
+        self.persist_schedule(
+            token,
+            ScheduleState {
+                version: 1,
+                due_wall,
+                recorded_wall: wall,
+                failures: state.failures,
+                paused: due_wall.is_none(),
+            },
+        )
+        .await
+    }
+
     /// Текущее поколение без чтения snapshot; None после удаления.
     pub async fn schedule_generation(&self, id: i64) -> Result<Option<i64>, SubscriptionError> {
         Ok(self
@@ -419,6 +585,8 @@ impl SubscriptionService {
         generation: i64,
         source: SubscriptionSource,
     ) -> Result<i64, SubscriptionError> {
+        let mut source = source;
+        source.0.schedule = None;
         let mut requests = self.requests.lock().await;
         let generation = self
             .repository

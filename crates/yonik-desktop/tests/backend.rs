@@ -1342,6 +1342,39 @@ fn damaged_preferences_notify_and_survive_settings_commands() {
     assert_eq!(fs::read(path).expect("исходник"), b"{");
 }
 
+// Старые integration-сценарии явно создают overdue metadata вместо ожидания суток.
+fn сделать_overdue(dir: &Directory) {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+                dir.0.join("subscriptions.sqlite"),
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .unwrap();
+            let service = yonik_linux::SubscriptionService::new(repo);
+            for token in service.schedule_metadata_page(0).await.unwrap() {
+                service
+                    .persist_schedule(
+                        token,
+                        yonik_linux::ScheduleState {
+                            version: 1,
+                            due_wall: Some(1),
+                            recorded_wall: 1,
+                            failures: 0,
+                            paused: false,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            service.close().await.unwrap();
+        });
+}
+
 #[test]
 fn scheduled_clean_import_requires_review_before_commit_or_discard() {
     for approve in [false, true] {
@@ -1353,6 +1386,7 @@ fn scheduled_clean_import_requires_review_before_commit_or_discard() {
             "local_exception":true,"route":"direct"}));
         seed.wait(|v| v["source_id"].is_i64());
         seed.close();
+        сделать_overdue(&dir);
         let mut app = Harness::new(dir.config());
         app.wait(|v| v["ready"] == true);
         app.send(json!({"command":"subscription_visibility","visible":true}));
@@ -1389,6 +1423,7 @@ fn scheduled_delete_and_shutdown_acknowledge_held_fetch() {
         );
         let id = seed.wait(|v| v["source_id"].is_i64())["source_id"].clone();
         seed.close();
+        сделать_overdue(&dir);
         let (accepted, receive) = mpsc::channel();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("fetch");
@@ -1457,6 +1492,7 @@ fn queued_source_delete_does_not_wait_for_another_fetch_before_shutdown() {
         ids.push(state["source_id"].as_i64().expect("source id"));
     }
     seed.close();
+    сделать_overdue(&dir);
     let (accepted, receive) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("fetch");
