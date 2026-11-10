@@ -100,9 +100,9 @@ impl DesktopSchedule {
         self.runtime
             .cancel(id, clock())
             .map_err(|_| DesktopError("storage"))?;
-        // При queued id может завершиться другая работа: её event сохраняется для UI.
-        // Review также требует ack очистки.
-        if self.fetching || self.review == Some(id) {
+        // Queued ID уже удалён: чужой fetch остаётся в общем select, где доступны
+        // приоритетные Stop/Shutdown. Только собственная active/review работа ждёт ack.
+        if self.runtime.cancellation_pending(id) {
             if let Some(event) = self
                 .runtime
                 .next_event(clock)
@@ -114,8 +114,8 @@ impl DesktopSchedule {
                     self.deferred = Some(event);
                 }
             }
+            self.fetching = false;
         }
-        self.fetching = false;
         if self.review == Some(id) {
             self.review = None;
         }

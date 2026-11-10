@@ -19,9 +19,9 @@ Persisted due пока отсутствует: перезапуск не вос�
 Ручной refresh сохраняет прежнюю семантику clean import и preferences persistence.
 
 Перед delete, HWID/source change и ручным refresh выполняются cancel и ack.
-При parallelism=1 отмена queued id во время чужого fetch может ждать окончания
-этого fetch (штатный timeout 30 секунд); его event сохраняется для следующего
-прохода UI, не теряется и не утверждается автоматически.
+Отмена queued id возвращается сразу: чужой fetch продолжает обслуживаться общим
+select, включая приоритетные Stop/Shutdown. Active/review отмена требует ack
+очистки своей работы.
 Stop отправляет отмену ручному refresh, session и TCP до первого await, затем
 ожидает scheduler cleanup. Shutdown дожидается scheduler перед service.close
 и освобождением runtime. При Stop оставшаяся очередь восстанавливается с
@@ -82,3 +82,20 @@ Stop: ожидание scheduler ack перед TCP cancel позволяло po
 Автоматическая пересортировка Cargo.lock убрана; зависимости не менялись.
 После завершения процессов target очищен штатным cargo clean.
 Независимый review и CI PR остаются проверками root/CI.
+
+## Исправление P2: queued cancellation
+
+Review head cc95d860b374f1df74d9a2f9862da8f387e5ee00 обнаружил ожидание чужого
+fetch внутри cancel queued ID. Runtime теперь предоставляет точный read-only
+признак cancellation_pending(id). Desktop ждёт ack только при активной отмене
+этого ID и сохраняет fetching чужой работы.
+
+Регрессия с реальным loopback FetchHost удерживает первый fetch, удаляет второй
+queued источник, ждёт завершения удаления и вызывает shutdown до transport
+timeout. RED: snapshot deadline 10 секунд; GREEN: 0,05 секунды. Сырые логи
+сохранены вне git в /home/myrs/projects/yonik/local/validation/pr56-cancel/.
+
+После исправления cargo +1.85.1 test -p yonik-desktop -p yonik-linux прошёл;
+clippy этих двух crates с --all-targets -- -D warnings и fmt --check прошли.
+Cargo.lock восстановлен после проверки семантического равенства зависимостей:
+Cargo изменил лишь порядок записей и списков dependencies. QML не менялся.
