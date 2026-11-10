@@ -10,6 +10,7 @@ import logging
 import os
 import stat
 import subprocess
+import tomllib
 from pathlib import Path
 
 TARGET = "x86_64-unknown-linux-gnu"
@@ -112,6 +113,49 @@ def evidence(path: Path, base: Path, allowed: Path) -> dict:
     }
 
 
+def curated_license(package: dict, base: Path, root: Path) -> list[dict]:
+    """Fallback связан с registry identity, lock checksum и VCS shipped crate."""
+    vendor = root / "packaging/licenses/vendor"
+    manifest = vendor / "sources.json"
+    if not manifest.exists():
+        return []
+    records = json.loads(read_bounded(manifest, root))
+    selected = [r for r in records if r["name"] == package["name"]]
+    if not selected:
+        return []
+    locks = tomllib.loads(read_bounded(root / "Cargo.lock", root).decode())["package"]
+    vcs = json.loads(read_bounded(base / ".cargo_vcs_info.json", base))
+    result = []
+    for record in selected:
+        if any(record[k] != package.get(k) for k in ("name", "version", "source")):
+            raise ValueError("curated: несовпадение package identity")
+        matching = [
+            p
+            for p in locks
+            if all(
+                p.get(k) == record[k] for k in ("name", "version", "source", "checksum")
+            )
+        ]
+        if len(matching) != 1 or vcs["git"]["sha1"] != record["commit"]:
+            raise ValueError("curated: несовпадение checksum/commit")
+        name = record["file"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or name in (".", "..")
+            or "/" in name
+            or "\\" in name
+        ):
+            raise ValueError("неверный curated filename")
+        path = vendor / name
+        entry = evidence(path, root, root)
+        if entry["sha256"] != record["sha256"]:
+            raise ValueError("curated: несовпадение хеша текста")
+        entry["curated"] = True
+        result.append(entry)
+    return result
+
+
 def inventory(metadata: dict, root: Path) -> dict:
     """Отбирает normal/build closure; Cargo feature union остаётся верхней оценкой."""
     packages = {p["id"]: p for p in metadata["packages"]}
@@ -152,6 +196,7 @@ def inventory(metadata: dict, root: Path) -> dict:
             allowed = license_root(path, base, root, package.get("source"))
             read_bounded(path, allowed)
             licenses.add(path)
+        fallback = curated_license(package, base, root) if not licenses else []
         rows.append(
             {
                 "id": package_id,
@@ -166,7 +211,8 @@ def inventory(metadata: dict, root: Path) -> dict:
                         p, base, license_root(p, base, root, package.get("source"))
                     )
                     for p in sorted(licenses)
-                ],
+                ]
+                + fallback,
                 "notice_files": [evidence(p, base, base) for p in sorted(notices)],
             }
         )
@@ -175,6 +221,7 @@ def inventory(metadata: dict, root: Path) -> dict:
         for p in [
             "Cargo.toml",
             "Cargo.lock",
+            "packaging/licenses/vendor/sources.json",
             "packaging/arch/PKGBUILD",
             "tools/build_native_adapter.py",
             "crates/yonik-engine/src/lib.rs",
@@ -305,8 +352,16 @@ def run(args: argparse.Namespace) -> int:
         for entry in row["license_files"] + row["notice_files"]:
             destination = bundle / entry["sha256"]
             if args.output:
-                source = Path(os.path.normpath(base / entry["path"]))
-                allowed = license_root(source, base, root, row.get("source"))
+                source = Path(
+                    os.path.normpath(
+                        (root if entry.get("curated") else base) / entry["path"]
+                    )
+                )
+                allowed = (
+                    root
+                    if entry.get("curated")
+                    else license_root(source, base, root, row.get("source"))
+                )
                 store_text(bundle, entry["sha256"], read_bounded(source, allowed))
             elif not destination.is_file() or digest(destination) != entry["sha256"]:
                 errors.append(f"missing_notice: bundled text {entry['sha256']}")
