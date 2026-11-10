@@ -144,3 +144,78 @@ Evidence этого исправления: `local/validation/lifetime-fix/`, в
 Полные логи: red.log, green.log, workspace-tests.log, clippy.log,
 gate-session-network.log, gate-tun-projection.log, gate-service.log.
 Свои воспроизводимые build-артефакты очищаются `cargo clean` после переноса evidence.
+
+## Исправление P2: route expiry после actual VM FAIL на bf87917
+
+Review/fix base: `bf87917b7004766b7cbe17c482d343ff2c12f01a`.
+Actual VM rerun этого head снова завершился Apply/Stale: context/stamp true,
+topology false. Read-only probe с исключёнными только в локальных копиях
+addresses через 3 секунды дал `same_without_addresses=false`: изменился
+RTA_CACHEINFO offset 8..12 у двух RA routes. Исходный FAIL сохранён отдельно
+в `local/validation/route-expiry-fix/fail-bf87917-route-probe.log` и `.rs`.
+Полный отчёт VM-исполнителя: `local/validation/system-session-vm-gate/report.md`.
+Его original-head stubborn-child PASS не относится к bf87917 или этому fix.
+
+UAPI `rta_cacheinfo.rta_expires` — signed i32; `rtnl_put_cacheinfo` переводит
+signed остаток jiffies в USER_HZ через `jiffies_to_clock_t`, с saturation INT_MAX.
+Это не kernel CONFIG_HZ и не секунды. Host sysconf(_SC_CLK_TCK) и AT_CLKTCK
+равны 100; host CONFIG_HZ=1000. Факты сохранены в units.json и source logs.
+Production читает bounded собственный `/proc/self/auxv` один раз (AT_CLKTCK,
+тот же process parameter, что sysconf), без unsafe, новых зависимостей/feature
+flags или запуска системных команд. Неизвестная clock rate даёт отказ для
+finite expiry; infinite CACHEINFO=0 по-прежнему сравнивается строго.
+
+Для IPv4/IPv6 route dump фиксируется отдельное monotonic окно чтения.
+RTM_GETROUTE получает такое же окно; initial escape route capture хранится в
+immutable artifact и проверяется при Apply, после TUN configure и при live sweep.
+Baseline не обновляется при sweep. Время сравнения также проверяет expiry после
+окончания dump. Address fix не переписан.
+
+CACHEINFO finite expiry сравнивается как пересечение абсолютных deadline
+интервалов с точностью USER_HZ и окна чтения (jiffies sampling + floor conversion).
+Для поддерживаемых x86_64/aarch64 Linux kernel HZ >= USER_HZ; один USER_HZ tick
+покрывает дискретность jiffies. RTA_EXPIRES обрабатывается отдельно в секундах:
+его ABI не смешивается с clock ticks. Явный EXPIRES=0 отклоняется как истёкший,
+UINT_MAX — INFINITY_LIFE_TIME; CACHEINFO=0 — отсутствие expiry. Переход finite
+в zero/infinite либо обратно, отрицательный и saturated CACHEINFO, увеличение
+или сокращение абсолютного срока за пределами точности ABI дают отказ.
+При возможном expiry действует консервативный отказ. Погрешность не накапливается.
+Renewal внутри дискретности одного snapshot неотличим от rounding, поэтому
+Netlink generation/loss fencing сохранён и остаётся обязательным.
+
+rta_error/rta_id, route nexthop/metric/interfaces, query/namespace и все прочие
+selectors по-прежнему сравниваются. RTA_EXPIRES lookup допускается только с
+точной ABI длиной 4 байта; неизвестные атрибуты остаются incomplete.
+
+Первичные источники: Linux UAPI include/uapi/linux/rtnetlink.h,
+[kernel/time/time.c](https://github.com/torvalds/linux/blob/master/kernel/time/time.c),
+[net/core/rtnetlink.c](https://github.com/torvalds/linux/blob/v6.12/net/core/rtnetlink.c),
+[net/ipv6/route.c](https://github.com/torvalds/linux/blob/v6.12/net/ipv6/route.c).
+Сверены jiffies_to_clock_t, rtnl_put_cacheinfo и преобразование RTA_EXPIRES
+через addrconf_timeout_fixup(..., HZ); выдержки и hashes в kernel-source*.log,
+kernel-v6.12.log. Runtime host config взят из установленных kernel headers.
+
+Regression RED: `finite_ra_route_natural_countdown_remains_equivalent` на bf
+отклоняет 8640000→8639700 ticks (три секунды при USER_HZ=100), cargo exit 101.
+GREEN: 11 equivalence tests проходят; новые проверки охватывают countdown,
+zero/negative/saturation/infinite, renewal/сокращение срока, expiry после dump,
+RTA_EXPIRES seconds, clock-rate mismatch, error/id и escape selectors.
+Все новые временные сценарии используют заданные monotonic моменты без sleeps.
+
+Новый exact-head actual VM rerun должен запускаться отдельно. Prepare/Apply,
+traffic и session cleanup всей матрицей ещё не приняты; P09/P12/P13 partial,
+`system_tun:false`. Старое stubborn evidence не переносится на новый head.
+
+Проверки route fix на Rust 1.85.1 с jobs=2 и собственным target под root flock:
+
+- `cargo +1.85.1 test -p yonik-linux --lib --locked finite_ra_route_natural_countdown_remains_equivalent`: RED (1 failed на bf).
+- `cargo +1.85.1 test -p yonik-linux --lib --locked network::equivalence`: GREEN, 11 passed.
+- `cargo +1.85.1 test --workspace --locked -- --test-threads=1`: exit 0, 564 passed, 0 failed, 25 ignored.
+- `cargo +1.85.1 clippy --workspace --all-targets --locked -- -D warnings`: exit 0.
+- `cargo +1.85.1 fmt --all -- --check`, `git diff --check`: exit 0.
+- `tools/managed_network_smoke.py <lib-test-binary> --case session-network`,
+  `--case tun-projection`, `--case service`: каждый exit 0, один actual namespace test.
+
+Все логи скопированы в `local/validation/route-expiry-fix/` до cargo clean.
+Cargo.lock и зависимости сохранены. Чужие VM-каталоги использовались только
+для чтения evidence. Actual VM acceptance этого fix ещё отсутствует.

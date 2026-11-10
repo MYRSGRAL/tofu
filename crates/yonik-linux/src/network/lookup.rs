@@ -198,6 +198,15 @@ pub async fn lookup_route(
     cancel: &mut Cancellation,
     timeout: Duration,
 ) -> Result<KernelRoute, NetworkReadError> {
+    lookup_route_captured(query, cancel, timeout)
+        .await
+        .map(|(route, _)| route)
+}
+pub(crate) async fn lookup_route_captured(
+    query: RouteQuery,
+    cancel: &mut Cancellation,
+    timeout: Duration,
+) -> Result<(KernelRoute, super::equivalence::RouteCapture), NetworkReadError> {
     if timeout.is_zero() || timeout > Duration::from_secs(5) {
         return Err(NetworkReadError::Limit);
     }
@@ -206,9 +215,11 @@ pub async fn lookup_route(
     let payload = request_payload(&query);
     let mut reader = NetlinkReader::open()?;
     let namespace = reader.namespace();
+    let start = Instant::now();
     let replies = reader
         .request(ReadOperation::RouteGet, &payload, cancel, deadline)
         .await?;
+    let capture = super::equivalence::RouteCapture::new(start, Instant::now());
     if replies.len() != 1 {
         return Err(NetworkReadError::Malformed);
     }
@@ -218,7 +229,7 @@ pub async fn lookup_route(
     if Instant::now() >= deadline {
         return Err(NetworkReadError::Timeout);
     }
-    Ok(route)
+    Ok((route, capture))
 }
 
 fn family(address: IpAddr) -> u8 {
@@ -365,11 +376,11 @@ fn parse_reply(
     // layouts и NLA flags по-прежнему не объявляются поддержанными.
     let cache_info =
         |attribute: &NetworkAttribute| attribute.kind == 12 && attribute.value.len() == 32;
-    if route
-        .attributes
-        .iter()
-        .any(|attribute| attribute.kind != 9 && !cache_info(attribute))
-    {
+    if route.attributes.iter().any(|attribute| {
+        attribute.kind != 9
+            && !cache_info(attribute)
+            && !(attribute.kind == 23 && attribute.value.len() == 4)
+    }) {
         route.incomplete.push(LookupIncomplete::UnknownAttributes);
     }
     if route

@@ -181,8 +181,12 @@ impl LinuxTopology {
 #[derive(Clone, Copy)]
 pub(crate) struct TopologyCapture {
     addresses: [super::equivalence::CaptureWindow; 2],
+    routes: [super::equivalence::RouteCapture; 2],
 }
 impl TopologyCapture {
+    pub(crate) fn route(self, family: u8) -> super::equivalence::RouteCapture {
+        self.routes[usize::from(family == 10)]
+    }
     pub(crate) fn family(self, family: u8) -> super::equivalence::CaptureWindow {
         self.addresses[usize::from(family == 10)]
     }
@@ -227,6 +231,7 @@ pub(crate) async fn read_topology_captured(
             start: now,
             end: now,
         }; 2],
+        routes: [super::equivalence::RouteCapture::new(now, now); 2],
     };
     for (slot, family) in [2, 10].into_iter().enumerate() {
         let mut addr = [0; 8];
@@ -244,10 +249,13 @@ pub(crate) async fn read_topology_captured(
         }
         let mut header = [0; 12];
         header[0] = family;
-        for message in reader
+        let start = tokio::time::Instant::now();
+        let messages = reader
             .request(ReadOperation::Routes, &header, cancel, deadline)
-            .await?
-        {
+            .await?;
+        capture.routes[slot] =
+            super::equivalence::RouteCapture::new(start, tokio::time::Instant::now());
+        for message in messages {
             result.routes.push(parse_route(&message.payload)?);
         }
         for message in reader

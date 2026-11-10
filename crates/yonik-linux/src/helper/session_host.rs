@@ -12,9 +12,11 @@ use crate::helper::{
 };
 use crate::{
     Cancellation, KernelRoute, LinuxLink, LinuxTopology, NetworkStamp, RouteKind, RouteQuery,
-    lookup_route,
     managed_network::{Resource, Scope, tun::TunExecutor},
-    network::{TopologyCapture, read_topology_captured, same_captured_topology, same_kernel_route},
+    network::{
+        RouteCapture, TopologyCapture, lookup_route_captured, read_topology_captured,
+        same_captured_kernel_route, same_captured_topology,
+    },
     read_topology,
     worker::WorkerPayload,
 };
@@ -228,6 +230,7 @@ pub(super) struct SessionArtifact {
     baseline: LinuxTopology,
     baseline_capture: TopologyCapture,
     route: KernelRoute,
+    route_capture: RouteCapture,
     context: PreparedContext,
     uid: u32,
     worker_uid: u32,
@@ -456,7 +459,7 @@ impl Backend {
         let query = RouteQuery::new(endpoint, worker_uid)
             .with_mark(plan.socket_mark())
             .with_transport(protocol, None, Some(server.endpoint().port()));
-        let route = lookup_route(query, cancel, DEADLINE)
+        let (route, route_capture) = lookup_route_captured(query, cancel, DEADLINE)
             .await
             .map_err(unavailable)?;
         checked_route(&route, owner, plan.routing_table())?;
@@ -514,6 +517,7 @@ impl Backend {
             baseline,
             baseline_capture,
             route,
+            route_capture,
             context,
             uid,
             worker_uid,
@@ -553,12 +557,16 @@ impl Backend {
                 &current,
                 current_capture,
             )
-            || !same_kernel_route(
-                &lookup_route(artifact.query(), cancel, DEADLINE)
+            || {
+                let (route, capture) = lookup_route_captured(artifact.query(), cancel, DEADLINE)
                     .await
-                    .map_err(unavailable)?,
-                &artifact.route,
-            )
+                    .map_err(unavailable)?;
+                !same_captured_kernel_route(
+                    &artifact.route,
+                    &route,
+                    Some((artifact.route_capture, capture)),
+                )
+            }
         {
             return Err(stale());
         }
@@ -620,11 +628,16 @@ impl Backend {
             .await
             .map_err(unavailable)?;
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
-        let route = lookup_route(artifact.query(), cancel, DEADLINE)
+        let (route, route_capture) = lookup_route_captured(artifact.query(), cancel, DEADLINE)
             .await
             .map_err(unavailable)?;
         let egress = checked_route(&route, owner, artifact.plan.routing_table())?;
-        if !same_kernel_route(&route, &artifact.route) || egress == index {
+        if !same_captured_kernel_route(
+            &artifact.route,
+            &route,
+            Some((artifact.route_capture, route_capture)),
+        ) || egress == index
+        {
             return Err(stale());
         }
         let topology = read_topology(cancel, DEADLINE).await.map_err(unavailable)?;
@@ -748,10 +761,15 @@ impl Backend {
                 active.index,
             )
             .map_err(unavailable)?;
-        let route = lookup_route(active.artifact.query(), cancel, DEADLINE)
-            .await
-            .map_err(unavailable)?;
-        if !same_kernel_route(&route, &active.artifact.route) {
+        let (route, route_capture) =
+            lookup_route_captured(active.artifact.query(), cancel, DEADLINE)
+                .await
+                .map_err(unavailable)?;
+        if !same_captured_kernel_route(
+            &active.artifact.route,
+            &route,
+            Some((active.artifact.route_capture, route_capture)),
+        ) {
             return Err(stale());
         }
         let owner = self

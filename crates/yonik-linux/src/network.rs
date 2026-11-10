@@ -2,8 +2,12 @@
 
 mod bus;
 mod equivalence;
-pub(crate) use equivalence::{same_captured_topology, same_external_topology, same_kernel_route};
+pub(crate) use equivalence::{
+    same_captured_kernel_route, same_captured_topology, same_external_topology,
+};
 mod lookup;
+pub(crate) use equivalence::RouteCapture;
+pub(crate) use lookup::lookup_route_captured;
 mod read;
 mod route;
 mod topology;

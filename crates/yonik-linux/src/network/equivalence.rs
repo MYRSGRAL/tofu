@@ -12,10 +12,63 @@ pub(crate) struct CaptureWindow {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct RouteCapture {
+    pub(crate) window: CaptureWindow,
+    pub(crate) clock_ticks: Option<u64>,
+}
+impl RouteCapture {
+    pub(crate) fn new(start: Instant, end: Instant) -> Self {
+        Self {
+            window: CaptureWindow { start, end },
+            clock_ticks: clock_ticks(),
+        }
+    }
+}
+// AT_CLKTCK — тот же process parameter, который возвращает sysconf(_SC_CLK_TCK).
+// Читаем собственный auxv один раз, без libc unsafe и новых dependency features.
+fn clock_ticks() -> Option<u64> {
+    static TICKS: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *TICKS.get_or_init(|| {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open("/proc/self/auxv")
+            .ok()?
+            .take(4097)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if bytes.len() > 4096 {
+            return None;
+        }
+        parse_clock_ticks(&bytes)
+    })
+}
+fn parse_clock_ticks(bytes: &[u8]) -> Option<u64> {
+    let word = std::mem::size_of::<usize>();
+    if bytes.len() % (2 * word) != 0 {
+        return None;
+    }
+    let mut result = None;
+    for pair in bytes.chunks_exact(2 * word) {
+        let key = usize::from_ne_bytes(pair[..word].try_into().ok()?);
+        let value = usize::from_ne_bytes(pair[word..].try_into().ok()?);
+        if key == 0 {
+            return result;
+        }
+        if key == 17 {
+            if result.is_some() || value == 0 || value > 1_000_000_000 {
+                return None;
+            }
+            result = Some(value as u64);
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
 enum Context {
     Link,
     Address(Option<(CaptureWindow, CaptureWindow)>),
-    Route,
+    Route(Option<(RouteCapture, RouteCapture)>),
     Families,
     Inet6,
 }
@@ -70,11 +123,13 @@ fn same_topology(
             )
         })
         && left.routes.len() == right.routes.len()
-        && left
-            .routes
-            .iter()
-            .zip(&right.routes)
-            .all(|(a, b)| same_route(a, b))
+        && left.routes.iter().zip(&right.routes).all(|(a, b)| {
+            same_route(
+                a,
+                b,
+                times.map(|(at, bt)| (at.route(a.family), bt.route(b.family))),
+            )
+        })
 }
 fn same_link(left: &LinuxLink, right: &LinuxLink) -> bool {
     equal_record!(LinuxLink,left,right,unknown,Context::Link;index,link_type,flags,name,alias,mtu,master,parent,kind,operational_state)
@@ -86,11 +141,23 @@ fn same_address(
 ) -> bool {
     equal_record!(LinuxAddress,left,right,unknown,Context::Address(times);family,index,address,local,prefix_len,scope,flags)
 }
-fn same_route(left: &LinuxRoute, right: &LinuxRoute) -> bool {
-    equal_record!(LinuxRoute,left,right,unknown,Context::Route;family,destination,source,table,preferred_source,gateway,output_interface,input_interface,priority,protocol,kind,scope,tos,flags,multipath,nexthop_id)
+fn same_route(
+    left: &LinuxRoute,
+    right: &LinuxRoute,
+    times: Option<(RouteCapture, RouteCapture)>,
+) -> bool {
+    equal_record!(LinuxRoute,left,right,unknown,Context::Route(times);family,destination,source,table,preferred_source,gateway,output_interface,input_interface,priority,protocol,kind,scope,tos,flags,multipath,nexthop_id)
 }
-pub(crate) fn same_kernel_route(left: &KernelRoute, right: &KernelRoute) -> bool {
-    equal_record!(KernelRoute,left,right,attributes,Context::Route;namespace,query,table,output_interface,gateway,preferred_source,kind,flags,nexthop_id,incomplete)
+#[cfg(test)]
+fn same_kernel_route(left: &KernelRoute, right: &KernelRoute) -> bool {
+    same_captured_kernel_route(left, right, None)
+}
+pub(crate) fn same_captured_kernel_route(
+    left: &KernelRoute,
+    right: &KernelRoute,
+    times: Option<(RouteCapture, RouteCapture)>,
+) -> bool {
+    equal_record!(KernelRoute,left,right,attributes,Context::Route(times);namespace,query,table,output_interface,gateway,preferred_source,kind,flags,nexthop_id,incomplete)
 }
 fn attributes_equal(
     left: &[NetworkAttribute],
@@ -131,14 +198,91 @@ fn value_equal(kind: u16, left: &[u8], right: &[u8], context: Context) -> bool {
         // ifa_cacheinfo: preferred/valid lifetimes остаются частью binding.
         (Context::Address(times), 6) => address_cache_equal(left, right, times),
         // rta_cacheinfo: сохраняем expires и error, не сравниваем ref/use/clock.
-        (Context::Route, 12) => {
+        (Context::Route(times), 12) => {
             left.len() == 32
                 && right.len() == 32
-                && left[8..16] == right[8..16]
+                && left[12..16] == right[12..16]
+                && route_expiry_equal(
+                    i64::from(i32::from_ne_bytes(
+                        left[8..12].try_into().expect("Проверены 32 байта"),
+                    )),
+                    i64::from(i32::from_ne_bytes(
+                        right[8..12].try_into().expect("Проверены 32 байта"),
+                    )),
+                    times,
+                    false,
+                    Instant::now(),
+                )
                 && left[20..24] == right[20..24]
+        }
+        (Context::Route(times), 23) => {
+            left.len() == 4
+                && right.len() == 4
+                && route_expiry_equal(
+                    i64::from(u32::from_ne_bytes(
+                        left.try_into().expect("Проверены 4 байта"),
+                    )),
+                    i64::from(u32::from_ne_bytes(
+                        right.try_into().expect("Проверены 4 байта"),
+                    )),
+                    times,
+                    true,
+                    Instant::now(),
+                )
         }
         _ => left == right,
     }
+}
+fn route_expiry_equal(
+    a: i64,
+    b: i64,
+    times: Option<(RouteCapture, RouteCapture)>,
+    seconds: bool,
+    now: Instant,
+) -> bool {
+    // CACHEINFO 0 означает отсутствие expiry. Отрицательное — уже expired;
+    // INT_MAX может быть результатом saturation, не доказанный finite deadline.
+    // EXPIRES — секунды; UINT_MAX соответствует INFINITY_LIFE_TIME.
+    if seconds && (a == i64::from(u32::MAX) || b == i64::from(u32::MAX)) {
+        return a == b;
+    }
+    if !seconds && (a == 0 || b == 0) {
+        return a == b;
+    }
+    if a <= 0 || b <= 0 || (!seconds && (a >= i64::from(i32::MAX) || b >= i64::from(i32::MAX))) {
+        return false;
+    }
+    let Some((before, after)) = times else {
+        return false;
+    };
+    let (Some(hz), Some(other_hz)) = (before.clock_ticks, after.clock_ticks) else {
+        return false;
+    };
+    if hz == 0 || hz != other_hz || hz > 1_000_000_000 {
+        return false;
+    }
+    let (before, after) = (before.window, after.window);
+    if before.start > before.end || after.start > after.end || before.end > after.start {
+        return false;
+    }
+    let rate = if seconds { 1 } else { hz };
+    // Floor при переводе jiffies в USER_HZ плюс дискретный момент jiffies.
+    // На поддерживаемых Linux x86_64/aarch64 HZ >= USER_HZ. Для EXPIRES
+    // к секундной дискретности добавляется один USER_HZ tick.
+    let tick = Duration::from_nanos(1_000_000_000u64.div_ceil(hz));
+    let quantum = Duration::from_nanos(1_000_000_000u64.div_ceil(rate));
+    let duration = |value: i64| Duration::from_nanos((value as u64 * 1_000_000_000) / rate);
+    let bounds = |value, window: CaptureWindow| {
+        let nominal = duration(value);
+        (
+            window.start + nominal.saturating_sub(tick),
+            window.end + nominal + quantum,
+        )
+    };
+    let (low_a, high_a) = bounds(a, before);
+    let (low_b, high_b) = bounds(b, after);
+    let now = now.max(after.end);
+    now < low_a && now < low_b && low_a < high_b && low_b < high_a
 }
 // Linux вычитает целое число секунд от tstamp. Поэтому expiry лежит
 // в (read_start + remaining - 1s, read_end + remaining]. Сравниваем
@@ -229,6 +373,135 @@ mod tests {
     use super::*;
     use crate::{NetworkNamespace, RouteKind, RouteQuery};
     use std::num::NonZeroU32;
+    fn route_cache(expires: i32) -> Vec<u8> {
+        let mut bytes = vec![0; 32];
+        bytes[8..12].copy_from_slice(&expires.to_ne_bytes());
+        bytes
+    }
+    #[test]
+    fn finite_ra_route_natural_countdown_remains_equivalent() {
+        let t = Instant::now();
+        assert!(value_equal(
+            12,
+            &route_cache(8640000),
+            &route_cache(8639700),
+            Context::Route(Some((route_window(t, 0), route_window(t, 3000))))
+        ));
+    }
+    #[test]
+    fn route_expiry_keeps_zero_signed_saturation_renewal_and_deadline_fences() {
+        let t = Instant::now();
+        let same = |a, b, elapsed, now, seconds| {
+            route_expiry_equal(
+                a,
+                b,
+                Some((route_window(t, 0), route_window(t, elapsed))),
+                seconds,
+                t + Duration::from_millis(now),
+            )
+        };
+        assert!(same(10000, 9700, 3000, 3000, false));
+        assert!(!same(10000, 10000, 3000, 3000, false)); // renewal
+        assert!(!same(10000, 9600, 3000, 3000, false)); // сокращение срока
+        assert!(!same(100, 0, 1000, 1000, false));
+        assert!(!same(0, 100, 1000, 1000, false));
+        assert!(same(0, 0, 1000, 1000, false)); // отсутствие expiry
+        assert!(!same(-1, -1, 0, 0, false));
+        assert!(!same(i64::from(i32::MAX), i64::from(i32::MAX), 0, 0, false));
+        assert!(!same(100, 100, 0, 1000, false)); // истечение после dump
+        assert!(same(100, 97, 3000, 3000, true)); // EXPIRES: секунды, не ticks
+        assert!(!same(100, 100, 3000, 3000, true));
+        assert!(!same(1, 0, 1000, 1000, true));
+        assert!(!same(0, 0, 0, 0, true)); // явный EXPIRES=0 уже истёк
+        assert!(same(
+            i64::from(u32::MAX),
+            i64::from(u32::MAX),
+            1000,
+            1000,
+            true
+        ));
+        assert!(!same(i64::from(u32::MAX), 97, 3000, 3000, true));
+        assert!(!same(100, i64::from(u32::MAX), 3000, 3000, true));
+        let mut other = route_window(t, 3000);
+        other.clock_ticks = Some(250);
+        assert!(!route_expiry_equal(
+            10000,
+            9700,
+            Some((route_window(t, 0), other)),
+            false,
+            t
+        ));
+        other.clock_ticks = None;
+        assert!(!route_expiry_equal(
+            10000,
+            9700,
+            Some((route_window(t, 0), other)),
+            false,
+            t
+        ));
+        // Время читающего процесса может быть не кратно USER_HZ tick.
+        assert!(same(10000, 9999, 2, 2, false));
+    }
+    #[test]
+    fn captured_escape_route_does_not_hide_error_id_metric_or_interface_changes() {
+        let t = Instant::now();
+        let mut before = route();
+        before.attributes[0].value = route_cache(10000);
+        let mut after = before.clone();
+        after.attributes[0].value = route_cache(9700);
+        let times = Some((route_window(t, 0), route_window(t, 3000)));
+        assert!(same_captured_kernel_route(&before, &after, times));
+        assert!(!same_captured_kernel_route(&before, &after, None));
+        for change in 0..5 {
+            let mut changed = after.clone();
+            match change {
+                0 => changed.attributes[0].value[12] = 1,
+                1 => changed.attributes[0].value[20] = 1,
+                2 => changed.output_interface = NonZeroU32::new(99),
+                3 => changed.nexthop_id = Some(9),
+                _ => changed.attributes.push(NetworkAttribute {
+                    kind: 8,
+                    value: vec![1, 2, 3, 4],
+                }),
+            }
+            assert!(!same_captured_kernel_route(&before, &changed, times));
+        }
+        before.attributes.push(NetworkAttribute {
+            kind: 23,
+            value: 100u32.to_ne_bytes().to_vec(),
+        });
+        after.attributes.push(NetworkAttribute {
+            kind: 23,
+            value: 97u32.to_ne_bytes().to_vec(),
+        });
+        assert!(same_captured_kernel_route(&before, &after, times));
+    }
+    #[test]
+    fn auxv_clock_ticks_are_bounded_unique_and_native_endian() {
+        let encode = |pairs: &[(usize, usize)]| {
+            pairs
+                .iter()
+                .flat_map(|(a, b)| [a.to_ne_bytes(), b.to_ne_bytes()].concat())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(parse_clock_ticks(&encode(&[(17, 100), (0, 0)])), Some(100));
+        for pairs in [
+            vec![(17, 0), (0, 0)],
+            vec![(17, 100)],
+            vec![(17, 100), (17, 100), (0, 0)],
+            vec![(0, 0)],
+        ] {
+            assert_eq!(parse_clock_ticks(&encode(&pairs)), None);
+        }
+        assert_eq!(parse_clock_ticks(&[1, 2, 3]), None);
+        assert!(clock_ticks().is_some());
+    }
+    fn route_window(t: Instant, ms: u64) -> RouteCapture {
+        RouteCapture {
+            window: window(t, ms),
+            clock_ticks: Some(100),
+        }
+    }
     fn window(t: Instant, ms: u64) -> CaptureWindow {
         let t = t + Duration::from_millis(ms);
         CaptureWindow { start: t, end: t }
