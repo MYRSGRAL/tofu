@@ -61,6 +61,12 @@ impl HostConfig {
         self.system_subscription_policy = false;
         self
     }
+    /// Доверенная настройка platform provider; после ephemeral key требуется
+    /// явное включение. GUI JSON не имеет доступа к этой настройке.
+    pub fn with_system_subscription_policy(mut self, enabled: bool) -> Self {
+        self.system_subscription_policy = enabled;
+        self
+    }
     pub fn with_listen_port(mut self, port: NonZeroU16) -> Self {
         self.listen_port = Some(port);
         self

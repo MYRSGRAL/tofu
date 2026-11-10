@@ -1660,3 +1660,6 @@ fn p2_ручной_b_не_пересекается_с_плановым_a_и_не
     app.close();
     server.join().unwrap();
 }
+
+#[path = "support/p10_e2e.rs"]
+mod p10_e2e;
