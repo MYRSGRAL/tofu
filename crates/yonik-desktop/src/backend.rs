@@ -214,6 +214,15 @@ enum Command {
     Shutdown,
 }
 impl Command {
+    fn routing_request_id(&self) -> Option<u64> {
+        match self {
+            Self::EditRouting { request_id, .. }
+            | Self::RoutingOrder { request_id, .. }
+            | Self::RoutingDefault { request_id, .. }
+            | Self::RoutingDelete { request_id, .. } => Some(*request_id),
+            _ => None,
+        }
+    }
     fn is_source_operation(&self) -> bool {
         matches!(
             self,
@@ -2511,7 +2520,13 @@ async fn run(
             }
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
-                if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
+                if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Some(request_id) = envelope.command.routing_request_id() {
+                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                        actor.emit();
+                    }
+                    continue;
+                }
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
