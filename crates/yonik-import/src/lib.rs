@@ -2,12 +2,14 @@
 
 mod decode;
 mod identity;
+mod intent;
 mod json;
 mod model;
 mod uri;
 mod xray;
 
 pub use identity::{IdentityError, SecretIdentity};
+pub use intent::{IntentError, ServerIntent};
 pub use model::{
     Credentials, Endpoint, FatalError, Field, ImportFailure, ImportReport, Issue, IssueCode,
     ParsedServer, Protocol, ReviewFlag, SecretText, Security, Transport,
