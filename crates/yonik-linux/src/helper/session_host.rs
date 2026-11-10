@@ -163,6 +163,7 @@ pub(super) fn spawn_safety<B: Send + 'static>(
     mut events: impl SafetyEvents,
     backend: std::sync::Weak<Mutex<B>>,
     runtime: tokio::runtime::Handle,
+    operations: Arc<tokio::sync::Semaphore>,
     reconcile: fn(&mut B, &tokio::runtime::Handle),
 ) -> SafetyTask {
     let task_runtime = runtime.clone();
@@ -172,8 +173,12 @@ pub(super) fn spawn_safety<B: Send + 'static>(
             // последующий sweep выполняется и при закрытии источника событий.
             let shared = backend.clone();
             let runtime = task_runtime.clone();
+            let Ok(permit) = Arc::clone(&operations).acquire_owned().await else {
+                break;
+            };
             if !matches!(
                 tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
                     let Some(shared) = shared.upgrade() else {
                         return false;
                     };
@@ -191,7 +196,11 @@ pub(super) fn spawn_safety<B: Send + 'static>(
             if !events.next_event().await {
                 let shared = backend.clone();
                 let runtime = task_runtime.clone();
+                let Ok(permit) = Arc::clone(&operations).acquire_owned().await else {
+                    break;
+                };
                 let _ = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
                     if let Some(shared) = shared.upgrade() {
                         if let Ok(mut backend) = shared.lock() {
                             reconcile(&mut backend, &runtime);

@@ -6,6 +6,8 @@ use super::{
 fn actor_fixture() -> super::super::SystemProtectionHost {
     let monitor = crate::NetworkMonitor::start().unwrap();
     super::super::SystemProtectionHost {
+        operations: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        stop_admission: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         backend: std::sync::Arc::new(std::sync::Mutex::new(super::Backend {
             path: "/run/yonik/unused-actor-test".into(),
             journal: None,
@@ -61,6 +63,7 @@ async fn network_event_cleans_session_without_rpc_and_waits_for_inflight_operati
         TestEvents(receiver),
         std::sync::Arc::downgrade(&backend),
         tokio::runtime::Handle::current(),
+        std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         cleanup_on_event,
     );
     observed.changed().await.unwrap(); // startup sweep
@@ -113,6 +116,7 @@ async fn safety_startup_sweep_recovers_prior_session_and_does_not_own_backend_cy
         TestEvents(receiver),
         weak.clone(),
         tokio::runtime::Handle::current(),
+        std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         cleanup_on_event,
     );
     observed.changed().await.unwrap();
@@ -479,6 +483,7 @@ async fn pidfd_exit_wakes_safety_without_network_event_or_rpc() {
         super::SessionEvents::new(TestEvents(receiver), signal.clone()),
         std::sync::Arc::downgrade(&backend),
         tokio::runtime::Handle::current(),
+        std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         cleanup_on_event,
     );
     observed.changed().await.unwrap();
@@ -659,4 +664,114 @@ fn link_binding_pins_vnet_header_for_both_engine_modes() {
         after.unknown[0].value = attr(2, &attr(5, &[1 - expected]));
         assert!(!same_link_contract(&before, &after));
     }
+}
+
+#[tokio::test]
+async fn authorized_stop_waits_for_exact_backend_guard_used_by_safety() {
+    type Hold = (
+        tokio::sync::oneshot::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    );
+    static HOLD: std::sync::Mutex<Option<Hold>> = std::sync::Mutex::new(None);
+    fn held_sweep(_: &mut super::Backend, _: &tokio::runtime::Handle) {
+        if let Some((entered, release)) = HOLD.lock().unwrap().take() {
+            entered.send(()).unwrap();
+            release.recv().unwrap();
+        }
+    }
+    let host = actor_fixture();
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    *HOLD.lock().unwrap() = Some((entered, wait));
+    let (events, receiver) = tokio::sync::watch::channel(0);
+    let mut sweep = super::spawn_safety(
+        TestEvents(receiver),
+        std::sync::Arc::downgrade(&host.backend),
+        tokio::runtime::Handle::current(),
+        std::sync::Arc::clone(&host.operations),
+        held_sweep,
+    );
+    ready.await.unwrap();
+    let (_keep, cancel) = crate::Cancellation::new();
+    let stop = host.job(super::super::Operation::Stop(1000), cancel);
+    tokio::pin!(stop);
+    let early = tokio::time::timeout(std::time::Duration::from_millis(25), &mut stop).await;
+    release.send(()).unwrap();
+    assert!(
+        early.is_err(),
+        "Stop отклонён до освобождения настоящего safety/backend guard"
+    );
+    assert!(matches!(
+        stop.await.unwrap(),
+        super::super::Reply::State(crate::helper::ProtectionState::NoManagedPolicy)
+    ));
+    assert_eq!(host.backend.lock().unwrap().epoch, 2);
+    drop(events);
+    tokio::time::timeout(std::time::Duration::from_secs(2), &mut sweep.0)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn dropped_authorized_stop_caller_keeps_bounded_slot_until_cleanup_ack() {
+    let host = actor_fixture();
+    let sweep = std::sync::Arc::clone(&host.operations)
+        .acquire_owned()
+        .await
+        .unwrap();
+    let (_keep, cancel) = crate::Cancellation::new();
+    let mut stop = Box::pin(host.job(super::super::Operation::Stop(1000), cancel));
+    assert!(futures_util::poll!(stop.as_mut()).is_pending());
+    assert_eq!(host.stop_admission.available_permits(), 0);
+    drop(stop); // Уже допущенный Stop остаётся владельцем отдельной задачи.
+    let (_keep2, cancel2) = crate::Cancellation::new();
+    assert!(matches!(
+        host.job(super::super::Operation::Stop(1000), cancel2).await,
+        Err(ServiceError::Busy)
+    ));
+    let waiter = std::sync::Arc::clone(&host.stop_admission).acquire_owned();
+    tokio::pin!(waiter);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), &mut waiter)
+            .await
+            .is_err()
+    );
+    assert_eq!(host.backend.lock().unwrap().epoch, 1);
+    drop(sweep);
+    let _ack = tokio::time::timeout(std::time::Duration::from_secs(2), waiter)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(host.backend.lock().unwrap().epoch, 2);
+}
+#[tokio::test]
+async fn stop_wait_preserves_timeout_cancellation_and_no_effect_before_admission() {
+    let operations = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let (_keep, mut cancel) = crate::Cancellation::new();
+    assert!(matches!(
+        super::super::wait_for_stop(
+            operations.clone(),
+            &mut cancel,
+            std::time::Duration::from_millis(1)
+        )
+        .await,
+        Err(ServiceError::Prepared(
+            crate::helper::PreparedError::Timeout
+        ))
+    ));
+    let (signal, mut cancel) = crate::Cancellation::new();
+    signal.send_replace(true);
+    assert!(matches!(
+        super::super::wait_for_stop(operations, &mut cancel, std::time::Duration::from_secs(1))
+            .await,
+        Err(ServiceError::Cancelled)
+    ));
+    let host = actor_fixture();
+    assert!(matches!(
+        host.job(super::super::Operation::Stop(1000), cancel).await,
+        Err(ServiceError::Cancelled)
+    ));
+    assert_eq!(host.backend.lock().unwrap().epoch, 1);
+    assert_eq!(host.stop_admission.available_permits(), 1);
 }

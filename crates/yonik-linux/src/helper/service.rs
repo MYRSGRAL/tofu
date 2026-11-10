@@ -42,6 +42,14 @@ pub enum ServiceError {
     Unavailable,
     Cancelled,
 }
+pub(super) const STOP_WAIT_BOUND: Duration = Duration::from_secs(30);
+pub(super) fn busy_at(_stage: &str) -> ServiceError {
+    #[cfg(test)]
+    if std::env::var_os("YONIK_SESSION_DIAGNOSTICS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!("session busy stage={_stage}");
+    }
+    ServiceError::Busy
+}
 impl From<PreparedError> for ServiceError {
     fn from(error: PreparedError) -> Self {
         Self::Prepared(error)
@@ -323,7 +331,7 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
                 if message.header().message_type() != Type::MethodCall { continue; }
                 let permit = match permits.clone().try_acquire_owned() {
                     Ok(permit) => permit,
-                    Err(_) => { send_result(&connection, &message, Err(ServiceError::Busy)).await; continue; }
+                    Err(_) => { send_result(&connection, &message, Err(busy_at("rpc_in_flight_capacity"))).await; continue; }
                 };
                 let broker = broker.clone(); let host = host.clone(); let child_cancel = worker_cancel.clone();
                 tasks.spawn(async move {
@@ -385,7 +393,10 @@ async fn dispatch<H: ProtectionHost>(
         Request::Prepare(allow_lan) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
-                    let mut host = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    let mut host = host.try_lock().map_err(|_| {
+                        let _ = busy_at("prepare_outer_host");
+                        PreparedError::Capacity
+                    })?;
                     host.prepare(uid, allow_lan, cancel.clone())
                         .await
                         .map_err(as_prepared)
@@ -396,7 +407,10 @@ async fn dispatch<H: ProtectionHost>(
         Request::PrepareProfile(request) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
-                    let mut host = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    let mut host = host.try_lock().map_err(|_| {
+                        let _ = busy_at("prepare_outer_host");
+                        PreparedError::Capacity
+                    })?;
                     host.prepare_profile(uid, *request, cancel.clone())
                         .await
                         .map_err(as_prepared)
@@ -408,7 +422,10 @@ async fn dispatch<H: ProtectionHost>(
             let mut guard = None;
             let artifact = broker
                 .claim_for_apply(message, handle, Prompt::Allow, cancel.clone(), || {
-                    let locked = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    let locked = host.try_lock().map_err(|_| {
+                        let _ = busy_at("apply_outer_host");
+                        PreparedError::Capacity
+                    })?;
                     let context = locked.context(uid).map_err(as_prepared)?;
                     guard = Some(locked);
                     Ok(context)
@@ -419,7 +436,7 @@ async fn dispatch<H: ProtectionHost>(
             serde_json::json!({"version":1,"state":state})
         }
         Request::State => {
-            let mut host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            let mut host = host.try_lock().map_err(|_| busy_at("state_outer_host"))?;
             let state = host.state(uid, cancel).await?;
             serde_json::json!({"version":1,"state":state})
         }
@@ -436,7 +453,11 @@ async fn dispatch<H: ProtectionHost>(
             if peer.uid() != uid {
                 return Err(ServiceError::Authorization(AuthorizationError::PeerGone));
             }
-            let mut host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            let mut host = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(ServiceError::Cancelled),
+                result = tokio::time::timeout(STOP_WAIT_BOUND,host.lock()) => result.map_err(|_| ServiceError::Unavailable)?,
+            };
             let state = if matches!(request, Request::Unlock) {
                 host.unlock(uid, cancel).await?
             } else {

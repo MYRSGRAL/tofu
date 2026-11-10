@@ -71,6 +71,8 @@ impl PreparedArtifact for GuardArtifact {
 
 pub struct SystemProtectionHost {
     backend: Arc<Mutex<Backend>>,
+    operations: Arc<tokio::sync::Semaphore>,
+    stop_admission: Arc<tokio::sync::Semaphore>,
     _monitor: NetworkMonitor,
     runtime: tokio::runtime::Handle,
     _safety: Option<session_host::SafetyTask>,
@@ -176,34 +178,51 @@ impl SystemProtectionHost {
         .map_err(unavailable)??;
         let backend = Arc::new(Mutex::new(backend));
         let runtime = tokio::runtime::Handle::current();
+        let operations = Arc::new(tokio::sync::Semaphore::new(1));
         let safety = session_host::spawn_safety(
             session_host::SessionEvents::new(monitor.watch(), exited),
             Arc::downgrade(&backend),
             runtime.clone(),
+            Arc::clone(&operations),
             session_host::reconcile_network_event,
         );
         Ok(Self {
             backend,
+            operations,
+            stop_admission: Arc::new(tokio::sync::Semaphore::new(1)),
             _monitor: monitor,
             runtime,
             _safety: Some(safety),
         })
     }
     async fn job(&self, operation: Operation, cancel: Cancellation) -> Result<Reply, ServiceError> {
-        drop(self.backend.try_lock().map_err(|error| match error {
-            std::sync::TryLockError::WouldBlock => ServiceError::Busy,
-            _ => ServiceError::Unavailable,
-        })?);
+        cancel.check().map_err(|_| ServiceError::Cancelled)?;
         let shared = Arc::clone(&self.backend);
         let runtime = self.runtime.clone();
-        // Даже если вызывающий future отменён, задача заканчивает durable
-        // переход и reap. Mutex не допускает следующий эффект раньше неё.
-        tokio::task::spawn_blocking(move || {
-            let mut backend = shared.lock().map_err(unavailable)?;
-            runtime.block_on(backend.perform(operation, cancel))
-        })
-        .await
-        .map_err(unavailable)?
+        if matches!(operation, Operation::Stop(_)) {
+            // Единственный допущенный Stop ожидает FIFO gate до spawn_blocking.
+            // Drop caller не отменяет уже допущенную задачу и durable cleanup.
+            let slot = Arc::clone(&self.stop_admission)
+                .try_acquire_owned()
+                .map_err(|_| super::service::busy_at("stop_admission_capacity"))?;
+            let operations = Arc::clone(&self.operations);
+            return tokio::spawn(async move {
+                let mut cancel = cancel;
+                let permit =
+                    wait_for_stop(operations, &mut cancel, super::service::STOP_WAIT_BOUND).await?;
+                execute_job(shared, runtime, operation, cancel, (permit, Some(slot))).await
+            })
+            .await
+            .map_err(unavailable)?;
+        }
+        let permit = Arc::clone(&self.operations)
+            .try_acquire_owned()
+            .map_err(|_| super::service::busy_at("backend_operation_capacity"))?;
+        drop(self.backend.try_lock().map_err(|error| match error {
+            std::sync::TryLockError::WouldBlock => super::service::busy_at("backend_job_preflight"),
+            _ => ServiceError::Unavailable,
+        })?);
+        execute_job(shared, runtime, operation, cancel, (permit, None)).await
     }
     #[cfg(test)]
     pub(super) async fn fixture(
@@ -212,6 +231,35 @@ impl SystemProtectionHost {
     ) -> Result<Self, ServiceError> {
         Self::create(path, &mut cancel, true).await
     }
+}
+async fn wait_for_stop(
+    operations: Arc<tokio::sync::Semaphore>,
+    cancel: &mut Cancellation,
+    bound: Duration,
+) -> Result<tokio::sync::OwnedSemaphorePermit, ServiceError> {
+    tokio::select! {
+        biased;
+        _=cancel.cancelled()=>Err(ServiceError::Cancelled),
+        result=tokio::time::timeout(bound,operations.acquire_owned())=>result.map_err(|_|ServiceError::Prepared(PreparedError::Timeout))?.map_err(unavailable),
+    }
+}
+async fn execute_job(
+    shared: Arc<Mutex<Backend>>,
+    runtime: tokio::runtime::Handle,
+    operation: Operation,
+    cancel: Cancellation,
+    permits: (
+        tokio::sync::OwnedSemaphorePermit,
+        Option<tokio::sync::OwnedSemaphorePermit>,
+    ),
+) -> Result<Reply, ServiceError> {
+    tokio::task::spawn_blocking(move || {
+        let _permits = permits;
+        let mut backend = shared.lock().map_err(unavailable)?;
+        runtime.block_on(backend.perform(operation, cancel))
+    })
+    .await
+    .map_err(unavailable)?
 }
 impl Backend {
     fn snapshot(&self) -> Result<crate::NetworkSnapshot, ServiceError> {
@@ -230,7 +278,7 @@ impl Backend {
                 || journal.public_policy().is_some()
                 || journal.session_recovery().is_some()
             {
-                return Err(ServiceError::Busy);
+                return Err(super::service::busy_at("backend_owner_uid"));
             }
         }
         let ns = namespace()?;
@@ -335,7 +383,7 @@ impl Backend {
                 .map(Reply::State),
             Operation::Prepare(uid, allow_lan) => {
                 if self.has_session() || self.worker_uncertain {
-                    return Err(ServiceError::Busy);
+                    return Err(super::service::busy_at("backend_prepare_active"));
                 }
                 // До live-reconciler нельзя сохранять разрешающие LAN bindings
                 // после смены topology; RPC явно отказывает, а не ослабляет защиту.
@@ -377,7 +425,7 @@ impl Backend {
             }
             Operation::Apply(uid, plan, stamp) => {
                 if self.has_session() || self.worker_uncertain {
-                    return Err(ServiceError::Busy);
+                    return Err(super::service::busy_at("backend_apply_active"));
                 }
                 if plan.version != 1
                     || plan.uid != uid
@@ -534,7 +582,7 @@ impl ProtectionHost for SystemProtectionHost {
         self.backend
             .try_lock()
             .map_err(|error| match error {
-                std::sync::TryLockError::WouldBlock => ServiceError::Busy,
+                std::sync::TryLockError::WouldBlock => super::service::busy_at("backend_context"),
                 _ => ServiceError::Unavailable,
             })?
             .context(uid)
