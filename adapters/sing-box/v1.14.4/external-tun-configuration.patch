@@ -1,0 +1,154 @@
+diff --git a/option/tun.go b/option/tun.go
+--- a/option/tun.go
++++ b/option/tun.go
+@@ -12,6 +12,7 @@
+ )
+ 
+ type TunInboundOptions struct {
++	ExternalConfiguration         bool                             `json:"external_configuration,omitempty"`
+ 	InterfaceName                 string                           `json:"interface_name,omitempty"`
+ 	NetNs                         string                           `json:"netns,omitempty" reference:"network_namespace"`
+ 	MTU                           uint32                           `json:"mtu,omitempty"`
+diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
+--- a/protocol/tun/inbound.go
++++ b/protocol/tun/inbound.go
+@@ -60,6 +60,28 @@
+ 	routeExcludeAddressSet []*netipx.IPSet
+ }
+ 
++// validateExternalConfiguration запрещает смешивать внешнего владельца сети
++// с нативным управлением routes/DNS. Существование интерфейса проверяется при Start,
++// чтобы config-check не создавал TUN и не зависел от уже применённой сети.
++func validateExternalConfiguration(options option.TunInboundOptions, usePlatformInterface bool) error {
++	if !options.ExternalConfiguration {
++		return nil
++	}
++	if !C.IsLinux || usePlatformInterface || options.Platform != nil || options.NetNs != "" {
++		return E.New("external_configuration requires a Linux interface in the current namespace")
++	}
++	if options.InterfaceName == "" || options.MTU == 0 || len(options.Address) == 0 {
++		return E.New("external_configuration requires explicit interface_name, mtu and address")
++	}
++	if options.AutoRoute || options.AutoRedirect || options.StrictRoute {
++		return E.New("external_configuration conflicts with automatic routing")
++	}
++	if (options.DNSMode != "" && options.DNSMode != "disabled") || len(options.DNSAddress) != 0 {
++		return E.New("external_configuration requires disabled native DNS")
++	}
++	return nil
++}
++
+ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TunInboundOptions) (adapter.Inbound, error) {
+ 	//nolint:staticcheck
+ 	if len(options.Inet4Address) > 0 || len(options.Inet6Address) > 0 ||
+@@ -102,6 +124,9 @@
+ 
+ 	platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
+ 	usePlatformInterface := platformInterface != nil && platformInterface.UsePlatformInterface()
++	if err := validateExternalConfiguration(options, usePlatformInterface); err != nil {
++		return nil, err
++	}
+ 	if options.NetNs != "" && !C.IsLinux {
+ 		return nil, E.New("`netns` is only supported on Linux")
+ 	}
+@@ -197,6 +222,7 @@
+ 		logger:         logger,
+ 		tunOptions: tun.Options{
+ 			Name:                                  options.InterfaceName,
++			EXP_ExternalConfiguration:             options.ExternalConfiguration,
+ 			NetNs:                                 options.NetNs,
+ 			MTU:                                   tunMTU,
+ 			GSO:                                   enableGSO,
+@@ -328,6 +354,11 @@
+ 			t.dnsHijackAddress = append(inet4DNSAddress, inet6DNSAddress...)
+ 		}
+ 	case adapter.StartStateStart:
++		if t.tunOptions.EXP_ExternalConfiguration {
++			if _, err := net.InterfaceByName(t.tunOptions.Name); err != nil {
++				return E.Cause(err, "external_configuration interface is unavailable")
++			}
++		}
+ 		if !t.usePlatformInterface &&
+ 			((C.IsLinux && !t.tunOptions.GSO) || (C.IsDarwin && !t.tunOptions.EXP_MultiPendingPackets)) {
+ 			outboundManager := service.FromContext[adapter.OutboundManager](t.ctx)
+diff --git a/protocol/tun/external_configuration_test.go b/protocol/tun/external_configuration_test.go
+new file mode 100644
+--- /dev/null
++++ b/protocol/tun/external_configuration_test.go
+@@ -0,0 +1,76 @@
++package tun
++
++import (
++	"encoding/json"
++	"net/netip"
++	"testing"
++
++	C "github.com/sagernet/sing-box/constant"
++	"github.com/sagernet/sing-box/option"
++)
++
++func externalOptions(t *testing.T) option.TunInboundOptions {
++	t.Helper()
++	var options option.TunInboundOptions
++	if err := json.Unmarshal([]byte(`{"external_configuration":true,"interface_name":"tofu00000001","mtu":1500,"address":["198.18.0.1/30","2001:db8:746f::1/126"],"dns_mode":"disabled"}`), &options); err != nil {
++		t.Fatal(err)
++	}
++	return options
++}
++
++func TestExternalConfigurationExplicitWireContract(t *testing.T) {
++	options := externalOptions(t)
++	if !options.ExternalConfiguration || options.InterfaceName != "tofu00000001" || len(options.Address) != 2 {
++		t.Fatal("external_configuration: typed settings lost")
++	}
++	var omitted option.TunInboundOptions
++	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil || omitted.ExternalConfiguration {
++		t.Fatal("external_configuration: upstream default changed")
++	}
++	if err := json.Unmarshal([]byte(`{"external_configuration":"true"}`), &omitted); err == nil {
++		t.Fatal("external_configuration: non-boolean accepted")
++	}
++	if C.IsLinux {
++		if err := validateExternalConfiguration(options, false); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
++func TestExternalConfigurationRejectsCompetingNetworkOwners(t *testing.T) {
++	if !C.IsLinux {
++		t.Skip("external_configuration is Linux-only")
++	}
++	for name, mutate := range map[string]func(*option.TunInboundOptions){
++		"auto-route":      func(o *option.TunInboundOptions) { o.AutoRoute = true },
++		"auto-redirect":   func(o *option.TunInboundOptions) { o.AutoRedirect = true },
++		"strict-route":    func(o *option.TunInboundOptions) { o.StrictRoute = true },
++		"native-dns":      func(o *option.TunInboundOptions) { o.DNSMode = "native" },
++		"hijack-dns":      func(o *option.TunInboundOptions) { o.DNSMode = "hijack" },
++		"dns-address":     func(o *option.TunInboundOptions) { o.DNSAddress = []netip.Addr{netip.MustParseAddr("198.18.0.2")} },
++		"no-name":         func(o *option.TunInboundOptions) { o.InterfaceName = "" },
++		"no-mtu":          func(o *option.TunInboundOptions) { o.MTU = 0 },
++		"no-address":      func(o *option.TunInboundOptions) { o.Address = nil },
++		"other-namespace": func(o *option.TunInboundOptions) { o.NetNs = "other" },
++		"platform":        func(o *option.TunInboundOptions) { o.Platform = &option.TunPlatformOptions{} },
++	} {
++		t.Run(name, func(t *testing.T) {
++			options := externalOptions(t)
++			mutate(&options)
++			if err := validateExternalConfiguration(options, false); err == nil {
++				t.Fatal("external_configuration: competing network ownership accepted")
++			}
++		})
++	}
++	if err := validateExternalConfiguration(externalOptions(t), true); err == nil {
++		t.Fatal("external_configuration: platform interface accepted")
++	}
++	// Отсутствие нового режима не вводит ограничений в upstream-конфигурации.
++	legacy := externalOptions(t)
++	legacy.ExternalConfiguration = false
++	legacy.AutoRoute = true
++	legacy.DNSMode = "native"
++	if err := validateExternalConfiguration(legacy, true); err != nil {
++		t.Fatal("external_configuration: legacy behavior changed")
++	}
++}

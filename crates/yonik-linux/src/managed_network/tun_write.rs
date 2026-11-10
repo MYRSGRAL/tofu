@@ -1,4 +1,5 @@
 //! Закрытый RTNETLINK write transport: ACK не заменяет последующую сверку.
+use super::config::{TunAddress, TunRoute};
 use super::{OperationLease, TunError};
 use rustix::net::{
     self, AddressFamily, RecvFlags, SendFlags, SocketFlags, SocketType, netlink::SocketAddrNetlink,
@@ -10,40 +11,142 @@ const MAX_BYTES: usize = 64 * 1024;
 const HEADER: usize = 16;
 
 pub(super) enum Action {
-    SetAlias { index: u32, alias: Vec<u8> },
-    Delete { index: u32 },
+    SetAlias {
+        index: u32,
+        alias: Vec<u8>,
+    },
+    SetLink {
+        index: u32,
+        mtu: u32,
+    },
+    Delete {
+        index: u32,
+    },
+    Address {
+        index: u32,
+        address: TunAddress,
+        add: bool,
+    },
+    Route {
+        index: u32,
+        route: TunRoute,
+        add: bool,
+    },
+}
+fn attribute(body: &mut Vec<u8>, kind: u16, value: &[u8]) {
+    let length = 4 + value.len();
+    body.extend_from_slice(&(length as u16).to_ne_bytes());
+    body.extend_from_slice(&kind.to_ne_bytes());
+    body.extend_from_slice(value);
+    body.resize((body.len() + 3) & !3, 0);
+}
+fn address_bytes(address: std::net::IpAddr) -> Vec<u8> {
+    match address {
+        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+    }
 }
 impl Action {
     fn kind(&self) -> u16 {
         match self {
-            Self::SetAlias { .. } => 19,
+            Self::SetAlias { .. } | Self::SetLink { .. } => 19,
             Self::Delete { .. } => 17,
+            Self::Address { add: true, .. } => 20,
+            Self::Address { add: false, .. } => 21,
+            Self::Route { add: true, .. } => 24,
+            Self::Route { add: false, .. } => 25,
+        }
+    }
+    fn flags(&self) -> u16 {
+        if matches!(
+            self,
+            Self::Address { add: true, .. } | Self::Route { add: true, .. }
+        ) {
+            0x605
+        } else {
+            5
         }
     }
     fn request(&self, sequence: u32, port: u32) -> Result<Vec<u8>, TunError> {
         let index = match self {
-            Self::SetAlias { index, .. } | Self::Delete { index } => *index,
+            Self::SetAlias { index, .. }
+            | Self::SetLink { index, .. }
+            | Self::Delete { index }
+            | Self::Address { index, .. }
+            | Self::Route { index, .. } => *index,
         };
         if index == 0 || index > i32::MAX as u32 {
             return Err(TunError::Invalid);
         }
-        let mut body = vec![0; 16];
-        body[4..8].copy_from_slice(&index.to_ne_bytes());
-        if let Self::SetAlias { alias, .. } = self {
-            if alias.is_empty() || alias.len() > 254 || alias.contains(&0) {
-                return Err(TunError::Invalid);
+        let mut body = match self {
+            Self::Address { address, .. } => {
+                let mut value = vec![
+                    if address.address().is_ipv4() { 2 } else { 10 },
+                    address.prefix_len(),
+                    2,
+                    0,
+                ];
+                value.extend_from_slice(&index.to_ne_bytes());
+                let ip = address_bytes(address.address());
+                attribute(&mut value, 1, &ip);
+                attribute(&mut value, 2, &ip);
+                // NODAD и NOPREFIXROUTE: маршруты принадлежат отдельным intents.
+                attribute(&mut value, 8, &0x202_u32.to_ne_bytes());
+                value
             }
-            let length = 4 + alias.len() + 1;
-            body.extend_from_slice(&(length as u16).to_ne_bytes());
-            body.extend_from_slice(&20_u16.to_ne_bytes());
-            body.extend_from_slice(alias);
-            body.push(0);
-            body.resize((body.len() + 3) & !3, 0);
+            Self::Route { route, .. } => {
+                let mut value = vec![
+                    if route.destination().is_ipv4() { 2 } else { 10 },
+                    route.prefix_len(),
+                    0,
+                    0,
+                    0,
+                    253,
+                    if route.destination().is_ipv4() {
+                        253
+                    } else {
+                        0
+                    },
+                    1,
+                ];
+                value.extend_from_slice(&0_u32.to_ne_bytes());
+                if route.prefix_len() != 0 {
+                    attribute(&mut value, 1, &address_bytes(route.destination()));
+                }
+                attribute(&mut value, 4, &index.to_ne_bytes());
+                attribute(&mut value, 6, &route.priority().to_ne_bytes());
+                attribute(&mut value, 15, &route.table().to_ne_bytes());
+                value
+            }
+            _ => {
+                let mut value = vec![0; 16];
+                value[4..8].copy_from_slice(&index.to_ne_bytes());
+                value
+            }
+        };
+        match self {
+            Self::SetAlias { alias, .. } => {
+                if alias.is_empty() || alias.len() > 254 || alias.contains(&0) {
+                    return Err(TunError::Invalid);
+                }
+                let mut terminated = alias.clone();
+                terminated.push(0);
+                attribute(&mut body, 20, &terminated);
+            }
+            Self::SetLink { mtu, .. } => {
+                if !(1280..=9000).contains(mtu) {
+                    return Err(TunError::Invalid);
+                }
+                body[8..12].copy_from_slice(&1_u32.to_ne_bytes());
+                body[12..16].copy_from_slice(&1_u32.to_ne_bytes());
+                attribute(&mut body, 4, &mtu.to_ne_bytes());
+            }
+            _ => {}
         }
         let mut bytes = Vec::with_capacity(HEADER + body.len());
         bytes.extend_from_slice(&((HEADER + body.len()) as u32).to_ne_bytes());
         bytes.extend_from_slice(&self.kind().to_ne_bytes());
-        bytes.extend_from_slice(&5_u16.to_ne_bytes()); // REQUEST | ACK, без replace.
+        bytes.extend_from_slice(&self.flags().to_ne_bytes());
         bytes.extend_from_slice(&sequence.to_ne_bytes());
         bytes.extend_from_slice(&port.to_ne_bytes());
         bytes.extend(body);
@@ -67,6 +170,7 @@ fn accept(
     port: u32,
     kind: u16,
     request_length: usize,
+    flags: u16,
 ) -> Result<bool, TunError> {
     let mut rest = bytes;
     let mut acknowledged = false;
@@ -93,7 +197,7 @@ fn accept(
             }
             let original = &rest[20..36];
             if value_u32(&original[..4])? as usize != request_length
-                || value_u16(&original[6..8])? != 5
+                || value_u16(&original[6..8])? != flags
                 || value_u16(&original[4..6])? != kind
                 || value_u32(&original[8..12])? != sequence
                 || value_u32(&original[12..16])? != port
@@ -117,6 +221,7 @@ fn accept(
 
 pub(super) async fn run(action: Action, lease: Arc<OperationLease>) -> Result<(), TunError> {
     let kind = action.kind();
+    let flags = action.flags();
     let socket = net::socket_with(
         AddressFamily::NETLINK,
         SocketType::RAW,
@@ -141,7 +246,7 @@ pub(super) async fn run(action: Action, lease: Arc<OperationLease>) -> Result<()
         let _lease = lease;
         tokio::time::timeout(
             super::DEADLINE,
-            exchange(socket, request, sequence, port, kind),
+            exchange(socket, request, sequence, port, kind, flags),
         )
         .await
         .map_err(|_| TunError::Timeout)?
@@ -155,6 +260,7 @@ async fn exchange(
     sequence: u32,
     port: u32,
     kind: u16,
+    flags: u16,
 ) -> Result<(), TunError> {
     loop {
         let mut ready = socket.writable().await.map_err(|_| TunError::Io)?;
@@ -201,7 +307,7 @@ async fn exchange(
         if sender.groups() != 0 {
             return Err(TunError::Evidence);
         }
-        if accept(&bytes[..length], sequence, port, kind, request.len())? {
+        if accept(&bytes[..length], sequence, port, kind, request.len(), flags)? {
             return Ok(());
         }
     }
@@ -244,20 +350,66 @@ mod tests {
         assert_eq!(&request[36..42], b"owner\0");
     }
     #[test]
+    fn address_and_route_creation_are_exclusive_without_replace() {
+        let address = TunAddress::new("198.18.0.1".parse().unwrap(), 30).unwrap();
+        let route = TunRoute::new("198.18.0.0".parse().unwrap(), 30, 1001, 47).unwrap();
+        for action in [
+            Action::Address {
+                index: 7,
+                address,
+                add: true,
+            },
+            Action::Route {
+                index: 7,
+                route,
+                add: true,
+            },
+        ] {
+            let request = action.request(3, 5).unwrap();
+            let flags = value_u16(&request[6..8]).unwrap();
+            assert_eq!(flags & 0x600, 0x600); // CREATE | EXCL.
+            assert_eq!(flags & 0x100, 0); // Никогда REPLACE.
+            assert_eq!(flags & 5, 5); // REQUEST | ACK.
+        }
+        for action in [
+            Action::Address {
+                index: 7,
+                address,
+                add: false,
+            },
+            Action::Route {
+                index: 7,
+                route,
+                add: false,
+            },
+        ] {
+            let request = action.request(3, 5).unwrap();
+            assert_eq!(value_u16(&request[6..8]).unwrap(), 5);
+        }
+        assert!(
+            Action::SetLink {
+                index: 7,
+                mtu: 1279
+            }
+            .request(3, 5)
+            .is_err()
+        );
+    }
+    #[test]
     fn ack_requires_matching_outer_and_original_identity() {
         let original = ack();
-        assert_eq!(accept(&original, 3, 5, 17, 32), Ok(true));
-        assert_eq!(accept(&original, 4, 5, 17, 32), Ok(false));
+        assert_eq!(accept(&original, 3, 5, 17, 32, 5), Ok(true));
+        assert_eq!(accept(&original, 4, 5, 17, 32, 5), Ok(false));
         for offset in [4, 6, 12, 20, 24, 26, 28, 32] {
             let mut value = original.clone();
             value[offset] ^= 1;
-            assert!(accept(&value, 3, 5, 17, 32).is_err(), "offset {offset}");
+            assert!(accept(&value, 3, 5, 17, 32, 5).is_err(), "offset {offset}");
         }
         for length in [0, 1, 15, 16, 35] {
-            assert!(accept(&original[..length], 3, 5, 17, 32).is_err() || length == 0);
+            assert!(accept(&original[..length], 3, 5, 17, 32, 5).is_err() || length == 0);
         }
         let mut rejected = original;
         rejected[16..20].copy_from_slice(&(-1_i32).to_ne_bytes());
-        assert_eq!(accept(&rejected, 3, 5, 17, 32), Err(TunError::Rejected));
+        assert_eq!(accept(&rejected, 3, 5, 17, 32, 5), Err(TunError::Rejected));
     }
 }

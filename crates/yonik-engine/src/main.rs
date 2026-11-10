@@ -6,7 +6,10 @@ use std::{
 };
 
 use serde_json::json;
-use yonik_engine::{Engine, PolicyMode, compile, compile_policy, policy_input::read_policy};
+use yonik_engine::{
+    Engine, PolicyMode, SystemTun, SystemTunAddress, compile, compile_policy, compile_system,
+    compile_system_policy, policy_input::read_policy,
+};
 use yonik_import::import_reader;
 
 struct Arguments {
@@ -15,6 +18,7 @@ struct Arguments {
     port: NonZeroU16,
     emit: bool,
     policy: Option<(PathBuf, PolicyMode, NonZeroU16)>,
+    tun: Option<SystemTun>,
 }
 
 const DEFAULT_PORT: NonZeroU16 = match NonZeroU16::new(10808) {
@@ -40,8 +44,36 @@ fn arguments() -> Result<Arguments, &'static str> {
     let mut policy = None;
     let mut policy_mode = None;
     let mut probe_port = None;
+    let (mut tun_id, mut tun_mtu, mut routing_mark) = (None, None, None);
+    let mut tun_addresses = Vec::<SystemTunAddress>::new();
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some("--tun-id") if tun_id.is_none() => {
+                tun_id = Some(
+                    args.next()
+                        .and_then(|v| v.to_str().and_then(|v| v.parse::<u32>().ok()))
+                        .ok_or("Некорректный ID TUN")?,
+                )
+            }
+            Some("--tun-mtu") if tun_mtu.is_none() => {
+                tun_mtu = Some(
+                    args.next()
+                        .and_then(|v| v.to_str().and_then(|v| v.parse::<u16>().ok()))
+                        .ok_or("Некорректный MTU TUN")?,
+                )
+            }
+            Some("--routing-mark") if routing_mark.is_none() => {
+                routing_mark = Some(
+                    args.next()
+                        .and_then(|v| v.to_str().and_then(|v| v.parse::<u32>().ok()))
+                        .ok_or("Некорректная метка транспорта")?,
+                )
+            }
+            Some("--tun-address") if tun_addresses.len() < 2 => tun_addresses.push(
+                args.next()
+                    .and_then(|v| v.to_str().and_then(|v| v.parse().ok()))
+                    .ok_or("Некорректный адрес TUN")?,
+            ),
             Some("--server") if server.is_none() => {
                 server = Some(
                     args.next()
@@ -84,12 +116,21 @@ fn arguments() -> Result<Arguments, &'static str> {
             return Err("Нужны вместе --policy FILE --policy-mode names|ip-only --probe-port PORT");
         }
     };
+    let tun = match (tun_id, tun_mtu, routing_mark) {
+        (None, None, None) if tun_addresses.is_empty() => None,
+        (Some(id), Some(mtu), Some(mark)) => Some(
+            SystemTun::new(id, mtu, mark, tun_addresses)
+                .map_err(|_| "Некорректная конфигурация TUN")?,
+        ),
+        _ => return Err("Для TUN нужны --tun-id, --tun-mtu, --routing-mark и --tun-address"),
+    };
     Ok(Arguments {
         engine,
         server: server.unwrap_or(0),
         port: port.unwrap_or(DEFAULT_PORT),
         emit,
         policy,
+        tun,
     })
 }
 
@@ -108,8 +149,18 @@ fn run() -> Result<(), String> {
         .ok_or("Индекс сервера вне списка")?;
     let config = if let Some((path, mode, probe_port)) = &args.policy {
         let policy = read_policy(open_policy(path)?).map_err(|e| e.to_string())?;
-        compile_policy(server, args.engine, args.port, *probe_port, &policy, *mode)
-            .map_err(|e| e.to_string())?
+        if let Some(tun) = &args.tun {
+            if *mode != PolicyMode::IpOnly {
+                return Err("Для TUN пока доступна только IP-политика".into());
+            }
+            compile_system_policy(server, args.engine, args.port, *probe_port, &policy, tun)
+                .map_err(|e| e.to_string())?
+        } else {
+            compile_policy(server, args.engine, args.port, *probe_port, &policy, *mode)
+                .map_err(|e| e.to_string())?
+        }
+    } else if let Some(tun) = &args.tun {
+        compile_system(server, args.engine, args.port, tun).map_err(|e| e.to_string())?
     } else {
         compile(server, args.engine, args.port).map_err(|e| e.to_string())?
     };
@@ -125,6 +176,7 @@ fn run() -> Result<(), String> {
             "version":args.engine.version(), "server_index":args.server,
             "protocol":server.protocol().as_str(),"listen":"127.0.0.1","port":args.port.get(),
             "probe_port":config.probe_port().get(),
+            "system_tun":args.tun.is_some(),
             "status":"compiled_not_checked",
         })).map_err(|_| "Не удалось записать сводку")?;
     }

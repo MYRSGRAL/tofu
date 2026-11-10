@@ -17,11 +17,17 @@ use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, oneshot},
 };
 
+#[path = "tun_config.rs"]
+mod config;
+#[cfg(test)]
+#[path = "tun_session_tests.rs"]
+mod session_tests;
 #[cfg(test)]
 #[path = "tun_tests.rs"]
 mod tests;
 #[path = "tun_write.rs"]
 mod write;
+pub use config::{TunAddress, TunRoute};
 
 const DEADLINE: Duration = Duration::from_secs(5);
 const MAX_OUTPUT: usize = 256 * 1024;
@@ -314,6 +320,11 @@ impl TunExecutor {
         if journal.ownership() != self.owner {
             return Err(JournalError::WrongOwnership.into());
         }
+        if journal.records().iter().any(
+            |record| matches!(record.resource(), Resource::Address { tun_id, .. } if *tun_id == id),
+        ) {
+            return Err(JournalError::Conflict.into());
+        }
         let record = journal
             .records()
             .iter()
@@ -325,10 +336,15 @@ impl TunExecutor {
         };
         let marker = alias(self.owner, id)?;
         journal.require_reconciliation(self.owner, id)?;
-        let Some(index) = observed(&self.links().await?, name_id, &marker)? else {
+        let topology = self.configuration_snapshot().await?;
+        let Some(index) = observed(&topology.links, name_id, &marker)? else {
             journal.reconcile(self.owner, id, Reconciled::Absent)?;
             return Ok(());
         };
+        if journal.records().iter().any(|record| matches!(record.resource(), Resource::Route { ifindex, .. } | Resource::Dns { ifindex, .. } if *ifindex == index)) {
+            return Err(JournalError::Conflict.into());
+        }
+        config::check_tun_teardown(&topology, index)?;
         journal.reconcile(self.owner, id, Reconciled::Owned)?;
         journal.mark_cleanup(self.owner, id)?;
         self.check_namespace()?;
