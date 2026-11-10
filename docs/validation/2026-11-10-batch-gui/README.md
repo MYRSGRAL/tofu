@@ -44,6 +44,8 @@ fetch-контракт не изменён. Смена источника/revisi
 
 Combined merge актуального main: [main-merge.md](main-merge.md).
 
+Исправление review P2 для historical favorites: [unavailable-favorite.md](unavailable-favorite.md).
+
 ## Границы первоначального среза
 
 Нет нового end-to-end batch-прогона на 10 000 сетевых целей и нового batch-теста

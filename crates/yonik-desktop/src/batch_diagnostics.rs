@@ -268,9 +268,12 @@ mod tests {
         let endpoint = std::net::TcpListener::bind("127.0.0.1:0").expect("свой endpoint");
         let port = endpoint.local_addr().expect("адрес").port();
         drop(endpoint);
-        let body = (0..128)
-            .map(|id| format!("trojan://fixture-{id}@127.0.0.1:{port}#Цель{id}\n"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..128).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://fixture-{id}@127.0.0.1:{port}#Цель{id}")
+                .expect("Строка fixture");
+            text
+        });
         repo.commit_snapshot(
             source.id,
             1,

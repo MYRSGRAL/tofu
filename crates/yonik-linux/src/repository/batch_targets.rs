@@ -104,14 +104,26 @@ fn prepare_batch(
     if raw > yonik_import::MAX_RECORDS || unique > raw {
         return Err(RepositoryError::Corrupt);
     }
-    let count: usize = tx
-        .query_row(
-            "SELECT count(*) FROM profiles WHERE source_id=?1",
-            [source],
-            |r| r.get(0),
-        )
-        .map_err(storage)?;
-    if count > 10_000 {
+    // present входит в AEAD AAD: фильтровать SQL-флаг до open_profile нельзя.
+    // Исторические favorite имеют старую revision и не относятся к current snapshot.
+    let mut available = Vec::with_capacity(unique.min(10_000));
+    for row in read_profiles(&tx, source)? {
+        if cancel.check().is_err() {
+            return Ok(None);
+        }
+        let profile = open_profile(&db.key, &db.id, &row)?;
+        if !profile.available {
+            continue;
+        }
+        if row.generation != generation || row.revision != revision {
+            return Err(RepositoryError::Corrupt);
+        }
+        available.push((profile, row.fingerprint));
+    }
+    if available.len() != unique {
+        return Err(RepositoryError::Corrupt);
+    }
+    if available.len() > 10_000 {
         return Err(RepositoryError::InvalidInput);
     }
     if cancel.check().is_err() {
@@ -124,23 +136,16 @@ fn prepare_batch(
     if cancel.check().is_err() {
         return Ok(None);
     }
-    let mut targets = Vec::with_capacity(count);
-    for row in read_profiles(&tx, source)? {
+    let mut targets = Vec::with_capacity(available.len());
+    for (profile, expected_fingerprint) in available {
         if cancel.check().is_err() {
             return Ok(None);
-        }
-        let profile = open_profile(&db.key, &db.id, &row)?;
-        if !profile.available {
-            return Err(RepositoryError::NotFound);
-        }
-        if row.generation != generation || row.revision != revision {
-            return Err(RepositoryError::Corrupt);
         }
         let server = report
             .servers
             .get(profile.ordinal)
             .ok_or(RepositoryError::Corrupt)?;
-        if fingerprint(&db.key, &db.id, source, server)? != row.fingerprint {
+        if fingerprint(&db.key, &db.id, source, server)? != expected_fingerprint {
             return Err(RepositoryError::Corrupt);
         }
         targets.push(BatchTargetProjection {
@@ -214,6 +219,210 @@ mod tests {
             .await
             .expect("каталог");
         (dir, repo, source.id)
+    }
+    async fn disappeared_favorite(
+        repo: &EncryptedSubscriptionRepository,
+        source: i64,
+        available: usize,
+    ) -> i64 {
+        let first = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("A")
+            .profiles[0]
+            .id;
+        repo.set_favorite(first, true).await.expect("favorite A");
+        use std::fmt::Write as _;
+        let body = (0..available).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://available-{id}@127.0.0.1:1#B{id}")
+                .expect("Строка fixture");
+            text
+        });
+        repo.commit_snapshot(
+            source,
+            1,
+            1,
+            SnapshotInput {
+                body: body.into_bytes(),
+                metadata: vec![],
+                validators: None,
+            },
+        )
+        .await
+        .expect("обновление без A");
+        first
+    }
+    #[tokio::test]
+    async fn unavailable_favorite_does_not_block_available_batch_or_paging() {
+        let (_dir, repo, source) = fixture(1).await;
+        // A+B → favorite A → refresh only B.
+        repo.commit_snapshot(
+            source,
+            1,
+            1,
+            SnapshotInput {
+                body:
+                    "trojan://fixture-secret@127.0.0.1:1#Тест\ntrojan://available-0@127.0.0.1:1#B0"
+                        .as_bytes()
+                        .to_vec(),
+                metadata: vec![],
+                validators: None,
+            },
+        )
+        .await
+        .expect("A+B");
+        let page = repo
+            .profiles(source, ProfileQuery::default())
+            .await
+            .expect("A+B");
+        let a = page
+            .profiles
+            .iter()
+            .find(|p| p.name == "Тест")
+            .expect("A")
+            .id;
+        repo.set_favorite(a, true).await.expect("favorite A");
+        repo.commit_snapshot(
+            source,
+            1,
+            2,
+            SnapshotInput {
+                body: b"trojan://available-0@127.0.0.1:1#B0".to_vec(),
+                metadata: vec![],
+                validators: None,
+            },
+        )
+        .await
+        .expect("only B");
+        let (_sender, cancel) = Cancellation::new();
+        let batch = repo
+            .batch_targets(source, 1, 3, cancel)
+            .await
+            .expect("недоступный favorite не блокирует B")
+            .expect("batch");
+        assert_eq!(batch.targets.len(), 1);
+        assert_eq!(batch.targets[0].profile.name, "B0");
+        let available = repo
+            .profiles(
+                source,
+                ProfileQuery {
+                    limit: 1,
+                    ..ProfileQuery::default()
+                },
+            )
+            .await
+            .expect("available page");
+        assert_eq!(available.total, 1);
+        assert_eq!(available.profiles[0].id, batch.targets[0].profile.id);
+        let retained = repo
+            .profiles(
+                source,
+                ProfileQuery {
+                    include_unavailable: true,
+                    ..ProfileQuery::default()
+                },
+            )
+            .await
+            .expect("retained");
+        let a = retained
+            .profiles
+            .iter()
+            .find(|p| p.id == a)
+            .expect("favorite A сохранён");
+        assert!(a.favorite && !a.available);
+    }
+    #[tokio::test]
+    async fn unavailable_favorite_is_not_part_of_ten_thousand_target_limit() {
+        let (_dir, repo, source) = fixture(1).await;
+        let a = disappeared_favorite(&repo, source, 10_000).await;
+        let (_sender, cancel) = Cancellation::new();
+        let batch = repo
+            .batch_targets(source, 1, 2, cancel)
+            .await
+            .expect("10k available плюс historical favorite допустимы")
+            .expect("batch");
+        assert_eq!(batch.targets.len(), 10_000);
+        assert!(batch.targets.iter().all(|p| p.profile.id != a));
+        for offset in [0, 9999, 10_000] {
+            let page = repo
+                .profiles(
+                    source,
+                    ProfileQuery {
+                        offset,
+                        limit: 1,
+                        ..ProfileQuery::default()
+                    },
+                )
+                .await
+                .expect("available page");
+            assert_eq!(page.total, 10_000);
+            assert_eq!(page.profiles.len(), usize::from(offset < 10_000));
+        }
+        let retained = repo
+            .profiles(
+                source,
+                ProfileQuery {
+                    include_unavailable: true,
+                    favorites_only: true,
+                    ..ProfileQuery::default()
+                },
+            )
+            .await
+            .expect("favorites");
+        assert_eq!(retained.profiles.len(), 1);
+        assert!(retained.profiles[0].favorite && !retained.profiles[0].available);
+        use std::fmt::Write as _;
+        let body = (0..10_001).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://available-{id}@127.0.0.1:1#B{id}")
+                .expect("Строка fixture");
+            text
+        });
+        repo.commit_snapshot(
+            source,
+            1,
+            2,
+            SnapshotInput {
+                body: body.into_bytes(),
+                metadata: vec![],
+                validators: None,
+            },
+        )
+        .await
+        .expect("10001 available");
+        let (_sender, cancel) = Cancellation::new();
+        assert!(matches!(
+            repo.batch_targets(source, 1, 3, cancel).await,
+            Err(RepositoryError::InvalidInput)
+        ));
+    }
+    #[tokio::test]
+    async fn unavailable_rows_are_authenticated_before_filtering() {
+        for mutation in ["payload", "present", "current_hidden", "current_revision"] {
+            let (_dir, repo, source) = fixture(1).await;
+            let a = disappeared_favorite(&repo, source, 1).await;
+            repo.run(move |db| {
+                let sql = match mutation {
+                    "payload" => {
+                        "UPDATE profiles SET payload=zeroblob(length(payload)) WHERE id=?1"
+                    }
+                    "present" => "UPDATE profiles SET present=1 WHERE id=?1",
+                    "current_hidden" => "UPDATE profiles SET present=0 WHERE id<>?1",
+                    _ => "UPDATE profiles SET revision=revision+1 WHERE id<>?1",
+                };
+                db.connection.execute(sql, [a]).map_err(storage)?;
+                Ok(())
+            })
+            .await
+            .expect("повреждение своей БД");
+            let (_sender, cancel) = Cancellation::new();
+            assert!(
+                matches!(
+                    repo.batch_targets(source, 1, 2, cancel).await,
+                    Err(RepositoryError::Corrupt)
+                ),
+                "{mutation}"
+            );
+        }
     }
     #[tokio::test]
     async fn bulk_matches_single_resolve_and_enforces_cas_and_cancellation() {
@@ -308,9 +517,12 @@ mod tests {
             .create_source(b"fresh".to_vec())
             .await
             .expect("источник");
-        let body = (0..10_000)
-            .map(|id| format!("trojan://synthetic-{id}@127.0.0.1:1#Цель{id}\n"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let body = (0..10_000).fold(String::new(), |mut text, id| {
+            writeln!(&mut text, "trojan://synthetic-{id}@127.0.0.1:1#Цель{id}")
+                .expect("Строка fixture");
+            text
+        });
         repo.commit_snapshot(
             fresh.id,
             1,
