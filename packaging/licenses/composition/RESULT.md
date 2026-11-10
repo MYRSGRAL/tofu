@@ -1,5 +1,9 @@
 # Composition Linux: подтверждённый результат и остаток
 
+Дополнение PR85: [P25 scope / Xray publisher / historical Qt experiment](P25-SCOPE.md).
+Состояние ниже — snapshot предыдущей волны; новые результаты и уточнённые границы
+поставки приведены в дополнении.
+
 База PR: `ca225267432efe1dc96243fcfcc2a8d914820c8e`.
 Исторический package78 и source eec7 не объявляются latest продуктом.
 [Integrity result](verification.json), [исходный статический manifest](../linux-composition.json).
