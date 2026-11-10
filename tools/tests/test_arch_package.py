@@ -45,12 +45,12 @@ def add_pkginfo(archive: tarfile.TarFile, content: bytes = PKGINFO) -> None:
 
 
 class ArchiveTests(unittest.TestCase):
-    def check_fixture(self, change: str = "") -> None:
+    def check_fixture(self, change: str = "", metadata: bytes = PKGINFO) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "package.tar"
             with tarfile.open(path, "w") as archive:
                 if change != "no_pkginfo":
-                    content = PKGINFO
+                    content = metadata
                     if change == "wrong_pkginfo":
                         content = (
                             b"pkgname = other-package\npkgver = 99-1\narch = aarch64\n"
@@ -197,6 +197,15 @@ class ArchiveTests(unittest.TestCase):
         ):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.check_fixture(change)
+
+    def test_only_lf_separates_metadata_records(self) -> None:
+        for separator in ("\r", "\v", "\f", "\x85", "\u2028", "\u2029"):
+            content = PKGINFO.replace(
+                b"depend = glibc\n",
+                b"#hidden" + separator.encode() + b"depend = glibc\n",
+            )
+            with self.subTest(separator=repr(separator)), self.assertRaises(ValueError):
+                self.check_fixture(metadata=content)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,8 @@ def validate_pkginfo(content: bytes, root: Path) -> None:
         "depend": fields["depends"],
     }
     actual: dict[str, list[str]] = {}
-    for line in content.decode("utf-8").splitlines():
+    # libalpm разделяет записи только LF, не Unicode separators/VT/FF.
+    for line in content.decode("utf-8").split("\n"):
         if not line.strip() or line.startswith("#"):
             continue
         key, separator, value = line.partition(" = ")
