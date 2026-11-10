@@ -6,6 +6,8 @@
 
 pub mod fence;
 mod protection_host;
+mod session_network;
+pub use session_network::SessionNetworkPlan;
 mod systemd_worker;
 pub use protection_host::{GuardArtifact, SystemProtectionHost};
 pub use systemd_worker::{

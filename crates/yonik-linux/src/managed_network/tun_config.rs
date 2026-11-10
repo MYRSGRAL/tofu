@@ -126,7 +126,7 @@ pub(super) fn record_state(journal: &Journal, id: u64) -> Result<RecordState, Tu
         .map(|r| r.state())
         .ok_or(JournalError::Missing.into())
 }
-fn address_matches(value: &LinuxAddress, index: u32, expected: TunAddress) -> bool {
+pub(super) fn address_matches(value: &LinuxAddress, index: u32, expected: TunAddress) -> bool {
     value.index == index
         && value.family == if expected.address.is_ipv4() { 2 } else { 10 }
         && value.address == expected.address

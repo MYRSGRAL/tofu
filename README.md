@@ -323,6 +323,13 @@ and both cores’ TUN traffic passed in a
 Profile Prepare/Apply and GUI integration, plus stubborn-child TERM/KILL
 acceptance, remain pending. [Worker contract](docs/specs/helper-worker-runtime.md).
 
+A closed `ServerIntent` and a helper-owned network plan now share descriptors
+between the compiler and TUN executor. External topology projection and the
+configure/capture/cleanup sequence pass isolated namespace gates.
+[Contract and limitations](docs/specs/helper-session-network.md).
+The authorized session host, worker/nft orchestration and GUI wiring remain
+pending; this does not enable system TUN in the installed app.
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses

@@ -326,6 +326,13 @@ helper crash/recover и TUN traffic обоих ядер прошли
 [проверку в одноразовой Arch VM](docs/validation/2026-11-10-installed-worker.md).
 Подключение к profile Prepare/Apply и GUI, полная TERM→KILL приёмка ещё нужны. [Контракт worker](docs/specs/helper-worker-runtime.md).
 
+Для системной сессии добавлены закрытый `ServerIntent` и helper-owned сетевой
+план: одни дескрипторы используются compiler и TUN executor. Проверены проекция
+внешней topology и configure/capture/cleanup в собственных namespaces.
+[Контракт и ограничения](docs/specs/helper-session-network.md).
+Авторизованный session host, worker/nft orchestration и GUI ещё не связаны;
+это не включает системный TUN в установленном приложении.
+
 ### Rust-библиотеки и CLI
 
 Rust 1.85+ (edition 2024). Application использует только std, нормализация доменов — IDNA; у импортера

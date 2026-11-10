@@ -75,6 +75,11 @@
    [три actual gates](validation/2026-11-10-installed-worker.md) прошли, включая
    setsid-потомка, helper SIGKILL/recover и TUN traffic обоих ядер. Остаются
    TERM→KILL для упрямого потомка и подключение runtime к session host.
+   PR #39 влит как `6355150`, PR #40 — как `49debdd`; все пять jobs обоих
+   workflows зелёные на соответствующих heads. Следующий срез:
+   [типизированный профиль и неизменяемый сетевой план](specs/helper-session-network.md).
+   Шесть протоколов DTO и configure/capture/external-check/cleanup проверены;
+   [evidence](validation/2026-11-10-session-plan.md). Сам SystemSessionHost ещё нужен.
    Следом нужны системная установка/клиент, live reconcile и TUN-сессия с явным
    владением ресурсами и cleanup по [плану интеграции](superpowers/plans/2026-11-10-system-session-integration.md);
    затем DNS/Fake-IP и атрибуцию приложений.
