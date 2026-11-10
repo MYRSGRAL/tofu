@@ -96,7 +96,8 @@ mod bridge_impl {
                 return;
             };
             if let Err(error) = host.dispatch(&request.to_string()) {
-                self.as_mut().report_error(error.key());
+                self.as_mut()
+                    .report_dispatch_error(&request.to_string(), error.key());
             }
         }
 
@@ -107,6 +108,25 @@ mod bridge_impl {
                 // При ошибке старта worker и его ресурсы ещё не созданы.
                 self.set_snapshot_json(QString::from("{\"closed\":true}"));
             }
+        }
+
+        fn report_dispatch_error(self: Pin<&mut Self>, request: &str, message: &str) {
+            let mut snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                &self.snapshot_json().to_string(),
+            )
+            .unwrap_or_default();
+            if let Ok(command) = serde_json::from_str::<serde_json::Value>(request) {
+                if matches!(
+                    command["command"].as_str(),
+                    Some("edit_routing" | "routing_order" | "routing_delete" | "routing_default")
+                ) {
+                    snapshot.insert("routing_ack".into(), serde_json::json!({"request_id": command["request_id"], "saved_id": null, "error": message}));
+                }
+            }
+            snapshot.insert("error".into(), message.into());
+            self.set_snapshot_json(QString::from(
+                &serde_json::Value::Object(snapshot).to_string(),
+            ));
         }
 
         fn report_error(self: Pin<&mut Self>, message: &str) {

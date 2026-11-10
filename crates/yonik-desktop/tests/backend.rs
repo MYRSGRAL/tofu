@@ -18,6 +18,36 @@ use std::{
 use yonik_desktop::{DesktopHost, HostConfig};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn stop_acknowledges_queued_routing_mutation_and_allows_retry() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let first_ready = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == true && first_ready.fetch_add(1, Ordering::Relaxed) == 0 {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let _ = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"routing_default", "expected_revision":0, "request_id":77, "action":"block"}));
+    app.send(json!({"command":"stop"}));
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["routing_ack"]["request_id"] == 77);
+    assert_eq!(cancelled["routing_ack"]["error"], "cancelled");
+    app.send(json!({"command":"routing_default", "expected_revision":0, "request_id":78, "action":"block"}));
+    let saved = app.wait(|v| v["routing_ack"]["request_id"] == 78);
+    assert!(saved["routing_ack"]["error"].is_null());
+    app.close();
+}
 pub(crate) struct Directory(pub(crate) PathBuf);
 impl Directory {
     pub(crate) fn new() -> Self {

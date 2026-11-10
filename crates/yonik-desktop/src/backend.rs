@@ -105,6 +105,33 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    RoutingCatalog {
+        processes: bool,
+        query: String,
+        offset: usize,
+    },
+    EditRouting {
+        expected_revision: i64,
+        request_id: u64,
+        create: bool,
+        rule: crate::editor::RuleInput,
+        confirm_broad: bool,
+    },
+    RoutingOrder {
+        expected_revision: i64,
+        request_id: u64,
+        ids: Vec<u64>,
+    },
+    RoutingDefault {
+        expected_revision: i64,
+        request_id: u64,
+        action: String,
+    },
+    RoutingDelete {
+        expected_revision: i64,
+        request_id: u64,
+        id: u64,
+    },
     SubscriptionVisibility {
         visible: bool,
     },
@@ -187,6 +214,15 @@ enum Command {
     Shutdown,
 }
 impl Command {
+    fn routing_request_id(&self) -> Option<u64> {
+        match self {
+            Self::EditRouting { request_id, .. }
+            | Self::RoutingOrder { request_id, .. }
+            | Self::RoutingDefault { request_id, .. }
+            | Self::RoutingDelete { request_id, .. } => Some(*request_id),
+            _ => None,
+        }
+    }
     fn is_source_operation(&self) -> bool {
         matches!(
             self,
@@ -531,7 +567,27 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
     })
 }
 #[derive(Serialize)]
+struct RoutingAck {
+    request_id: u64,
+    saved_id: Option<u64>,
+    error: Option<&'static str>,
+}
+enum RoutingMutation {
+    Put {
+        rule: crate::editor::RuleInput,
+        confirm_broad: bool,
+        create: bool,
+    },
+    Order(Vec<u64>),
+    Delete(u64),
+    Default(String),
+}
+#[derive(Serialize)]
 struct Snapshot {
+    routing_revision: Option<i64>,
+    routing_ack: Option<RoutingAck>,
+    routing_catalog: serde_json::Value,
+    routing: crate::editor::Draft,
     language: String,
     preferences_warning: bool,
     preferences_durability_warning: bool,
@@ -584,6 +640,10 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            routing: crate::editor::Draft::default(),
+            routing_revision: Some(0),
+            routing_ack: None,
+            routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
             preferences_warning: false,
             preferences_durability_warning: false,
@@ -730,7 +790,9 @@ fn private_directory(path: &Path) -> Result<(PathBuf, File)> {
     Ok((canonical, directory))
 }
 
-async fn open(config: &mut HostConfig) -> Result<(SubscriptionService, File)> {
+async fn open(
+    config: &mut HostConfig,
+) -> Result<(SubscriptionService, File, EncryptedSubscriptionRepository)> {
     let path = config.data_dir.clone();
     let (directory, lock) = tokio::task::spawn_blocking(move || private_directory(&path))
         .await
@@ -750,10 +812,12 @@ async fn open(config: &mut HostConfig) -> Result<(SubscriptionService, File)> {
     let repo = EncryptedSubscriptionRepository::open(path, key)
         .await
         .map_err(|_| DesktopError("storage"))?;
-    Ok((SubscriptionService::new(repo), lock))
+    Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
 struct Actor {
+    routing_repository: EncryptedSubscriptionRepository,
+    routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
     service: SubscriptionService,
@@ -766,6 +830,93 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    async fn save_routing(&mut self, candidate: crate::editor::Draft) -> Result<()> {
+        candidate.policy().map_err(DesktopError)?;
+        let expected = self
+            .routing_revision
+            .ok_or(DesktopError("routing_storage"))?;
+        let revision = self
+            .routing_repository
+            .save_routing_draft(expected, candidate.json().into_bytes())
+            .await
+            .map_err(|error| {
+                DesktopError(if error == yonik_linux::RepositoryError::Conflict {
+                    "routing_stale"
+                } else {
+                    "routing_storage"
+                })
+            })?;
+        self.routing_revision = Some(revision);
+        self.state.routing_revision = Some(revision);
+        self.state.routing = candidate;
+        Ok(())
+    }
+
+    async fn mutate_routing(
+        &mut self,
+        expected_revision: i64,
+        request_id: u64,
+        mutation: RoutingMutation,
+    ) -> Result<()> {
+        let saved_id = match &mutation {
+            RoutingMutation::Put { rule, .. } => Some(rule.id),
+            _ => None,
+        };
+        let result = async {
+            if request_id == 0 || request_id > 9_007_199_254_740_991 {
+                return Err(DesktopError("invalid_input"));
+            }
+            let current = self
+                .routing_revision
+                .ok_or(DesktopError("routing_storage"))?;
+            if expected_revision != current {
+                return Err(DesktopError("routing_stale"));
+            }
+            let mut candidate = self.state.routing.clone();
+            match mutation {
+                RoutingMutation::Put {
+                    rule,
+                    confirm_broad,
+                    create,
+                } => {
+                    let exists = candidate.rules.iter().any(|r| r.id == rule.id);
+                    if exists == create {
+                        return Err(DesktopError("id"));
+                    }
+                    candidate.put(rule, confirm_broad).map_err(DesktopError)?;
+                }
+                RoutingMutation::Order(ids) => {
+                    if ids.len() != candidate.rules.len() {
+                        return Err(DesktopError("id"));
+                    }
+                    let mut available: std::collections::HashMap<_, _> =
+                        candidate.rules.into_iter().map(|r| (r.id, r)).collect();
+                    candidate.rules = ids
+                        .into_iter()
+                        .map(|id| available.remove(&id).ok_or(DesktopError("id")))
+                        .collect::<Result<Vec<_>>>()?;
+                }
+                RoutingMutation::Delete(id) => {
+                    let index = candidate
+                        .rules
+                        .iter()
+                        .position(|r| r.id == id)
+                        .ok_or(DesktopError("id"))?;
+                    candidate.rules.remove(index);
+                }
+                RoutingMutation::Default(action) => candidate.default_action = action,
+            }
+            self.save_routing(candidate).await
+        }
+        .await;
+        self.state.routing_ack = Some(RoutingAck {
+            request_id,
+            saved_id: if result.is_ok() { saved_id } else { None },
+            error: result.as_ref().err().map(|e| e.key()),
+        });
+        result
+    }
+
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
         let outcome = self
             .preferences_store
@@ -949,6 +1100,65 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::RoutingCatalog {
+                processes,
+                query,
+                offset,
+            } => {
+                self.state.routing_catalog = tokio::task::spawn_blocking(move || {
+                    crate::editor::catalog(processes, &query, offset)
+                })
+                .await
+                .map_err(|_| DesktopError("catalog"))?
+                .map_err(DesktopError)?;
+                Ok(())
+            }
+            Command::EditRouting {
+                expected_revision,
+                request_id,
+                create,
+                rule,
+                confirm_broad,
+            } => {
+                self.mutate_routing(
+                    expected_revision,
+                    request_id,
+                    RoutingMutation::Put {
+                        rule,
+                        confirm_broad,
+                        create,
+                    },
+                )
+                .await
+            }
+            Command::RoutingOrder {
+                expected_revision,
+                request_id,
+                ids,
+            } => {
+                self.mutate_routing(expected_revision, request_id, RoutingMutation::Order(ids))
+                    .await
+            }
+            Command::RoutingDelete {
+                expected_revision,
+                request_id,
+                id,
+            } => {
+                self.mutate_routing(expected_revision, request_id, RoutingMutation::Delete(id))
+                    .await
+            }
+            Command::RoutingDefault {
+                expected_revision,
+                request_id,
+                action,
+            } => {
+                self.mutate_routing(
+                    expected_revision,
+                    request_id,
+                    RoutingMutation::Default(action),
+                )
+                .await
+            }
             Command::Reload => self.reload().await,
             Command::SourcePage { offset } => {
                 self.state.sources_offset = offset;
@@ -1401,9 +1611,11 @@ mod settings_tests {
         let directory = Directory(path);
         let mut config = HostConfig::new(directory.0.clone(), directory.0.join("engines"))
             .with_ephemeral_key([77; 32]);
-        let (service, _lock) = open(&mut config).await.expect("тестовая БД");
+        let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            routing_repository,
+            routing_revision: Some(0),
             preferences_store,
             preferences,
             service,
@@ -2019,7 +2231,7 @@ async fn run(
         Err(error) => Err(error),
     };
     state.busy = false;
-    let (service, _lock) = match opened {
+    let (service, _lock, routing_repository) = match opened {
         Ok(opened) => opened,
         Err(error) => {
             state.command_error(false, error.key());
@@ -2064,6 +2276,8 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        routing_repository,
+        routing_revision: Some(0),
         preferences_store,
         preferences,
         service,
@@ -2075,6 +2289,27 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
+    match actor.routing_repository.routing_draft().await {
+        Ok(None) => {}
+        Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
+            .ok()
+            .and_then(|s| crate::editor::Draft::parse(s).ok())
+        {
+            Some(draft) => {
+                actor.state.routing = draft;
+                actor.routing_revision = Some(revision);
+            }
+            None => {
+                actor.routing_revision = None;
+                actor.state.error = Some("routing_storage");
+            }
+        },
+        Err(_) => {
+            actor.routing_revision = None;
+            actor.state.error = Some("routing_storage");
+        }
+    }
+    actor.state.routing_revision = actor.routing_revision;
     if let Err(error) = actor.reload().await {
         actor.state.command_error(true, error.key());
     }
@@ -2285,7 +2520,13 @@ async fn run(
             }
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
-                if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
+                if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Some(request_id) = envelope.command.routing_request_id() {
+                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                        actor.emit();
+                    }
+                    continue;
+                }
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
@@ -2503,5 +2744,174 @@ async fn run(
     }
     if let Some(task) = signals {
         task.abort();
+    }
+}
+
+#[cfg(test)]
+mod routing_regressions {
+    use super::*;
+    use std::os::unix::fs::DirBuilderExt;
+
+    async fn fixture() -> (Actor, File, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "yonik-routing-p2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("часы")
+                .as_nanos()
+        ));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("fixture");
+        let mut config =
+            HostConfig::new(path.clone(), path.join("engines")).with_ephemeral_key([71; 32]);
+        let (service, lock, routing_repository) = open(&mut config).await.expect("БД");
+        routing_repository
+            .routing_draft()
+            .await
+            .expect("инициализация");
+        let (preferences_store, preferences, _) = Store::open(&path);
+        (
+            Actor {
+                routing_repository,
+                routing_revision: Some(0),
+                preferences_store,
+                preferences,
+                service,
+                state: Snapshot::new(true),
+                callback: Arc::new(|_| {}),
+                selected: None,
+                pending: None,
+                automatic_port: true,
+                probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
+                network: None,
+            },
+            lock,
+            path,
+        )
+    }
+    async fn send(actor: &mut Actor, value: serde_json::Value) -> Result<()> {
+        actor
+            .command(serde_json::from_value(value).expect("контракт команды редактора"))
+            .await
+    }
+    fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
+        serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
+    }
+    #[tokio::test]
+    async fn stale_order_and_partial_order_cannot_delete_queued_add() {
+        let (mut actor, lock, path) = fixture().await;
+        send(&mut actor, put(1, 0, 1, true)).await.expect("первое");
+        send(&mut actor, put(2, 1, 2, true))
+            .await
+            .expect("queued add");
+        assert_eq!(send(&mut actor, serde_json::json!({"command":"routing_order","expected_revision":1,"request_id":3,"ids":[1]})).await.expect_err("stale").key(), "routing_stale");
+        assert_eq!(send(&mut actor, serde_json::json!({"command":"routing_order","expected_revision":2,"request_id":4,"ids":[1]})).await.expect_err("неполная перестановка").key(), "id");
+        assert_eq!(
+            actor
+                .state
+                .routing
+                .rules
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        send(&mut actor, serde_json::json!({"command":"routing_order","expected_revision":2,"request_id":5,"ids":[2,1]})).await.expect("перестановка");
+        send(&mut actor, serde_json::json!({"command":"routing_delete","expected_revision":3,"request_id":6,"id":1})).await.expect("явное удаление");
+        assert_eq!(
+            actor
+                .state
+                .routing
+                .rules
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        let saved = actor
+            .routing_repository
+            .routing_draft()
+            .await
+            .expect("БД")
+            .expect("запись");
+        assert_eq!(saved.0, 4);
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка");
+    }
+    #[tokio::test]
+    async fn repository_conflict_returns_matching_error_ack_without_accepting_form() {
+        let (mut actor, lock, path) = fixture().await;
+        actor
+            .routing_repository
+            .save_routing_draft(0, actor.state.routing.json().into_bytes())
+            .await
+            .expect("внешняя запись");
+        assert_eq!(
+            send(&mut actor, put(1, 0, 9, true))
+                .await
+                .expect_err("CAS conflict")
+                .key(),
+            "routing_stale"
+        );
+        assert!(actor.state.routing.rules.is_empty());
+        let snapshot = serde_json::to_value(&actor.state).expect("ACK");
+        assert_eq!(snapshot["routing_ack"]["request_id"], 9);
+        assert_eq!(snapshot["routing_ack"]["error"], "routing_stale");
+        assert!(snapshot["routing_ack"]["saved_id"].is_null());
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка");
+    }
+    #[tokio::test]
+    async fn every_mutation_rejects_stale_snapshot_and_create_is_explicit() {
+        let (mut actor, lock, path) = fixture().await;
+        send(&mut actor, put(1, 0, 1, true))
+            .await
+            .expect("добавление");
+        for command in [
+            put(2, 0, 2, true),
+            put(1, 0, 3, false),
+            serde_json::json!({"command":"routing_default","expected_revision":0,"request_id":4,"action":"direct"}),
+            serde_json::json!({"command":"routing_delete","expected_revision":0,"request_id":5,"id":1}),
+        ] {
+            assert_eq!(
+                send(&mut actor, command)
+                    .await
+                    .expect_err("старая ревизия")
+                    .key(),
+                "routing_stale"
+            );
+        }
+        assert_eq!(
+            send(&mut actor, put(1, 1, 6, true))
+                .await
+                .expect_err("ID уже есть")
+                .key(),
+            "id"
+        );
+        assert_eq!(
+            send(&mut actor, put(2, 1, 7, false))
+                .await
+                .expect_err("нет ID для update")
+                .key(),
+            "id"
+        );
+        assert_eq!(actor.state.routing.rules.len(), 1);
+        assert_eq!(actor.routing_revision, Some(1));
+        let snapshot = serde_json::to_value(&actor.state).expect("DTO");
+        assert_eq!(snapshot["routing_revision"], 1);
+        assert_eq!(snapshot["routing_ack"]["request_id"], 7);
+        assert_eq!(snapshot["routing_ack"]["error"], "id");
+        send(&mut actor, put(1, 1, 8, false)).await.expect("update");
+        let snapshot = serde_json::to_value(&actor.state).expect("ACK");
+        assert_eq!(snapshot["routing_ack"]["saved_id"], 1);
+        assert!(snapshot["routing_ack"]["error"].is_null());
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка");
     }
 }

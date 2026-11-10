@@ -9,3 +9,5 @@ pub use backend::{DesktopError, DesktopHost, HostConfig};
 
 #[cfg(target_os = "linux")]
 mod preferences;
+
+pub mod editor;
