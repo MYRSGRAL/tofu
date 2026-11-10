@@ -1,5 +1,7 @@
 //! Staged-обновление подписки без I/O и изменения активной сессии.
 
+pub mod scheduler;
+
 use std::{fmt, num::NonZeroU64};
 use yonik_import::{FatalError, ImportReport, import_bytes};
 
