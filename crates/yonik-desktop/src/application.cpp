@@ -125,7 +125,10 @@ protected:
             if (QSystemTrayIcon::isSystemTrayAvailable()) {
                 window_.hide();
             } else {
-                bridge_.shutdown();
+                // Без трея окно остаётся единственным доступным управлением сессией.
+                window_.show();
+                window_.raise();
+                window_.requestActivate();
             }
             return true;
         }
@@ -233,7 +236,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     auto* showAction = menu.addAction(QStringLiteral("Открыть yonik"));
     auto* connectAction = menu.addAction(QStringLiteral("Подключить"));
     auto* stopAction = menu.addAction(QStringLiteral("Отключить"));
-    auto* quitAction = menu.addAction(QStringLiteral("Выход"));
+    auto* quitAction = menu.addAction(QStringLiteral("Выйти и отключиться"));
     auto* statusAction = new QAction(QStringLiteral("Отключено"), &menu);
     menu.insertAction(showAction, statusAction);
     statusAction->setEnabled(false);
@@ -257,7 +260,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
         showAction->setText(english ? QStringLiteral("Open yonik") : QStringLiteral("Открыть yonik"));
         connectAction->setText(english ? QStringLiteral("Connect") : QStringLiteral("Подключить"));
         stopAction->setText(english ? QStringLiteral("Disconnect") : QStringLiteral("Отключить"));
-        quitAction->setText(english ? QStringLiteral("Quit") : QStringLiteral("Выход"));
+        quitAction->setText(english ? QStringLiteral("Quit and Disconnect") : QStringLiteral("Выйти и отключиться"));
     };
     QObject::connect(&menu, &QMenu::aboutToShow, window, updateTrayLabels);
     updateTrayLabels();
@@ -338,7 +341,9 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
         stepDispatchPending = true;
         ++stepIndex;
         const auto perform = [&, bridge, window, step, ui] {
-            if (ui) {
+            if (ui && step.value(QStringLiteral("ui")).toObject().value(QStringLiteral("action")).toString() == QStringLiteral("quit")) {
+                quitAction->trigger();
+            } else if (ui) {
                 if (!smoke::perform(qobject_cast<QQuickWindow*>(window), step.value(QStringLiteral("ui")).toObject())) {
                     qWarning("yonik smoke: UI action failed at step %lld", static_cast<long long>(stepIndex));
                     smokeFailed = true;
@@ -383,6 +388,8 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             metadata.insert(QStringLiteral("profile_count"), profiles);
             metadata.insert(QStringLiteral("pending"), pending);
             metadata.insert(QStringLiteral("step"), stepIndex);
+            metadata.insert(QStringLiteral("window_visible"), window->isVisible());
+            metadata.insert(QStringLiteral("tray_available"), QSystemTrayIcon::isSystemTrayAvailable());
             const auto tcpResult = snapshot.value(QStringLiteral("tcp_result")).toObject();
             const auto tcpStatus = tcpResult.value(QStringLiteral("status"));
             const auto tcpSamples = tcpResult.value(QStringLiteral("samples_ms")).toArray().size();

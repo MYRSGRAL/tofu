@@ -18,6 +18,20 @@ import desktop_smoke as smoke  # noqa: E402
 
 
 class DesktopNetworkTests(unittest.TestCase):
+    def test_trace_accepts_only_boolean_lifecycle_metadata(self) -> None:
+        smoke.validate_trace_metadata(
+            [{"closed": False, "window_visible": True, "tray_available": False}]
+        )
+        for key in ("window_visible", "tray_available"):
+            for value in ("secret", 1, None, {}):
+                with (
+                    self.subTest(key=key, value=value),
+                    self.assertRaises(RuntimeError),
+                ):
+                    smoke.validate_trace_metadata([{key: value}])
+        with self.assertRaises(RuntimeError):
+            smoke.validate_trace_metadata([{"credentials": "secret"}])
+
     def test_refresh_rejects_completed_handler_without_transport_outcome(self) -> None:
         for terminal in (None, "unknown"):
             with self.subTest(terminal=terminal):

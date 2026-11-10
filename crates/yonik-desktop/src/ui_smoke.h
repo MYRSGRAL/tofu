@@ -83,6 +83,10 @@ inline void reveal(QQuickItem* item)
 inline bool perform(QQuickWindow* window, const QJsonObject& action)
 {
     const auto kind = action.value(QStringLiteral("action")).toString();
+    if (kind == QStringLiteral("close")) {
+        window->close();
+        return true;
+    }
     if (kind == QStringLiteral("resize")) {
         const auto width = action.value(QStringLiteral("width")).toInt();
         const auto height = action.value(QStringLiteral("height")).toInt();

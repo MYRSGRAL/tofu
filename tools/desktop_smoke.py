@@ -25,6 +25,37 @@ from engine_smoke import links, run_sandbox
 LOG = logging.getLogger("desktop-smoke")
 
 
+def validate_trace_metadata(events: list[dict[str, Any]]) -> None:
+    """Отклоняет поля вне безопасной схемы smoke trace."""
+    allowed = {
+        "status",
+        "ready",
+        "busy",
+        "error",
+        "revision",
+        "selected_profile",
+        "closed",
+        "source_count",
+        "profile_count",
+        "pending",
+        "tcp_busy",
+        "tcp_status",
+        "tcp_samples_count",
+        "tcp_samples_requested",
+        "step",
+        "can_stop",
+        "probe_present",
+        "window_visible",
+        "tray_available",
+    }
+    if any(set(event) - allowed for event in events):
+        raise RuntimeError("Trace содержит поля вне разрешённых metadata")
+    for event in events:
+        for key in ("window_visible", "tray_available"):
+            if key in event and type(event[key]) is not bool:
+                raise RuntimeError("Lifecycle metadata должны быть булевыми")
+
+
 class Fixture(BaseHTTPRequestHandler):
     body: bytes = b""
     refresh_gate: ProbeGate | None = None
@@ -554,27 +585,7 @@ def run_case(
         text = trace.read_text()
         if "invented-secret" in text or "subscription" in text or "password" in text:
             raise RuntimeError("Чувствительные данные попали в trace")
-        allowed = {
-            "status",
-            "ready",
-            "busy",
-            "error",
-            "revision",
-            "selected_profile",
-            "closed",
-            "source_count",
-            "profile_count",
-            "pending",
-            "tcp_busy",
-            "tcp_status",
-            "tcp_samples_count",
-            "tcp_samples_requested",
-            "step",
-            "can_stop",
-            "probe_present",
-        }
-        if any(set(event) - allowed for event in events):
-            raise RuntimeError("Trace содержит поля вне разрешённых metadata")
+        validate_trace_metadata(events)
         if probe_url is not None and (
             probe_url in text or UUID in text or "https://" in text
         ):
