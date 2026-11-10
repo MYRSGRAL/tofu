@@ -87,6 +87,9 @@ pub fn compile_native_dns(
         .host()
         .parse::<std::net::IpAddr>()
         .is_err()
+        || dns.ipv4 == dns.ipv6
+        || !dns.fake_exclusions.is_empty()
+        || dns.require_mapping_lease
         || mode != PolicyMode::Names
         || policy.default_action != yonik_domain::Action::Proxy
         || !policy.user_rules.is_empty()
@@ -100,6 +103,8 @@ pub fn compile_native_dns(
             && [port, probe_port, dns.listen_port]
                 .iter()
                 .any(|port| port.get() == dns.upstream.port()))
+        || matches!(dns.upstream, std::net::SocketAddr::V6(address)
+            if address.scope_id() != 0 || address.flowinfo() != 0 || address.ip().to_ipv4_mapped().is_some())
         || dns.upstream.port() == 0
         || dns.upstream.ip().is_unspecified()
         || dns.upstream.ip().is_multicast()
@@ -109,10 +114,16 @@ pub fn compile_native_dns(
         ));
     }
     let mut config = compile_policy(server, engine, port, probe_port, policy, mode)?;
+    let strategy = if dns.ipv6 { "ipv6_only" } else { "ipv4_only" };
+    let fake_pool = if dns.ipv6 {
+        "fc00::/18"
+    } else {
+        "198.18.0.0/15"
+    };
     let fake = dns.mode == NativeDnsMode::FakeIp;
     match engine {
         Engine::Xray => {
-            config.value["dns"] = json!({"servers": if fake {json!(["fakedns"])} else {json!([{ "address": dns.upstream.ip().to_string(), "port": dns.upstream.port()}])}, "tag":"dns-upstream", "queryStrategy":"UseIPv4", "disableFallback":true, "disableCache":true});
+            config.value["dns"] = json!({"servers": if fake {json!(["fakedns"])} else {json!([{ "address": dns.upstream.ip().to_string(), "port": dns.upstream.port()}])}, "tag":"dns-upstream", "queryStrategy":if dns.ipv6 {"UseIPv6"} else {"UseIPv4"}, "disableFallback":true, "disableCache":true});
             config.value["routing"]["rules"]
                 .as_array_mut()
                 .ok_or(PolicyCompileError::InvalidPolicy)?
@@ -121,7 +132,16 @@ pub fn compile_native_dns(
                     json!({"type":"field","inboundTag":["dns-upstream"],"outboundTag":"direct"}),
                 );
             if fake {
-                config.value["fakedns"] = json!([{ "ipPool":"198.18.0.0/15", "poolSize":65535}]);
+                config.value["fakedns"] = json!([{ "ipPool":fake_pool, "poolSize":65535}]);
+                // Успешный sniff заменяет fake IP именем; оставшийся literal
+                // не имеет mapping и не должен уходить в публичный proxy.
+                config.value["routing"]["rules"]
+                    .as_array_mut()
+                    .ok_or(PolicyCompileError::InvalidPolicy)?
+                    .insert(
+                        0,
+                        json!({"type":"field","ip":[fake_pool],"outboundTag":"block"}),
+                    );
             }
             config.value["inbounds"].as_array_mut().ok_or(PolicyCompileError::InvalidPolicy)?.push(json!({"tag":"dns-in","listen":"127.0.0.1","port":dns.listen_port.get(),"protocol":"dokodemo-door","settings":{"address":"1.1.1.1","port":53,"network":"udp"}}));
             if fake {
@@ -142,14 +162,19 @@ pub fn compile_native_dns(
         }
         Engine::SingBox => {
             config.value["route"]["default_domain_resolver"] =
-                json!({"server":"real", "strategy":"ipv4_only"});
+                json!({"server":"real", "strategy":strategy});
             let mut servers = vec![
                 json!({"type":"udp","tag":"real","server":dns.upstream.ip().to_string(),"server_port":dns.upstream.port()}),
             ];
             if fake {
-                servers.push(json!({"type":"fakeip","tag":"fake","inet4_range":"198.18.0.0/15"}));
+                let range = if dns.ipv6 {
+                    "inet6_range"
+                } else {
+                    "inet4_range"
+                };
+                servers.push(json!({"type":"fakeip","tag":"fake",range:fake_pool}));
             }
-            config.value["dns"] = json!({"servers":servers,"final":"real", "rules":if fake {json!([{ "query_type":["A"],"action":"route","server":"fake"}])} else {json!([])},"disable_cache":true,"strategy":"ipv4_only"});
+            config.value["dns"] = json!({"servers":servers,"final":"real", "rules":if fake {json!([{ "query_type":[if dns.ipv6 {"AAAA"} else {"A"}],"action":"route","server":"fake"}])} else {json!([])},"disable_cache":true,"strategy":strategy});
             config.value["inbounds"].as_array_mut().ok_or(PolicyCompileError::InvalidPolicy)?.push(json!({"type":"direct","tag":"dns-in","listen":"127.0.0.1","listen_port":dns.listen_port.get(),"network":"udp"}));
             config.value["route"]["rules"]
                 .as_array_mut()
