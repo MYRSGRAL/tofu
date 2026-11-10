@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=cloud.highpriority.yonik.Network1
+Exec=/usr/lib/yonik/yonik-helper
+User=root
+SystemdService=yonik-helper.service

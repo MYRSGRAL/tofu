@@ -100,6 +100,7 @@ enum Action<'a> {
     Delete(&'a Table, u64),
     ListTable(&'a Table),
     InstallBlock(&'a Table, &'a PublicBlockPolicy),
+    CheckBlock(&'a Table, &'a PublicBlockPolicy),
     ReplaceBlock(&'a Table, u64, &'a Table, &'a PublicBlockPolicy),
 }
 fn request(action: Action<'_>) -> Value {
@@ -114,7 +115,7 @@ fn request(action: Action<'_>) -> Value {
         Action::ListTable(table) => {
             json!({"list":{"table":{"family":table.family,"name":table.name}}})
         }
-        Action::InstallBlock(table, policy) => {
+        Action::InstallBlock(table, policy) | Action::CheckBlock(table, policy) => {
             let mut commands = vec![request(Action::Create(table))["nftables"][0].clone()];
             commands.extend(policy.commands(&table.name));
             return json!({"nftables": commands});
@@ -261,6 +262,7 @@ impl NftExecutor {
         Ok(())
     }
     async fn run(&mut self, action: Action<'_>) -> Result<Vec<u8>, NftError> {
+        let check_only = matches!(&action, Action::CheckBlock(..));
         let bytes = serde_json::to_vec(&request(action)).map_err(|_| NftError::Invalid)?;
         if bytes.len() > MAX_OUTPUT {
             return Err(NftError::Invalid);
@@ -274,8 +276,13 @@ impl NftExecutor {
             .map_err(|_| NftError::Timeout)?
             .map_err(|_| NftError::Io)?;
         self.check_namespace()?;
-        let child = Command::new(format!("/proc/self/fd/{}", self.executable.as_raw_fd()))
-            .args(["-j", "-n", "-f", "-"])
+        let mut command = Command::new(format!("/proc/self/fd/{}", self.executable.as_raw_fd()));
+        command.args(["-j", "-n"]);
+        if check_only {
+            command.arg("-c");
+        }
+        let child = command
+            .args(["-f", "-"])
             .env_clear()
             .current_dir("/")
             .stdin(Stdio::piped())
@@ -290,6 +297,34 @@ impl NftExecutor {
     }
     async fn observe(&mut self, table: &Table) -> Result<Observation, NftError> {
         observe_json(&self.run(Action::List).await?, table)
+    }
+    /// Только синтаксис/возможности kernel: -c не устанавливает таблицу.
+    pub(crate) async fn check_public_policy(
+        &mut self,
+        policy: &PublicBlockPolicy,
+    ) -> Result<(), NftError> {
+        let mut bytes = [0; 8];
+        getrandom::getrandom(&mut bytes).map_err(|_| NftError::Io)?;
+        let id = u64::from_le_bytes(bytes).max(1);
+        let table = block::block_table(self.owner, id, id, policy);
+        self.run(Action::CheckBlock(&table, policy))
+            .await
+            .map(|_| ())
+    }
+    #[cfg(test)]
+    pub(crate) fn isolated_fixture(owner: Ownership) -> Result<Self, NftError> {
+        let netns = File::open("/proc/thread-self/ns/net").map_err(|_| NftError::Namespace)?;
+        let actual = namespace(&netns)?;
+        let host = std::env::var("YONIK_NFT_TEST_HOST_NETNS").map_err(|_| NftError::Namespace)?;
+        if host == format!("{}:{}", actual.0, actual.1) || actual != owner.namespace() {
+            return Err(NftError::Namespace);
+        }
+        Ok(Self {
+            executable: File::open("/usr/bin/nft").map_err(|_| NftError::Io)?,
+            netns,
+            owner,
+            gate: Arc::new(Semaphore::new(1)),
+        })
     }
     /// Durable intent предшествует create. Повтор сначала сверяет ОС.
     pub async fn ensure_table(
@@ -446,4 +481,8 @@ mod block;
 
 #[path = "nft_policy.rs"]
 mod policy;
+#[cfg(test)]
+pub(crate) use block::tests::{
+    fixture as network_fixture, peer as network_peer, probe as network_probe,
+};
 pub use policy::PublicPolicyRecovery;

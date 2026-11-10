@@ -181,7 +181,7 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
     pub async fn system(cancel: Cancellation) -> Result<Self, PreparedError> {
         Self::with_authorizer(PeerAuthorizer::system(cancel).await?)
     }
-    fn with_authorizer(authorizer: PeerAuthorizer) -> Result<Self, PreparedError> {
+    pub(super) fn with_authorizer(authorizer: PeerAuthorizer) -> Result<Self, PreparedError> {
         Self::with_budget(authorizer, config_budget().clone())
     }
     fn with_budget(
@@ -221,6 +221,9 @@ impl<A: PreparedArtifact> PreparedRequests<A> {
             #[cfg(test)]
             clock_offset_ms,
         })
+    }
+    pub(super) fn authorizer(&self) -> &PeerAuthorizer {
+        &self.authorizer
     }
     pub fn connection(&self) -> &Connection {
         &self.authorizer.connection

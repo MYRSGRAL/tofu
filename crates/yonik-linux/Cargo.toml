@@ -29,5 +29,9 @@ rustls = { version = "0.23.46", default-features = false, features = ["std", "ri
 name = "yonik-local"
 path = "src/main.rs"
 
+[[bin]]
+name = "yonik-helper"
+path = "src/helper_main.rs"
+
 [lints]
 workspace = true

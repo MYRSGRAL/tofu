@@ -1,0 +1,46 @@
+[Unit]
+Description=Yonik — системный сетевой помощник
+Documentation=https://www.freedesktop.org/software/systemd/man/systemd.kill.html
+After=dbus.service
+Requires=dbus.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=dbus
+BusName=cloud.highpriority.yonik.Network1
+ExecStartPre=/usr/lib/yonik/yonik-helper --check-worker-fence
+ExecStart=/usr/lib/yonik/yonik-helper
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=yonik
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=1s
+TimeoutStartSec=15s
+TimeoutStopSec=5s
+KillMode=control-group
+KillSignal=SIGTERM
+SendSIGKILL=yes
+FinalKillSignal=SIGKILL
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+LimitCORE=0

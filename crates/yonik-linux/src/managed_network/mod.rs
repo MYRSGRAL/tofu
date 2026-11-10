@@ -306,6 +306,43 @@ pub struct Journal {
 }
 
 impl Journal {
+    /// Фиксированный helper path: восстановление читает владельца из защищённого
+    /// журнала, а не принимает UID/session из клиентского сообщения.
+    pub fn open_existing(path: &Path) -> Result<Option<Self>, JournalError> {
+        let directory = storage::directory(path)?;
+        let Some(mut document) = storage::read(&directory)? else {
+            return Ok(None);
+        };
+        let migrated = document.version == 1;
+        if migrated {
+            document.version = 2;
+        }
+        document.validate()?;
+        let mut journal = Self {
+            directory,
+            document,
+            reconciled: BTreeSet::new(),
+            poisoned: false,
+        };
+        if migrated {
+            journal.persist(journal.document.clone())?;
+        }
+        Ok(Some(journal))
+    }
+    /// Передача пустого host-journal другому авторизованному владельцу не
+    /// переносит ни ресурсы, ни старые prepared handles/поколения.
+    pub fn reassign_empty_owner(&mut self, next: Ownership) -> Result<(), JournalError> {
+        self.check(self.document.ownership)?;
+        next.validate()?;
+        if !self.document.records.is_empty() || self.document.public_policy.is_some() {
+            return Err(JournalError::Conflict);
+        }
+        let mut document = self.document.clone();
+        document.ownership = next;
+        self.persist(document)?;
+        self.reconciled.clear();
+        Ok(())
+    }
     pub fn open(path: &Path, ownership: Ownership) -> Result<Self, JournalError> {
         ownership.validate()?;
         let directory = storage::directory(path)?;

@@ -106,7 +106,7 @@ fn normalization_preserves_opposite_protocol_and_extra_predicates() {
 fn fixture_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/public_block_fixture.py")
 }
-pub(in crate::managed_network::nft) fn fixture(arguments: &[&str]) -> Value {
+pub(crate) fn fixture(arguments: &[&str]) -> Value {
     let output = std::process::Command::new("/usr/bin/python3")
         .arg(fixture_path())
         .args(arguments)
@@ -119,12 +119,7 @@ pub(in crate::managed_network::nft) fn fixture(arguments: &[&str]) -> Value {
     );
     serde_json::from_slice(&output.stdout).unwrap()
 }
-pub(in crate::managed_network::nft) fn probe(
-    address: &str,
-    protocol: &str,
-    mark: Option<&str>,
-    port: &str,
-) -> bool {
+pub(crate) fn probe(address: &str, protocol: &str, mark: Option<&str>, port: &str) -> bool {
     let mut args = vec![
         "probe",
         "--address",
@@ -139,14 +134,14 @@ pub(in crate::managed_network::nft) fn probe(
     }
     fixture(&args)["reachable"].as_bool().unwrap()
 }
-pub(in crate::managed_network::nft) struct Peer(std::process::Child);
+pub(crate) struct Peer(std::process::Child);
 impl Drop for Peer {
     fn drop(&mut self) {
         let _kill = self.0.kill();
         let _wait = self.0.wait();
     }
 }
-pub(in crate::managed_network::nft) fn peer() -> Peer {
+pub(crate) fn peer() -> Peer {
     use std::io::BufRead;
     let mut peer = Peer(
         std::process::Command::new("/usr/bin/ip")
