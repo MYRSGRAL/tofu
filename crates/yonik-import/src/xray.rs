@@ -87,7 +87,7 @@ pub(crate) fn extract(
             };
             match protocol.as_str() {
                 Some("freedom" | "blackhole" | "dns") => continue,
-                Some("vless" | "shadowsocks") => {}
+                Some("vless" | "shadowsocks" | "vmess" | "trojan") => {}
                 _ => {
                     issue(
                         issues,
@@ -97,7 +97,7 @@ pub(crate) fn extract(
                     continue;
                 }
             }
-            let normalized = if protocol.as_str() == Some("shadowsocks") {
+            let normalized = if matches!(protocol.as_str(), Some("shadowsocks" | "trojan")) {
                 normalize_shadowsocks(&node, &name, count, servers)
             } else {
                 normalize(&node, &name, count, servers)
@@ -130,6 +130,7 @@ fn normalize(
     index: usize,
     servers: &mut Vec<ParsedServer>,
 ) -> Result<(), RecordError> {
+    let vmess = node["protocol"] == "vmess";
     let settings = node
         .get("settings")
         .filter(|v| v.is_object())
@@ -139,6 +140,9 @@ fn normalize(
         .and_then(Value::as_array)
         .filter(|v| !v.is_empty())
         .ok_or_else(invalid)?;
+    if vmess && endpoints.len() != 1 {
+        return Err(invalid());
+    }
     let (parameters, mut unsupported) = stream_parameters(node)?;
     unsupported |= unknown(settings, &["vnext"]);
     let label = if name.is_empty() {
@@ -174,33 +178,46 @@ fn normalize(
             .and_then(Value::as_array)
             .filter(|v| !v.is_empty())
             .ok_or((IssueCode::InvalidCredentials, Field::Credentials))?;
+        if vmess && users.len() != 1 {
+            return Err(invalid());
+        }
         for user in users {
             if servers.len() + pending.len() >= MAX_RECORDS {
                 return Err((IssueCode::TooLarge, Field::Payload));
             }
             let id = text(user, "id", "")?;
-            let mut pairs = parameters.clone();
-            for key in ["encryption", "flow"] {
-                if user.get(key).is_some() {
-                    pairs.push((key, text(user, key, "")?.to_owned()));
-                }
-            }
-            let query = url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(pairs)
-                .finish();
-            let auth =
-                percent_encoding::utf8_percent_encode(id, percent_encoding::NON_ALPHANUMERIC);
-            let address = if host.contains(':') {
-                format!("[{host}]")
+            let mut server = if vmess {
+                normalize_vmess(host, port, user, &parameters, &label)?
             } else {
-                host.to_owned()
+                let mut pairs = parameters.clone();
+                for key in ["encryption", "flow"] {
+                    if user.get(key).is_some() {
+                        pairs.push((key, text(user, key, "")?.to_owned()));
+                    }
+                }
+                let query = url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(pairs)
+                    .finish();
+                let auth =
+                    percent_encoding::utf8_percent_encode(id, percent_encoding::NON_ALPHANUMERIC);
+                let address = if host.contains(':') {
+                    format!("[{host}]")
+                } else {
+                    host.to_owned()
+                };
+                let mut source =
+                    url::Url::parse(&format!("vless://{auth}@{address}:{port}?{query}"))
+                        .map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))?;
+                source.set_fragment(Some(&format!("{label} [{index}.{}]", pending.len() + 1)));
+                uri::parse(source.as_str())?
             };
-            let mut source = url::Url::parse(&format!("vless://{auth}@{address}:{port}?{query}"))
-                .map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))?;
-            source.set_fragment(Some(&format!("{label} [{index}.{}]", pending.len() + 1)));
-            let mut server = uri::parse(source.as_str())?;
+            let allowed: &[&str] = if vmess {
+                &["id", "security", "alterId", "email", "level"]
+            } else {
+                &["id", "encryption", "flow", "email", "level"]
+            };
             if unsupported
-                || unknown(user, &["id", "encryption", "flow", "email", "level"])
+                || unknown(user, allowed)
                 || user.get("level").is_some_and(|v| v.as_u64() != Some(0))
             {
                 server.review_flags.push(ReviewFlag::UnsupportedOption);
@@ -387,6 +404,7 @@ fn normalize_shadowsocks(
     index: usize,
     servers: &mut Vec<ParsedServer>,
 ) -> Result<(), RecordError> {
+    let trojan = node["protocol"] == "trojan";
     let settings = node
         .get("settings")
         .filter(|v| v.is_object())
@@ -396,6 +414,9 @@ fn normalize_shadowsocks(
         .and_then(Value::as_array)
         .filter(|v| !v.is_empty())
         .ok_or_else(invalid)?;
+    if trojan && endpoints.len() != 1 {
+        return Err(invalid());
+    }
     let (parameters, unsupported) = stream_parameters(node)?;
     let unsupported = unsupported || unknown(settings, &["servers"]);
     let label = if name.is_empty() {
@@ -430,7 +451,11 @@ fn normalize_shadowsocks(
             .and_then(|n| u16::try_from(n).ok())
             .filter(|p| *p != 0)
             .ok_or((IssueCode::InvalidPort, Field::Endpoint))?;
-        let method = text(endpoint, "method", "")?;
+        let method = if trojan {
+            "trojan"
+        } else {
+            text(endpoint, "method", "")?
+        };
         let password = text(endpoint, "password", "")?;
         if method.is_empty() || password.is_empty() {
             return Err((IssueCode::InvalidCredentials, Field::Credentials));
@@ -444,17 +469,22 @@ fn normalize_shadowsocks(
         } else {
             host.to_owned()
         };
-        let mut source = url::Url::parse(&format!(
-            "ss://{method}:{password}@{address}:{port}?{query}"
-        ))
-        .map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))?;
+        let uri = if trojan {
+            format!("trojan://{password}@{address}:{port}?{query}")
+        } else {
+            format!("ss://{method}:{password}@{address}:{port}?{query}")
+        };
+        let mut source =
+            url::Url::parse(&uri).map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))?;
         source.set_fragment(Some(&format!("{label} [{index}.{}]", pending.len() + 1)));
         let mut server = uri::parse(source.as_str())?;
+        let allowed: &[&str] = if trojan {
+            &["address", "port", "password", "email", "level"]
+        } else {
+            &["address", "port", "method", "password", "email", "level"]
+        };
         if unsupported
-            || unknown(
-                endpoint,
-                &["address", "port", "method", "password", "email", "level"],
-            )
+            || unknown(endpoint, allowed)
             || endpoint.get("level").is_some_and(|v| v.as_u64() != Some(0))
         {
             server.review_flags.push(ReviewFlag::UnsupportedOption);
@@ -463,4 +493,48 @@ fn normalize_shadowsocks(
     }
     servers.extend(pending);
     Ok(())
+}
+
+/// Envelope использует тот же путь проверки, что и импорт VMess URI.
+fn normalize_vmess(
+    host: &str,
+    port: u16,
+    user: &Value,
+    parameters: &Parameters,
+    label: &str,
+) -> Result<ParsedServer, RecordError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut envelope = serde_json::json!({
+        "v":"2", "ps":label, "add":host, "port":port,
+        "id":text(user, "id", "")?, "scy":text(user, "security", "auto")?,
+        "aid":0
+    });
+    if let Some(aid) = user.get("alterId") {
+        let aid = aid
+            .as_u64()
+            .and_then(|v| u16::try_from(v).ok())
+            .ok_or((IssueCode::InvalidCredentials, Field::Credentials))?;
+        envelope["aid"] = Value::from(aid);
+    }
+    let mut unsupported = false;
+    for (key, value) in parameters {
+        let mapped = match *key {
+            "type" => "net",
+            "security" => "tls",
+            "serviceName" => "path",
+            "host" | "path" | "sni" | "fp" | "alpn" => key,
+            // Не представимые в существующем VMess envelope поля остаются в native JSON.
+            _ => {
+                unsupported = true;
+                continue;
+            }
+        };
+        envelope[mapped] = Value::String(value.clone());
+    }
+    let source = format!("vmess://{}", STANDARD.encode(envelope.to_string()));
+    let mut server = uri::parse(&source)?;
+    if unsupported {
+        server.review_flags.push(ReviewFlag::UnsupportedOption);
+    }
+    Ok(server)
 }
