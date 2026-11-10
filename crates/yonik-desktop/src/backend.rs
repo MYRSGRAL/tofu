@@ -2095,7 +2095,7 @@ async fn run(
             std::future::pending::<()>().await;
         }
     };
-    tokio::pin!(provider);
+    let mut provider = Box::pin(provider);
     let mut subscription_policy = control.subscription_policy.subscribe();
     let mut subscription_visible = control.subscription_visible.subscribe();
     let origin = tokio::time::Instant::now();
@@ -2476,6 +2476,9 @@ async fn run(
     if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
         actor.state.command_error(true, "storage");
     }
+    // Закрываем provider и его D-Bus subscriptions до публикации closed:
+    // callback может удерживать run и не должен продлевать жизнь соединения.
+    drop(provider);
     actor.pending = None;
     if let Some(monitor) = network_monitor {
         monitor.shutdown().await;
