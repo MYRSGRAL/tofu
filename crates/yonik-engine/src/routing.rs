@@ -149,10 +149,40 @@ pub fn compile_policy(
     policy: &Policy,
     mode: PolicyMode,
 ) -> Result<CompiledConfig, PolicyCompileError> {
+    compile_policy_inner(server, engine, port, probe_port, policy, mode, false)
+}
+
+pub(crate) fn compile_tun_policy(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+) -> Result<CompiledConfig, PolicyCompileError> {
+    compile_policy_inner(
+        server,
+        engine,
+        port,
+        probe_port,
+        policy,
+        PolicyMode::IpOnly,
+        true,
+    )
+}
+
+fn compile_policy_inner(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+    mode: PolicyMode,
+    tun_sources: bool,
+) -> Result<CompiledConfig, PolicyCompileError> {
     if port == probe_port {
         return Err(PolicyCompileError::ProbePort);
     }
-    validate_policy(policy, mode)?;
+    validate_policy(policy, mode, tun_sources)?;
     crate::validate_listener(server, probe_port).map_err(PolicyCompileError::Server)?;
     let mut config = compile(server, engine, port).map_err(PolicyCompileError::Server)?;
     let auth = ProbeCredentials::random()?;
@@ -228,7 +258,11 @@ pub fn compile_policy(
                 .map(ToString::to_string)
                 .collect()
         });
-        rules.push(route_rule(engine, rule.action, domains, cidrs));
+        let mut native = route_rule(engine, rule.action, domains, cidrs);
+        if tun_sources {
+            crate::source_selectors::apply(engine, &mut native, &rule.conditions.executables);
+        }
+        rules.push(native);
     }
     rules.push(route_rule(engine, policy.default_action, None, None));
     let direct = match engine {
@@ -323,11 +357,18 @@ fn route_rule(
     }
 }
 
-fn validate_policy(policy: &Policy, mode: PolicyMode) -> Result<(), PolicyCompileError> {
+fn validate_policy(
+    policy: &Policy,
+    mode: PolicyMode,
+    tun_sources: bool,
+) -> Result<(), PolicyCompileError> {
     let mut selectors =
         policy.lan.len() + policy.private_networks.len() + policy.private_domains.len();
     if policy.user_rules.len() + policy.preset_rules.len() > 10000 {
         return Err(PolicyCompileError::InvalidPolicy);
+    }
+    if tun_sources {
+        crate::source_selectors::validate(policy)?;
     }
     for rules in [&policy.user_rules, &policy.preset_rules] {
         let mut ids = HashSet::with_capacity(rules.len());
@@ -339,7 +380,7 @@ fn validate_policy(policy: &Policy, mode: PolicyMode) -> Result<(), PolicyCompil
                 .saturating_add(rule.conditions.executables.len())
                 .saturating_add(rule.conditions.domains.len())
                 .saturating_add(rule.conditions.destinations.len());
-            if rule.enabled && !rule.conditions.executables.is_empty() {
+            if !tun_sources && rule.enabled && !rule.conditions.executables.is_empty() {
                 return Err(PolicyCompileError::Unsupported(
                     PolicyCapability::ProcessAttribution,
                 ));

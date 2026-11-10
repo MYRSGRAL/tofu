@@ -1,7 +1,5 @@
 //! Системный TUN inbound; сетью и проверкой применённого состояния владеет host.
-use crate::{
-    CompileError, CompiledConfig, Engine, PolicyCompileError, PolicyMode, compile, compile_policy,
-};
+use crate::{CompileError, CompiledConfig, Engine, PolicyCompileError, compile};
 use serde_json::json;
 use std::{fmt, net::IpAddr, num::NonZeroU16, str::FromStr};
 use yonik_domain::Policy;
@@ -112,7 +110,7 @@ pub fn compile_system_policy(
     tun: &SystemTun,
 ) -> Result<CompiledConfig, PolicyCompileError> {
     attach(
-        compile_policy(server, engine, port, probe_port, policy, PolicyMode::IpOnly)?,
+        crate::routing::compile_tun_policy(server, engine, port, probe_port, policy)?,
         tun,
     )
     .map_err(PolicyCompileError::Server)
