@@ -45,6 +45,27 @@ class TranslationTests(unittest.TestCase):
         with self.assertRaises(checker.CatalogError):
             checker.check_source("")
 
+    def test_other_declarations_are_checked(self) -> None:
+        for declaration in ("let", "var"):
+            with self.subTest(declaration=declaration):
+                source = SOURCE.replace("const", declaration)
+                self.assertEqual(checker.check_source(source), (1, 1))
+                with self.assertRaises(checker.CatalogError):
+                    checker.check_source(SOURCE + source.replace('"Готово"', '""'))
+
+    def test_wrapped_maps_are_rejected(self) -> None:
+        for opening, closing in (("(", ")"), ("((", "))")):
+            with self.subTest(opening=opening), self.assertRaises(checker.CatalogError):
+                checker.check_source(
+                    SOURCE + f'const wrapped = {opening}{{ready: ["Да"]}}{closing};'
+                )
+
+    def test_single_quoted_keys_are_rejected(self) -> None:
+        with self.assertRaises(checker.CatalogError):
+            checker.check_source(
+                SOURCE + 'const m = {ready: ["Да", "Yes"], \'ready\': ["Нет", "No"]};'
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

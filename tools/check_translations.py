@@ -51,19 +51,28 @@ def validate_pair(key: str, ru: str, en: str) -> None:
 
 
 def check_source(source: str) -> tuple[int, int]:
-    """Разбирает все tr-вызовы и const-карты; неизвестные формы отклоняет."""
+    """Разбирает tr-вызовы и карты объявлений; неизвестные формы отклоняет."""
     ts = tokens(source)
     inline = 0
     keys = 0
     maps = 0
     index = 0
     while index < len(ts):
-        if ts[index] == "const" and ts[index + 2 : index + 4] == ["=", "{"]:
+        declaration = ts[index] in {"const", "let", "var"}
+        initializer = index + 3
+        if declaration and ts[index + 2 : index + 3] == ["="]:
+            while ts[initializer : initializer + 1] == ["("]:
+                initializer += 1
+            if initializer > index + 3 and ts[initializer : initializer + 1] == ["{"]:
+                raise CatalogError("Карта в скобках: используйте прямой объект")
+        if declaration and ts[index + 2 : index + 4] == ["=", "{"]:
             name = ts[index + 1]
             maps += 1
             index += 4
             seen: set[str] = set()
             while index < len(ts) and ts[index] != "}":
+                if ts[index].startswith("'"):
+                    raise CatalogError(f"{name}: ключ в неподдерживаемых кавычках")
                 key = literal(ts[index]) if ts[index].startswith('"') else ts[index]
                 if key in seen:
                     raise CatalogError(f"{name}: повторный ключ {key}")

@@ -92,6 +92,8 @@ jobs:
           "$RUNNER_TEMP/yonik-lint/bin/ruff" format --check tools
           "$RUNNER_TEMP/yonik-lint/bin/ruff" check tools
           python3 -m unittest discover -s tools/tests -v
+          python3 -m unittest discover -s tests -p test_check_translations.py -v
+          python3 tools/check_translations.py
   native_adapter:
     runs-on: ubuntu-latest
     timeout-minutes: 25
