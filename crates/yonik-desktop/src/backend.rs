@@ -5,7 +5,7 @@ mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
 use crate::preferences::{Preferences, SaveOutcome, Store};
-use batch_diagnostics::{BatchRunning, BatchState};
+use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -2394,7 +2394,7 @@ async fn run(
                 // получить polling сети во время ожидания scheduler acknowledgement.
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
-                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
@@ -2411,7 +2411,7 @@ async fn run(
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
-                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
@@ -2476,21 +2476,23 @@ async fn run(
             changed = tcp_priority.changed() => {
                 let _ = changed;
                 tcp_priority.borrow_and_update();
-                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); actor.state.batch.busy = false; actor.state.batch.cancelled = true; actor.emit(); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
             }
             _ = network_changed(&mut network) => {
                 let current = network.as_ref().map(NetworkWatch::current);
                 actor.network = network.clone();
                 apply_network_event(&mut actor.state, current, &control);
-                if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); }
                 actor.state.batch.invalidate();
                 if let Some(tcp) = tcp_running.as_ref() {
                     if !network_matches(current, tcp.network_stamp) { tcp.cancel.send_replace(true); }
                 }
                 actor.emit();
             }
-            result = async { batch_running.as_mut().expect("guard").receiver.recv().await }, if batch_running.is_some() => {
+            result = async { batch_running.as_mut().expect("guard").next().await }, if batch_running.is_some() => {
+                match result {
+                    BatchPoll::Event(result) => {
                 if let Some(result) = result {
                     let valid = batch_running.as_ref().is_some_and(|batch|
                         batch.generation == control.generation.load(Ordering::SeqCst)
@@ -2503,23 +2505,41 @@ async fn run(
                             !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
                             || actor.state.batch.source_id != actor.state.source_id
                             || actor.state.batch.revision != actor.state.revision);
-                        if let Some(batch) = batch_running.take() { batch.cancel.send_replace(true); batch.task.abort(); }
+                        if let Some(batch) = batch_running.as_mut() { batch.stop(); }
                         if stale { actor.state.batch.invalidate(); }
-                        else { actor.state.batch.busy = false; actor.state.batch.cancelled = true; }
+                        else { actor.state.batch.cancelled = true; }
                         actor.emit(); continue;
                     }
-                    let batch = batch_running.as_mut().expect("guard");
-                    if let Some(mut row) = batch.rows.remove(&result.id) {
-                        match result.result { Ok(result) => row.finish(result), Err(_) => row.status = "tcp_failed" }
-                        actor.state.batch.accept(row);
-                        if actor.state.batch.completed % 32 == 0 { actor.emit(); }
+                    match result {
+                        BatchEvent::Prepared { total } => { actor.state.batch.total = total; actor.emit(); }
+                        BatchEvent::Result(row) => {
+                            actor.state.batch.accept(row);
+                            if actor.state.batch.completed % 32 == 0 { actor.emit(); }
+                        }
                     }
-                } else {
-                    if let Some(batch) = batch_running.take() {
-                        if !matches!(batch.task.await, Ok(Ok(()))) { actor.state.batch.cancelled = true; }
+                } else if let Some(batch) = batch_running.as_mut() { batch.output_closed = true; }
                     }
-                    actor.state.batch.busy = false;
-                    actor.emit();
+                    BatchPoll::Finished(result) => {
+                // Producer завершён, включая ACK CPU prepare. Дочитываем bounded очередь.
+                let mut batch = batch_running.take().expect("guard");
+                let valid = !*batch.cancel.borrow() && !quitting
+                    && batch.generation == control.generation.load(Ordering::SeqCst)
+                    && batch.tcp_generation == *control.tcp_priority.borrow()
+                    && network_matches(network.as_ref().map(NetworkWatch::current),batch.stamp)
+                    && actor.state.batch.source_id == actor.state.source_id
+                    && actor.state.batch.revision == actor.state.revision;
+                if valid {
+                    while let Ok(event) = batch.receiver.try_recv() {
+                        match event {
+                            BatchEvent::Prepared { total } => actor.state.batch.total = total,
+                            BatchEvent::Result(row) => actor.state.batch.accept(row),
+                        }
+                    }
+                    match result { Ok(Err(error)) => actor.state.command_error(false,error.key()), Err(_) => actor.state.command_error(false,"tcp_failed"), _ => {} }
+                }
+                actor.state.batch.busy = false;
+                actor.emit();
+                    }
                 }
             }
             result = async { (&mut tcp_running.as_mut().expect("guard").task).await }, if tcp_running.is_some() => {
@@ -2607,6 +2627,10 @@ async fn run(
                     }
                     if cancelled_review { actor.state.pending = None; }
                 }
+                if matches!(&envelope.command, Command::RenameSource { .. } | Command::DeleteSource { .. } | Command::SetSourceHwid { .. } | Command::SelectSource { .. } | Command::Refresh | Command::ApproveRefresh | Command::ImportSource { .. } | Command::AddSource { .. }) {
+                    if let Some(batch) = batch_running.as_mut() { batch.stop(); }
+                    actor.state.batch.invalidate();
+                }
                 actor.state.begin_command(&envelope.command);
                 let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
                 let outcome = match envelope.command {
@@ -2641,7 +2665,7 @@ async fn run(
                     Command::CheckBatch => {
                         if batch_running.is_some() || actor.state.busy { Err(DesktopError("busy")) }
                         else if envelope.generation != control.generation.load(Ordering::SeqCst) || envelope.tcp_generation != *control.tcp_priority.borrow() { Err(DesktopError("cancelled")) }
-                        else { match actor.start_batch(envelope.generation, envelope.tcp_generation, &control).await {
+                        else { match actor.start_batch(envelope.generation, envelope.tcp_generation) {
                             Ok(batch) => { batch_running = Some(batch); Ok(()) }, Err(error) => Err(error)
                         } }
                     }
@@ -2752,25 +2776,24 @@ async fn run(
             }
         }
         if batch_running.as_ref().is_some_and(|batch| {
-            batch.generation != control.generation.load(Ordering::SeqCst)
-                || batch.tcp_generation != *control.tcp_priority.borrow()
-                || !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
-                || actor.state.batch.source_id != actor.state.source_id
-                || actor.state.batch.revision != actor.state.revision
+            !batch.output_closed
+                && (batch.generation != control.generation.load(Ordering::SeqCst)
+                    || batch.tcp_generation != *control.tcp_priority.borrow()
+                    || !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                    || actor.state.batch.source_id != actor.state.source_id
+                    || actor.state.batch.revision != actor.state.revision)
         }) {
             let stale = batch_running.as_ref().is_some_and(|batch| {
                 !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
                     || actor.state.batch.source_id != actor.state.source_id
                     || actor.state.batch.revision != actor.state.revision
             });
-            if let Some(batch) = batch_running.take() {
-                batch.cancel.send_replace(true);
-                batch.task.abort();
+            if let Some(batch) = batch_running.as_mut() {
+                batch.stop();
             }
             if stale {
                 actor.state.batch.invalidate();
             } else {
-                actor.state.batch.busy = false;
                 actor.state.batch.cancelled = true;
             }
             actor.emit();

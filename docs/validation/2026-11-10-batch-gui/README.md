@@ -40,6 +40,8 @@ fetch-контракт не изменён. Смена источника/revisi
 
 Продолжение приёмки и bulk API: [acceptance.md](acceptance.md).
 
+Итог интеграции и сквозные runtime gates: [integrated.md](integrated.md).
+
 ## Границы первоначального среза
 
 Нет нового end-to-end batch-прогона на 10 000 сетевых целей и нового batch-теста

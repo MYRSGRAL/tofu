@@ -56,6 +56,15 @@ fn source_batch_pages_failures_without_credentials() {
         26
     );
     let original = done["source_id"].as_i64().expect("источник");
+    app.send(json!({"command":"rename_source","id":original,"name":"Переименованный"}));
+    let renamed =
+        app.wait(|v| v["source_name"] == "Переименованный" && v["batch"]["invalidated"] == true);
+    assert!(
+        renamed["batch"]["rows"]
+            .as_array()
+            .expect("строки")
+            .is_empty()
+    );
     app.send(json!({"command":"add_source", "name":"Другой", "url":"http://127.0.0.1:1/unused", "local_exception":true, "route":"direct"}));
     let stale = app.wait(|v| v["source_id"] != original && v["batch"]["invalidated"] == true);
     assert!(

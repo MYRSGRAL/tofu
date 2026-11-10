@@ -328,6 +328,28 @@ fn actual_10k_tcp_connections() {
         cancel.elapsed().as_millis(),
         fixture.accepted()
     );
+    for action in ["stop", "shutdown"] {
+        app.send(json!({"command":"check_batch"}));
+        app.wait(|v| v["batch"]["busy"] == true);
+        thread::sleep(Duration::from_millis(50));
+        let started = Instant::now();
+        app.send(json!({"command":action}));
+        app.wait(|v| v["batch"]["busy"] == false && v["batch"]["cancelled"] == true);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            fixture.accepted(),
+            30_000,
+            "нет TCP после отмены подготовки"
+        );
+        eprintln!(
+            "PREPARATION_PRIORITY action={action} ack_ms={} tcp_eof={}",
+            started.elapsed().as_millis(),
+            fixture.accepted()
+        );
+        if action == "shutdown" {
+            app.wait(|v| v["closed"] == true);
+        }
+    }
 }
 
 #[test]
