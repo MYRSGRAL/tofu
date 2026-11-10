@@ -1,5 +1,6 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
+use crate::preferences::{Preferences, SaveOutcome, Store};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -76,7 +77,7 @@ impl std::error::Error for DesktopError {}
 
 type Result<T> = std::result::Result<T, DesktopError>;
 type Callback = Arc<dyn Fn(String) + Send + Sync>;
-const DEFAULT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+pub(crate) const DEFAULT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize)]
@@ -139,6 +140,10 @@ enum Command {
         id: i64,
         revision: i64,
     },
+    SetLanguage {
+        language: String,
+    },
+    ResetListenPort,
     SetEngine {
         engine: EngineChoice,
     },
@@ -302,6 +307,7 @@ impl DesktopHost {
                 | Command::Stop
                 | Command::Shutdown
                 | Command::ResetProbeTarget
+                | Command::ResetListenPort
                 | Command::CheckTcp
                 | Command::CancelTcp
         ) {
@@ -483,6 +489,9 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    language: String,
+    preferences_warning: bool,
+    preferences_durability_warning: bool,
     build_id: &'static str,
     source_hwid_enabled: bool,
     ready: bool,
@@ -516,6 +525,7 @@ struct Snapshot {
     active_name: Option<String>,
     active_engine: Option<EngineChoice>,
     probe_custom: bool,
+    probe_persistent: bool,
     probe_expected_status: u16,
     probe_result: Option<HealthResultDto>,
     tcp_busy: bool,
@@ -531,6 +541,9 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            language: "ru".into(),
+            preferences_warning: false,
+            preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
             source_hwid_enabled: false,
             ready: false,
@@ -564,6 +577,7 @@ impl Snapshot {
             active_name: None,
             active_engine: None,
             probe_custom: false,
+            probe_persistent: true,
             probe_expected_status: 204,
             probe_result: None,
             tcp_busy: false,
@@ -697,6 +711,8 @@ async fn open(config: &mut HostConfig) -> Result<(SubscriptionService, File)> {
 }
 
 struct Actor {
+    preferences: Preferences,
+    preferences_store: Store,
     service: SubscriptionService,
     state: Snapshot,
     callback: Callback,
@@ -707,6 +723,16 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
+        let outcome = self
+            .preferences_store
+            .save(&preferences)
+            .map_err(|_| DesktopError("preferences_write"))?;
+        self.state.preferences_durability_warning =
+            outcome == SaveOutcome::PublishedDurabilityUnknown;
+        self.preferences = preferences;
+        Ok(())
+    }
     fn prepare_port(&mut self) -> Result<()> {
         match available_port(self.state.port) {
             Ok(_) => Ok(()),
@@ -1002,10 +1028,39 @@ impl Actor {
                 self.selected = Some(profile);
                 Ok(())
             }
+            Command::SetLanguage { language } => {
+                if !matches!(language.as_str(), "ru" | "en") {
+                    return Err(DesktopError("invalid_input"));
+                }
+                let mut preferences = self.preferences.clone();
+                preferences.language = language.clone();
+                self.save_preferences(preferences)?;
+                self.state.language = language;
+                Ok(())
+            }
+            Command::ResetListenPort => {
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                let port = available_port(0)?.get();
+                let mut preferences = self.preferences.clone();
+                preferences.port = None;
+                self.save_preferences(preferences)?;
+                self.state.port = port;
+                self.automatic_port = true;
+                Ok(())
+            }
             Command::SetEngine { engine } => {
                 if self.state.can_stop {
                     return Err(DesktopError("busy"));
                 }
+                let mut preferences = self.preferences.clone();
+                preferences.engine = match engine {
+                    EngineChoice::Xray => "xray",
+                    EngineChoice::SingBox => "sing-box",
+                }
+                .into();
+                self.save_preferences(preferences)?;
                 self.state.engine = engine;
                 Ok(())
             }
@@ -1013,6 +1068,9 @@ impl Actor {
                 if self.state.can_stop {
                     return Err(DesktopError("busy"));
                 }
+                let mut preferences = self.preferences.clone();
+                preferences.port = Some(port);
+                self.save_preferences(preferences)?;
                 self.state.port = port.get();
                 self.automatic_port = false;
                 Ok(())
@@ -1028,8 +1086,18 @@ impl Actor {
                 ProbeTarget::new(&url, PROBE_TIMEOUT)
                     .and_then(|target| target.with_expected_status(expected_status))
                     .map_err(|_| DesktopError("probe_target_invalid"))?;
+                let mut preferences = self.preferences.clone();
+                let persistent = !url.contains(['@', '?', '#']);
+                preferences.probe_url = if persistent {
+                    url.to_string()
+                } else {
+                    DEFAULT_PROBE_URL.into()
+                };
+                preferences.probe_status = if persistent { expected_status } else { 204 };
+                self.save_preferences(preferences)?;
                 self.probe_url = url;
                 self.state.probe_custom = true;
+                self.state.probe_persistent = persistent;
                 self.state.probe_expected_status = expected_status;
                 self.state.probe_result = None;
                 Ok(())
@@ -1038,8 +1106,13 @@ impl Actor {
                 if self.state.can_stop {
                     return Err(DesktopError("busy"));
                 }
+                let mut preferences = self.preferences.clone();
+                preferences.probe_url = DEFAULT_PROBE_URL.into();
+                preferences.probe_status = 204;
+                self.save_preferences(preferences)?;
                 self.probe_url = Zeroizing::new(DEFAULT_PROBE_URL.into());
                 self.state.probe_custom = false;
+                self.state.probe_persistent = true;
                 self.state.probe_expected_status = 204;
                 self.state.probe_result = None;
                 Ok(())
@@ -1174,7 +1247,7 @@ async fn network_invalidated(network: &mut Option<NetworkWatch>, stamp: Option<N
 
 #[cfg(test)]
 mod settings_tests {
-    use super::{Actor, DEFAULT_PROBE_URL, HostConfig, Snapshot, open};
+    use super::{Actor, DEFAULT_PROBE_URL, HostConfig, Snapshot, Store, open};
     use std::{
         fs,
         os::unix::fs::DirBuilderExt,
@@ -1237,7 +1310,10 @@ mod settings_tests {
         let mut config = HostConfig::new(directory.0.clone(), directory.0.join("engines"))
             .with_ephemeral_key([77; 32]);
         let (service, _lock) = open(&mut config).await.expect("тестовая БД");
+        let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            preferences_store,
+            preferences,
             service,
             state: Snapshot::new(true),
             callback: Arc::new(|_| {}),
@@ -1262,6 +1338,22 @@ mod settings_tests {
                 "busy"
             );
             assert_eq!(actor.state.port, 18888);
+            for raw in [
+                r#"{"command":"set_engine","engine":"sing-box"}"#,
+                r#"{"command":"set_probe_target","url":"https://example.com/","expected_status":200}"#,
+                r#"{"command":"reset_probe_target"}"#,
+                r#"{"command":"reset_listen_port"}"#,
+            ] {
+                let command = serde_json::from_str(raw).expect("настройка");
+                assert_eq!(
+                    actor
+                        .command(command)
+                        .await
+                        .expect_err("снимок сессии неизменен")
+                        .key(),
+                    "busy"
+                );
+            }
             let command =
                 serde_json::from_str(r#"{"command":"delete_source","id":1}"#).expect("удаление");
             assert_eq!(
@@ -1281,6 +1373,19 @@ mod settings_tests {
             .expect("команда настройки");
         actor.command(command).await.expect("сессия освобождена");
         assert_eq!(actor.state.port, 18889);
+        actor.preferences_store.sync_directory =
+            |_| Err(std::io::Error::other("инъекция dir fsync"));
+        actor
+            .command(
+                serde_json::from_str(r#"{"command":"set_language","language":"en"}"#)
+                    .expect("язык"),
+            )
+            .await
+            .expect("опубликованное изменение применено");
+        assert_eq!(actor.state.language, "en");
+        assert_eq!(actor.preferences.language, "en");
+        assert!(actor.state.preferences_durability_warning);
+        assert_eq!(Store::open(&directory.0).1.language, "en");
         actor.service.close().await.expect("закрытие БД");
     }
 }
@@ -1818,18 +1923,38 @@ async fn run(
             return;
         }
     };
+    let (preferences_store, mut preferences, warning) = Store::open(&config.data_dir);
+    if let Some(port) = config.listen_port {
+        preferences.port = Some(port);
+    }
+    state.engine = if preferences.engine == "sing-box" {
+        EngineChoice::SingBox
+    } else {
+        EngineChoice::Xray
+    };
+    if let Some(port) = preferences.port {
+        state.port = port.get();
+    }
+    state.language = preferences.language.clone();
+    state.preferences_warning = warning;
+    state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
+    state.probe_expected_status = preferences.probe_status;
     state.ready = true;
     let network_monitor = NetworkMonitor::start().ok();
     let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
+    let automatic_port = preferences.port.is_none();
+    let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        preferences_store,
+        preferences,
         service,
         state,
         callback,
         selected: None,
         pending: None,
-        automatic_port: config.listen_port.is_none(),
-        probe_url: Zeroizing::new(DEFAULT_PROBE_URL.into()),
+        automatic_port,
+        probe_url,
         network: network.clone(),
     };
     if let Err(error) = actor.reload().await {

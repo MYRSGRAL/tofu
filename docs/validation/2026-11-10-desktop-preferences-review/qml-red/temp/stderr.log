@@ -1,0 +1,3 @@
+qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+yonik smoke: incomplete script at step 4
+Error: "Qt завершился с кодом 2"

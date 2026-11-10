@@ -1,0 +1,30 @@
+Traceback (most recent call last):
+  File "/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-desktop/tests/preferences_smoke.py", line 191, in <module>
+    runtime_write_failure(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        Path(sys.argv[1]).resolve(),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        Path(sys.argv[2]).resolve() / conflict,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        conflict,
+        ^^^^^^^^^
+    )
+    ^
+  File "/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/crates/yonik-desktop/tests/preferences_smoke.py", line 151, in runtime_write_failure
+    execute(
+    ~~~~~~~^
+        binary,
+        ^^^^^^^
+    ...<21 lines>...
+        "1",
+        ^^^^
+    )
+    ^
+  File "/home/myrs/.t3/worktrees/yonik/t3-ecbf7aa7/tools/desktop_ui_smoke.py", line 476, in execute
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: GUI exit=1, ожидалось 0; step=4
+qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+yonik smoke: incomplete script at step 4
+Error: "Qt завершился с кодом 2"

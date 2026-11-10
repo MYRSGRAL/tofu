@@ -1,0 +1,2 @@
+qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+yonik smoke: capturing own window after a frame
