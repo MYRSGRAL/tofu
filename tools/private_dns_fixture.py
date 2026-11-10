@@ -1,6 +1,7 @@
 """Диагностика stock pinned DNS через actual WG; не production capability."""
 
 from __future__ import annotations
+
 import argparse
 import json
 import select
@@ -10,6 +11,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+
 from dns_fixture import (
     DnsFixture,
     Reply,
