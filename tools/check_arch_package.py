@@ -3,9 +3,45 @@
 
 import argparse
 import hashlib
+import shlex
 import subprocess
 import tarfile
 from pathlib import Path, PurePosixPath
+
+MAX_PKGINFO = 64 * 1024
+
+
+def validate_pkginfo(content: bytes, root: Path) -> None:
+    """Сверяет metadata с уже проверенным seal рецептом, не исполняя shell."""
+    if len(content) > MAX_PKGINFO:
+        raise ValueError("Превышен лимит .PKGINFO")
+    recipe = root / "packaging/arch/PKGBUILD"
+    validate_recipe(recipe)
+    fields = {}
+    for line in recipe.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in {"pkgname", "pkgver", "pkgrel", "arch", "depends"}:
+            fields[key] = shlex.split(value.strip("()"))
+    expected = {
+        "pkgname": fields["pkgname"],
+        "pkgver": [fields["pkgver"][0] + "-" + fields["pkgrel"][0]],
+        "arch": fields["arch"],
+        "depend": fields["depends"],
+    }
+    actual: dict[str, list[str]] = {}
+    for line in content.decode("utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        key, separator, value = line.partition(" = ")
+        if not separator or not key or not value or any(ord(c) < 32 for c in line):
+            raise ValueError("Некорректная строка .PKGINFO")
+        if key in expected:
+            actual.setdefault(key, []).append(value)
+    if any(
+        sorted(actual.get(key, [])) != sorted(value) for key, value in expected.items()
+    ):
+        raise ValueError(".PKGINFO не соответствует рецепту")
+
 
 DESKTOP = """[Desktop Entry]
 Type=Application
@@ -80,7 +116,14 @@ def validate_archive(path: Path, root: Path) -> None:
                     continue
                 if not entry.isfile():
                     raise ValueError(f"Ссылка/специальный файл: {name}")
-                if name in (".PKGINFO", ".BUILDINFO", ".MTREE"):
+                if name == ".PKGINFO":
+                    if entry.size > MAX_PKGINFO or entry.mode != 0o644:
+                        raise ValueError("Неверный размер/mode .PKGINFO")
+                    stream = archive.extractfile(entry)
+                    assert stream is not None
+                    validate_pkginfo(stream.read(MAX_PKGINFO + 1), root)
+                    continue
+                if name in (".BUILDINFO", ".MTREE"):
                     continue
                 if name not in expected:
                     raise ValueError(f"Лишний файл/hook: {name}")
@@ -97,6 +140,8 @@ def validate_archive(path: Path, root: Path) -> None:
                     or stream.read(len(content) + 1) != content
                 ):
                     raise ValueError(f"Подменены metadata: {name}")
+        if ".PKGINFO" not in seen:
+            raise ValueError("Отсутствует .PKGINFO")
         if not expected.keys() <= seen:
             raise ValueError(f"Отсутствуют файлы: {expected.keys() - seen}")
     finally:

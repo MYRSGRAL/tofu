@@ -15,12 +15,63 @@ arch = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(arch)
 
+PKGINFO = b"""pkgname = yonik
+pkgver = 0.1.0.r20261110-1
+arch = x86_64
+""" + b"".join(
+    f"depend = {name}\n".encode()
+    for name in (
+        "ca-certificates",
+        "qt6-base",
+        "qt6-declarative",
+        "qt6-svg",
+        "sqlite",
+        "dbus",
+        "polkit",
+        "systemd",
+        "nftables",
+        "iproute2",
+        "gcc-libs",
+        "glibc",
+    )
+)
+
+
+def add_pkginfo(archive: tarfile.TarFile, content: bytes = PKGINFO) -> None:
+    entry = tarfile.TarInfo(".PKGINFO")
+    entry.mode = 0o644
+    entry.size = len(content)
+    archive.addfile(entry, io.BytesIO(content))
+
 
 class ArchiveTests(unittest.TestCase):
     def check_fixture(self, change: str = "") -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "package.tar"
             with tarfile.open(path, "w") as archive:
+                if change != "no_pkginfo":
+                    content = PKGINFO
+                    if change == "wrong_pkginfo":
+                        content = (
+                            b"pkgname = other-package\npkgver = 99-1\narch = aarch64\n"
+                        )
+                    elif change == "missing_dependency":
+                        content = content.replace(b"depend = glibc\n", b"")
+                    elif change == "duplicate_name":
+                        content += b"pkgname = yonik\n"
+                    elif change == "large_pkginfo":
+                        content += b"#" * 65537
+                    elif change in ("wrong_name", "wrong_version", "wrong_arch"):
+                        before, after = {
+                            "wrong_name": (b"pkgname = yonik", b"pkgname = other"),
+                            "wrong_version": (
+                                b"pkgver = 0.1.0.r20261110-1",
+                                b"pkgver = 99-1",
+                            ),
+                            "wrong_arch": (b"arch = x86_64", b"arch = aarch64"),
+                        }[change]
+                        content = content.replace(before, after)
+                    add_pkginfo(archive, content)
                 for name, (mode, content) in arch.expected_files(
                     Path(__file__).parents[2]
                 ).items():
@@ -96,6 +147,7 @@ class ArchiveTests(unittest.TestCase):
             )
             archive_path = work / "staged.tar"
             with tarfile.open(archive_path, "w") as archive:
+                add_pkginfo(archive)
                 for path in (work / "pkg").rglob("*"):
                     entry = archive.gettarinfo(
                         str(path), str(path.relative_to(work / "pkg"))
@@ -128,6 +180,20 @@ class ArchiveTests(unittest.TestCase):
             "traversal",
             "hook",
             "link",
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.check_fixture(change)
+
+    def test_rejects_invalid_package_metadata(self) -> None:
+        for change in (
+            "no_pkginfo",
+            "wrong_pkginfo",
+            "wrong_name",
+            "wrong_version",
+            "wrong_arch",
+            "missing_dependency",
+            "duplicate_name",
+            "large_pkginfo",
         ):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.check_fixture(change)
