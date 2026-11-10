@@ -41,6 +41,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
     if !(1..=3).contains(&version) {
         return Err(RepositoryError::UnsupportedVersion);
     }
+    validate_schema(connection, version)?;
     let check: String = connection
         .query_row("PRAGMA integrity_check(1)", [], |r| r.get(0))
         .map_err(|_| RepositoryError::Corrupt)?;
@@ -99,7 +100,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
         }
     }
     if version >= 2 {
-        let mut stmt = connection.prepare("SELECT id,source_id,fingerprint,generation,revision,ordinal,present,payload FROM profiles").map_err(storage)?;
+        let mut stmt = connection.prepare("SELECT p.id,p.source_id,p.fingerprint,p.generation,p.revision,p.ordinal,p.present,p.payload,s.source_generation,s.revision FROM profiles p LEFT JOIN snapshots s ON s.source_id=p.source_id").map_err(storage)?;
         let mut rows = stmt.query([]).map_err(storage)?;
         while let Some(r) = rows.next().map_err(storage)? {
             let row = ProfileRow {
@@ -112,7 +113,142 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
                 present: r.get(6).map_err(storage)?,
                 payload: bounded_blob(r, 7, SMALL_LIMIT + 40).map_err(storage)?,
             };
+            validate_profile_snapshot(
+                &row,
+                r.get::<_, Option<i64>>(8).map_err(storage)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(9).map_err(storage)?.unwrap_or(0),
+            )?;
             open_profile(key, &id, &row)?;
+        }
+    }
+    if table_exists(connection, "routing_draft")? {
+        let mut stmt = connection
+            .prepare("SELECT revision,payload FROM routing_draft")
+            .map_err(|_| RepositoryError::Corrupt)?;
+        let mut rows = stmt.query([]).map_err(storage)?;
+        while let Some(row) = rows.next().map_err(storage)? {
+            let revision = row.get(0).map_err(storage)?;
+            let raw = bounded_blob(row, 1, 262144 + 40).map_err(storage)?;
+            decrypt(key, &id, 8, 0, 0, revision, &raw, 262144)?;
+        }
+    }
+    Ok(())
+}
+
+fn table_exists(connection: &Connection, name: &str) -> Result<bool> {
+    let kind: Option<String> = connection
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name=?1",
+            [name],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| RepositoryError::Corrupt)?;
+    match kind.as_deref() {
+        None => Ok(false),
+        Some("table") => Ok(true),
+        _ => Err(RepositoryError::Corrupt),
+    }
+}
+
+// Проверяем поля даже у пустых таблиц. Lazy catalog и routing_draft не
+// создаются и не чинятся: preflight не должен изменять проверяемую БД.
+fn validate_schema(connection: &Connection, version: i64) -> Result<()> {
+    let mut contracts = vec![
+        (
+            "repository",
+            "id,sentinel",
+            "typeof(id)!='blob' OR typeof(sentinel)!='blob'",
+        ),
+        (
+            "sources",
+            "id,generation,payload",
+            "typeof(id)!='integer' OR id<=0 OR typeof(generation)!='integer' OR generation<=0 OR typeof(payload)!='blob'",
+        ),
+        (
+            "snapshots",
+            "source_id,source_generation,revision,body,metadata,validators",
+            "typeof(source_id)!='integer' OR source_id<=0 OR typeof(source_generation)!='integer' OR source_generation<=0 OR typeof(revision)!='integer' OR revision<=0 OR typeof(body)!='blob' OR typeof(metadata)!='blob' OR typeof(validators) NOT IN ('blob','null') OR NOT EXISTS(SELECT 1 FROM sources WHERE id=source_id)",
+        ),
+    ];
+    if version >= 2 {
+        contracts.extend([
+            ("profiles", "id,source_id,fingerprint,generation,revision,ordinal,present,payload", "typeof(id)!='integer' OR id<=0 OR typeof(source_id)!='integer' OR NOT EXISTS(SELECT 1 FROM sources WHERE sources.id=profiles.source_id) OR typeof(fingerprint)!='blob' OR length(fingerprint)!=32 OR typeof(generation)!='integer' OR generation<=0 OR typeof(revision)!='integer' OR revision<=0 OR typeof(ordinal)!='integer' OR ordinal<0 OR ordinal>=20000 OR typeof(present)!='integer' OR present NOT IN (0,1) OR typeof(payload)!='blob'"),
+            ("profile_catalog", "source_id,generation,revision,raw_count,unique_count", "typeof(source_id)!='integer' OR NOT EXISTS(SELECT 1 FROM snapshots WHERE snapshots.source_id=profile_catalog.source_id) OR typeof(generation)!='integer' OR generation<=0 OR typeof(revision)!='integer' OR revision<=0 OR typeof(raw_count)!='integer' OR raw_count<0 OR raw_count>20000 OR typeof(unique_count)!='integer' OR unique_count<0 OR unique_count>raw_count"),
+            ("sqlite_sequence", "name,seq", "name='profiles' AND (typeof(seq)!='integer' OR seq<0 OR seq<(SELECT COALESCE(MAX(id),0) FROM profiles))"),
+        ]);
+    }
+    if version >= 3 {
+        contracts.push(("source_sequence", "singleton,last_id", "typeof(singleton)!='integer' OR singleton!=1 OR typeof(last_id)!='integer' OR last_id<0 OR last_id<(SELECT COALESCE(MAX(id),0) FROM sources)"));
+    }
+    if table_exists(connection, "routing_draft")? {
+        contracts.push(("routing_draft", "singleton,revision,payload", "typeof(singleton)!='integer' OR singleton!=1 OR typeof(revision)!='integer' OR revision<=0 OR typeof(payload)!='blob'"));
+    }
+    for (table, columns, invalid) in contracts {
+        if !table_exists(connection, table)? {
+            return Err(RepositoryError::Corrupt);
+        }
+        // Все SQL-фрагменты — статический контракт, не пользовательский ввод.
+        connection
+            .prepare(&format!("SELECT {columns} FROM {table} LIMIT 0"))
+            .map_err(|_| RepositoryError::Corrupt)?;
+        let bad: bool = connection
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE {invalid})"),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| RepositoryError::Corrupt)?;
+        if bad {
+            return Err(RepositoryError::Corrupt);
+        }
+    }
+    let mut keys = vec![("sources", "id"), ("snapshots", "source_id")];
+    if version >= 2 {
+        keys.extend([("profiles", "id"), ("profile_catalog", "source_id")]);
+    }
+    if version >= 3 {
+        keys.push(("source_sequence", "singleton"));
+    }
+    if table_exists(connection, "routing_draft")? {
+        keys.push(("routing_draft", "singleton"));
+    }
+    for (table, key) in keys {
+        let valid: bool = connection.query_row(
+            "SELECT count(*)=1 AND COALESCE(MAX(name=?2 AND upper(type)='INTEGER'),0) FROM pragma_table_info(?1) WHERE pk>0",
+            params![table,key], |r| r.get(0)
+        ).map_err(|_| RepositoryError::Corrupt)?;
+        if !valid {
+            return Err(RepositoryError::Corrupt);
+        }
+    }
+    if version >= 2 {
+        let unique: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_index_list('profiles') i WHERE i.\"unique\"=1 AND (SELECT group_concat(name, ',') FROM pragma_index_info(i.name))='source_id,fingerprint')",
+            [], |r| r.get(0)
+        ).map_err(|_| RepositoryError::Corrupt)?;
+        if !unique {
+            return Err(RepositoryError::Corrupt);
+        }
+    }
+    if version >= 3 {
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM source_sequence", [], |r| r.get(0))
+            .map_err(|_| RepositoryError::Corrupt)?;
+        if count != 1 {
+            return Err(RepositoryError::Corrupt);
+        }
+    }
+    if version >= 2 {
+        let excessive: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM profiles GROUP BY source_id HAVING count(*)>40000)",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(storage)?;
+        if excessive {
+            return Err(RepositoryError::Corrupt);
         }
     }
     Ok(())

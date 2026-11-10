@@ -1684,6 +1684,14 @@ fn seal_profile(
     );
     Ok(out)
 }
+// Единый инвариант актуальности для чтения и maintenance preflight.
+fn validate_profile_snapshot(row: &ProfileRow, generation: i64, revision: i64) -> Result<()> {
+    if row.present && (row.generation != generation || row.revision != revision) {
+        return Err(RepositoryError::Corrupt);
+    }
+    Ok(())
+}
+
 fn open_profile(key: &[u8; 32], db: &[u8; 32], r: &ProfileRow) -> Result<ServerProfile> {
     if r.payload.len() < 40 || r.fingerprint.len() != 32 {
         return Err(RepositoryError::Corrupt);
@@ -1874,11 +1882,7 @@ impl EncryptedSubscriptionRepository {
             let search = query.search.to_lowercase();
             let mut profiles = Vec::new();
             for r in read_profiles(&tx, source)? {
-                if r.present
-                    && (r.generation != snapshot_generation || r.revision != snapshot_revision)
-                {
-                    return Err(RepositoryError::Corrupt);
-                }
+                validate_profile_snapshot(&r, snapshot_generation, snapshot_revision)?;
                 let p = open_profile(&db.key, &db.id, &r)?;
                 let name = p.name.to_lowercase();
                 if (query.include_unavailable || p.available)
@@ -1993,9 +1997,7 @@ impl EncryptedSubscriptionRepository {
             if !p.available {
                 return Err(RepositoryError::NotFound);
             }
-            if r.generation != generation || r.revision != revision {
-                return Err(RepositoryError::Corrupt);
-            }
+            validate_profile_snapshot(&r, generation, revision)?;
             let body: Vec<u8> = tx
                 .query_row(
                     "SELECT body FROM snapshots WHERE source_id=?1",

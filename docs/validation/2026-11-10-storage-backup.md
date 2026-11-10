@@ -45,3 +45,53 @@ fsync файла → атомарный hard_link без замены → unlink
 Python-код не изменялся, Ruff неприменим.
 `cargo +1.85.1 clippy -p yonik-linux --all-targets -- -D warnings` — успешно.
 Дополнительная регрессия проверяет отказ при существующем sidecar назначения.
+
+## Исправление review PR70 от 2026-11-11
+
+Исходный head `f48eaf6bfbb66a1aa711e5d5abcd64b0117ec6b9`;
+обычный merge `origin/main` `5157139600ff9a26fe456f19a6b9796ecbeda195`
+создал `043631583b866cb6b43badece4743bcca5c61c34` без конфликтов.
+Изменения ограничены repository/backup, тестами и этим evidence.
+
+RED на merge-head без production-исправления:
+`cargo +1.85.1 test -p yonik-linux --test storage_backup rejects_` —
+0 passed, 2 failed: `rejects_incomplete_versioned_schema` (v3 без
+source_sequence) и `rejects_authenticated_profile_replay` (аутентичные
+поля generation/revision/payload профиля snapshot 1 в БД со snapshot 2).
+Оба упали именно на «повреждённый кандидат опубликован», после подтверждения
+побайтовой неизменности original и candidate. Лог `red.log`.
+
+Preflight теперь проверяет обязательные поля даже пустых таблиц:
+v1 repository/sources/snapshots; v2 добавляет profiles/profile_catalog и
+sqlite_sequence; v3 добавляет source_sequence. Проверяются INTEGER primary
+keys, unique index source_id/fingerprint, типы и диапазоны служебных значений,
+ссылки на источники/snapshot, единственная строка source_sequence и last_id
+не ниже max(source.id), счётчики каталога и лимит профилей на источник.
+Отсутствующий lazy catalog row допустим. routing_draft остаётся необязательной
+для всех legacy-версий; при наличии проверяются её поля/ключ/значения и AEAD
+с существующим доменом 8. Проверка не создаёт и не исправляет таблицы.
+
+Связь present-профиля с текущим snapshot проверяет общий private
+`validate_profile_snapshot`, используемый также profiles/resolve_profile.
+Недоступный избранный профиль может хранить старую generation/revision.
+
+GREEN: 4 backup-теста. В schema-тесте 13 отказных кандидатов: отсутствующие
+таблицы v2/v3, поле validators v1, поля last_id/unique_count/ordinal,
+таблица sources без PK, пустой/отстающий source_sequence, неверные счётчики
+каталога и corrupt routing draft. Replay проверяется отдельно. При каждом
+отказе target отсутствует, байты original и candidate не изменились.
+Положительная матрица: v1/v2/v3 × routing_draft present/absent (6 случаев),
+backup→reopen→profiles→create_source; для v2/v3 также сохранён недоступный
+избранный профиль старой версии. Ciphertext/source bytes не меняются при backup.
+
+Логи текущего исправления вне TTL:
+`/home/myrs/projects/yonik/local/validation/storage-backup-review/`.
+Не проверялись аппаратные сбои fsync/питания, произвольное враждебное DDL,
+интеграция UI/keyring и замена существующей БД. Предыдущие границы bounded
+maintenance, no-overwrite и исход после публикации/fsync не изменены.
+
+Финальная проверка исправления (Rust 1.85.1, jobs=1, global slot + flock):
+`cargo test -p yonik-linux --test storage_backup` — 4 passed;
+`cargo test -p yonik-linux --lib repository::tests` — 16 passed;
+`cargo clippy -p yonik-linux --all-targets -- -D warnings` — успешно;
+`cargo fmt --all --check` и `git diff --check` — успешно. Python не изменялся.
