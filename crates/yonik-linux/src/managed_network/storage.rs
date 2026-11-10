@@ -132,9 +132,32 @@ pub(super) fn read(directory: &File) -> Result<Option<Document>, JournalError> {
     if bytes.len() > MAX_JOURNAL_BYTES {
         return Err(JournalError::Limit);
     }
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|_| JournalError::Corrupt)
+    // v1 разбирается отдельной строгой схемой: новые поля нельзя незаметно
+    // протащить через миграцию старого формата.
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
+    if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct LegacyDocument {
+            version: u32,
+            ownership: super::Ownership,
+            records: Vec<super::Record>,
+        }
+        let legacy: LegacyDocument =
+            serde_json::from_slice(&bytes).map_err(|_| JournalError::Corrupt)?;
+        Ok(Some(Document {
+            version: legacy.version,
+            ownership: legacy.ownership,
+            records: legacy.records,
+            public_policy: None,
+            policy_sequence: 0,
+        }))
+    } else {
+        serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|_| JournalError::Corrupt)
+    }
 }
 
 pub(super) fn write(directory: &File, document: &Document) -> Result<(), JournalError> {

@@ -282,6 +282,13 @@ The library can preserve the public block after session cleanup and remove it
 explicitly on Unlock. GUI/service authorization and full platform integration
 remain unfinished. [Public-block contract](docs/specs/helper-public-block.md).
 
+Journal schema v2 persists the desired/previous policy and Unlock intent in the
+same atomic file as owned resources. Durable Apply/Unlock entrypoints and
+startup recovery compare actual rules; recovery never replays stored interface
+exceptions automatically. Live-process command fencing and crash-boundary
+tests are included. System-service/cgroup recovery remains open.
+[Policy recovery contract](docs/specs/helper-policy-recovery.md).
+
 ### Rust libraries and CLIs
 
 Rust 1.85+ (edition 2024). Application remains std-only; domain normalization uses IDNA, and the importer uses
