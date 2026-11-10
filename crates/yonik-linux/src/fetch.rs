@@ -1,13 +1,19 @@
 //! Ограниченная загрузка подписок. Секреты доступны только через явные методы.
 
 use std::{
+    collections::BTreeMap,
     fmt,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
 use reqwest::{Url, header};
-use tokio::sync::watch;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    sync::watch,
+};
 
 pub const MAX_FETCH_BODY: usize = 8 * 1024 * 1024;
 const MAX_FIELD: usize = 8 * 1024;
@@ -163,6 +169,7 @@ pub enum FetchError {
     InvalidValidator,
     InvalidTimeout,
     UnsupportedPeerVerification,
+    ProxyDnsRequired,
     Cancelled,
     Timeout,
     Dns,
@@ -186,6 +193,7 @@ impl std::error::Error for FetchError {}
 pub struct FetchHost {
     timeout: Duration,
     socks_endpoint: Option<SocketAddr>,
+    proxy_dns: Option<SocketAddr>,
 }
 
 impl FetchHost {
@@ -196,18 +204,96 @@ impl FetchHost {
         Ok(Self {
             timeout,
             socks_endpoint: None,
+            proxy_dns: None,
         })
     }
 
-    /// Явно выбранный SOCKS5 listener активной сессии. DNS разрешается локально;
-    /// прокси получает только проверенный IP. Конечный peer доверяется сессии,
-    /// для HTTPS дополнительно проверяется сертификат исходного имени.
+    /// Явно выбранный SOCKS5 listener активной сессии. Без with_proxy_dns
+    /// разрешены только literal IP: домены отклоняются до системного DNS.
+    /// Смена endpoint отзывает прежнюю DNS-настройку. Конечный peer доверяется
+    /// сессии, для HTTPS проверяется сертификат исходного имени.
     pub fn with_socks_endpoint(mut self, endpoint: SocketAddr) -> Result<Self, FetchError> {
         if !endpoint.ip().is_loopback() || endpoint.port() == 0 {
             return Err(FetchError::BlockedAddress);
         }
         self.socks_endpoint = Some(endpoint);
+        self.proxy_dns = None;
         Ok(self)
+    }
+
+    /// Явный DNS-over-TCP upstream, доступный через выбранную SOCKS-сессию.
+    /// Адрес выбирает вызывающий session provider; bootstrap и fallback нет.
+    /// Настройка относится к текущему endpoint, а не к UI порту или system DNS.
+    pub fn with_proxy_dns(mut self, upstream: SocketAddr) -> Result<Self, FetchError> {
+        if self.socks_endpoint.is_none() {
+            return Err(FetchError::UnsupportedPeerVerification);
+        }
+        if upstream.port() == 0
+            || upstream.ip().is_unspecified()
+            || upstream.ip().is_multicast()
+            || upstream.ip() == IpAddr::V4(Ipv4Addr::BROADCAST)
+            || matches!(upstream, SocketAddr::V6(address) if address.scope_id() != 0)
+        {
+            return Err(FetchError::Dns);
+        }
+        self.proxy_dns = Some(upstream);
+        Ok(self)
+    }
+
+    async fn resolve_proxy(&self, url: &Url, port: u16) -> Result<Vec<SocketAddr>, FetchError> {
+        let host = url.host_str().ok_or(FetchError::InvalidSource)?;
+        if let Ok(ip) = host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<IpAddr>()
+        {
+            return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        let upstream = self.proxy_dns.ok_or(FetchError::ProxyDnsRequired)?;
+        let endpoint = self
+            .socks_endpoint
+            .ok_or(FetchError::UnsupportedPeerVerification)?;
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        let mut addresses = Vec::new();
+        // Отказ любого семейства не превращается в успешный неполный набор.
+        for kind in [1, 28] {
+            let mut nonce = [0; 2];
+            getrandom::getrandom(&mut nonce).map_err(|_| FetchError::Dns)?;
+            let id = u16::from_be_bytes(nonce);
+            let query = dns_query(&host, id, kind)?;
+            let mut stream = dns_tunnel(endpoint, upstream).await?;
+            stream
+                .write_u16(query.len() as u16)
+                .await
+                .map_err(|_| FetchError::Dns)?;
+            stream
+                .write_all(&query)
+                .await
+                .map_err(|_| FetchError::Dns)?;
+            let size = stream.read_u16().await.map_err(|_| FetchError::Dns)? as usize;
+            if !(12..=MAX_DNS_FRAME).contains(&size) {
+                return Err(FetchError::Dns);
+            }
+            let mut frame = vec![0; size];
+            stream
+                .read_exact(&mut frame)
+                .await
+                .map_err(|_| FetchError::Dns)?;
+            addresses.extend(
+                dns_addresses(&frame, &host, id, kind)?
+                    .into_iter()
+                    .map(|ip| SocketAddr::new(ip, port)),
+            );
+            if addresses.len() > 64 {
+                return Err(FetchError::Dns);
+            }
+        }
+        addresses.sort_unstable();
+        addresses.dedup();
+        if addresses.is_empty() {
+            return Err(FetchError::Dns);
+        }
+        Ok(addresses)
     }
 
     pub async fn fetch(
@@ -248,7 +334,10 @@ impl FetchHost {
             let port = url
                 .port_or_known_default()
                 .ok_or(FetchError::InvalidSource)?;
-            let addresses = resolve(&url, port).await?;
+            let addresses = match route {
+                FetchRoute::Direct => resolve(&url, port).await?,
+                FetchRoute::Proxy => self.resolve_proxy(&url, port).await?,
+            };
             if !source.local_exception
                 && addresses.iter().any(|address| !is_public_ip(address.ip()))
             {
@@ -263,6 +352,7 @@ impl FetchHost {
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .referer(false)
+                .dns_resolver(Arc::new(NoSystemDns))
                 .resolve_to_addrs(host, &addresses)
                 .timeout(self.timeout);
             if let Some(endpoint) = proxy_endpoint {
@@ -390,6 +480,242 @@ impl FetchHost {
         }
         Err(FetchError::Redirect)
     }
+}
+
+/// Overrides содержат полный проверенный набор; ошибка ключа не вызывает GAI.
+struct NoSystemDns;
+impl reqwest::dns::Resolve for NoSystemDns {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async { Err(std::io::Error::other("DNS pin отсутствует").into()) })
+    }
+}
+
+const MAX_DNS_FRAME: usize = 16 * 1024;
+const MAX_DNS_RECORDS: usize = 128;
+
+async fn dns_tunnel(endpoint: SocketAddr, upstream: SocketAddr) -> Result<TcpStream, FetchError> {
+    let mut stream = TcpStream::connect(endpoint)
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    if stream.peer_addr().map_err(|_| FetchError::Dns)? != endpoint {
+        return Err(FetchError::Dns);
+    }
+    stream
+        .write_all(&[5, 1, 0])
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    let mut method = [0; 2];
+    stream
+        .read_exact(&mut method)
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    if method != [5, 0] {
+        return Err(FetchError::Dns);
+    }
+    let mut connect = vec![5, 1, 0];
+    match upstream.ip() {
+        IpAddr::V4(ip) => {
+            connect.push(1);
+            connect.extend_from_slice(&ip.octets());
+        }
+        IpAddr::V6(ip) => {
+            connect.push(4);
+            connect.extend_from_slice(&ip.octets());
+        }
+    }
+    connect.extend_from_slice(&upstream.port().to_be_bytes());
+    stream
+        .write_all(&connect)
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    let mut reply = [0; 4];
+    stream
+        .read_exact(&mut reply)
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    if reply[..3] != [5, 0, 0] {
+        return Err(FetchError::Dns);
+    }
+    let size = match reply[3] {
+        1 => 4,
+        4 => 16,
+        3 => stream.read_u8().await.map_err(|_| FetchError::Dns)? as usize,
+        _ => return Err(FetchError::Dns),
+    };
+    if size == 0 {
+        return Err(FetchError::Dns);
+    }
+    let mut bound = [0; 257];
+    stream
+        .read_exact(&mut bound[..size + 2])
+        .await
+        .map_err(|_| FetchError::Dns)?;
+    Ok(stream)
+}
+
+fn dns_query(host: &str, id: u16, kind: u16) -> Result<Vec<u8>, FetchError> {
+    if host.is_empty() || host.len() > 253 {
+        return Err(FetchError::Dns);
+    }
+    let mut query = Vec::with_capacity(host.len() + 18);
+    query.extend_from_slice(&id.to_be_bytes());
+    query.extend_from_slice(&[1, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+    for label in host.split('.') {
+        if label.is_empty() || label.len() > 63 || !label.bytes().all(dns_label_byte) {
+            return Err(FetchError::Dns);
+        }
+        query.push(label.len() as u8);
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.push(0);
+    query.extend_from_slice(&kind.to_be_bytes());
+    query.extend_from_slice(&1_u16.to_be_bytes());
+    Ok(query)
+}
+
+fn dns_label_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+}
+
+fn dns_take<'a>(
+    frame: &'a [u8],
+    position: &mut usize,
+    length: usize,
+) -> Result<&'a [u8], FetchError> {
+    let end = position.checked_add(length).ok_or(FetchError::Dns)?;
+    let bytes = frame.get(*position..end).ok_or(FetchError::Dns)?;
+    *position = end;
+    Ok(bytes)
+}
+fn dns_u16(frame: &[u8], position: &mut usize) -> Result<u16, FetchError> {
+    let bytes = dns_take(frame, position, 2)?;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+fn dns_name(frame: &[u8], position: &mut usize) -> Result<String, FetchError> {
+    let mut cursor = *position;
+    let mut end = None;
+    let mut name = String::new();
+    for _ in 0..128 {
+        let length = *frame.get(cursor).ok_or(FetchError::Dns)?;
+        if length & 0xc0 == 0xc0 {
+            let low = *frame.get(cursor + 1).ok_or(FetchError::Dns)?;
+            let pointer = (((length & 0x3f) as usize) << 8) | low as usize;
+            // RFC 1035 compression ссылается на предыдущее имя; forward/loops запрещены.
+            if pointer >= cursor {
+                return Err(FetchError::Dns);
+            }
+            end.get_or_insert(cursor + 2);
+            cursor = pointer;
+        } else {
+            if length & 0xc0 != 0 {
+                return Err(FetchError::Dns);
+            }
+            cursor += 1;
+            if length == 0 {
+                *position = end.unwrap_or(cursor);
+                return Ok(name);
+            }
+            let label = dns_take(frame, &mut cursor, length as usize)?;
+            if !label.iter().copied().all(dns_label_byte) {
+                return Err(FetchError::Dns);
+            }
+            if !name.is_empty() {
+                name.push('.');
+            }
+            if name.len() + label.len() > 253 {
+                return Err(FetchError::Dns);
+            }
+            for byte in label {
+                name.push(byte.to_ascii_lowercase() as char);
+            }
+        }
+    }
+    Err(FetchError::Dns)
+}
+
+fn dns_addresses(frame: &[u8], host: &str, id: u16, kind: u16) -> Result<Vec<IpAddr>, FetchError> {
+    let mut position = 0;
+    if dns_u16(frame, &mut position)? != id {
+        return Err(FetchError::Dns);
+    }
+    let flags = dns_u16(frame, &mut position)?;
+    // QR=response, стандартный opcode, TC=0, reserved Z=0, RCODE=NOERROR.
+    if flags & 0xfa4f != 0x8000 || dns_u16(frame, &mut position)? != 1 {
+        return Err(FetchError::Dns);
+    }
+    let answers = dns_u16(frame, &mut position)? as usize;
+    let authority = dns_u16(frame, &mut position)? as usize;
+    let additional = dns_u16(frame, &mut position)? as usize;
+    let total = answers + authority + additional;
+    if total > MAX_DNS_RECORDS {
+        return Err(FetchError::Dns);
+    }
+    if dns_name(frame, &mut position)? != host
+        || dns_u16(frame, &mut position)? != kind
+        || dns_u16(frame, &mut position)? != 1
+    {
+        return Err(FetchError::Dns);
+    }
+    let mut aliases = BTreeMap::new();
+    let mut addresses = Vec::new();
+    for index in 0..total {
+        let owner = dns_name(frame, &mut position)?;
+        let record_kind = dns_u16(frame, &mut position)?;
+        let class = dns_u16(frame, &mut position)?;
+        dns_take(frame, &mut position, 4)?; // TTL: кэширования между операциями нет.
+        let length = dns_u16(frame, &mut position)? as usize;
+        let start = position;
+        let bytes = dns_take(frame, &mut position, length)?;
+        if index >= answers || class != 1 {
+            continue;
+        }
+        match record_kind {
+            1 if length == 4 => addresses.push((
+                owner,
+                IpAddr::V4(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3])),
+            )),
+            28 if length == 16 => {
+                let octets: [u8; 16] = bytes.try_into().map_err(|_| FetchError::Dns)?;
+                addresses.push((owner, IpAddr::V6(Ipv6Addr::from(octets))));
+            }
+            1 | 28 => return Err(FetchError::Dns),
+            5 => {
+                let mut offset = start;
+                let alias = dns_name(frame, &mut offset)?;
+                if alias.is_empty() || offset != position {
+                    return Err(FetchError::Dns);
+                }
+                if aliases.insert(owner, alias).is_some() {
+                    return Err(FetchError::Dns);
+                }
+            }
+            _ => {}
+        }
+    }
+    if position != frame.len() {
+        return Err(FetchError::Dns);
+    }
+    let mut canonical = host;
+    for depth in 0..=8 {
+        let Some(alias) = aliases.get(canonical) else {
+            break;
+        };
+        if depth == 8 || addresses.iter().any(|(owner, _)| owner == canonical) {
+            return Err(FetchError::Dns);
+        }
+        canonical = alias;
+    }
+    let result: Vec<_> = addresses
+        .into_iter()
+        .filter_map(|(owner, ip)| {
+            (owner == canonical && matches!((kind, ip), (1, IpAddr::V4(_)) | (28, IpAddr::V6(_))))
+                .then_some(ip)
+        })
+        .collect();
+    if result.len() > 64 {
+        return Err(FetchError::Dns);
+    }
+    Ok(result)
 }
 
 fn transport_error(error: reqwest::Error) -> FetchError {
@@ -863,5 +1189,113 @@ mod tests {
                 .unwrap_err(),
             FetchError::Timeout
         );
+    }
+}
+
+#[cfg(test)]
+mod proxy_dns_tests {
+    use super::*;
+
+    fn answer() -> Vec<u8> {
+        let mut frame = dns_query("a.test", 7, 1).expect("query");
+        frame[2..4].copy_from_slice(&[0x81, 0x80]);
+        frame[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        frame.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 1, 0, 4, 8, 8, 4, 4]);
+        frame
+    }
+
+    #[test]
+    fn response_is_bound_to_id_question_and_complete_frame() {
+        let frame = answer();
+        assert_eq!(
+            dns_addresses(&frame, "a.test", 7, 1).expect("answer"),
+            vec!["8.8.4.4".parse::<IpAddr>().expect("IP")]
+        );
+        assert_eq!(dns_addresses(&frame, "b.test", 7, 1), Err(FetchError::Dns));
+        assert_eq!(dns_addresses(&frame, "a.test", 8, 1), Err(FetchError::Dns));
+        assert_eq!(dns_addresses(&frame, "a.test", 7, 28), Err(FetchError::Dns));
+        for end in 0..frame.len() {
+            assert_eq!(
+                dns_addresses(&frame[..end], "a.test", 7, 1),
+                Err(FetchError::Dns),
+                "truncation {end}"
+            );
+        }
+        let mut extra = frame.clone();
+        extra.push(0);
+        assert_eq!(dns_addresses(&extra, "a.test", 7, 1), Err(FetchError::Dns));
+    }
+
+    #[test]
+    fn cname_is_followed_only_within_bounded_answer_chain() {
+        let mut frame = dns_query("a.test", 7, 1).expect("query");
+        frame[2..4].copy_from_slice(&[0x81, 0x80]);
+        frame[6..8].copy_from_slice(&2_u16.to_be_bytes());
+        frame.extend_from_slice(&[0xc0, 0x0c, 0, 5, 0, 1, 0, 0, 0, 1, 0, 8]);
+        let alias = frame.len();
+        frame.extend_from_slice(b"\x01b\x04test\0");
+        frame.extend_from_slice(&[
+            0xc0,
+            alias as u8,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            4,
+            127,
+            0,
+            0,
+            1,
+        ]);
+        assert_eq!(
+            dns_addresses(&frame, "a.test", 7, 1).expect("CNAME"),
+            vec!["127.0.0.1".parse::<IpAddr>().expect("IP")]
+        );
+        // Тот же адрес с посторонним owner не становится ответом на исходное имя.
+        frame[alias + 1] = b'c';
+        // Переопределяем owner A на a.test: CNAME + A у одного owner неоднозначны.
+        frame[alias + 9] = 0x0c;
+        assert_eq!(dns_addresses(&frame, "a.test", 7, 1), Err(FetchError::Dns));
+    }
+
+    #[test]
+    fn compression_loops_and_record_flood_are_rejected() {
+        let mut frame = answer();
+        frame[12..14].copy_from_slice(&[0xc0, 0x0c]);
+        assert_eq!(dns_addresses(&frame, "a.test", 7, 1), Err(FetchError::Dns));
+        let mut frame = answer();
+        frame[6..8].copy_from_slice(&129_u16.to_be_bytes());
+        assert_eq!(dns_addresses(&frame, "a.test", 7, 1), Err(FetchError::Dns));
+    }
+
+    #[test]
+    fn explicit_upstream_requires_endpoint_and_valid_literal_address() {
+        assert!(
+            FetchHost::new(Duration::from_secs(1))
+                .expect("host")
+                .with_proxy_dns("127.0.0.1:53".parse().expect("address"))
+                .is_err()
+        );
+        for value in [
+            "0.0.0.0:53",
+            "[::]:53",
+            "224.0.0.1:53",
+            "255.255.255.255:53",
+            "127.0.0.1:0",
+        ] {
+            assert!(
+                FetchHost::new(Duration::from_secs(1))
+                    .expect("host")
+                    .with_socks_endpoint("127.0.0.1:1080".parse().expect("endpoint"))
+                    .expect("endpoint")
+                    .with_proxy_dns(value.parse().expect("address"))
+                    .is_err()
+            );
+        }
     }
 }
