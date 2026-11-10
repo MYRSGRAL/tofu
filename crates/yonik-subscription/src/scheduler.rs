@@ -60,6 +60,13 @@ impl Work {
     }
 }
 
+/// Снимок только ожидающей записи; активная работа не переносится между runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryState {
+    pub due: Option<Duration>,
+    pub failures: u32,
+}
+
 #[derive(Debug)]
 struct Entry {
     generation: i64,
@@ -117,6 +124,31 @@ impl Scheduler {
                 cancelled: false,
             },
         );
+        Ok(())
+    }
+
+    pub fn failures(&self, id: i64) -> Option<u32> {
+        self.entries.get(&id).map(|entry| entry.failures)
+    }
+
+    pub fn snapshot(&self, id: i64) -> Option<RetryState> {
+        let entry = self.entries.get(&id)?;
+        entry.active.is_none().then_some(RetryState {
+            due: entry.due,
+            failures: entry.failures,
+        })
+    }
+
+    pub fn restore(&mut self, id: i64, generation: i64, state: RetryState) -> Result<(), Error> {
+        if state.failures > Self::MAX_FAILURES
+            || (state.failures == Self::MAX_FAILURES && state.due.is_some())
+        {
+            return Err(Error::InvalidLimits);
+        }
+        self.schedule(id, generation, state.due.unwrap_or_default())?;
+        let entry = self.entries.get_mut(&id).ok_or(Error::Stale)?;
+        entry.due = state.due;
+        entry.failures = state.failures;
         Ok(())
     }
 
@@ -189,15 +221,27 @@ impl Scheduler {
             return Ok(());
         }
         entry.active = None;
+        let state = Self::completion_state(entry.failures, now, success);
+        entry.failures = state.failures;
+        entry.due = state.due;
+        Ok(())
+    }
+
+    pub fn completion_state(failures: u32, now: Duration, success: bool) -> RetryState {
+        let failures = if success {
+            0
+        } else {
+            failures.saturating_add(1).min(Self::MAX_FAILURES)
+        };
         let delay = if success {
-            entry.failures = 0;
             Some(Self::INTERVAL)
         } else {
-            entry.failures = entry.failures.saturating_add(1);
-            (entry.failures < Self::MAX_FAILURES).then(|| Self::retry_delay(entry.failures))
+            (failures < Self::MAX_FAILURES).then(|| Self::retry_delay(failures))
         };
-        entry.due = delay.and_then(|delay| now.checked_add(delay));
-        Ok(())
+        RetryState {
+            failures,
+            due: delay.and_then(|delay| now.checked_add(delay)),
+        }
     }
 
     fn retry_delay(failures: u32) -> Duration {
@@ -226,7 +270,7 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, Policy, Scheduler};
+    use super::{Error, Policy, RetryState, Scheduler};
     use std::{num::NonZeroU64, time::Duration};
 
     fn scheduler() -> Scheduler {
@@ -239,6 +283,29 @@ mod tests {
             ui_visible: true,
             ..Policy::default()
         }
+    }
+
+    #[test]
+    fn восстановление_сохраняет_budget_и_pause() {
+        let mut s = scheduler();
+        s.restore(
+            1,
+            7,
+            RetryState {
+                due: Some(Duration::ZERO),
+                failures: 4,
+            },
+        )
+        .unwrap();
+        let work = s.take_due(Duration::ZERO, allowed()).unwrap().unwrap();
+        s.complete(work, Duration::from_secs(10), false).unwrap();
+        let state = s.snapshot(1).unwrap();
+        assert_eq!(state.failures, 5);
+        assert_eq!(state.due, None);
+        let mut reopened = scheduler();
+        reopened.restore(1, 7, state).unwrap();
+        assert_eq!(reopened.take_due(Duration::MAX, allowed()), Ok(None));
+        assert!(reopened.resume(1, Duration::ZERO));
     }
 
     #[test]
