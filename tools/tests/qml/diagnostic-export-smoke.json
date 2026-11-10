@@ -1,0 +1,109 @@
+{
+  "steps": [
+    {
+      "when": {
+        "ready": true
+      },
+      "ui": {
+        "action": "click",
+        "object": "settingsButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "click",
+        "object": "settingsDiagnosticsButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "click",
+        "object": "copyDiagnosticsButton"
+      }
+    },
+    {
+      "ui_when": {
+        "diagnosticsExportResult": {
+          "text": "Скопировано"
+        }
+      },
+      "command": {
+        "command": "set_language",
+        "language": "en"
+      }
+    },
+    {
+      "when": {
+        "language": "en"
+      },
+      "ui": {
+        "action": "click",
+        "object": "copyDiagnosticsButton"
+      }
+    },
+    {
+      "ui_when": {
+        "diagnosticsExportResult": {
+          "text": "Copied"
+        }
+      },
+      "command": {
+        "command": "unknown"
+      }
+    },
+    {
+      "when": {
+        "error": "invalid_input"
+      },
+      "ui": {
+        "action": "click",
+        "object": "copyDiagnosticsButton"
+      }
+    },
+    {
+      "ui_when": {
+        "diagnosticsExportResult": {
+          "text": "Export unavailable: unknown error."
+        }
+      },
+      "ui": {
+        "action": "click",
+        "object": "homeButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "click",
+        "object": "homeButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "click",
+        "object": "serverPickerButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "click",
+        "object": "pasteSourceButton"
+      }
+    },
+    {
+      "ui_when": {
+        "sourceUrlInput": {
+          "text": "{\"errors\":[],\"platform\":\"linux\",\"schema_version\":1}"
+        }
+      },
+      "ui": {
+        "action": "click",
+        "object": "sourceAddCancelButton"
+      }
+    },
+    {
+      "ui": {
+        "action": "quit"
+      }
+    }
+  ]
+}

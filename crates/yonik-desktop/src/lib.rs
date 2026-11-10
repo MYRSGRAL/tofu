@@ -12,5 +12,6 @@ mod preferences;
 
 pub mod editor;
 
+pub mod diagnostics;
 #[cfg(target_os = "linux")]
 pub mod system_session;
