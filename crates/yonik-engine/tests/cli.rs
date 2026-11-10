@@ -1,5 +1,5 @@
 use std::{
-    io::Write,
+    io::{ErrorKind, Write},
     process::{Command, Stdio},
 };
 
@@ -11,12 +11,10 @@ fn run(input: &str, args: &[&str]) -> std::process::Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.as_bytes())
-        .unwrap();
+    if let Err(error) = child.stdin.take().unwrap().write_all(input.as_bytes()) {
+        // Отказ по аргументам может закрыть stdin до записи родителя.
+        assert_eq!(error.kind(), ErrorKind::BrokenPipe);
+    }
     child.wait_with_output().unwrap()
 }
 
@@ -47,6 +45,7 @@ fn partial_native_and_bad_arguments_are_rejected_without_secrets() {
         (URI.into(), vec!["xray", "--server", "2"]),
         (URI.into(), vec!["xray", "--listen-port", "0"]),
         (URI.into(), vec!["xray", "--secret.example"]),
+        (URI.repeat(4096), vec!["xray", "--secret.example"]),
     ] {
         let output = run(&input, &args);
         assert!(!output.status.success());
