@@ -16,7 +16,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(arch)
 
 PKGINFO = b"""pkgname = yonik
-pkgver = 0.1.0.r20261110-1
+pkgver = 0.1.0.r20261110-2
 arch = x86_64
 """ + b"".join(
     f"depend = {name}\n".encode()
@@ -65,7 +65,7 @@ class ArchiveTests(unittest.TestCase):
                         before, after = {
                             "wrong_name": (b"pkgname = yonik", b"pkgname = other"),
                             "wrong_version": (
-                                b"pkgver = 0.1.0.r20261110-1",
+                                b"pkgver = 0.1.0.r20261110-2",
                                 b"pkgver = 99-1",
                             ),
                             "wrong_arch": (b"arch = x86_64", b"arch = aarch64"),
@@ -127,7 +127,7 @@ class ArchiveTests(unittest.TestCase):
         root = Path(__file__).parents[2].resolve()
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
-            (work / "yonik-e33fa1908dfb3deb5434506341674de0b3a827b4").symlink_to(root)
+            (work / "yonik-eec7a56b6b03f2b022a87682f9097ce78b61fa0b").symlink_to(root)
             release = work / "target/release"
             release.mkdir(parents=True)
             for name in ("yonik-desktop", "yonik-helper", "yonik-worker"):

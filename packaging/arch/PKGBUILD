@@ -1,7 +1,7 @@
 # Снимок исходников; обновлять revision и checksum совместно после проверки.
 pkgname=yonik
 pkgver=0.1.0.r20261110
-pkgrel=1
+pkgrel=2
 pkgdesc='Qt-клиент yonik и системный сетевой помощник'
 arch=('x86_64')
 url='https://github.com/MYRSGRAL/yonik'
@@ -10,17 +10,24 @@ depends=('ca-certificates' 'qt6-base' 'qt6-declarative' 'qt6-svg' 'sqlite' 'dbus
 makedepends=('rust' 'clang' 'pkgconf')
 optdepends=('qt6-wayland: запуск в Wayland' 'gnome-keyring: провайдер Secret Service')
 options=('!debug')
-_revision=e33fa1908dfb3deb5434506341674de0b3a827b4
-source=("yonik-${_revision}.tar.gz::https://github.com/MYRSGRAL/yonik/archive/${_revision}.tar.gz")
-sha256sums=('f02df043825282f51ef8ad132d6eb7895532416112964b5d388b325e44c13b34')
+_revision=eec7a56b6b03f2b022a87682f9097ce78b61fa0b
+source=("yonik-${_revision}.tar.gz::https://codeload.github.com/MYRSGRAL/yonik/tar.gz/${_revision}")
+sha256sums=('71e9c347ffc363da062b42b0c5ffc6ccb0a97b0988202ce21391dd1c2553a1d3')
 
 build() {
     cd "$srcdir/yonik-$_revision"
     # Target задаёт runner, удерживающий flock корня transient-каталога.
     : "${CARGO_TARGET_DIR:?Укажите внешний transient target под flock}"
-    export CARGO_BUILD_JOBS=2
+    export CARGO_BUILD_JOBS=1
     export YONIK_BUILD_ID="0.1.0+$_revision"
-    cargo build --locked --release -p yonik-desktop --features gui --bin yonik-desktop -p yonik-linux --bin yonik-helper --bin yonik-worker
+    # GNU ld читает rlib раньше forced initializer archives CXX-Qt 0.10.
+    # Явные undefined symbols включают нужные initializer objects из rlib.
+    cargo rustc --locked --release -p yonik-desktop --features gui --bin yonik-desktop -- \
+        -C link-arg=-Wl,--undefined=cxx_qt_init_qml_module_cloud_highpriority_yonik \
+        -C link-arg=-Wl,--undefined=cxx_qt_init_crate_yonik_desktop \
+        -C link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt_lib \
+        -C link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt
+    cargo build --locked --release -p yonik-linux --bin yonik-helper --bin yonik-worker
 }
 
 package() {
