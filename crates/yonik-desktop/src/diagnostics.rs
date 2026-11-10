@@ -1,13 +1,101 @@
 //! Экспортирует только закрытый набор метаданных, никогда не исходный snapshot.
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, MapAccess, SeqAccess, Visitor},
+};
 use serde_json::{Value, json};
+use std::fmt;
+
+struct Unique(Value);
+impl<'de> Deserialize<'de> for Unique {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Strict;
+        impl<'de> Visitor<'de> for Strict {
+            type Value = Unique;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("JSON")
+            }
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Unique, M::Error> {
+                let mut values = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(de::Error::custom("повторный ключ"));
+                    }
+                    values.insert(key, map.next_value::<Unique>()?.0);
+                }
+                Ok(Unique(Value::Object(values)))
+            }
+            fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Unique, S::Error> {
+                let mut values = Vec::new();
+                while let Some(value) = seq.next_element::<Unique>()? {
+                    values.push(value.0);
+                }
+                Ok(Unique(Value::Array(values)))
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Unique, E> {
+                Ok(Unique(Value::String(value.into())))
+            }
+            fn visit_bool<E: de::Error>(self, value: bool) -> Result<Unique, E> {
+                Ok(Unique(Value::Bool(value)))
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Unique, E> {
+                Ok(Unique(Value::Null))
+            }
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Unique, E> {
+                Ok(Unique(value.into()))
+            }
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Unique, E> {
+                Ok(Unique(value.into()))
+            }
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Unique, E> {
+                serde_json::Number::from_f64(value)
+                    .map(|n| Unique(Value::Number(n)))
+                    .ok_or_else(|| de::Error::custom("число"))
+            }
+        }
+        deserializer.deserialize_any(Strict)
+    }
+}
+
+fn bounded(raw: &str) -> bool {
+    let (mut depth, mut quoted, mut escaped) = (0_u32, false, false);
+    for byte in raw.bytes() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+        } else if byte == b'"' {
+            quoted = true;
+        } else if byte == b'[' || byte == b'{' {
+            depth += 1;
+            if depth > 64 {
+                return false;
+            }
+        } else if byte == b']' || byte == b'}' {
+            let Some(next) = depth.checked_sub(1) else {
+                return false;
+            };
+            depth = next;
+        }
+    }
+    depth == 0 && !quoted
+}
 
 /// Отказ не содержит входных данных. Свободные поля snapshot не копируются.
 pub fn export_snapshot(raw: &str) -> Option<String> {
-    if raw.len() > 1_048_576 {
+    if raw.len() > 1_048_576 || !bounded(raw) {
         return None;
     }
-    let snapshot: Value = serde_json::from_str(raw).ok()?;
+    let snapshot = serde_json::from_str::<Unique>(raw).ok()?.0;
     let object = snapshot.as_object()?;
+    let catalog: Value = serde_json::from_str(include_str!(
+        "../../../docs/specs/diagnostic-message-catalog.json"
+    ))
+    .ok()?;
     let mut errors = Vec::new();
     let routing_error = match object.get("routing_ack") {
         None | Some(Value::Null) => None,
@@ -27,17 +115,18 @@ pub fn export_snapshot(raw: &str) -> Option<String> {
             continue;
         }
         let message_key = value.as_str()?;
-        let code = match message_key {
-            "cancelled" => "CANCELLED",
-            "cleanup_failed" => "CLEANUP_FAILED",
-            _ => return None,
-        };
+        let entry = catalog["messages"]
+            .as_array()?
+            .iter()
+            .find(|entry| entry["message_key"].as_str() == Some(message_key))?;
+        let code = entry["code"].as_str()?;
         let error = json!({"code":code,"message_key":message_key,"stage":"operation","retryable":false,"params":{}});
         if !errors.contains(&error) {
             errors.push(error);
         }
     }
-    Some(json!({"schema_version":1,"platform":"linux","errors":errors}).to_string())
+    let output = json!({"schema_version":1,"platform":"linux","errors":errors}).to_string();
+    (output.len() <= 65_536).then_some(output)
 }
 
 #[cfg(test)]
@@ -63,9 +152,26 @@ mod tests {
             let value = format!("cancelled{}", char::from_u32(control).expect("символ"));
             assert!(export_snapshot(&json!({"error":value}).to_string()).is_none());
         }
+        let at_limit = format!("{{}}{}", " ".repeat(1_048_574));
+        assert!(export_snapshot(&at_limit).is_some());
+        let nested = format!("{}0{}", "[".repeat(63), "]".repeat(63));
+        assert!(export_snapshot(&format!("{{\"native\":{nested}}}")).is_some());
         assert!(export_snapshot("[]").is_none());
         assert!(export_snapshot(&" ".repeat(1_048_577)).is_none());
     }
+    #[test]
+    fn duplicate_and_depth_bounds() {
+        for raw in [
+            r#"{"error":"cancelled","error":"cleanup_failed"}"#,
+            r#"{"native":{"a":1,"a":2}}"#,
+            r#"{"error":true}"#,
+        ] {
+            assert!(export_snapshot(raw).is_none());
+        }
+        assert!(export_snapshot(&format!("{}0{}", "[".repeat(65), "]".repeat(65))).is_none());
+        assert!(export_snapshot(r#"{"native":"[\"{}]","error":"storage"}"#).is_some());
+    }
+
     #[test]
     fn routing_error_obeys_the_same_allowlist() {
         assert!(export_snapshot(r#"{"routing_ack":{"error":"CANARY"}}"#).is_none());
@@ -76,7 +182,12 @@ mod tests {
     fn validator_parity() {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        for key in ["cancelled", "cleanup_failed"] {
+        let catalog: Value = serde_json::from_str(include_str!(
+            "../../../docs/specs/diagnostic-message-catalog.json"
+        ))
+        .expect("каталог");
+        for entry in catalog["messages"].as_array().expect("сообщения") {
+            let key = entry["message_key"].as_str().expect("ключ");
             let safe = export_snapshot(&json!({"error":key}).to_string()).expect("метаданные");
             let mut child = Command::new("python3")
                 .arg("../../tools/check_diagnostic_export.py")

@@ -1,0 +1,19 @@
+controlled-QML loaded
+qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+qml: actualCopy PASS cancelled ru
+This plugin does not support raise()
+qml: actualCopy PASS cleanup_failed ru
+qml: actualCopy PASS storage ru
+qml: actualCopy PASS invalid_json ru
+qml: actualCopy PASS check_timeout ru
+qml: actualCopy PASS dns_failed ru
+qml: actualCopy PASS system_timeout ru
+qml: actualCopy PASS cancelled en
+This plugin does not support raise()
+qml: actualCopy PASS cleanup_failed en
+qml: actualCopy PASS storage en
+qml: actualCopy PASS invalid_json en
+qml: actualCopy PASS check_timeout en
+qml: actualCopy PASS dns_failed en
+qml: actualCopy PASS system_timeout en
+qml: actualCopy PASS negative clipboard unchanged
