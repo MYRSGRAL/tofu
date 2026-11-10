@@ -31,7 +31,7 @@ ApplicationWindow {
     FontLoader { id: displayFont; source: "qrc:/fonts/Unbounded.ttf" }
     readonly property color surface: "#191919"
     readonly property color line: "#29262e"
-    readonly property bool editable: state.ready && !state.busy && !state.can_stop && !state.closed
+    readonly property bool editable: state.ready && !state.busy && !state.system_busy && !state.can_stop && !state.closed
     readonly property string actionText: state.can_stop
         ? (state.status === "CleanupError" ? tr("Повторить остановку", "Retry stopping")
            : (["Preparing", "Starting", "Checking"].indexOf(state.status) >= 0 ? tr("Отменить подключение", "Cancel connection") : tr("Отключить", "Disconnect")))
@@ -91,7 +91,7 @@ ApplicationWindow {
         tcp_invalidated: false, network_observed: false,
         network_routes: false, network_resolver: false, network_manager: false,
         selected_name: "", engine: "xray", active_name: "", active_engine: "", port: 10808, can_connect: false, can_stop: false})
-    readonly property bool canEditProbe: state.ready && !state.busy && !state.can_stop && !state.closed
+    readonly property bool canEditProbe: state.ready && !state.busy && !state.system_busy && !state.can_stop && !state.closed
     readonly property color ink: "#f5f3f8"
     readonly property color muted: "#bdb4cd"
     readonly property color accent: "#c3a6ef"
@@ -167,6 +167,11 @@ ApplicationWindow {
     }
     function statusText(status) {
         const values = {
+            Unknown: ["Состояние сети неизвестно", "Network state unknown"],
+            NoManagedPolicy: ["Управляемых правил нет", "No managed policy"],
+            TunnelStarting: ["Туннель запускается; доступ не подтверждён", "Tunnel starting; connectivity unverified"],
+            VerifiedRules: ["Правила подтверждены; доступ не подтверждён", "Rules verified; connectivity unverified"],
+            RecoveryRequired: ["Требуется восстановление сети", "Network recovery required"],
             Disconnected: ["Отключено", "Disconnected"], Preparing: ["Подготовка…", "Preparing…"],
             Starting: ["Запуск ядра…", "Starting engine…"], Checking: ["Проверка доступа…", "Checking connectivity…"],
             Connected: ["Подключено", "Connected"], Stopping: ["Отключение…", "Stopping…"],
@@ -289,6 +294,11 @@ ApplicationWindow {
             profile_required: ["Сначала выберите профиль.", "Select a profile first."],
             profile_unavailable: ["Профиль недоступен или список изменился. Выберите профиль заново.", "The profile is unavailable or the list has changed. Select the profile again."],
             engine_missing: ["Прокси-ядро не найдено. Установите выбранное ядро и перезапустите приложение.", "Proxy engine not found. Install the selected engine and restart the application."],
+            system_unsupported: ["Системный режим недоступен: helper сообщает system_tun=false.", "System mode unavailable: helper reports system_tun=false."],
+            system_denied: ["Нет разрешения на системное подключение.", "System connection authorization denied."],
+            system_owner_lost: ["Helper перезапущен. Проверьте состояние сети.", "Helper restarted. Check network state."],
+            system_timeout: ["Время ожидания helper истекло. Исход неизвестен.", "Helper timed out. Outcome unknown."],
+            system_unavailable: ["Helper недоступен. Проверьте состояние сети.", "Helper unavailable. Check network state."],
             engine_config: ["Профиль несовместим с выбранным ядром. Проверьте параметры подключения.", "The profile is incompatible with the selected engine. Check connection settings."],
             engine_failed: ["Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.", "Could not start the proxy engine. Check the profile and engine installation."],
             probe_target_invalid: ["Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.", "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299."],
@@ -920,9 +930,18 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     PlainLabel { Layout.fillWidth: true; text: window.tr("Режим", "Mode") }
-                    PlainLabel { text: window.tr("Локальный SOCKS5", "Local SOCKS5") }
-                    HelpButton { explanation: window.tr("Настройте прокси в нужном приложении. Системный VPN, TUN, DNS/Fake-IP и kill switch пока недоступны: трафик всей системы не перенаправляется.", "Configure the proxy in your application. System VPN, TUN, DNS/Fake-IP and kill switch are unavailable: system-wide traffic is not redirected.") }
+                    ComboBox {
+                        objectName: "connectionModeChoice"
+                        model: [window.tr("Локальный SOCKS5", "Local SOCKS5"), window.tr("Системное подключение", "System connection")]
+                        currentIndex: window.state.connection_mode === "system" ? 1 : 0
+                        enabled: window.editable && !window.state.can_unlock
+                        onActivated: window.send({command: "set_connection_mode", mode: currentIndex === 1 ? "system" : "local"})
+                    }
+                    HelpButton { explanation: window.tr("Локальный SOCKS настраивается в нужном приложении. Системный режим требует capability и разрешения helper. Подтверждение правил ещё не подтверждает доступ через туннель.", "Configure local SOCKS in your application. System mode requires helper capability and authorization. Verified rules do not confirm tunnel connectivity.") }
                 }
+                PlainLabel { visible: window.state.connection_mode === "system"; text: window.tr("Состояние helper: ", "Helper state: ") + (window.state.system_state || "Unknown") }
+                ActionButton { objectName: "systemStateButton"; visible: window.state.connection_mode === "system"; enabled: !window.state.system_busy; text: window.tr("Проверить состояние", "Check state"); onClicked: window.send({command: "system_state"}) }
+                ActionButton { objectName: "systemUnlockButton"; visible: window.state.connection_mode === "system"; enabled: !!window.state.can_unlock && !window.state.system_busy && !window.state.can_stop; text: window.tr("Снять сохранённую блокировку", "Unlock retained protection"); onClicked: window.send({command: "system_unlock"}) }
                 PlainLabel { text: window.tr("Адрес прокси", "Proxy address") }
                 RowLayout {
                     Layout.fillWidth: true

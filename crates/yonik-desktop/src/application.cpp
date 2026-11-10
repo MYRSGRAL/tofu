@@ -442,7 +442,8 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     // Qt автоматически регистрирует иконку при последующем появлении tray-сервиса.
     tray.show();
     if (smokeTest) {
-        QTimer::singleShot(30000, bridge, [&, bridge] {
+        // Окно включает 30-секундный deadline системного RPC и подтверждение Stop.
+        QTimer::singleShot(45000, bridge, [&, bridge] {
             smokeFailed = smokeFailed || stepIndex < steps.size() || stepDispatchPending;
             if (smokeFailed) qWarning("yonik smoke: incomplete script at step %lld", static_cast<long long>(stepIndex));
             bridge->shutdown();
