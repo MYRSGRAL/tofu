@@ -110,6 +110,12 @@ impl Catalog {
         })
     }
     pub fn desktop_snapshot(&self) -> io::Result<Snapshot<DesktopApplication>> {
+        self.desktop_snapshot_with(|dir, name| openat(dir, name, DIR, Mode::empty()))
+    }
+    fn desktop_snapshot_with(
+        &self,
+        mut open_child: impl FnMut(&File, &str) -> rustix::io::Result<std::os::fd::OwnedFd>,
+    ) -> io::Result<Snapshot<DesktopApplication>> {
         let mut out = Snapshot {
             items: Vec::new(),
             incomplete: false,
@@ -118,6 +124,10 @@ impl Catalog {
         let mut files = 0;
         let mut dirs = 0;
         for root in &self.roots {
+            if dirs >= self.limits.max_dirs {
+                out.incomplete = true;
+                break;
+            }
             let dir = match directory(root) {
                 Ok(d) => d,
                 Err(_) => {
@@ -125,13 +135,9 @@ impl Catalog {
                     continue;
                 }
             };
+            dirs += 1;
             let mut stack = vec![(dir, String::new(), 0)];
             while let Some((dir, prefix, depth)) = stack.pop() {
-                if dirs >= self.limits.max_dirs {
-                    out.incomplete = true;
-                    break;
-                }
-                dirs += 1;
                 for name in names(
                     &dir,
                     self.limits.max_files.saturating_sub(files),
@@ -139,13 +145,37 @@ impl Catalog {
                 )? {
                     files += 1;
                     let relative = format!("{prefix}{name}");
-                    if let Ok(sub) = openat(&dir, name.as_str(), DIR, Mode::empty()) {
-                        if depth >= self.limits.max_depth {
-                            out.incomplete = true
-                        } else {
-                            stack.push((File::from(sub), format!("{relative}/"), depth + 1));
+                    // statat не открывает каталог: ожидающие в stack уже входят в dirs.
+                    match rustix::fs::statat(
+                        &dir,
+                        name.as_str(),
+                        rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+                    ) {
+                        Ok(stat)
+                            if rustix::fs::FileType::from_raw_mode(stat.st_mode)
+                                == rustix::fs::FileType::Directory =>
+                        {
+                            if dirs >= self.limits.max_dirs || depth >= self.limits.max_depth {
+                                out.incomplete = true;
+                                continue;
+                            }
+                            match open_child(&dir, name.as_str()) {
+                                Ok(sub) => {
+                                    dirs += 1;
+                                    stack.push((
+                                        File::from(sub),
+                                        format!("{relative}/"),
+                                        depth + 1,
+                                    ));
+                                }
+                                Err(rustix::io::Errno::NOTDIR | rustix::io::Errno::NOENT) => {}
+                                Err(_) => out.incomplete = true,
+                            }
+                            continue;
                         }
-                        continue;
+                        Err(rustix::io::Errno::NOENT) => {}
+                        Err(_) => out.incomplete = true,
+                        Ok(_) => {}
                     }
                     if !name.ends_with(".desktop") {
                         continue;
@@ -434,4 +464,40 @@ fn process(root: &File, name: &str, limit: usize) -> io::Result<ProcessCandidate
         start_time: before.2,
         exe,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn directory_budget_precedes_child_open() {
+        let root = std::env::temp_dir().join(format!("yonik-dir-budget-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        for index in 0..12 {
+            fs::create_dir(root.join(index.to_string())).unwrap();
+        }
+        let catalog = Catalog::new(
+            vec![root.clone()],
+            "/proc".into(),
+            "C".into(),
+            Limits {
+                max_dirs: 1,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
+        let mut opens = 0;
+        let result = catalog
+            .desktop_snapshot_with(|dir, name| {
+                opens += 1;
+                openat(dir, name, DIR, Mode::empty())
+            })
+            .unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert!(result.incomplete);
+        assert_eq!(
+            opens, 0,
+            "Бюджет должен проверяться до открытия дочерних каталогов"
+        );
+    }
 }

@@ -188,3 +188,39 @@ fn exact_path_requires_native_regular_executable() {
         );
     }
 }
+
+#[test]
+fn inaccessible_nested_directory_marks_snapshot_incomplete() {
+    use std::os::unix::fs::PermissionsExt;
+    if rustix::process::geteuid().as_raw() == 0 {
+        use std::os::unix::process::CommandExt;
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "inaccessible_nested_directory_marks_snapshot_incomplete",
+                "--nocapture",
+            ])
+            .uid(65534)
+            .gid(65534)
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "EACCES fixture в непривилегированном процессе"
+        );
+        return;
+    }
+    // Настоящий EACCES; дочерний процесс root создаёт только собственную fixture.
+    let f = Fixture::new();
+    let private = f.0.join("high/private");
+    fs::create_dir(&private).unwrap();
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+    let error = fs::read_dir(&private).unwrap_err();
+    let snapshot = f.catalog(Limits::default()).desktop_snapshot().unwrap();
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(
+        snapshot.incomplete,
+        "Недоступный вложенный каталог потерян без диагностики"
+    );
+}
