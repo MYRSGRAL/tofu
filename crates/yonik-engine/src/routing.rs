@@ -23,6 +23,7 @@ impl std::str::FromStr for PolicyMode {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyCapability {
+    DnsContract,
     RequiredRealResolution,
     ProcessAttribution,
     PrivateNetworkBinding,
@@ -40,6 +41,9 @@ impl fmt::Display for PolicyCompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Server(error) => error.fmt(f),
+            Self::Unsupported(PolicyCapability::DnsContract) => f.write_str(
+                "Запрошенный DNS/Fake-IP контракт не поддерживается закреплённым адаптером",
+            ),
             Self::Unsupported(PolicyCapability::RequiredRealResolution) => f.write_str(
                 "Нативный режим не подтверждает обязательное DNS разрешение CIDR-политики",
             ),
