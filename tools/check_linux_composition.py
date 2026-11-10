@@ -245,14 +245,274 @@ def scan(package: Path, cores: list[Path]) -> dict:
     }
 
 
+def retained_archives(linkmap: str) -> dict:
+    """Ненулевые input sections только после gold Memory map, исключая discarded."""
+    headers = ("\nMemory map\n", "\nLinker script and memory map\n")
+    header = next((candidate for candidate in headers if candidate in linkmap), None)
+    if header is None:
+        raise ValueError("неподдерживаемый link map: нет gold/bfd memory map")
+    retained = linkmap.split(header, 1)[1]
+    pattern = re.compile(
+        r"0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S+\.(?:rlib|a))\(([^)]+)\)"
+    )
+    records: dict[str, dict] = {}
+    for match in pattern.finditer(retained):
+        address, size, archive, member = match.groups()
+        if not int(address, 16) or not int(size, 16):
+            continue
+        entry = records.setdefault(
+            Path(archive).name, {"sections": 0, "sample_members": []}
+        )
+        entry["sections"] += 1
+        if len(entry["sample_members"]) < 4 and member not in entry["sample_members"]:
+            entry["sample_members"].append(member)
+    return records
+
+
+def dependency_roles(metadata: dict, package_id: str) -> dict[str, list[str]]:
+    """Normal closure отделена от build/proc-macro, dev рёбра не обходятся."""
+    packages = {row["id"]: row for row in metadata["packages"]}
+    nodes = {row["id"]: row for row in metadata["resolve"]["nodes"]}
+    pending = [(package_id, "normal")]
+    seen: set[tuple[str, str]] = set()
+    while pending:
+        current, role = pending.pop()
+        if (current, role) in seen:
+            continue
+        seen.add((current, role))
+        for dependency in nodes[current]["deps"]:
+            target = dependency["pkg"]
+            macro = any(
+                "proc-macro" in row["kind"] for row in packages[target]["targets"]
+            )
+            for kind in dependency["dep_kinds"]:
+                if kind["kind"] == "dev":
+                    continue
+                next_role = (
+                    "build"
+                    if role == "build" or kind["kind"] == "build" or macro
+                    else "normal"
+                )
+                pending.append((target, next_role))
+    result: dict[str, list[str]] = {}
+    for identity, role in sorted(seen):
+        result.setdefault(identity, []).append(role)
+    return result
+
+
+def validate_go_sources(path: Path, composition: dict) -> dict:
+    """Сверяет закреплённые module identity и raw notices без сети."""
+    report = json.loads(read_file(path, 16 * 1024 * 1024))
+    expected = {
+        tuple(row[1:4])
+        for core in composition["cores"].values()
+        for row in core["go"]["modules"]
+        if row[0] == "dep"
+    }
+    found = set()
+    for record in report["records"]:
+        identity = (record["module"], record["version"], record["h1"])
+        if identity not in expected or identity in found:
+            raise ValueError("несовпадение/повтор Go module identity")
+        found.add(identity)
+        if record["status"] not in {"observed", "missing_text", "unresolved"}:
+            raise ValueError("недопустимый Go status")
+
+        def escape(value: str) -> str:
+            return "".join("!" + c.lower() if c.isupper() else c for c in value)
+
+        url = f"https://proxy.golang.org/{escape(identity[0])}/@v/{escape(identity[1])}.zip"
+        if record["zip_url"] != url:
+            raise ValueError("подмена primary module URL")
+        if record["status"] != "observed":
+            continue
+        if record.get("h1_verified") is not True or not record.get("texts"):
+            raise ValueError("нет подтверждения h1/texts")
+        for text in record["texts"]:
+            name = text["file"]
+            if (
+                not re.fullmatch(r"texts/[0-9a-f]{64}", name)
+                or name.split("/")[1] != text["sha256"]
+            ):
+                raise ValueError("недопустимый путь Go notice")
+            raw = read_file(path.parent / name, 4 * 1024 * 1024)
+            if sha(raw) != text["sha256"]:
+                raise ValueError("подмена Go notice")
+    if found != expected:
+        raise ValueError("неполный набор Go module records")
+    manifest = ROOT / "packaging/licenses/linux-composition.json"
+    if report["input_manifest_sha256"] != sha(read_file(manifest)):
+        raise ValueError("Go sources связаны с другим binary manifest")
+    return {
+        "records": len(found),
+        "observed": sum(r["status"] == "observed" for r in report["records"]),
+    }
+
+
+def validate_rust_evidence(directory: Path, report: dict) -> None:
+    """Проверяет реальные новые ELF/maps вне TTL по опубликованному manifest."""
+    for name, expected in report["evidence_sha256"].items():
+        if Path(name).name != name or "\\" in name or name in {".", ".."}:
+            raise ValueError("небезопасный путь Rust evidence")
+        if sha(read_file(directory / name)) != expected:
+            raise ValueError("Rust evidence hash mismatch")
+    names = {row["binary"] for row in report["binaries"]}
+    if (
+        names != {"yonik-desktop", "yonik-helper", "yonik-worker"}
+        or len(report["binaries"]) != 3
+    ):
+        raise ValueError("неверный набор новых Rust ELF")
+    for row in report["binaries"]:
+        if sha(read_file(directory / "new-binaries" / row["binary"])) != row["sha256"]:
+            raise ValueError("Rust ELF hash mismatch")
+        mapfile = directory / (row["binary"].replace("-", "_") + ".map")
+        raw = read_file(mapfile)
+        if sha(raw) != row["map_sha256"]:
+            raise ValueError("Rust map hash mismatch")
+        retained = retained_archives(raw.decode())
+        for archive in row["archive_mentions"]:
+            if archive.get("retained_input_sections") != retained.get(
+                archive["archive"]
+            ):
+                raise ValueError("Rust retained section evidence mismatch")
+
+
+def validate_bundle(directory: Path, composition: dict) -> dict:
+    """Проверяет сохранённые raw bytes и cross-links; status partial не повышается."""
+    names = (
+        "go-sources.json",
+        "go-toolchains.json",
+        "go-toolchain-sources.json",
+        "core-sources.json",
+        "qt-sources.json",
+        "rust-toolchain.json",
+        "arch-recipes.json",
+        "arch/arch-packages.json",
+        "qt-runtime.json",
+        "rust-build.json",
+    )
+    reports = {}
+    count = 0
+
+    def visit(value: object, base: Path) -> None:
+        nonlocal count
+        if isinstance(value, list):
+            for row in value:
+                visit(row, base)
+        elif isinstance(value, dict):
+            if "file" in value:
+                name = value["file"]
+                if not isinstance(name, str) or not re.fullmatch(
+                    r"(?:texts|recipes)/[0-9a-f]{64}", name
+                ):
+                    raise ValueError("небезопасный путь evidence")
+                if sha(read_file(base / name, 4 * 1024 * 1024)) != value["sha256"]:
+                    raise ValueError("evidence hash mismatch")
+                count += 1
+            for child in value.values():
+                if isinstance(child, (list, dict)):
+                    visit(child, base)
+
+    for name in names:
+        path = directory / name
+        report = json.loads(read_file(path, 16 * 1024 * 1024))
+        visit(report, path.parent)
+        reports[name] = report
+    validate_go_sources(directory / "go-sources.json", composition)
+    toolchains = {core["go"]["toolchain"] for core in composition["cores"].values()}
+    if {row["ref"] for row in reports["go-toolchain-sources.json"]} != toolchains:
+        raise ValueError("Go toolchain source version mismatch")
+    sing = next(
+        core
+        for name, core in composition["cores"].items()
+        if name.startswith("sing-box-")
+    )
+    revision = next(
+        value.split("=", 1)[1]
+        for value in sing["go"]["settings"]
+        if value.startswith("vcs.revision=")
+    )
+    source = next(
+        row for row in reports["core-sources.json"] if row["core"] == "sing-box"
+    )
+    if source["commit"] != revision:
+        raise ValueError("sing-box source/buildinfo revision mismatch")
+    runtime = reports["qt-runtime.json"]
+    desktop = composition["elf"]["usr/bin/yonik-desktop"]["sha256"]
+    if runtime["binary_sha256"] != desktop:
+        raise ValueError("runtime относится к другому desktop")
+    arch = reports["arch/arch-packages.json"]
+    if arch["runtime_binary_sha256"] != desktop:
+        raise ValueError("Arch evidence относится к другому desktop")
+    owners = {row["name"]: row for row in arch["records"]}
+    recipes = {row["pkgbase"]: row for row in reports["arch-recipes.json"]}
+    for row in runtime["files"]:
+        for owner in row.get("owner", []):
+            package = owners[owner]
+            if (
+                package["runtime_payload_sha256"].get(row["resolved_path"].lstrip("/"))
+                != row["sha256"]
+            ):
+                raise ValueError("runtime/package payload mismatch")
+            if row["package_version"] != owner + " " + package["version"]:
+                raise ValueError("runtime/package version mismatch")
+    for package in owners.values():
+        recipe = recipes[package["pkgbase"]]
+        expected = next(
+            line.split(" = ", 1)[1]
+            for line in package["buildinfo"].splitlines()
+            if line.startswith("pkgbuild_sha256sum = ")
+        )
+        if recipe["status"] != "verified" or recipe["sha256"] != expected:
+            raise ValueError("Arch BUILDINFO/primary recipe mismatch")
+    for row in reports["qt-sources.json"]:
+        if row["checksum_matches"] != (
+            row["git_archive_sha256"] == row["arch_source_checksum"]
+        ):
+            raise ValueError("Qt source checksum status неверен")
+        recipe = recipes[row["pkgbase"]]
+        raw = read_file(directory / recipe["file"]).decode()
+        expected = re.search(r"sha256sums=\('([0-9a-f]{64})'", raw)
+        if (
+            expected is None
+            or expected.group(1) != row["arch_source_checksum"]
+            or recipe["sha256"] != row["arch_recipe_sha256"]
+        ):
+            raise ValueError("Qt source/Arch recipe checksum mismatch")
+    rust = reports["rust-build.json"]
+    if rust["status"] != "observed_new_build":
+        raise ValueError("неверный статус новой Rust сборки")
+    return {
+        "status": "partial",
+        "raw_references_checked": count,
+        "arch_packages": len(owners),
+        "go_modules": len(reports["go-sources.json"]["records"]),
+        "qt_source_checksum_mismatches": sum(
+            not row["checksum_matches"] for row in reports["qt-sources.json"]
+        ),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--core", action="append", default=[], type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--check", type=Path)
+    parser.add_argument("--go-sources", type=Path)
+    parser.add_argument("--evidence-bundle", type=Path)
+    parser.add_argument("--rust-evidence", type=Path)
     args = parser.parse_args()
     result = scan(args.package, args.core)
+    if args.rust_evidence:
+        if not args.evidence_bundle:
+            raise ValueError("--rust-evidence требует --evidence-bundle")
+        report = json.loads(read_file(args.evidence_bundle / "rust-build.json"))
+        validate_rust_evidence(args.rust_evidence, report)
+    if args.evidence_bundle:
+        validate_bundle(args.evidence_bundle, result)
+    if args.go_sources:
+        validate_go_sources(args.go_sources, result)
     if args.check and json.loads(read_file(args.check)) != result:
         raise ValueError("composition manifest не соответствует входам")
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

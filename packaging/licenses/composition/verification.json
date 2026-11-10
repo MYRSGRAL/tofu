@@ -1,0 +1,26 @@
+{
+  "status": "partial",
+  "raw_references_checked": 683,
+  "arch_packages": 59,
+  "go_modules": 173,
+  "qt_source_checksum_mismatches": 3,
+  "schema": 1,
+  "rust_new_build_verified": true,
+  "tests": 19,
+  "rust_lock_matches_inventory": true,
+  "reports_sha256": {
+    "go-toolchains.json": "66e65577d9c40a31410fc900e03e980228f3eb5054c7b4e7dfac07ddb401ba5a",
+    "go-sources.json": "4134773f4a5cc9121e282fcf747525f981fe690e6d95e7c8b8c4220bf1431e39",
+    "core-sources.json": "c3cdc2fc46b71d607869098b6c1d926cddde47cfff49190e903c89a4b6b1fe0d",
+    "qt-runtime.json": "1a3d4d728d65671c0693358a46b726fe8af27673409a7debf5531222dcccb42b",
+    "arch-recipes.json": "cfa3aea66f221626a04df5105b53e9b1af04679463f76398d7613041179d808d",
+    "qt-sources.json": "9424021d3a969e4ce78c47b9c09db4f370766d31ac0aa02b38226bec588c21de",
+    "rust-toolchain.json": "a35f8f8c19c420be7cc8bcd5f66c19468aac48984302edb016ef17513789044f",
+    "rust-build.json": "7f46f3345e85e2212347040ef0f3880e9bf7c31fd212aa8934fd8d5895f5d536",
+    "go-toolchain-sources.json": "8b7e5ad5466fb1b083ff5ff8865598ed041e7d4d162305055ee45444d63f0362",
+    "image.json": "14c80c4074e7006c93758e13adf2c8e8475fdfec94d69951bdcb7132857b6de5",
+    "cleanup.json": "39a9318556e9a0ae9a633b6f648e534b078933fcc3902f134106c490c7cbf5b5",
+    "go-stdlib-cleanup.json": "f0ca1c6809cbad97231862c10e5cc19c41abbd46e3a66d6f9655f92950c48b91"
+  },
+  "limits": "PASS относится к integrity gate, status partial не является P25 PASS"
+}
