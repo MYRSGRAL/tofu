@@ -2,8 +2,9 @@
 
 База рабочего checkout проверена до изменений:
 `e33fa1908dfb3deb5434506341674de0b3a827b4`.
-Ветка: `t3/linux-subscription-scheduler`. Head реализации: коммит, содержащий
-этот отчёт (`git log -1 --format=%H -- crates/yonik-linux/src/subscription_scheduler.rs`).
+Ветка: `t3/linux-subscription-scheduler`. Head реализации: `7a2833ecda03c2909f3d9a7cc932fb4b2c64bbe5`.
+Следующий docs-коммит фиксирует этот SHA и нормализует завершающую пустую строку
+лога; код после проверок не изменён.
 
 Основание: Task 2 плана `docs/superpowers/plans/2026-11-10-spec-completion-waves.md`
 (прочитан из основного repo), FR-06 requirements.md и P10 docs/PLAN.md.
