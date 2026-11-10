@@ -254,6 +254,12 @@ fn expected(online: bool, metered: bool, saver: bool, visible: bool) -> Subscrip
     }
 }
 fn start(dir: &Directory) -> (Harness, Observations) {
+    start_with_hook(dir, |_| {})
+}
+fn start_with_hook(
+    dir: &Directory,
+    hook: impl Fn(&str) + Send + Sync + 'static,
+) -> (Harness, Observations) {
     let (tx, rx) = mpsc::channel();
     let config = dir
         .config()
@@ -261,7 +267,7 @@ fn start(dir: &Directory) -> (Harness, Observations) {
         .with_schedule_observer(move |policy, loaded| {
             let _ = tx.send((policy, loaded));
         });
-    let mut app = Harness::new(config);
+    let mut app = Harness::with_hook(config, hook);
     app.wait(|v| v["ready"] == true);
     (app, Observations(rx))
 }
@@ -270,6 +276,18 @@ fn bounded<F: std::future::Future>(runtime: &tokio::runtime::Handle, future: F) 
         tokio::time::timeout(Duration::from_secs(3), future)
             .await
             .expect("bounded provider operation")
+    })
+}
+fn clients_closed(runtime: &tokio::runtime::Handle, provider: &PolicyBus) -> bool {
+    runtime.block_on(async {
+        // daemon наблюдает закрытие сокетов асинхронно; успех только по ListNames.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while provider.clients().await.unwrap() != 1 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok()
     })
 }
 fn worker() {
@@ -306,7 +324,20 @@ fn worker() {
     seed.wait(|v| v["source_id"].is_i64());
     seed.close();
     сделать_overdue(&dir);
-    let (mut app, mut obs) = start(&dir);
+    let (entered, closed_callback) = mpsc::channel();
+    let (resume, resumed) = mpsc::channel();
+    let resumed = std::sync::Mutex::new(resumed);
+    let (mut app, mut obs) = start_with_hook(&dir, move |snapshot| {
+        let value: serde_json::Value = serde_json::from_str(snapshot).unwrap();
+        if value["closed"] == true {
+            entered.send(()).unwrap();
+            resumed
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+        }
+    });
     obs.wait(expected(true, false, false, false)); // healthy + schedule loaded
     let blocked = || {
         thread::sleep(Duration::from_millis(150)); // Окно наблюдения после реального barrier.
@@ -369,8 +400,16 @@ fn worker() {
     app.send(json!({"command":"subscription_visibility","visible":true}));
     obs.wait(expected(true, false, false, true));
     accept_review(&listener, &mut app, 0);
+    // Удерживаем closed callback до возврата run: старый код в этот момент
+    // ещё владеет provider future и его соединением.
+    app.host.shutdown();
+    closed_callback
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap();
+    let disconnected = clients_closed(&runtime, &provider);
+    resume.send(()).unwrap();
     app.close();
-    assert_eq!(bounded(&runtime, provider.clients()).unwrap(), 1);
+    assert!(disconnected, "provider закрыт до публикации closed");
     сделать_overdue(&dir);
     let (next, next_obs) = start(&dir);
     app = next;
@@ -394,7 +433,7 @@ fn worker() {
     next_obs.wait(expected(true, false, false, true));
     accept_review(&listener, &mut app, 1);
     app.close();
-    assert_eq!(bounded(&runtime, provider.clients()).unwrap(), 1);
+    assert!(clients_closed(&runtime, &provider));
     // Deliberate delayed GetAll > старого окна 350 мс. Reopen не имеет права
     // засчитать absence до healthy+visible+loadschedule.
     provider.hold_next_snapshot();
@@ -422,7 +461,7 @@ fn worker() {
     barrier.join().unwrap();
     blocked();
     reopened.close();
-    assert_eq!(bounded(&runtime, provider.clients()).unwrap(), 1);
+    assert!(clients_closed(&runtime, &provider));
     drop(provider);
     bus.kill().unwrap();
     bus.wait().unwrap();
