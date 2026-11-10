@@ -383,6 +383,11 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             connectAction->setEnabled(snapshot.value(QStringLiteral("can_connect")).toBool());
             stopAction->setEnabled(snapshot.value(QStringLiteral("can_stop")).toBool());
             updateTrayLabels();
+            // После неудачного выхода диагностика должна быть доступна даже из трея.
+            if (snapshot.value(QStringLiteral("error")).toString() == QStringLiteral("cleanup_failed")
+                && !snapshot.value(QStringLiteral("closed")).toBool()) {
+                showAction->trigger();
+            }
             QJsonObject metadata;
             for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed", "tcp_busy", "can_stop"}) {
                 metadata.insert(QLatin1String(key), snapshot.value(QLatin1String(key)));
@@ -431,6 +436,12 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
                 application.quit();
             }
         });
+    if (smokeTest) {
+        // Видимость меняется без backend snapshot: trace фиксирует реальный close/relaunch.
+        QObject::connect(window, &QWindow::visibleChanged, bridge, [bridge](bool) {
+            Q_EMIT bridge->snapshot_jsonChanged();
+        });
+    }
     CloseHandler closeHandler(*window, *bridge, cleanupConfirmed);
     window->installEventFilter(&closeHandler);
     application.installEventFilter(&closeHandler);

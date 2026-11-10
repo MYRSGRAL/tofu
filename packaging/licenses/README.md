@@ -26,8 +26,13 @@ LICENSE/LICENCE/COPYING и NOTICE/AUTHORS/COPYRIGHT, включая подкат
 Cargo cache; на другой машине нужно заново сгенерировать report.
 Validator сверяет closure, features, recipe/source hashes и тексты с локальными
 исходниками; подмена provenance или исчезновение NOTICE приводит к ошибке.
-Наличие SPDX без текста не считается достаточным: текущий реальный gate
-завершается кодом 1 на восьми missing_license (см. evidence).
+Наличие SPDX без текста не считается достаточным. Восемь отсутствующих текстов
+подключены через `vendor/sources.json`: package/version/source, checksum из
+Cargo.lock и commit из shipped `.cargo_vcs_info.json` проверяются до чтения
+текста. Разрешены только имена файлов внутри vendor, FD-relative NOFOLLOW,
+regular file до 4 MiB, непустой текст и точный SHA-256. Оригинальные байты
+сохранены; URL закреплены commit, ветвь latest не используется.
+Реальный gate: 225 packages, 0 ошибок (см. evidence за 2026-11-11).
 
 Слои поставки:
 

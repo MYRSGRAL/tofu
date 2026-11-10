@@ -42,11 +42,12 @@
     "Cargo.lock": "d35687ddb7cb51101abd638ef437c468936a9f404b92e46efbb3a218e1ac2f03",
     "packaging/arch/PKGBUILD": "ac9471bafbb87f50d5552c7d1f0e377786912ecb9db9b55abdb32d1784ba2326",
     "tools/build_native_adapter.py": "16977d4f6332b2c3c8d2c5ffa2beffc00564a605484b8152685426817a201062",
-    "crates/yonik-engine/src/lib.rs": "ad59034b36118877e432743ea997b0d56c6b367d857cbf2c227b505178245ea7"
+    "crates/yonik-engine/src/lib.rs": "10de6da1b4322f3760dfa65f99a956d04d4091c4747749c11935d245c16737b8",
+    "packaging/licenses/vendor/sources.json": "ba0d2304e356d3de2a6795ba52eeb0e0df1d1ee0ce381122ab2a56a45447dfc5"
   },
   "packages": [
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-application#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-application#0.1.0",
       "name": "yonik-application",
       "version": "0.1.0",
       "source": null,
@@ -62,7 +63,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-desktop#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-desktop#0.1.0",
       "name": "yonik-desktop",
       "version": "0.1.0",
       "source": null,
@@ -81,7 +82,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-domain#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-domain#0.1.0",
       "name": "yonik-domain",
       "version": "0.1.0",
       "source": null,
@@ -97,7 +98,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-engine#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-engine#0.1.0",
       "name": "yonik-engine",
       "version": "0.1.0",
       "source": null,
@@ -113,7 +114,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-import#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-import#0.1.0",
       "name": "yonik-import",
       "version": "0.1.0",
       "source": null,
@@ -129,7 +130,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-linux#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-linux#0.1.0",
       "name": "yonik-linux",
       "version": "0.1.0",
       "source": null,
@@ -147,7 +148,7 @@
       "notice_files": []
     },
     {
-      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-af990449-fb5b3f6106bde5b4/crates/yonik-subscription#0.1.0",
+      "id": "path+file:///home/myrs/.t3/worktrees/yonik/t3-a063b5c2-17554799415a4dba/crates/yonik-subscription#0.1.0",
       "name": "yonik-subscription",
       "version": "0.1.0",
       "source": null,
@@ -651,7 +652,18 @@
       "spdx_declared": "MIT OR Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-format-0.3.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/clang-format-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/clang-format-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -662,7 +674,13 @@
       "spdx_declared": "Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/codespan-reporting-0.11.1/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/codespan-reporting-LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -793,7 +811,18 @@
       "spdx_declared": "MIT OR Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-qt-build-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -804,7 +833,18 @@
       "spdx_declared": "MIT OR Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-qt-gen-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -819,7 +859,18 @@
         "qt_qml"
       ],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-qt-lib-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -830,7 +881,18 @@
       "spdx_declared": "MIT OR Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-qt-macro-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -841,7 +903,18 @@
       "spdx_declared": "MIT OR Apache-2.0",
       "features": [],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-qt-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {
@@ -2707,7 +2780,18 @@
         "serde"
       ],
       "manifest": "../../../../.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/qt-build-utils-0.10.0/Cargo.toml",
-      "license_files": [],
+      "license_files": [
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "curated": true
+        },
+        {
+          "path": "packaging/licenses/vendor/cxx-qt-Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "curated": true
+        }
+      ],
       "notice_files": []
     },
     {

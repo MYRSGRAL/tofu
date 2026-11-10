@@ -38,6 +38,86 @@ class NoticesTests(unittest.TestCase):
         }
         self.report = notices.inventory(self.metadata, self.root)
 
+    def test_curated_boundaries(self) -> None:
+        import hashlib
+
+        vendor = self.root / "packaging/licenses/vendor"
+        vendor.mkdir(parents=True)
+        data = b"Primary text\r\n  "
+        (vendor / "LICENSE-primary").write_bytes(data)
+        crate = self.root / "crate"
+        crate.mkdir()
+        (crate / "Cargo.toml").write_text("[package]\n")
+        package = self.metadata["packages"][0]
+        package["manifest_path"] = str(crate / "Cargo.toml")
+        package["source"] = "registry+fixture"
+        (crate / ".cargo_vcs_info.json").write_text(
+            json.dumps({"git": {"sha1": "a" * 40}})
+        )
+        (self.root / "Cargo.lock").write_text(
+            '[[package]]\nname="yonik-desktop"\nversion="1"\n'
+            'source="registry+fixture"\nchecksum="' + "b" * 64 + '"\n'
+        )
+        record = {
+            "name": "yonik-desktop",
+            "version": "1",
+            "source": "registry+fixture",
+            "checksum": "b" * 64,
+            "commit": "a" * 40,
+            "file": "LICENSE-primary",
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        manifest = vendor / "sources.json"
+        manifest.write_text(json.dumps([record]))
+        result = notices.curated_license(package, crate, self.root)
+        self.assertEqual(result[0]["sha256"], record["sha256"])
+        (self.root / "LICENSE").unlink()
+        report = notices.inventory(self.metadata, self.root)
+        self.assertTrue(report["packages"][0]["license_files"][0]["curated"])
+        with (
+            mock.patch.object(
+                notices, "__file__", str(self.root / "tools/check_linux_notices.py")
+            ),
+            mock.patch.object(
+                notices.subprocess,
+                "check_output",
+                return_value=json.dumps(self.metadata),
+            ),
+        ):
+            output = self.root / "report.json"
+            self.assertFalse(
+                notices.run(type("Args", (), {"output": output, "check": None})())
+            )
+            self.assertEqual(
+                (self.root / "texts" / record["sha256"]).read_bytes(), data
+            )
+            self.assertFalse(
+                notices.run(type("Args", (), {"output": None, "check": output})())
+            )
+        (self.root / "LICENSE").write_text("primary fixture")
+        for key, value in [
+            ("version", "2"),
+            ("source", "other"),
+            ("checksum", "c" * 64),
+            ("commit", "c" * 40),
+            ("sha256", "0" * 64),
+            ("file", "../LICENSE"),
+        ]:
+            with self.subTest(key=key):
+                changed = dict(record, **{key: value})
+                manifest.write_text(json.dumps([changed]))
+                with self.assertRaises(ValueError):
+                    notices.curated_license(package, crate, self.root)
+        manifest.write_text(json.dumps([record]))
+        for content in [b"", b" \r\n", b"tampered", b"x" * (notices.MAX_TEXT + 1)]:
+            (vendor / "LICENSE-primary").write_bytes(content)
+            with self.assertRaises(ValueError):
+                notices.curated_license(package, crate, self.root)
+        (vendor / "LICENSE-primary").unlink()
+        (vendor / "LICENSE-primary").symlink_to(self.root / "LICENSE")
+        with self.assertRaises(ValueError):
+            notices.curated_license(package, crate, self.root)
+
     def test_valid(self) -> None:
         self.assertEqual(notices.validate(self.report, self.metadata, self.root), [])
 
