@@ -331,7 +331,7 @@ pacman -Q
         run(
             ssh
             + [
-                "set -e; cd /home/builder/input; python tools/check_arch_package.py packaging/arch/*.pkg.tar.zst; pacman -U --noconfirm packaging/arch/*.pkg.tar.zst; pacman -Qkk yonik; systemctl is-active yonik-helper.service || test $? = 3"
+                'set -e; cd /home/builder/input; python tools/check_arch_package.py packaging/arch/*.pkg.tar.zst; pacman -U --noconfirm packaging/arch/*.pkg.tar.zst; pacman -Qkk yonik; if helper_state=$(systemctl is-active yonik-helper.service); then exit 1; else test $? = 3 && test "$helper_state" = inactive; fi'
             ],
             evidence / "install.log",
         )

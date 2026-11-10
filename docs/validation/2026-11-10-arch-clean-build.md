@@ -78,3 +78,8 @@ Fingerprint сверяется с закреплённым primary незави�
 P24 остаётся частичным: real helper registry/session acceptance принадлежит L08.
 P25 не закрыт: #68 содержит 8 missing license / unknown composition; notices,
 SPDX, release и побитовая воспроизводимость не приняты данным прогоном.
+
+
+## Исправление постоянной проверки автозапуска
+
+Root review обнаружил, что прежняя guest-команда принимала `is-active` как с exit0, так и с exit3. Regression исполняет точный фрагмент runner в отдельном Bash с функцией-заглушкой systemctl, без обращения к systemd хоста. RED: active/0 и failed/3 ошибочно приняты; GREEN: принимается только inactive/3, а active/0, failed/3, unknown/4 и error/1 отвергаются. Семь профильных Python-тестов и Ruff прошли. Логи: `local/validation/pr78-autostart-fix/` основного workspace. Actual VM и сборка пакета повторно не запускались; исходный install.log по-прежнему показывает inactive. Изменение не расширяет приёмку на текущий main или новые auth/TUN fixes PR73.
