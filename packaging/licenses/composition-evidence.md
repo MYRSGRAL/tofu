@@ -47,7 +47,7 @@ BUILDINFO: qt6-base/declarative 6.12.0-4, qt6-svg 6.12.0-1,
 sqlite 3.54.1-1, glibc 2.44+r50+g1848099f063e-1. Это версии build environment,
 не доказанная принадлежность загруженных файлов или комплект notices Arch.
 Xray: 45 module rows, main `(devel)`, revision отсутствует. sing-box: 141 module
-rows, main `(devel)`, revision c005f35300ce76427dc285481ec5695f5b179cd2, modified=false.
+rows, main `v1.14.4`, revision c005f35300ce76427dc285481ec5695f5b179cd2, modified=false.
 Оба CGO_ENABLED=0; это не доказательство отсутствия всех native/static компонентов.
 Module h1 — checksum module content, не checksum исходного архива главного проекта.
 
