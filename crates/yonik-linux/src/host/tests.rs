@@ -170,3 +170,28 @@ async fn core_has_its_own_process_group_for_terminal_signal_isolation() {
     process::terminate(&mut child).await.unwrap();
     assert_eq!(group, pid);
 }
+
+#[tokio::test]
+#[ignore = "Нужен явно заданный закреплённый YONIK_EVENT_TEST_CORE"]
+async fn event_log_pinned_native_exit_status() {
+    use crate::event_log::{EventCode, EventLog, EventSource, LogFilter};
+    let path = std::env::var_os("YONIK_EVENT_TEST_CORE").expect("Закреплённое ядро");
+    let image = snapshot(path);
+    let log = EventLog::new();
+    let mut child = image
+        .command()
+        .arg("version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let status = child.wait().await.unwrap();
+    assert!(status.success());
+    process::terminate_logged(&mut child, Some(&log))
+        .await
+        .unwrap();
+    let page = log.read(0, LogFilter::default(), 1).unwrap();
+    assert_eq!(page.events[0].source, EventSource::Engine);
+    assert_eq!(page.events[0].code, EventCode::ProcessExited);
+    assert_eq!(page.events[0].value, Some(0));
+}
