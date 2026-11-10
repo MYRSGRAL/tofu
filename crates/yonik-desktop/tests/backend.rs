@@ -364,6 +364,10 @@ fn health_target_settings_are_validated_without_disclosing_url() {
     app.send(json!({"command":"set_probe_target","url":"https://health.invalid/private?health-token=hidden","expected_status":200}));
     let custom = app.wait(|v| v["probe_custom"] == true);
     assert_eq!(custom["probe_expected_status"], 200);
+    assert_eq!(custom["probe_persistent"], false);
+    let stored = fs::read_to_string(directory.0.join("preferences.json")).expect("настройки");
+    assert!(!stored.contains("health-token"));
+    assert!(!stored.contains("health.invalid"));
     for (url, status) in [
         ("http://health.invalid/", 204),
         ("https://user:secret@health.invalid/", 204),
@@ -1274,4 +1278,66 @@ fn cancel_refresh_checks_id_retains_busy_until_terminal_and_preserves_sources() 
     assert!(finished["refresh_token"].is_null());
     app.close();
     server.join().expect("сокет закрыт");
+}
+
+#[test]
+fn preferences_reopen_applies_engine_port_probe_and_language() {
+    let directory = Directory::new();
+    let mut first = Harness::new(directory.config());
+    first.wait(|v| v["ready"] == true);
+    for (command, field, expected) in [
+        (
+            json!({"command":"set_engine","engine":"sing-box"}),
+            "engine",
+            json!("sing-box"),
+        ),
+        (
+            json!({"command":"set_listen_port","port":18889}),
+            "port",
+            json!(18889),
+        ),
+        (
+            json!({"command":"set_probe_target","url":"https://example.com/health","expected_status":200}),
+            "probe_expected_status",
+            json!(200),
+        ),
+        (
+            json!({"command":"set_language","language":"en"}),
+            "language",
+            json!("en"),
+        ),
+    ] {
+        first.send(command);
+        first.wait(|v| v[field] == expected);
+    }
+    first.close();
+    let mut second = Harness::new(directory.config());
+    let state = second.wait(|v| v["ready"] == true);
+    assert_eq!(state["engine"], "sing-box");
+    assert_eq!(state["port"], 18889);
+    assert_eq!(state["probe_expected_status"], 200);
+    assert_eq!(state["language"], "en");
+    assert_eq!(state["probe_custom"], true);
+    second.send(json!({"command":"reset_listen_port"}));
+    second.wait(|v| v["port"] != 18889);
+    second.close();
+    let raw = fs::read_to_string(directory.0.join("preferences.json")).expect("настройки");
+    assert!(raw.contains("\"port\":null"));
+}
+
+#[test]
+fn damaged_preferences_notify_and_survive_settings_commands() {
+    let directory = Directory::new();
+    let path = directory.0.join("preferences.json");
+    fs::write(&path, b"{").expect("fixture");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("fixture");
+    let mut app = Harness::new(directory.config());
+    let state = app.wait(|v| v["ready"] == true);
+    assert_eq!(state["preferences_warning"], true);
+    assert_eq!(state["engine"], "xray");
+    app.send(json!({"command":"set_engine","engine":"sing-box"}));
+    let state = app.wait(|v| v["error"] == "preferences_write");
+    assert_eq!(state["engine"], "xray");
+    app.close();
+    assert_eq!(fs::read(path).expect("исходник"), b"{");
 }
