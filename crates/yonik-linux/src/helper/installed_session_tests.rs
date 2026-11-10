@@ -10,7 +10,11 @@ use std::{
 };
 #[path = "../../tests/common/vm_lock.rs"]
 mod gate_lock;
-fn guest_guard() -> Result<std::fs::File, Box<dyn std::error::Error>> {
+struct GuestGate {
+    _diagnostics: crate::helper::session_network::diagnostics::Scope,
+    _lock: std::fs::File,
+}
+fn guest_guard() -> Result<GuestGate, Box<dyn std::error::Error>> {
     if std::env::var_os("YONIK_SYSTEMD_VM_GATE").as_deref() != Some(std::ffi::OsStr::new("1"))
         || !rustix::process::geteuid().is_root()
     {
@@ -54,7 +58,11 @@ fn guest_guard() -> Result<std::fs::File, Box<dyn std::error::Error>> {
     if rustix::fs::fstatfs(directory)?.f_type as u64 != 0x6367_7270 {
         return Err("Требуется cgroup v2".into());
     }
-    Ok(gate_lock::acquire()?)
+    let lock = gate_lock::acquire()?;
+    Ok(GuestGate {
+        _diagnostics: crate::helper::session_network::diagnostics::Scope::after_guest_guard(),
+        _lock: lock,
+    })
 }
 async fn endpoint_reachable() -> bool {
     tokio::time::timeout(
@@ -246,4 +254,30 @@ async fn diagnose_first_xray_apply() {
     assert_eq!(apply.unwrap()["state"], "tunnel_starting");
     assert_eq!(stop.unwrap()["state"], "no_managed_policy");
     assert_clean().await;
+}
+
+#[tokio::test]
+#[ignore = "Только guarded disposable VM: один sing-box protected Apply, без retries"]
+async fn diagnose_sing_box_protected_apply() {
+    let _gate = guest_guard().unwrap();
+    assert!(endpoint_reachable().await, "Peer недоступен до effects");
+    let f = fixture().await;
+    let prepared = f.call("Prepare", &profile("sing-box", true)).await.unwrap();
+    let request = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    let apply = f.call("Apply", &request).await;
+    eprintln!("Protected sing-box Apply: {:?}", apply);
+    let stop = f.call("Stop", r#"{"version":1}"#).await;
+    eprintln!("Protected sing-box Stop: {:?}", stop);
+    // Ошибка сохраняет restrictive policy для evidence; нет Unlock ради SSH.
+    if apply.is_err() || stop.is_err() {
+        f.shutdown().await;
+        assert_eq!(apply.unwrap()["state"], "tunnel_starting");
+        assert_eq!(stop.unwrap()["state"], "recovery_required");
+        return;
+    }
+    assert_eq!(apply.unwrap()["state"], "tunnel_starting");
+    assert_eq!(stop.unwrap()["state"], "recovery_required");
+    f.call("Unlock", r#"{"version":1}"#).await.unwrap();
+    assert_clean().await;
+    f.shutdown().await;
 }

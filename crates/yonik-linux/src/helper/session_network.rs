@@ -1,5 +1,8 @@
 //! Неизменяемый сетевой план системной сессии. Авторизацию и порядок worker/nft
 //! обеспечивает session host; этот модуль не публикует Applied/Connected.
+#[cfg(test)]
+#[path = "external_diagnostics.rs"]
+pub(in crate::helper) mod diagnostics;
 use crate::{
     LinuxTopology,
     managed_network::{
@@ -321,15 +324,62 @@ impl SessionNetworkPlan {
         journal: &Journal,
         index: u32,
     ) -> Result<(), TunError> {
-        self.check_records(journal, index, Some(7))?;
+        let records = self.check_records(journal, index, Some(7));
+        #[cfg(test)]
+        let records = records.inspect_err(|&error| {
+            diagnostics::failure(
+                "records",
+                error,
+                (baseline, baseline_capture),
+                (&current, current_capture),
+                journal,
+                None,
+                (self, index),
+            );
+        });
+        records?;
+        #[cfg(test)]
+        let raw = diagnostics::snapshot(&current);
         let projected =
-            session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)?;
+            match session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    #[cfg(test)]
+                    if let Some(raw) = raw.as_ref() {
+                        diagnostics::failure(
+                            "projection",
+                            error,
+                            (baseline, baseline_capture),
+                            (raw, current_capture),
+                            journal,
+                            None,
+                            (self, index),
+                        );
+                    }
+                    #[cfg(test)]
+                    if raw.is_none() {
+                        diagnostics::stage("projection", error);
+                    }
+                    return Err(error);
+                }
+            };
         if !crate::network::same_captured_topology(
             baseline,
             baseline_capture,
             &projected,
             current_capture,
         ) {
+            #[cfg(test)]
+            diagnostics::failure(
+                "equivalence",
+                TunError::Evidence,
+                (baseline, baseline_capture),
+                (&projected, current_capture),
+                journal,
+                raw.as_ref(),
+                (self, index),
+            );
             return Err(TunError::Evidence);
         }
         Ok(())

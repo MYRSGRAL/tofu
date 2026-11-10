@@ -92,6 +92,44 @@ pub(crate) fn same_captured_topology(
 ) -> bool {
     same_topology(left, right, Some((left_time, right_time)))
 }
+#[cfg(test)]
+pub(crate) fn diagnostic_class_matches(
+    left: &LinuxTopology,
+    lt: TopologyCapture,
+    right: &LinuxTopology,
+    rt: TopologyCapture,
+) -> [(&'static str, bool); 6] {
+    [
+        ("namespace", left.namespace == right.namespace),
+        (
+            "link",
+            left.links.len() == right.links.len()
+                && left
+                    .links
+                    .iter()
+                    .zip(&right.links)
+                    .all(|(a, b)| same_link(a, b)),
+        ),
+        (
+            "address",
+            left.addresses.len() == right.addresses.len()
+                && left.addresses.iter().zip(&right.addresses).all(|(a, b)| {
+                    same_address(a, b, Some((lt.family(a.family), rt.family(b.family))))
+                }),
+        ),
+        (
+            "route",
+            left.routes.len() == right.routes.len()
+                && left
+                    .routes
+                    .iter()
+                    .zip(&right.routes)
+                    .all(|(a, b)| same_route(a, b, Some((lt.route(a.family), rt.route(b.family))))),
+        ),
+        ("rule", left.rules == right.rules),
+        ("nexthop", left.nexthops == right.nexthops),
+    ]
+}
 fn same_topology(
     left: &LinuxTopology,
     right: &LinuxTopology,

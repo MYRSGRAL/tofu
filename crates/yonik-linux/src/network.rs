@@ -2,6 +2,8 @@
 
 mod bus;
 mod equivalence;
+#[cfg(test)]
+pub(crate) use equivalence::diagnostic_class_matches;
 pub(crate) use equivalence::{
     same_captured_kernel_route, same_captured_topology, same_external_topology,
 };
