@@ -2,7 +2,11 @@
 
 use crate::SubscriptionPolicy;
 use futures_util::StreamExt;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
 use zbus::{Connection, MatchRule, MessageStream, message::Type};
 
@@ -14,6 +18,15 @@ const PP: &str = "org.freedesktop.UPower.PowerProfiles";
 const PP_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 const SERVICES: [(&str, &str); 3] = [(NM, NM_PATH), (UP, UP_PATH), (PP, PP_PATH)];
 type Properties = HashMap<String, zbus::zvariant::OwnedValue>;
+type Owners = HashMap<&'static str, String>;
+
+fn retry_delay(previous: Duration, healthy_for: Option<Duration>) -> Duration {
+    if healthy_for.is_some_and(|duration| duration >= Duration::from_secs(30)) {
+        Duration::from_secs(1)
+    } else {
+        previous
+    }
+}
 
 fn policy(
     state: Option<u32>,
@@ -40,22 +53,30 @@ pub async fn system_subscription_policy(sender: watch::Sender<SubscriptionPolicy
     let mut delay = std::time::Duration::from_secs(1);
     loop {
         sender.send_replace(Default::default());
+        let mut healthy_since = None;
         if let Ok(connection) = Connection::system().await {
-            delay = std::time::Duration::from_secs(1);
-            let _ = run(connection, sender.clone()).await;
+            let _ = run_tracked(connection, sender.clone(), &mut healthy_since).await;
         }
         sender.send_replace(Default::default());
+        delay = retry_delay(delay, healthy_since.map(|since| since.elapsed()));
         tokio::time::sleep(delay).await;
         delay = (delay * 2).min(std::time::Duration::from_secs(30));
     }
 }
 
-async fn snapshot(connection: &Connection) -> zbus::Result<SubscriptionPolicy> {
+async fn snapshot(
+    connection: &Connection,
+    owners: &Mutex<Owners>,
+) -> zbus::Result<SubscriptionPolicy> {
     let bus = zbus::fdo::DBusProxy::new(connection).await?;
     let mut maps = Vec::with_capacity(3);
     for (name, path) in SERVICES {
         // Уникальный адрес исключает ответ нового владельца в старой эпохе.
         let owner = bus.get_name_owner(name.try_into()?).await?;
+        owners
+            .lock()
+            .map_err(|_| zbus::Error::Failure("Таблица владельцев недоступна".into()))?
+            .insert(name, owner.as_str().to_owned());
         let proxy = zbus::Proxy::new(
             connection,
             owner.as_str(),
@@ -77,31 +98,65 @@ async fn snapshot(connection: &Connection) -> zbus::Result<SubscriptionPolicy> {
     Ok(policy(state, metered, battery, profile))
 }
 
-fn relevant(message: &zbus::Message) -> bool {
+fn relevant(message: &zbus::Message, owners: &Owners) -> bool {
     let header = message.header();
+    if header.message_type() != Type::Signal {
+        return false;
+    }
     match header.member().map(|v| v.as_str()) {
         Some("NameOwnerChanged")
             if header
                 .sender()
-                .is_some_and(|s| s.as_str() == "org.freedesktop.DBus") =>
+                .is_some_and(|s| s.as_str() == "org.freedesktop.DBus")
+                && header
+                    .interface()
+                    .is_some_and(|i| i.as_str() == "org.freedesktop.DBus")
+                && header
+                    .path()
+                    .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus") =>
         {
             message
                 .body()
                 .deserialize::<(String, String, String)>()
-                .map_or(true, |(name, _, _)| {
-                    SERVICES.iter().any(|(n, _)| *n == name)
-                })
+                .is_ok_and(|(name, _, _)| SERVICES.iter().any(|(n, _)| *n == name))
         }
-        Some("PropertiesChanged") => SERVICES
-            .iter()
-            .any(|(_, path)| header.path().is_some_and(|p| p.as_str() == *path)),
+        Some("PropertiesChanged")
+            if header
+                .interface()
+                .is_some_and(|i| i.as_str() == "org.freedesktop.DBus.Properties") =>
+        {
+            let Ok((interface, _, _)) = message
+                .body()
+                .deserialize::<(String, Properties, Vec<String>)>()
+            else {
+                return false;
+            };
+            SERVICES.iter().any(|(name, path)| {
+                interface == *name
+                    && header.path().is_some_and(|p| p.as_str() == *path)
+                    && header.sender().is_some_and(|sender| {
+                        owners
+                            .get(name)
+                            .is_some_and(|owner| owner == sender.as_str())
+                    })
+            })
+        }
         _ => false,
     }
 }
 
+#[cfg(test)]
 async fn run(
     connection: Connection,
     sender: watch::Sender<SubscriptionPolicy>,
+) -> zbus::Result<()> {
+    run_tracked(connection, sender, &mut None).await
+}
+
+async fn run_tracked(
+    connection: Connection,
+    sender: watch::Sender<SubscriptionPolicy>,
+    healthy_since: &mut Option<Instant>,
 ) -> zbus::Result<()> {
     // Одна bounded очередь сохраняет порядок owner/property событий. Подписка
     // завершена до снимка; любое событие во время снимка отменяет весь снимок.
@@ -109,14 +164,15 @@ async fn run(
     let mut events = MessageStream::for_match_rule(rule, &connection, Some(64)).await?;
     loop {
         sender.send_replace(Default::default());
-        let query = snapshot(&connection);
+        let owners = Mutex::new(Owners::new());
+        let query = snapshot(&connection, &owners);
         tokio::pin!(query);
         let result = loop {
             tokio::select! {
                 biased;
                 event = events.next() => {
                     let event = event.ok_or(zbus::Error::Failure("Шина закрыта".into()))??;
-                    if relevant(&event) { break None; }
+                    if relevant(&event, &*owners.lock().map_err(|_| zbus::Error::Failure("Таблица владельцев недоступна".into()))?) { break None; }
                 }
                 result = &mut query => break Some(result),
             }
@@ -124,13 +180,23 @@ async fn run(
         let Some(result) = result else {
             continue;
         };
+        if result.is_ok() {
+            healthy_since.get_or_insert_with(Instant::now);
+        } else {
+            *healthy_since = None;
+        }
         sender.send_replace(result.unwrap_or_default());
         loop {
             let event = events
                 .next()
                 .await
                 .ok_or(zbus::Error::Failure("Шина закрыта".into()))??;
-            if relevant(&event) {
+            if relevant(
+                &event,
+                &*owners
+                    .lock()
+                    .map_err(|_| zbus::Error::Failure("Таблица владельцев недоступна".into()))?,
+            ) {
                 break;
             }
         }
@@ -140,6 +206,61 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn посторонний_sender_не_инвалидирует_снимок() {
+        let owners = Owners::from([(NM, ":1.7".into())]);
+        for (sender, interface, path, payload, expected) in [
+            (
+                ":1.99",
+                "org.freedesktop.DBus.Properties",
+                NM_PATH,
+                NM,
+                false,
+            ),
+            (":1.7", "org.example.Other", NM_PATH, NM, false),
+            (
+                ":1.7",
+                "org.freedesktop.DBus.Properties",
+                UP_PATH,
+                NM,
+                false,
+            ),
+            (
+                ":1.7",
+                "org.freedesktop.DBus.Properties",
+                NM_PATH,
+                UP,
+                false,
+            ),
+            (":1.7", "org.freedesktop.DBus.Properties", NM_PATH, NM, true),
+        ] {
+            let message = zbus::Message::signal(path, interface, "PropertiesChanged")
+                .unwrap()
+                .sender(sender)
+                .unwrap()
+                .build(&(payload, Properties::new(), Vec::<String>::new()))
+                .unwrap();
+            assert_eq!(relevant(&message, &owners), expected);
+        }
+    }
+
+    #[test]
+    fn backoff_сбрасывается_только_после_здоровой_работы() {
+        use std::time::Duration;
+        let mut delay = Duration::from_secs(1);
+        for expected in [1, 2, 4, 8, 16, 30, 30] {
+            // Успешное подключение без успешного снимка не является восстановлением.
+            let wait = retry_delay(delay, None);
+            assert_eq!(wait, Duration::from_secs(expected));
+            delay = (wait * 2).min(Duration::from_secs(30));
+        }
+        assert_eq!(retry_delay(delay, Some(Duration::from_secs(29))), delay);
+        assert_eq!(
+            retry_delay(delay, Some(Duration::from_secs(30))),
+            Duration::from_secs(1)
+        );
+    }
 
     #[test]
     fn допускается_только_подтвержденная_политика() {
@@ -332,6 +453,28 @@ mod bus_tests {
         })
         .await
         .unwrap();
+        receiver.borrow_and_update();
+        let stranger = zbus::connection::Builder::address(address.trim())
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        stranger
+            .emit_signal(
+                None::<&str>,
+                NM_PATH,
+                "org.freedesktop.DBus.Properties",
+                "PropertiesChanged",
+                &(NM, Properties::new(), vec!["Metered"]),
+            )
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), receiver.changed())
+                .await
+                .is_err(),
+            "чужой sender не публикует даже временный unknown"
+        );
         for value in [1, 0, 2] {
             metered.store(value, std::sync::atomic::Ordering::SeqCst);
             server
