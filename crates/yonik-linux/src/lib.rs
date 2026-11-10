@@ -78,3 +78,5 @@ pub mod policy_test_support;
 
 #[cfg(target_os = "linux")]
 pub mod presets;
+#[cfg(target_os = "linux")]
+pub mod system_client;

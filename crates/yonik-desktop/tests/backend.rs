@@ -815,8 +815,10 @@ fn proxy_source_has_explicit_capability_error_and_custom_port_is_reported() {
     let mut app = Harness::new(config);
     assert_eq!(app.wait(|value| value["ready"] == true)["port"], 18888);
     app.send(json!({"command":"add_source","name":"Proxy","url":"https://fixture.invalid/invented-secret","local_exception":false,"route":"proxy"}));
+    app.wait(|value| value["source_id"].is_i64());
+    app.send(json!({"command":"refresh"}));
     let rejected = app.wait(|value| value["error"] == "unsupported_proxy");
-    assert_eq!(rejected["sources_total"], 0);
+    assert_eq!(rejected["sources_total"], 1);
     app.close();
 }
 
@@ -1692,4 +1694,90 @@ fn p2_ручной_b_не_пересекается_с_плановым_a_и_не
     app.wait(|v| v["pending"].is_null());
     app.close();
     server.join().unwrap();
+}
+
+/// Запускается с private D-Bus и TLS/VLESS fixture из tools/engine_host.py.
+#[test]
+#[ignore = "требует YONIK_PROXY_ENGINE_DIR/PROBE_URL/PROFILE от локального native fixture"]
+fn native_session_proxy_manual_and_scheduled_refresh() {
+    let dir = Directory::new();
+    let engines = PathBuf::from(std::env::var("YONIK_PROXY_ENGINE_DIR").expect("engines"));
+    let profile = std::env::var("YONIK_PROXY_PROFILE").expect("profile");
+    let probe = std::env::var("YONIK_PROXY_PROBE_URL").expect("probe");
+    let engine = std::env::var("YONIK_PROXY_ENGINE").expect("engine");
+    let config = || HostConfig::new(dir.0.clone(), engines.clone()).with_ephemeral_key([77; 32]);
+    let (held_sender, held) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let requests = AtomicU64::new(0);
+    let (url, server) = fixture_with_requests(
+        vec![profile.clone(), profile.clone(), profile.clone(), profile],
+        move |_| {
+            if requests.fetch_add(1, Ordering::SeqCst) == 3 {
+                held_sender.send(()).expect("held request");
+                released
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("release");
+            }
+        },
+    );
+    let mut app = Harness::new(config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_engine","engine":engine}));
+    app.wait(|v| v["engine"] == engine);
+    app.send(json!({"command":"add_source","name":"Bootstrap","url":url,"local_exception":true,"route":"direct"}));
+    app.wait(|v| v["source_id"].is_i64());
+    app.send(json!({"command":"refresh"}));
+    let imported = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+    app.send(json!({"command":"select_profile","id":imported["profiles"][0]["id"],"revision":imported["revision"]}));
+    app.wait(|v| v["selected_profile"].is_i64());
+    app.send(json!({"command":"set_probe_target","url":probe,"expected_status":204}));
+    app.wait(|v| v["probe_custom"] == true);
+    app.send(json!({"command":"connect"}));
+    app.wait(|v| v["status"] == "Connected");
+    app.send(json!({"command":"add_source","name":"Proxy","url":url,"local_exception":true,"route":"proxy"}));
+    let proxy = app.wait(|v| v["source_name"] == "Proxy");
+    let proxy_id = proxy["source_id"].clone();
+    app.send(json!({"command":"refresh"}));
+    app.wait(|v| v["source_id"] == proxy_id && v["total"] == 1 && v["busy"] == false);
+    app.send(json!({"command":"stop"}));
+    app.wait(|v| v["status"] == "Disconnected");
+    app.send(json!({"command":"refresh"}));
+    app.wait(|v| v["error"] == "unsupported_proxy" && v["busy"] == false);
+    app.send(json!({"command":"delete_source","id":imported["source_id"]}));
+    app.wait(|v| v["sources_total"] == 1);
+    app.close();
+    // Новый host восстанавливает route и schedule, но не сессию: готовность не выдумывается.
+    сделать_overdue(&dir);
+    let mut app = Harness::new(config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_engine","engine":engine}));
+    app.wait(|v| v["engine"] == engine);
+    app.send(json!({"command":"select_source","id":proxy_id}));
+    let selected = app.wait(|v| v["source_id"] == proxy_id && v["total"] == 1);
+    app.send(json!({"command":"select_profile","id":selected["profiles"][0]["id"],"revision":selected["revision"]}));
+    app.wait(|v| v["selected_profile"].is_i64());
+    app.send(json!({"command":"set_probe_target","url":probe,"expected_status":204}));
+    app.wait(|v| v["probe_custom"] == true);
+    app.send(json!({"command":"connect"}));
+    app.wait(|v| v["status"] == "Connected");
+    app.send(json!({"command":"subscription_visibility","visible":true}));
+    app.host
+        .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+            online: true,
+            ..Default::default()
+        })
+        .expect("policy");
+    app.wait(|v| !v["pending"].is_null());
+    app.send(json!({"command":"discard_refresh"}));
+    app.wait(|v| v["pending"].is_null());
+    app.send(json!({"command":"refresh"}));
+    app.wait(|v| v["busy"] == true);
+    held.recv_timeout(Duration::from_secs(5))
+        .expect("реальный proxy HTTP запрос");
+    app.send(json!({"command":"stop"}));
+    release.send(()).expect("release HTTP");
+    let stopped = app.wait(|v| v["status"] == "Disconnected" && v["busy"] == false);
+    assert!(stopped["pending"].is_null());
+    app.close();
+    server.join().expect("HTTP fixture");
 }

@@ -11,3 +11,6 @@ pub use backend::{DesktopError, DesktopHost, HostConfig};
 mod preferences;
 
 pub mod editor;
+
+#[cfg(target_os = "linux")]
+pub mod system_session;

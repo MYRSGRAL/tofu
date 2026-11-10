@@ -15,4 +15,7 @@ pub use policy::{
     Action, Conditions, Decision, Flow, Policy, PrivateNetwork, Route, Rule, RuleOrigin,
 };
 
+mod dns_policy;
+pub use dns_policy::{DnsPolicy, NativeDnsMode};
+
 pub mod policy_diagnostics;
