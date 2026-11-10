@@ -15,12 +15,13 @@ worker и очистку. Этот план продолжает P09/P12/P13/P19
 реализованы. В namespace проверен отдельный ненулевой UID, zero-capability
 Check и NET_ADMIN-only Run обоих ядер через TUN/RPDB с peer за veth.
 Private-bus tests подтверждают отмену, asynchronous jobs и lifecycle guards.
-Пункты ниже остаются открытыми до полной приёмки: эти доказательства не
-заменяют установленный systemd unit, cgroup tree и session host.
+[Установленные units в Arch VM](../../validation/2026-11-10-installed-worker.md)
+прошли отдельную проверку dedicated user, cgroup tree, setsid, BindsTo/recover
+и TUN traffic. Session host и упрямый потомок для TERM→KILL ещё не приняты.
 
 ## Порядок интеграции
 
-- [ ] Отдельный закреплённый systemd worker template, как предусмотрено
+- [x] Отдельный закреплённый systemd worker template, как предусмотрено
   platforms.md: выделенный системный пользователь, отдельная cgroup,
   фиксированный executable/argv/env, доступ только к конфигурации текущей
   сессии и `/dev/net/tun`. Определить и проверить минимальные capability обоих
@@ -58,20 +59,20 @@ Private-bus tests подтверждают отмену, asynchronous jobs и li
 Actual unit gate выполнять в одноразовой Linux VM, чтобы проверить systemd,
 cgroup v2, установленный worker user, реальные unit-файлы, fork/setsid и
 helper crash без установки helper на host. Локально доступны QEMU, xorriso,
-SSH и чтение/запись /dev/kvm; запуск ещё не проверен. Образ брать только из
+SSH и чтение/запись /dev/kvm; первый запуск и три actual gates прошли. Образ брать только из
 официального источника с проверкой целостности. VM, overlay, seed и временные
 ключи — в собственном transient task-каталоге под root flock; evidence и нужные
 артефакты сохранить вне TTL до остановки и очистки VM. VM gate не заменяет
 полную приёмку приложения на CachyOS/KDE.
 
-- [ ] Настоящие Xray/sing-box и compiler в отдельной сети: TCP/UDP, обе семьи,
+- [x] Настоящие Xray/sing-box и compiler в отдельной сети: TCP/UDP, обе семьи,
   endpoint за veth, отсутствие зацикливания благодаря socket mark; отрицательный
   контроль без worker/peer и обратный cleanup.
 - [ ] Подмена registry/config, лишние поля/пути, stale/consumed artifact,
   конкурирующие Connect, отмена Validate/Apply, поздние события и repeated Stop.
 - [ ] Worker exit/fork/setsid, зависший потомок, helper SIGKILL/restart и cgroup
   fence: подтверждённое отсутствие старого worker до повторного Apply.
-- [ ] Реальные минимальные права и systemd hardening обоих workers; готовность
+- [x] Реальные минимальные права и systemd hardening обоих workers; готовность
   unit-файла или fake-bus тест не заменяет эту проверку.
 - [ ] Изменение сети/приватный VPN/LAN и DNS/Fake-IP проходят отдельные матрицы.
   Пока они не доказаны, соответствующие возможности остаются unsupported.
