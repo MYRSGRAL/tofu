@@ -70,11 +70,19 @@ escaped duplicate keys, oversized outbound, depth, IPv6/gRPC и legacy alterId.
 этого отказа не менялся.
 
 Краткое evidence сохранено в этом отчёте вне TTL build-каталога. Полные локальные
-логи: `/tmp/yonik-xray-evidence/workspace-test-final.log`, `protocols.log`,
+логи: `local/validation/xray-json-protocols-original/workspace-test-final.log`, `protocols.log`,
 `clippy-final.log`. Бинарники для передачи не требуются. Перед завершением активных
 сборок этого task не осталось; собственный Cargo target очищен штатным cargo clean.
 
 ## Остаток и ограничения
+
+Независимое review выявило P2: один native ALPN-токен с запятой превращался
+после URI-преобразования в два протокола. Регрессия на VMess/Trojan, один/два
+элемента и обычный контрольный список сначала упала на прежнем коде.
+Теперь непредставимый ALPN отклоняет managed extraction до склейки; полный
+native JSON остаётся сохранённым. Все тесты yonik-import после исправления
+прошли. Логи red/green и clippy сохранены в основном workspace:
+`local/validation/review51-{alpn-red,alpn-green,clippy}.log`.
 
 Отдельный PR требует независимого review root перед merge. Вложенных агентов нет.
 Приёмка всего P04, Android, native config execution, helper, routing и listeners

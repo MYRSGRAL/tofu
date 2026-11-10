@@ -313,7 +313,15 @@ fn stream_parameters(node: &Value) -> Result<(Parameters, bool), RecordError> {
                     .as_array()
                     .ok_or_else(invalid)?
                     .iter()
-                    .map(|v| v.as_str().ok_or_else(invalid))
+                    .map(|v| {
+                        let token = v.as_str().ok_or_else(invalid)?;
+                        // URI-модель разделяет ALPN запятыми и не может сохранить
+                        // такую запятую внутри одного native-токена.
+                        if token.contains(',') {
+                            return Err(invalid());
+                        }
+                        Ok(token)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 parameters.push(("alpn", parts.join(",")));
             }

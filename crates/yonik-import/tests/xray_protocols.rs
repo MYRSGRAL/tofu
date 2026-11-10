@@ -52,6 +52,30 @@ fn извлекает_оба_протокола_и_сохраняет_intent_и_
 }
 
 #[test]
+fn alpn_с_запятой_не_превращается_в_несколько_протоколов() {
+    for protocol in ["vmess", "trojan"] {
+        for alpn in [json!(["h2,http/1.1"]), json!(["h2", "custom,token"])] {
+            let mut node = узел(protocol);
+            node["streamSettings"]["tlsSettings"]["alpn"] = alpn;
+            let raw = json!({"outbounds":[node]}).to_string();
+            let report = import_bytes(raw.as_bytes().to_vec()).unwrap();
+            assert!(
+                report.servers.is_empty(),
+                "{protocol}: непредставимый ALPN принят"
+            );
+            assert_eq!(report.issues.len(), 1);
+            assert_eq!(report.native_json.unwrap().expose(), raw);
+        }
+        let mut node = узел(protocol);
+        node["streamSettings"]["tlsSettings"]["alpn"] = json!(["h2", "http/1.1"]);
+        let report = import_bytes(json!({"outbounds":[node]}).to_string().into_bytes()).unwrap();
+        assert_eq!(report.servers.len(), 1);
+        assert!(report.issues.is_empty());
+        assert!(ServerIntent::from_server(&report.servers[0]).is_ok());
+    }
+}
+
+#[test]
 fn неоднозначные_массивы_отклоняются_целиком() {
     for protocol in ["vmess", "trojan"] {
         let key = if protocol == "vmess" {
