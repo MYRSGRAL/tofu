@@ -524,7 +524,8 @@ impl Backend {
         if worker_uid == uid {
             return Err(ServiceError::Unavailable);
         }
-        let plan = SessionNetworkPlan::reserve(owner, &baseline).map_err(unavailable)?;
+        let plan = SessionNetworkPlan::reserve_for_engine(owner, &baseline, request.engine)
+            .map_err(unavailable)?;
         let port = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .map_err(unavailable)?
             .local_addr()

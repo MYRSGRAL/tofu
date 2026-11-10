@@ -158,6 +158,13 @@ impl Action {
                 }
                 body[8..12].copy_from_slice(&1_u32.to_ne_bytes());
                 body[12..16].copy_from_slice(&1_u32.to_ne_bytes());
+                // Свой TUN использует только явно назначенные helper адреса.
+                // Устанавливаем NONE до attach, чтобы не запускать link-local/RS.
+                let mut inet6 = Vec::new();
+                attribute(&mut inet6, 8, &[1]); // IFLA_INET6_ADDR_GEN_MODE=NONE
+                let mut families = Vec::new();
+                attribute(&mut families, 10, &inet6); // AF_INET6
+                attribute(&mut body, 26, &families); // IFLA_AF_SPEC
                 attribute(&mut body, 4, &mtu.to_ne_bytes());
             }
             _ => {}

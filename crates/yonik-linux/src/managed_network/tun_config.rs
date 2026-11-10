@@ -466,10 +466,12 @@ impl TunExecutor {
         write::run(write::Action::SetLink { index, mtu }, operation).await?;
         let topology = self.configuration_snapshot().await?;
         if parent_index(self, journal, tun_id, &topology, true)? != Some(index)
-            || !topology
-                .links
-                .iter()
-                .any(|l| l.index == index && l.mtu == Some(mtu) && l.flags & 1 != 0)
+            || !topology.links.iter().any(|l| {
+                l.index == index
+                    && l.mtu == Some(mtu)
+                    && l.flags & 1 != 0
+                    && super::topology::addrgen_none(l)
+            })
         {
             return Err(TunError::Evidence);
         }

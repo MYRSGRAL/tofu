@@ -525,10 +525,21 @@ async fn real_namespace_persistent_tun_queue_contract() {
     let baseline = crate::read_topology(&mut cancel, super::DEADLINE)
         .await
         .unwrap();
-    let plan = crate::helper::SessionNetworkPlan::reserve(owner, &baseline).unwrap();
+    let sing_box = std::env::var_os("YONIK_TUN_ATTACH_ENGINE").as_deref()
+        == Some(std::ffi::OsStr::new("sing-box"));
+    let engine = if sing_box {
+        yonik_engine::Engine::SingBox
+    } else {
+        yonik_engine::Engine::Xray
+    };
+    let plan =
+        crate::helper::SessionNetworkPlan::reserve_for_engine(owner, &baseline, engine).unwrap();
     let mut journal =
         Journal::open(std::path::Path::new("/tmp/yonik-attach-diagnostic"), owner).unwrap();
     let index = plan.configure(&mut executor, &mut journal).await.unwrap();
+    plan.capture(&mut executor, &mut journal, index)
+        .await
+        .unwrap();
     // Отдельный causal control только в уже проверенном собственном namespace.
     // Production configure и fencing этим экспериментом не меняются.
     if std::env::var_os("YONIK_TUN_DIAGNOSTIC_ADDRGEN_NONE").as_deref()
@@ -562,9 +573,14 @@ async fn real_namespace_persistent_tun_queue_contract() {
         .await
         .unwrap();
     let before = before.links.into_iter().find(|l| l.index == index).unwrap();
-    let script = "import sys,fcntl,struct\nf=open('/dev/net/tun','r+b',buffering=0)\nfcntl.ioctl(f,0x400454ca,struct.pack('16sH',sys.argv[1].encode(),0x1001)+bytes(22))\nprint('READY',flush=True)\nsys.stdin.buffer.read(1)\n";
+    let script = "import sys,fcntl,struct\nf=open('/dev/net/tun','r+b',buffering=0)\nfcntl.ioctl(f,0x400454ca,struct.pack('16sH',sys.argv[1].encode(),int(sys.argv[2]))+bytes(22))\nif int(sys.argv[2]) & 0x4000:\n h=bytearray(4)\n fcntl.ioctl(f,0x800454d7,h,True)\n assert struct.unpack('I',h)[0]==10\nprint('READY',flush=True)\nsys.stdin.buffer.read(1)\n";
     let mut child = tokio::process::Command::new("/usr/bin/python3")
-        .args(["-c", script, std::str::from_utf8(&before.name).unwrap()])
+        .args([
+            "-c",
+            script,
+            std::str::from_utf8(&before.name).unwrap(),
+            if sing_box { "4097" } else { "20481" },
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -583,6 +599,24 @@ async fn real_namespace_persistent_tun_queue_contract() {
     let after = crate::read_topology(&mut cancel, super::DEADLINE)
         .await
         .unwrap();
+    plan.verify_external(&baseline, after.clone(), &journal, index)
+        .unwrap();
+    for alteration in 0..3 {
+        let mut foreign = after.clone();
+        let link = foreign.links.iter_mut().find(|l| l.index == index).unwrap();
+        match alteration {
+            0 => link.unknown.push(crate::NetworkAttribute {
+                kind: 9999,
+                value: vec![1],
+            }),
+            1 => link.alias = Some(b"foreign".to_vec()),
+            _ => link.index += 100,
+        }
+        assert!(
+            plan.verify_external(&baseline, foreign, &journal, index)
+                .is_err()
+        );
+    }
     let after = after.links.into_iter().find(|l| l.index == index).unwrap();
     super::diagnostic_link("raw", &before, &after);
     let same = same_link_contract(&before, &after);
@@ -597,9 +631,32 @@ async fn real_namespace_persistent_tun_queue_contract() {
     plan.cleanup_after_worker(&mut executor, &mut journal, index)
         .await
         .unwrap();
-    // Намеренный RED диагностического gate; неизвестные поля не маскируются.
+    // Оба framing режима заранее установлены; неизвестные поля не маскируются.
     assert!(
         same,
         "Контракт persistent TUN изменился при открытии очереди"
     );
+}
+
+#[test]
+fn link_binding_pins_vnet_header_for_both_engine_modes() {
+    fn attr(kind: u16, value: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&u16::try_from(value.len() + 4).unwrap().to_ne_bytes());
+        bytes.extend_from_slice(&kind.to_ne_bytes());
+        bytes.extend_from_slice(value);
+        bytes.resize((bytes.len() + 3) & !3, 0);
+        bytes
+    }
+    for expected in [0, 1] {
+        let mut before = super::super::tests::link(16, Some(b"tun"), false);
+        before.unknown.push(crate::NetworkAttribute {
+            kind: 18,
+            value: attr(2, &attr(5, &[expected])),
+        });
+        let mut after = before.clone();
+        assert!(same_link_contract(&before, &after));
+        after.unknown[0].value = attr(2, &attr(5, &[1 - expected]));
+        assert!(!same_link_contract(&before, &after));
+    }
 }

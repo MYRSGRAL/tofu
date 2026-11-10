@@ -4,7 +4,10 @@ use crate::{
     LinuxTopology,
     managed_network::{
         Journal, Ownership, RecordState, Resource, Scope,
-        tun::{TunAddress, TunError, TunExecutor, TunRoute, TunRule, session_external_topology},
+        tun::{
+            TunAddress, TunError, TunExecutor, TunRoute, TunRule,
+            session_external_topology_with_framing,
+        },
     },
 };
 use std::{
@@ -25,6 +28,7 @@ const ALLOCATION_ATTEMPTS: usize = 8;
 /// Существование плана не доказывает готовность транспорта или DNS.
 pub struct SessionNetworkPlan {
     owner: Ownership,
+    vnet_hdr: bool,
     name: u32,
     table: u32,
     priority: u32,
@@ -51,6 +55,18 @@ impl SessionNetworkPlan {
         }
         Err(TunError::Foreign)
     }
+    pub(crate) fn reserve_for_engine(
+        owner: Ownership,
+        baseline: &LinuxTopology,
+        engine: yonik_engine::Engine,
+    ) -> Result<Self, TunError> {
+        let mut plan = Self::reserve(owner, baseline)?;
+        plan.vnet_hdr = match engine {
+            yonik_engine::Engine::Xray => true,
+            yonik_engine::Engine::SingBox => false,
+        };
+        Ok(plan)
+    }
     fn candidate(owner: Ownership, random: [u8; 24]) -> Result<Self, TunError> {
         let number = |offset| {
             u32::from_le_bytes([
@@ -62,6 +78,7 @@ impl SessionNetworkPlan {
         };
         Ok(Self {
             owner,
+            vnet_hdr: false,
             name: number(0).max(1),
             table: 10000 + number(4) % 20000,
             priority: 10000 + number(8) % 10000,
@@ -243,7 +260,9 @@ impl SessionNetworkPlan {
         journal: &mut Journal,
     ) -> Result<u32, TunError> {
         self.check_records(journal, 0, Some(0))?;
-        let index = executor.ensure_tun(journal, TUN, self.name).await?;
+        let index = executor
+            .ensure_tun_with_framing(journal, TUN, self.name, self.vnet_hdr)
+            .await?;
         executor
             .configure_link(journal, TUN, u32::from(MTU))
             .await?;
@@ -286,7 +305,8 @@ impl SessionNetworkPlan {
         index: u32,
     ) -> Result<(), TunError> {
         self.check_records(journal, index, Some(7))?;
-        let projected = session_external_topology(current, journal, TUN, MTU)?;
+        let projected =
+            session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)?;
         if !crate::network::same_external_topology(&projected, baseline) {
             return Err(TunError::Evidence);
         }
@@ -302,7 +322,8 @@ impl SessionNetworkPlan {
         index: u32,
     ) -> Result<(), TunError> {
         self.check_records(journal, index, Some(7))?;
-        let projected = session_external_topology(current, journal, TUN, MTU)?;
+        let projected =
+            session_external_topology_with_framing(current, journal, TUN, MTU, self.vnet_hdr)?;
         if !crate::network::same_captured_topology(
             baseline,
             baseline_capture,
