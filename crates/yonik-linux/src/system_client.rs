@@ -1,0 +1,364 @@
+//! Клиент закрытого IPC v1. Потеря имени необратимо инвалидирует экземпляр.
+//!
+//! Отмена или deadline после отправки мутации означает неизвестный исход эффекта.
+//! Клиент никогда не повторяет RPC; controller должен явно запросить State.
+use crate::Cancellation;
+use futures_util::StreamExt;
+use serde::Deserialize;
+use std::{fmt, time::Duration};
+use tokio::{sync::watch, time::Instant};
+use zbus::{Connection, MatchRule, MessageStream, message::Type};
+const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
+const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
+const SERVICE_INTERFACE: &str = SERVICE_NAME;
+
+const MAX_JSON: usize = 64 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientError {
+    InvalidRequest,
+    Unsupported,
+    Busy,
+    Denied,
+    InvalidHandle,
+    Stale,
+    Timeout,
+    Cancelled,
+    Unavailable,
+    Deadline,
+    OwnerLost,
+    Protocol,
+}
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for ClientError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    NoManagedPolicy,
+    TunnelStarting,
+    VerifiedRules,
+    RecoveryRequired,
+    Unknown,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Capabilities {
+    version: u32,
+    pub public_protection: bool,
+    pub system_tun: bool,
+    pub allow_lan: bool,
+}
+/// Одноразовый непрозрачный handle привязан к экземпляру клиента; Debug скрыт.
+pub struct Prepared {
+    handle: [u8; 32],
+    owner: String,
+    peer: String,
+}
+impl fmt::Debug for Prepared {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Prepared(<скрыто>)")
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreparedReply {
+    version: u32,
+    handle: [u8; 32],
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateReply {
+    version: u32,
+    state: State,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ErrorReply {
+    version: u32,
+    error: String,
+}
+fn decode<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, ClientError> {
+    if json.len() > MAX_JSON || !json.trim_start().starts_with('{') {
+        return Err(ClientError::Protocol);
+    }
+    serde_json::from_str(json).map_err(|_| ClientError::Protocol)
+}
+fn version(version: u32) -> Result<(), ClientError> {
+    if version == 1 {
+        Ok(())
+    } else {
+        Err(ClientError::Protocol)
+    }
+}
+fn remote(_error: zbus::Error) -> ClientError {
+    ClientError::Unavailable
+}
+fn helper_error(json: &str) -> ClientError {
+    let Ok(reply) = decode::<ErrorReply>(json) else {
+        return ClientError::Protocol;
+    };
+    if version(reply.version).is_err() {
+        return ClientError::Protocol;
+    }
+    match reply.error.as_str() {
+        "invalid_request" => ClientError::InvalidRequest,
+        "unsupported" => ClientError::Unsupported,
+        "busy" => ClientError::Busy,
+        "authorization" => ClientError::Denied,
+        "invalid_handle" => ClientError::InvalidHandle,
+        "stale" => ClientError::Stale,
+        "timeout" => ClientError::Timeout,
+        "cancelled" => ClientError::Cancelled,
+        "unavailable" => ClientError::Unavailable,
+        _ => ClientError::Protocol,
+    }
+}
+
+pub struct SystemClient {
+    connection: Connection,
+    owner: String,
+    lost: watch::Receiver<bool>,
+    monitor: tokio::task::JoinHandle<()>,
+}
+impl Drop for SystemClient {
+    fn drop(&mut self) {
+        self.monitor.abort();
+    }
+}
+impl SystemClient {
+    /// Production использует только system bus, без session fallback.
+    pub async fn system(deadline: Instant, mut cancel: Cancellation) -> Result<Self, ClientError> {
+        let setup_cancel = cancel.clone();
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ClientError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(ClientError::Deadline),
+            result = async {
+                let connection = Connection::system().await.map_err(remote)?;
+                Self::on_connection(connection, deadline, setup_cancel).await
+            } => result,
+        }
+    }
+    /// Явная шина для embedding и private-bus acceptance; destination фиксирован.
+    pub async fn on_connection(
+        connection: Connection,
+        deadline: Instant,
+        mut cancel: Cancellation,
+    ) -> Result<Self, ClientError> {
+        let setup = async {
+            let rule = MatchRule::builder()
+                .msg_type(Type::Signal)
+                .sender("org.freedesktop.DBus")
+                .map_err(remote)?
+                .interface("org.freedesktop.DBus")
+                .map_err(remote)?
+                .member("NameOwnerChanged")
+                .map_err(remote)?
+                .path("/org/freedesktop/DBus")
+                .map_err(remote)?
+                .add_arg(SERVICE_NAME)
+                .map_err(remote)?
+                .build();
+            let mut changes = MessageStream::for_match_rule(rule, &connection, Some(16))
+                .await
+                .map_err(remote)?;
+            let owner = Self::owner(&connection).await?;
+            let (tx, lost) = watch::channel(false);
+            let monitor = tokio::spawn(async move {
+                // Любая смена owner, потеря потока или переполнение закрывает fence.
+                let _ = changes.next().await;
+                let _ = tx.send(true);
+            });
+            Ok(Self {
+                connection,
+                owner,
+                lost,
+                monitor,
+            })
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ClientError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(ClientError::Deadline),
+            result = setup => result,
+        }
+    }
+    async fn owner(connection: &Connection) -> Result<String, ClientError> {
+        let reply = connection
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "GetNameOwner",
+                &(SERVICE_NAME,),
+            )
+            .await
+            .map_err(remote)?;
+        let owner: String = reply
+            .body()
+            .deserialize()
+            .map_err(|_| ClientError::Protocol)?;
+        if !owner.starts_with(':') {
+            return Err(ClientError::Protocol);
+        }
+        Ok(owner)
+    }
+    async fn call(
+        &mut self,
+        method: &str,
+        request: String,
+        deadline: Instant,
+        mut cancel: Cancellation,
+    ) -> Result<String, ClientError> {
+        if *self.lost.borrow() || self.lost.has_changed().is_err() {
+            return Err(ClientError::OwnerLost);
+        }
+        if request.len() > MAX_JSON {
+            return Err(ClientError::InvalidRequest);
+        }
+        let operation = async {
+            let (reply, failed) = match self
+                .connection
+                .call_method(
+                    Some(self.owner.as_str()),
+                    SERVICE_PATH,
+                    Some(SERVICE_INTERFACE),
+                    method,
+                    &(request,),
+                )
+                .await
+            {
+                Ok(reply) => (reply, false),
+                Err(zbus::Error::MethodError(_, _, reply)) => (reply, true),
+                Err(error) => return Err(remote(error)),
+            };
+            if reply.header().sender().map(|s| s.as_str()) != Some(self.owner.as_str())
+                || reply.body().len() > MAX_JSON + 8
+            {
+                return Err(ClientError::Protocol);
+            }
+            let json: String = reply
+                .body()
+                .deserialize()
+                .map_err(|_| ClientError::Protocol)?;
+            if json.len() > MAX_JSON {
+                return Err(ClientError::Protocol);
+            }
+            if Self::owner(&self.connection).await? != self.owner {
+                return Err(ClientError::OwnerLost);
+            }
+            if failed {
+                if reply.header().error_name().map(|name| name.as_str())
+                    != Some("cloud.highpriority.yonik.Network1.Error")
+                {
+                    return Err(ClientError::Protocol);
+                }
+                return Err(helper_error(&json));
+            }
+            Ok(json)
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ClientError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(ClientError::Deadline),
+            _ = self.lost.changed() => Err(ClientError::OwnerLost),
+            result = operation => result,
+        }
+    }
+    pub async fn capabilities(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<Capabilities, ClientError> {
+        let reply: Capabilities = decode(
+            &self
+                .call("Capabilities", "{\"version\":1}".into(), deadline, cancel)
+                .await?,
+        )?;
+        version(reply.version)?;
+        Ok(reply)
+    }
+    pub async fn prepare(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<Prepared, ClientError> {
+        let reply: PreparedReply = decode(
+            &self
+                .call(
+                    "Prepare",
+                    "{\"version\":1,\"mode\":\"public_protection\",\"allow_lan\":false}".into(),
+                    deadline,
+                    cancel,
+                )
+                .await?,
+        )?;
+        version(reply.version)?;
+        Ok(Prepared {
+            handle: reply.handle,
+            owner: self.owner.clone(),
+            peer: self
+                .connection
+                .unique_name()
+                .ok_or(ClientError::Unavailable)?
+                .to_string(),
+        })
+    }
+    pub async fn apply(
+        &mut self,
+        prepared: Prepared,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        if prepared.owner != self.owner
+            || Some(prepared.peer.as_str()) != self.connection.unique_name().map(|n| n.as_str())
+        {
+            return Err(ClientError::Stale);
+        }
+        let request = serde_json::json!({"version":1,"handle":prepared.handle}).to_string();
+        self.state_call("Apply", request, deadline, cancel).await
+    }
+    async fn state_call(
+        &mut self,
+        method: &str,
+        request: String,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        let reply: StateReply = decode(&self.call(method, request, deadline, cancel).await?)?;
+        version(reply.version)?;
+        Ok(reply.state)
+    }
+    pub async fn state(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        self.state_call("State", "{\"version\":1}".into(), deadline, cancel)
+            .await
+    }
+    pub async fn stop(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        self.state_call("Stop", "{\"version\":1}".into(), deadline, cancel)
+            .await
+    }
+    pub async fn unlock(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        self.state_call("Unlock", "{\"version\":1}".into(), deadline, cancel)
+            .await
+    }
+}
+
+/// Удобная граница по умолчанию для интерактивной авторизации.
+pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(60);
