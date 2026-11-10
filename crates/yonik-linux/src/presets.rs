@@ -162,7 +162,9 @@ impl Store {
         }
         self.publish(&Index {
             active: Some(id),
-            previous: old.active,
+            previous: self
+                .healthy_pointer(old.active)
+                .or_else(|| self.healthy_pointer(old.previous)),
         })
     }
     pub fn rollback(&self) -> Result<PublishOutcome, Error> {
@@ -172,8 +174,12 @@ impl Store {
         self.load(&previous)?;
         self.publish(&Index {
             active: Some(previous),
-            previous: old.active,
+            previous: self.healthy_pointer(old.active),
         })
+    }
+    fn healthy_pointer(&self, id: Option<String>) -> Option<String> {
+        // Повреждённая версия не должна вытеснять исправную резервную копию.
+        id.filter(|id| self.load(id).is_ok())
     }
     fn load(&self, id: &str) -> Result<Snapshot, Error> {
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -195,7 +201,9 @@ impl Store {
         let index: Index =
             serde_json::from_slice(&read_bounded(&path, 1024)?).map_err(|_| Error::Invalid)?;
         for id in [&index.active, &index.previous].into_iter().flatten() {
-            self.load(id)?;
+            if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(Error::Invalid);
+            }
         }
         Ok(index)
     }

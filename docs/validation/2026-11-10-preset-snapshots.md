@@ -51,3 +51,10 @@ CARGO_TARGET_DIR вне checkout и CARGO_BUILD_JOBS=1. В clippy исправл
 Это библиотечный API для следующего desktop bridge, а не закрытие полного
 G-LINUX/Pxx. Внешние ядра, GUI и power-loss fault injection не запускались;
 проверка доменных решений/DNS остаётся существующим domain evaluator.
+
+
+## Исправление независимости active/previous
+
+Root regression воспроизвела отказ reopen при повреждённом active, несмотря на исправный previous. Чтение index теперь проверяет форму указателей без загрузки обоих файлов; `active()` проверяет только active, `rollback()` — целевой previous. Новым резервом становится только проверенный snapshot; install при повреждённом active сохраняет исправный previous. Повреждённые исходники не изменяются. GREEN: пять preset integration tests, включая оба направления повреждения, rollback и install с сохранением исправного резерва; scoped Linux all-targets clippy и fmt прошли.
+
+Evidence: `local/validation/pr75-corrupt-snapshot/` основного workspace. Первый запуск с переиспользованным root-cache обнаружил несовместимый старый artifact yonik-engine; после штатной инвалидации собственных engine/Linux artifacts получен behavioral RED, затем GREEN. `cargo clean -p` переставил записи Cargo.lock; парсинг TOML подтвердил идентичный граф, исходные байты lock восстановлены. Зависимости не менялись. Fault injection файловой системы и power-loss этим исправлением не доказаны.

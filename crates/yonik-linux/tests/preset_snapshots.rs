@@ -194,3 +194,113 @@ async fn loopback_update_and_failure_of_second_resource_preserve_active() {
     );
     server.await.expect("fixture");
 }
+
+#[test]
+fn corrupt_snapshot_does_not_disable_healthy_pointer() {
+    for damaged in ["active", "previous"] {
+        let temp = Temp::new();
+        let store = Store::open(&temp.0).expect("store");
+        for version in ["v1", "v2"] {
+            store
+                .install(
+                    metadata(version, "https://example.org/list", DOMAINS, IPS),
+                    DOMAINS.to_vec(),
+                    IPS.to_vec(),
+                )
+                .expect("install");
+        }
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(temp.0.join("index")).expect("index"))
+                .expect("index JSON");
+        let path = temp.0.join(index[damaged].as_str().expect("snapshot ID"));
+        std::fs::write(&path, b"damaged").expect("corrupt own fixture");
+        let reopened =
+            Store::open(&temp.0).expect("открытие не требует исправности обоих snapshots");
+        if damaged == "active" {
+            assert!(matches!(reopened.active(), Err(Error::Invalid)));
+            reopened
+                .rollback()
+                .expect("восстановление исправного previous");
+            assert_eq!(
+                reopened
+                    .active()
+                    .expect("active")
+                    .expect("snapshot")
+                    .0
+                    .version,
+                "v1"
+            );
+            let index: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(temp.0.join("index")).expect("index"))
+                    .expect("JSON");
+            assert!(
+                index["previous"].is_null(),
+                "повреждённый active не становится резервом"
+            );
+        } else {
+            assert_eq!(
+                reopened
+                    .active()
+                    .expect("active")
+                    .expect("snapshot")
+                    .0
+                    .version,
+                "v2"
+            );
+            assert_eq!(reopened.rollback(), Err(Error::Invalid));
+            reopened
+                .install(
+                    metadata("v3", "https://example.org/list", DOMAINS, IPS),
+                    DOMAINS.to_vec(),
+                    IPS.to_vec(),
+                )
+                .expect("update не требует исправного previous");
+            reopened.rollback().expect("новый резерв v2");
+            assert_eq!(
+                reopened
+                    .active()
+                    .expect("active")
+                    .expect("snapshot")
+                    .0
+                    .version,
+                "v2"
+            );
+        }
+        assert_eq!(std::fs::read(path).expect("original"), b"damaged");
+    }
+}
+
+#[test]
+fn install_preserves_healthy_previous_when_active_is_corrupt() {
+    let temp = Temp::new();
+    let store = Store::open(&temp.0).expect("store");
+    for version in ["v1", "v2"] {
+        store
+            .install(
+                metadata(version, "https://example.org/list", DOMAINS, IPS),
+                DOMAINS.to_vec(),
+                IPS.to_vec(),
+            )
+            .expect("install");
+    }
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.0.join("index")).expect("index"))
+            .expect("index JSON");
+    std::fs::write(
+        temp.0.join(index["active"].as_str().expect("ID")),
+        b"damaged",
+    )
+    .expect("corrupt own fixture");
+    store
+        .install(
+            metadata("v3", "https://example.org/list", DOMAINS, IPS),
+            DOMAINS.to_vec(),
+            IPS.to_vec(),
+        )
+        .expect("install");
+    store.rollback().expect("сохранён исправный резерв");
+    assert_eq!(
+        store.active().expect("active").expect("snapshot").0.version,
+        "v1"
+    );
+}
