@@ -7,6 +7,7 @@
 //! Drop/отмена не очищает сеть и не удаляет неоднозначные намерения.
 
 pub mod firewall;
+pub mod private_bindings;
 pub mod nft;
 mod policy_state;
 mod session_state;
