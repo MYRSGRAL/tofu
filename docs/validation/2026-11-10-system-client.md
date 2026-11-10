@@ -58,3 +58,17 @@ test real_bus_contract_errors_cancellation_and_owner_fence ... ok
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
 
 ```
+
+## Исправления независимого review
+
+Error reply теперь проходит тот же sender/body/signature/актуальный owner fence,
+что и успешный ответ. Для MethodError используется исходный Message; текст,
+извлечённый zbus unchecked-декодированием, не используется. Только затем
+проверяются имя ошибки и закрытый JSON v1. Все DTO требуют JSON-object: sequence
+representation serde отклоняется до deserialize.
+
+Private-bus RED: State/Capabilities массивы принимались, error-массив, ошибка
+с body (ss) и ошибка чужого sender принимались как Busy. GREEN: 4 integration
+теста PASS, библиотечные тесты и clippy all-targets PASS. Автоповторы мутаций
+не добавлены, cancellation по-прежнему означает неизвестный исход эффекта.
+Логи вне TTL: /home/myrs/projects/yonik/local/validation/pr65-wire-fix/.

@@ -83,7 +83,7 @@ struct ErrorReply {
     error: String,
 }
 fn decode<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, ClientError> {
-    if json.len() > MAX_JSON {
+    if json.len() > MAX_JSON || !json.trim_start().starts_with('{') {
         return Err(ClientError::Protocol);
     }
     serde_json::from_str(json).map_err(|_| ClientError::Protocol)
@@ -95,36 +95,27 @@ fn version(version: u32) -> Result<(), ClientError> {
         Err(ClientError::Protocol)
     }
 }
-fn remote(error: zbus::Error) -> ClientError {
-    match error {
-        zbus::Error::MethodError(name, Some(body), _)
-            if name.as_str() == "cloud.highpriority.yonik.Network1.Error" =>
-        {
-            let Ok(reply) = decode::<ErrorReply>(&body) else {
-                return ClientError::Protocol;
-            };
-            if version(reply.version).is_err() {
-                return ClientError::Protocol;
-            }
-            match reply.error.as_str() {
-                "invalid_request" => ClientError::InvalidRequest,
-                "unsupported" => ClientError::Unsupported,
-                "busy" => ClientError::Busy,
-                "authorization" => ClientError::Denied,
-                "invalid_handle" => ClientError::InvalidHandle,
-                "stale" => ClientError::Stale,
-                "timeout" => ClientError::Timeout,
-                "cancelled" => ClientError::Cancelled,
-                "unavailable" => ClientError::Unavailable,
-                _ => ClientError::Protocol,
-            }
-        }
-        zbus::Error::MethodError(name, _, _)
-            if name.as_str() == "cloud.highpriority.yonik.Network1.Error" =>
-        {
-            ClientError::Protocol
-        }
-        _ => ClientError::Unavailable,
+fn remote(_error: zbus::Error) -> ClientError {
+    ClientError::Unavailable
+}
+fn helper_error(json: &str) -> ClientError {
+    let Ok(reply) = decode::<ErrorReply>(json) else {
+        return ClientError::Protocol;
+    };
+    if version(reply.version).is_err() {
+        return ClientError::Protocol;
+    }
+    match reply.error.as_str() {
+        "invalid_request" => ClientError::InvalidRequest,
+        "unsupported" => ClientError::Unsupported,
+        "busy" => ClientError::Busy,
+        "authorization" => ClientError::Denied,
+        "invalid_handle" => ClientError::InvalidHandle,
+        "stale" => ClientError::Stale,
+        "timeout" => ClientError::Timeout,
+        "cancelled" => ClientError::Cancelled,
+        "unavailable" => ClientError::Unavailable,
+        _ => ClientError::Protocol,
     }
 }
 
@@ -231,7 +222,7 @@ impl SystemClient {
             return Err(ClientError::InvalidRequest);
         }
         let operation = async {
-            let reply = self
+            let (reply, failed) = match self
                 .connection
                 .call_method(
                     Some(self.owner.as_str()),
@@ -241,7 +232,11 @@ impl SystemClient {
                     &(request,),
                 )
                 .await
-                .map_err(remote)?;
+            {
+                Ok(reply) => (reply, false),
+                Err(zbus::Error::MethodError(_, _, reply)) => (reply, true),
+                Err(error) => return Err(remote(error)),
+            };
             if reply.header().sender().map(|s| s.as_str()) != Some(self.owner.as_str())
                 || reply.body().len() > MAX_JSON + 8
             {
@@ -256,6 +251,14 @@ impl SystemClient {
             }
             if Self::owner(&self.connection).await? != self.owner {
                 return Err(ClientError::OwnerLost);
+            }
+            if failed {
+                if reply.header().error_name().map(|name| name.as_str())
+                    != Some("cloud.highpriority.yonik.Network1.Error")
+                {
+                    return Err(ClientError::Protocol);
+                }
+                return Err(helper_error(&json));
             }
             Ok(json)
         };

@@ -252,7 +252,7 @@ async fn malformed_helper_error_is_protocol_error() {
                     .reply_error(
                         &message,
                         "cloud.highpriority.yonik.Network1.Error",
-                        &(42_u32,),
+                        &("{\"version\":1,\"error\":\"busy\"}", "лишнее"),
                     )
                     .await
                     .unwrap();
@@ -263,4 +263,59 @@ async fn malformed_helper_error_is_protocol_error() {
     let (result, _) = tokio::join!(client.state(deadline(), cancel), respond);
     assert_eq!(result, Err(ClientError::Protocol));
     drop(keep);
+}
+
+#[tokio::test]
+async fn closed_json_replies_require_objects_and_pinned_error_sender() {
+    use futures_util::StreamExt;
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    let foreign = bus.connect().await;
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let mut calls = zbus::MessageStream::from(&server);
+    let (_keep, cancel) = Cancellation::new();
+    let mut client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let mut outcomes = Vec::new();
+    for (capabilities, error, foreign_sender, body) in [
+        (false, false, false, "[1,\"verified_rules\"]"),
+        (true, false, false, "[1,true,false,false]"),
+        (false, true, false, "[1,\"busy\"]"),
+        (false, true, true, "{\"version\":1,\"error\":\"busy\"}"),
+    ] {
+        let respond = async {
+            while let Some(Ok(message)) = calls.next().await {
+                if message.header().message_type() == zbus::message::Type::MethodCall {
+                    let sender = if foreign_sender { &foreign } else { &server };
+                    if error {
+                        sender
+                            .reply_error(
+                                &message,
+                                "cloud.highpriority.yonik.Network1.Error",
+                                &(body,),
+                            )
+                            .await
+                            .unwrap();
+                    } else {
+                        sender.reply(&message, &(body,)).await.unwrap();
+                    }
+                    break;
+                }
+            }
+        };
+        let request = async {
+            if capabilities {
+                client
+                    .capabilities(deadline(), cancel.clone())
+                    .await
+                    .map(|_| ())
+            } else {
+                client.state(deadline(), cancel.clone()).await.map(|_| ())
+            }
+        };
+        let (result, _) = tokio::join!(request, respond);
+        outcomes.push(result);
+    }
+    assert_eq!(outcomes, vec![Err(ClientError::Protocol); 4]);
 }
