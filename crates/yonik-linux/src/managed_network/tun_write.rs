@@ -1,6 +1,6 @@
 //! Закрытый RTNETLINK write transport: ACK не заменяет последующую сверку.
 use super::config::{TunAddress, TunRoute};
-use super::{OperationLease, TunError};
+use super::{OperationLease, TunError, TunRule};
 use rustix::net::{
     self, AddressFamily, RecvFlags, SendFlags, SocketFlags, SocketType, netlink::SocketAddrNetlink,
 };
@@ -11,6 +11,10 @@ const MAX_BYTES: usize = 64 * 1024;
 const HEADER: usize = 16;
 
 pub(super) enum Action {
+    Rule {
+        rule: TunRule,
+        add: bool,
+    },
     SetAlias {
         index: u32,
         alias: Vec<u8>,
@@ -55,12 +59,16 @@ impl Action {
             Self::Address { add: false, .. } => 21,
             Self::Route { add: true, .. } => 24,
             Self::Route { add: false, .. } => 25,
+            Self::Rule { add: true, .. } => 32,
+            Self::Rule { add: false, .. } => 33,
         }
     }
     fn flags(&self) -> u16 {
         if matches!(
             self,
-            Self::Address { add: true, .. } | Self::Route { add: true, .. }
+            Self::Address { add: true, .. }
+                | Self::Route { add: true, .. }
+                | Self::Rule { add: true, .. }
         ) {
             0x605
         } else {
@@ -74,11 +82,22 @@ impl Action {
             | Self::Delete { index }
             | Self::Address { index, .. }
             | Self::Route { index, .. } => *index,
+            Self::Rule { .. } => 1,
         };
         if index == 0 || index > i32::MAX as u32 {
             return Err(TunError::Invalid);
         }
         let mut body = match self {
+            Self::Rule { rule, .. } => {
+                let mut value = vec![if rule.ipv6() { 10 } else { 2 }, 0, 0, 0, 0, 0, 0, 1];
+                value.extend_from_slice(&2_u32.to_ne_bytes()); // FIB_RULE_INVERT.
+                attribute(&mut value, 6, &rule.priority().to_ne_bytes());
+                attribute(&mut value, 10, &rule.mark().to_ne_bytes());
+                attribute(&mut value, 15, &rule.table().to_ne_bytes());
+                attribute(&mut value, 16, &u32::MAX.to_ne_bytes());
+                attribute(&mut value, 21, &[253]);
+                value
+            }
             Self::Address { address, .. } => {
                 let mut value = vec![
                     if address.address().is_ipv4() { 2 } else { 10 },
@@ -394,6 +413,26 @@ mod tests {
             .request(3, 5)
             .is_err()
         );
+    }
+    #[test]
+    fn rule_wire_image_has_only_fixed_selectors_and_exact_delete() {
+        for ipv6 in [false, true] {
+            let rule = TunRule::new(10001, 1001, 47, ipv6).unwrap();
+            let add = Action::Rule { rule, add: true }.request(3, 5).unwrap();
+            let delete = Action::Rule { rule, add: false }.request(3, 5).unwrap();
+            assert_eq!(value_u16(&add[4..6]), Ok(32));
+            assert_eq!(value_u16(&add[6..8]), Ok(0x605));
+            assert_eq!(value_u16(&delete[4..6]), Ok(33));
+            assert_eq!(value_u16(&delete[6..8]), Ok(5));
+            assert_eq!(&add[16..], &delete[16..]);
+            let mut expected = vec![if ipv6 { 10 } else { 2 }, 0, 0, 0, 0, 0, 0, 1];
+            expected.extend_from_slice(&2_u32.to_ne_bytes());
+            for (kind, value) in [(6, 10001_u32), (10, 47), (15, 1001), (16, u32::MAX)] {
+                attribute(&mut expected, kind, &value.to_ne_bytes());
+            }
+            attribute(&mut expected, 21, &[253]);
+            assert_eq!(&add[16..], expected);
+        }
     }
     #[test]
     fn ack_requires_matching_outer_and_original_identity() {

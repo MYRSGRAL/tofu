@@ -1,6 +1,7 @@
 //! Скомпилированный профиль проходит TUN → VLESS server → echo, без внешней сети.
 use super::*;
 use std::{
+    io::{BufRead, Write},
     num::NonZeroU16,
     path::{Path, PathBuf},
     process::{Child as StdChild, Command as StdCommand},
@@ -69,6 +70,93 @@ fn peer_config(engine: Engine) -> serde_json::Value {
         }
     }
 }
+async fn peer_signal(peer: &mut Process, expected: &str) {
+    let output = peer.0.stdout.take().unwrap();
+    let read = tokio::task::spawn_blocking(move || {
+        let mut output = std::io::BufReader::new(output);
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        (output.into_inner(), line)
+    });
+    let (output, line) = tokio::time::timeout(DEADLINE, read).await.unwrap().unwrap();
+    peer.0.stdout = Some(output);
+    assert_eq!(line.trim(), expected);
+}
+
+async fn remote_peer(binary: &Path, config: &Path, tools: &Path) -> Process {
+    // VLESS peer находится за veth: local rule не может скрыть отсутствие mark.
+    let script = format!(
+        r#"import sys, subprocess, socket, time
+sys.path.insert(0, {tools:?})
+from traffic_echo import echo_servers
+print('namespace', flush=True)
+assert sys.stdin.buffer.readline() == b'go\n'
+def ip(*args):
+ subprocess.run(['/usr/bin/ip', *args], check=True, timeout=5, stdout=subprocess.DEVNULL)
+ip('link', 'set', 'lo', 'up')
+ip('address', 'add', '10.203.0.2/30', 'dev', 'yonik-inner')
+ip('-6', 'address', 'add', '2001:db8:7470::2/126', 'dev', 'yonik-inner', 'nodad')
+ip('link', 'set', 'yonik-inner', 'up')
+with echo_servers():
+ with subprocess.Popen([{binary:?}, 'run', '-c', {config:?}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as core:
+  try:
+   deadline = time.monotonic() + 5
+   while True:
+    if core.poll() is not None: raise RuntimeError('VLESS peer stopped')
+    try:
+     with socket.create_connection(('127.0.0.1', 24443), timeout=0.1): break
+    except OSError:
+     if time.monotonic() >= deadline: raise TimeoutError('VLESS peer readiness')
+     time.sleep(0.02)
+   print('ready', flush=True)
+   sys.stdin.buffer.read()
+  finally:
+   core.kill()
+   core.wait(timeout=5)
+"#
+    );
+    let mut peer = Process(
+        StdCommand::new("/usr/bin/unshare")
+            .args(["--net", "/usr/bin/python3", "-u", "-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    peer_signal(&mut peer, "namespace").await;
+    ip(&[
+        "link",
+        "add",
+        "yonik-outer",
+        "type",
+        "veth",
+        "peer",
+        "name",
+        "yonik-inner",
+    ]);
+    ip(&[
+        "link",
+        "set",
+        "yonik-inner",
+        "netns",
+        &peer.0.id().to_string(),
+    ]);
+    ip(&["address", "add", "10.203.0.1/30", "dev", "yonik-outer"]);
+    ip(&[
+        "-6",
+        "address",
+        "add",
+        "2001:db8:7470::1/126",
+        "dev",
+        "yonik-outer",
+        "nodad",
+    ]);
+    ip(&["link", "set", "yonik-outer", "up"]);
+    peer.0.stdin.as_mut().unwrap().write_all(b"go\n").unwrap();
+    peer_signal(&mut peer, "ready").await;
+    peer
+}
 async fn address_state(index: u32) -> Vec<(std::net::IpAddr, u8, u32)> {
     let (_keep, mut cancel) = Cancellation::new();
     let snapshot = read_topology(&mut cancel, Duration::from_secs(5))
@@ -126,24 +214,21 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
             .await
             .unwrap();
     }
-    for (id, address, prefix) in [(4, "198.18.0.0", 30), (5, "2001:db8:746f::", 126)] {
+    for (id, address) in [(4, "0.0.0.0"), (5, "::")] {
         executor
             .ensure_route(
                 &mut journal,
                 1,
                 id,
-                TunRoute::new(address.parse().unwrap(), prefix, 1001, 100).unwrap(),
+                TunRoute::new(address.parse().unwrap(), 0, 1001, 100).unwrap(),
             )
             .await
             .unwrap();
     }
     ip(&["link", "set", "lo", "up"]);
-    for family in ["-4", "-6"] {
-        ip(&[family, "rule", "add", "priority", "10000", "lookup", "1001"]);
-    }
     let before = address_state(index).await;
     let report = yonik_import::import_bytes(
-        b"vless://00112233-4455-6677-8899-aabbccddeeff@127.0.0.1:24443".to_vec(),
+        b"vless://00112233-4455-6677-8899-aabbccddeeff@10.203.0.2:24443".to_vec(),
     )
     .unwrap();
     let tun = SystemTun::new(
@@ -168,6 +253,7 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
     config.write_sensitive(&mut bytes).unwrap();
     let mut client_value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let mut peer_value = peer_config(engine);
+    peer_value["inbounds"][0]["listen"] = serde_json::json!("0.0.0.0");
     if std::env::var_os("YONIK_SYSTEM_TUN_DEBUG").is_some() && engine == Engine::Xray {
         client_value["log"] = serde_json::json!({"loglevel":"debug"});
         peer_value["log"] = serde_json::json!({"loglevel":"debug"});
@@ -203,21 +289,28 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
         .join("../../tools")
         .canonicalize()
         .unwrap();
-    let echo_script = format!(
-        "import sys\nsys.path.insert(0,{tools:?})\nfrom traffic_echo import echo_servers\nwith echo_servers(): sys.stdin.buffer.read()\n"
-    );
-    let mut echo = Process(
-        StdCommand::new("/usr/bin/python3")
-            .args(["-c", &echo_script])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
-    listener(&mut echo, 24081).await;
-    let mut peer = core(&binary, &peer_path);
-    listener(&mut peer, 24443).await;
+    let mut peer = remote_peer(&binary, &peer_path, &tools).await;
+    for (id, ipv6) in [(6, false), (7, true)] {
+        executor
+            .ensure_rule(
+                &mut journal,
+                1,
+                id,
+                TunRule::new(10000, 1001, 99, ipv6).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+    for (family, target) in [("-4", "10.203.0.2"), ("-6", "2001:db8:7470::2")] {
+        assert_eq!(
+            ip(&[family, "route", "get", target])[0]["dev"],
+            "tofu00000001"
+        );
+        assert_eq!(
+            ip(&[family, "route", "get", target, "mark", "99"])[0]["dev"],
+            "yonik-outer"
+        );
+    }
     let mut client = core(&binary, &client_path);
     listener(&mut client, 10808).await;
     assert_eq!(
@@ -260,7 +353,8 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
         .status()
         .unwrap();
     assert!(successful.success(), "TUN→proxy→echo не прошёл");
-    peer.0.kill().unwrap();
+    // EOF даёт supervisor завершить и reap peer core, а не оставить потомка.
+    drop(peer.0.stdin.take());
     peer.0.wait().unwrap();
     // Все назначения отклоняются без VLESS server; прямого echo fallback нет.
     let negative = format!(
@@ -277,8 +371,8 @@ async fn compiled_profile_crosses_owned_tun_and_proxy() {
     );
     client.0.kill().unwrap();
     client.0.wait().unwrap();
-    for family in ["-4", "-6"] {
-        ip(&[family, "rule", "del", "priority", "10000", "lookup", "1001"]);
+    for id in [7, 6] {
+        executor.remove_rule(&mut journal, 1, id).await.unwrap();
     }
     for id in [5, 4] {
         executor.remove_route(&mut journal, 1, id).await.unwrap();

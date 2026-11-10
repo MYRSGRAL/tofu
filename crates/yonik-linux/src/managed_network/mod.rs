@@ -111,6 +111,15 @@ pub enum Resource {
         protocol: u8,
         ifindex: u32,
     },
+    /// Фиксированное RPDB-правило собственного TUN: invert, полная маска, protocol 253.
+    TunRule {
+        tun_id: u64,
+        ifindex: u32,
+        priority: u32,
+        table: u32,
+        mark: u32,
+        ipv6: bool,
+    },
     Rule {
         priority: u32,
         table: u32,
@@ -172,6 +181,21 @@ impl Resource {
                     }
                 };
                 *table != 0 && canonical && *protocol != 0 && *ifindex != 0
+            }
+            Self::TunRule {
+                tun_id,
+                ifindex,
+                priority,
+                table,
+                mark,
+                ..
+            } => {
+                *tun_id != 0
+                    && *ifindex != 0
+                    && *ifindex <= i32::MAX as u32
+                    && (1..32766).contains(priority)
+                    && (256..u32::MAX).contains(table)
+                    && (1..=i32::MAX as u32).contains(mark)
             }
             Self::Rule {
                 priority,
@@ -273,7 +297,9 @@ impl Document {
             })
             .collect();
         for record in &self.records {
-            if let Resource::Address { tun_id, .. } = record.resource {
+            if let Resource::Address { tun_id, .. } | Resource::TunRule { tun_id, .. } =
+                record.resource
+            {
                 if !tun_ids.contains(&tun_id) {
                     return Err(JournalError::Invalid);
                 }
@@ -625,7 +651,9 @@ impl Journal {
         let mut removed = 0;
         let mut address_children = BTreeMap::<u64, usize>::new();
         for record in &self.document.records {
-            if let Resource::Address { tun_id, .. } = record.resource {
+            if let Resource::Address { tun_id, .. } | Resource::TunRule { tun_id, .. } =
+                record.resource
+            {
                 *address_children.entry(tun_id).or_default() += 1;
             }
         }
@@ -643,6 +671,11 @@ impl Journal {
             {
                 continue;
             }
+            if let Resource::Route { table, .. } = self.document.records[index].resource {
+                if self.document.records.iter().any(|record| matches!(record.resource, Resource::TunRule { table: used, .. } if used == table)) {
+                    continue;
+                }
+            }
             if remove(&self.document.records[index]).is_ok() {
                 let mut document = self.document.clone();
                 let removed_record = document.records.remove(index);
@@ -654,7 +687,9 @@ impl Journal {
                     document.public_policy = None;
                 }
                 self.persist(document)?;
-                if let Resource::Address { tun_id, .. } = removed_record.resource {
+                if let Resource::Address { tun_id, .. } | Resource::TunRule { tun_id, .. } =
+                    removed_record.resource
+                {
                     if let Some(count) = address_children.get_mut(&tun_id) {
                         *count -= 1;
                     }

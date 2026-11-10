@@ -19,6 +19,8 @@ use tokio::{
 
 #[path = "tun_config.rs"]
 mod config;
+#[path = "tun_rule.rs"]
+mod rule;
 #[cfg(test)]
 #[path = "tun_session_tests.rs"]
 mod session_tests;
@@ -28,6 +30,7 @@ mod tests;
 #[path = "tun_write.rs"]
 mod write;
 pub use config::{TunAddress, TunRoute};
+pub use rule::TunRule;
 
 const DEADLINE: Duration = Duration::from_secs(5);
 const MAX_OUTPUT: usize = 256 * 1024;
@@ -321,7 +324,7 @@ impl TunExecutor {
             return Err(JournalError::WrongOwnership.into());
         }
         if journal.records().iter().any(
-            |record| matches!(record.resource(), Resource::Address { tun_id, .. } if *tun_id == id),
+            |record| matches!(record.resource(), Resource::Address { tun_id, .. } | Resource::TunRule { tun_id, .. } if *tun_id == id),
         ) {
             return Err(JournalError::Conflict.into());
         }

@@ -16,6 +16,7 @@ LOG = logging.getLogger("yonik.managed-network")
 CASES = {
     "owned-tun": "managed_network::tun::tests::real_namespace_tun_ownership_reopen_and_cleanup",
     "tun-config": "managed_network::tun::config::tests::real_namespace_owned_addresses_routes_and_cleanup",
+    "tun-rule": "managed_network::tun::rule::tests::real_namespace_owned_rpdb_and_cleanup",
     "unsupported-tun": "managed_network::tun::session_tests::unpatched_engine_is_rejected_before_network_effects",
     "compiled-tun": "managed_network::tun::session_tests::compiled_profile_crosses_owned_tun_and_proxy",
     "public-block": "managed_network::nft::block::tests::real_public_block_tcp_udp_dual_stack_and_lifetime",

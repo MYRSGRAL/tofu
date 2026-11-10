@@ -299,15 +299,19 @@ reconciliation remain open; LAN is explicitly unsupported until then.
 A typed persistent TUN executor now records intent, verifies a full ownership
 alias and cleans up by ifindex. Both pinned engines and the adapted sing-box
 pass the single-queue traffic/lifecycle fixture; multi-queue is unsupported.
-Routes, DNS and service/GUI session wiring remain open.
+Network resources are implemented separately; DNS and service/GUI session wiring remain open.
 [Owned TUN contract and evidence](docs/specs/helper-owned-tun.md).
 
 System TUN compilation now preserves the selected profile and authenticated
 probe, with helper-owned addresses/routes and IP-only policy. Xray and the
 pinned sing-box external-configuration adapter pass TUN→VLESS→echo and crash
 cleanup fixtures. Stock sing-box is rejected for this mode: auto_route=false
-still creates IPv6 network effects. Service/GUI, production RPDB and DNS gates
-remain open. [Contract and evidence](docs/specs/helper-tun-configuration.md).
+still creates IPv6 network effects. [Contract and evidence](docs/specs/helper-tun-configuration.md).
+Journal-backed RPDB rules now capture unmarked traffic while marked core sockets
+use the existing routing policy. Both cores pass TCP/UDP IPv4/IPv6 through a peer
+in a separate namespace behind veth, followed by owned-resource cleanup.
+Service/worker/GUI wiring, live reconciliation and DNS gates remain open.
+[RPDB contract](docs/specs/helper-tun-rpdb.md).
 
 ### Rust libraries and CLIs
 
