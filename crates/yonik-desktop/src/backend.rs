@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     fs::{self, DirBuilder, File, OpenOptions},
-    net::{Ipv4Addr, TcpListener, UdpSocket},
+    net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket},
     num::NonZeroU16,
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -937,7 +937,7 @@ impl Actor {
             Err(error) => Err(error),
         }
     }
-    async fn refresh(&mut self, generation: u64) -> Result<RefreshTask> {
+    async fn refresh(&mut self, generation: u64, host: Arc<DesktopFetch>) -> Result<RefreshTask> {
         let id = self
             .state
             .source_id
@@ -971,10 +971,13 @@ impl Actor {
             .await
             .map_err(map_subscription)?;
         let task = tokio::spawn(async move {
-            let host = yonik_linux::FetchHost::new(Duration::from_secs(30))
-                .map_err(SubscriptionError::Fetch)?;
             service
-                .refresh_with_host(identity.id, Some(identity.generation), &host, receiver)
+                .refresh_with_host(
+                    identity.id,
+                    Some(identity.generation),
+                    host.as_ref(),
+                    receiver,
+                )
                 .await
         });
         self.state.busy = true;
@@ -1171,13 +1174,17 @@ impl Actor {
                 route,
                 hwid_enabled,
             } => {
-                if matches!(route, Route::Proxy) {
-                    return Err(DesktopError("unsupported_proxy"));
-                }
-                let source =
-                    SubscriptionSource::new(name, url, local_exception, FetchRoute::Direct)
-                        .and_then(|source| source.with_hwid(hwid_enabled))
-                        .map_err(map_subscription)?;
+                let source = SubscriptionSource::new(
+                    name,
+                    url,
+                    local_exception,
+                    match route {
+                        Route::Direct => FetchRoute::Direct,
+                        Route::Proxy => FetchRoute::Proxy,
+                    },
+                )
+                .and_then(|source| source.with_hwid(hwid_enabled))
+                .map_err(map_subscription)?;
                 let id = self.service.add(source).await.map_err(map_subscription)?;
                 self.state.source_id = Some(id);
                 self.state.offset = 0;
@@ -1945,7 +1952,68 @@ type RefreshTask = (
     String,
 );
 
+type ProxyLease = Option<(u64, SocketAddr)>;
+
+/// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
+struct DesktopFetch {
+    lease: ProxyLease,
+    current: watch::Receiver<ProxyLease>,
+    proxy_used: AtomicBool,
+}
+impl DesktopFetch {
+    fn new(current: &watch::Sender<ProxyLease>) -> Arc<Self> {
+        Arc::new(Self {
+            lease: *current.borrow(),
+            current: current.subscribe(),
+            proxy_used: AtomicBool::new(false),
+        })
+    }
+    fn stale(&self) -> bool {
+        self.proxy_used.load(Ordering::Acquire) && *self.current.borrow() != self.lease
+    }
+}
+impl yonik_linux::SubscriptionFetch for DesktopFetch {
+    fn fetch<'a>(
+        &'a self,
+        source: &'a yonik_linux::Source,
+        route: FetchRoute,
+        validators: Option<&'a yonik_linux::FetchValidators>,
+        cancel: watch::Receiver<bool>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = std::result::Result<yonik_linux::FetchResponse, FetchError>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let mut host = yonik_linux::FetchHost::new(Duration::from_secs(30))?;
+            if route == FetchRoute::Direct {
+                return host.fetch(source, route, validators, cancel).await;
+            }
+            self.proxy_used.store(true, Ordering::Release);
+            if self.stale() {
+                return Err(FetchError::Cancelled);
+            }
+            let Some((_, endpoint)) = self.lease else {
+                return Err(FetchError::UnsupportedPeerVerification);
+            };
+            host = host.with_socks_endpoint(endpoint)?;
+            let mut current = self.current.clone();
+            tokio::select! {
+                biased;
+                _ = current.changed() => Err(FetchError::Cancelled),
+                result = host.fetch(source, route, validators, cancel) => {
+                    if self.stale() { Err(FetchError::Cancelled) } else { result }
+                }
+            }
+        })
+    }
+}
+
 struct Running {
+    lease: (u64, SocketAddr),
     cancel: watch::Sender<bool>,
     task: tokio::task::JoinHandle<std::result::Result<(), LocalSession>>,
 }
@@ -2356,15 +2424,60 @@ async fn run(
     } else {
         schedule_loaded = true;
     }
-    let fetch_host = yonik_linux::FetchHost::new(Duration::from_secs(30))
-        .ok()
-        .map(Arc::new);
+    let (proxy_session, _) = watch::channel::<ProxyLease>(None);
+    let mut session_generation = 0_u64;
+    let mut manual_host: Option<Arc<DesktopFetch>> = None;
+    let mut schedule_host = DesktopFetch::new(&proxy_session);
     loop {
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
         }
-        let allowed = fetch_host.is_some()
-            && !quitting
+        let lease = running
+            .as_ref()
+            .filter(|session| {
+                actor.state.status == "Connected"
+                    && !*session.cancel.borrow()
+                    && !session.task.is_finished()
+            })
+            .map(|session| session.lease);
+        proxy_session.send_if_modified(|current| {
+            if *current == lease {
+                false
+            } else {
+                *current = lease;
+                true
+            }
+        });
+        if manual_host.as_ref().is_some_and(|host| host.stale()) {
+            actor.pending = None;
+            if scheduled.review.is_none() {
+                actor.state.pending = None;
+            }
+            if let Some((_, cancel, _, _, _)) = &refreshing {
+                cancel.send_replace(true);
+            }
+            manual_host = None;
+        }
+        if schedule_host.stale() {
+            if scheduled.review.is_some() {
+                actor.state.pending = None;
+            }
+            if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
+                actor.state.command_error(true, "storage");
+            }
+            let policy = scheduled.policy;
+            let visible = scheduled.visible;
+            if let Ok(mut replacement) = DesktopSchedule::new() {
+                replacement.policy = policy;
+                replacement.visible = visible;
+                if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await {
+                    actor.state.command_error(true, error.key());
+                }
+                scheduled = replacement;
+            }
+            schedule_host = DesktopFetch::new(&proxy_session);
+        }
+        let allowed = !quitting
             && refreshing.is_none()
             && actor.pending.is_none()
             && scheduled.review.is_none();
@@ -2374,6 +2487,7 @@ async fn run(
             biased;
             changed = priority.changed() => {
                 if changed.is_err() { quitting = true; }
+                proxy_session.send_replace(None);
                 let action = *priority.borrow_and_update();
                 quitting |= action.shutdown;
                 // Сначала все сигналы отмены, затем любые await: spawned TCP не должен
@@ -2449,7 +2563,9 @@ async fn run(
                     None => std::future::pending::<()>().await,
                 }
             } => {
-                if let Some(host) = fetch_host.as_ref() {
+                {
+                    schedule_host = DesktopFetch::new(&proxy_session);
+                    let host = &schedule_host;
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
                         Ok(()) => scheduled.fetching = true,
@@ -2621,7 +2737,7 @@ async fn run(
                             match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation).await {
+                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -2634,7 +2750,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else {
                             match actor.command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation).await {
+                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -2644,13 +2760,14 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else { match actor.refresh(envelope.generation).await {
+                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
                     }
                     Command::Connect => {
                         if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
+                        else if session_generation == u64::MAX { Err(DesktopError("engine_failed")) }
                         else if actor.selected.is_none() { Err(DesktopError("profile_required")) }
                         else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
                         else if let Err(error) = actor.prepare_port() { Err(error) }
@@ -2660,8 +2777,10 @@ async fn run(
                                 match (NonZeroU16::new(actor.state.port).and_then(|port| yonik_engine::compile(&profile.server, actor.state.engine.engine(), port).ok()), actor.probe_target()) {
                                     (Some(compiled), Ok(target)) => {
                                         let (cancel, receiver) = Cancellation::new();
+                                        let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
+                                        session_generation = session_generation.saturating_add(1);
                                         let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
-                                        running = Some(Running { cancel, task }); actor.state.can_stop = true;
+                                        running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
                                     }
@@ -2913,5 +3032,54 @@ mod routing_regressions {
         drop(actor);
         drop(lock);
         std::fs::remove_dir_all(path).expect("очистка");
+    }
+}
+
+#[cfg(test)]
+mod proxy_session_tests {
+    use super::*;
+    use yonik_linux::{Source, SubscriptionFetch};
+
+    #[tokio::test]
+    async fn reconnect_same_endpoint_revokes_pinned_generation_before_network() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let endpoint = listener.local_addr().expect("endpoint");
+        let (session, _) = watch::channel(Some((1, endpoint)));
+        let host = DesktopFetch::new(&session);
+        session.send_replace(Some((2, endpoint)));
+        let (_sender, cancel) = watch::channel(false);
+        let source = Source::local("http://127.0.0.1:1/sub").expect("source");
+        assert_eq!(
+            host.fetch(&source, FetchRoute::Proxy, None, cancel)
+                .await
+                .unwrap_err(),
+            FetchError::Cancelled
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_proxy_waiting_for_socks_handshake() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let endpoint = listener.local_addr().expect("endpoint");
+        let (session, _) = watch::channel(Some((1, endpoint)));
+        let host = DesktopFetch::new(&session);
+        let (_sender, cancel) = watch::channel(false);
+        let source = Source::local("http://127.0.0.1:1/sub").expect("source");
+        let revoke = async {
+            let (_stream, _) = listener.accept().await.expect("SOCKS accept");
+            session.send_replace(None);
+        };
+        let (result, ()) =
+            tokio::join!(host.fetch(&source, FetchRoute::Proxy, None, cancel), revoke);
+        assert_eq!(result.unwrap_err(), FetchError::Cancelled);
     }
 }
