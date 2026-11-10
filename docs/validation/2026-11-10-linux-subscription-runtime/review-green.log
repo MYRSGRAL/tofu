@@ -1,0 +1,10 @@
+   Compiling yonik-linux v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-d8e2ec1e/crates/yonik-linux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.28s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/yonik-scheduler-review/target/debug/deps/yonik_linux-31c1aeccd6b9ac4c)
+
+running 3 tests
+test subscriptions::scheduler_tests::review_deadline_после_commit_и_retry_отменённого_ожидания ... ok
+test subscriptions::scheduler_tests::review_backoff_после_задержанной_ошибки_commit ... ok
+test subscriptions::scheduler_tests::cancel_ждёт_фактического_конца_parser_и_shutdown ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 305 filtered out; finished in 0.14s

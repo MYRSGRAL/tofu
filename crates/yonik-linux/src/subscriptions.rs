@@ -626,11 +626,21 @@ impl SubscriptionService {
                 (body.into_bytes(), encode_validators(&validators)?)
             }
         };
+        // Сохраняем operation (включая JoinHandle blocking-import) до acknowledgement.
+        // Отмена сигнала запрещает публикацию, но не отсоединяет уже начатый parser.
+        let operation = stage_body(body);
+        tokio::pin!(operation);
         let (controller, staged) = tokio::select! {
             biased;
-            _ = watch_cancelled(&mut superseded) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
-            _ = watch_cancelled(&mut parse_cancel) => return Err(SubscriptionError::Fetch(FetchError::Cancelled)),
-            result = stage_body(body) => result?,
+            _ = watch_cancelled(&mut superseded) => {
+                let _ = operation.await;
+                return Err(SubscriptionError::Fetch(FetchError::Cancelled));
+            },
+            _ = watch_cancelled(&mut parse_cancel) => {
+                let _ = operation.await;
+                return Err(SubscriptionError::Fetch(FetchError::Cancelled));
+            },
+            result = &mut operation => result?,
         };
         Ok(RefreshResult::Pending(Box::new(PendingRefresh {
             service: self.identity.clone(),
@@ -740,6 +750,8 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
         .map_err(|_| SubscriptionError::Worker)?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
+        #[cfg(test)]
+        scheduler_tests::hold_parser(&body);
         let next = CONTROLLERS
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| SubscriptionError::Exhausted)?;
@@ -754,3 +766,7 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
     .await
     .map_err(|_| SubscriptionError::Worker)?
 }
+
+#[cfg(test)]
+#[path = "subscription_scheduler_tests.rs"]
+mod scheduler_tests;

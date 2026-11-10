@@ -45,7 +45,7 @@ Host включает это ожидание в select с системными 
 Bounded набор futures и отчётов ограничен parallelism; queue — capacity.
 
 `review(id)` даёт ссылку на неизменяемый PendingRefresh для явного показа.
-`finish_review(&service, id, approve, now).await` сохраняет только при approve=true.
+`finish_review(&service, id, approve, clock).await` сохраняет только при approve=true.
 Даже чистый импорт автоматически не утверждается. При false отчёт удаляется,
 snapshot остаётся прежним. Повтор после прерывания ожидания продолжает уже принятое
 решение, не меняя его approve. Host должен передавать тот же SubscriptionService,
@@ -103,3 +103,51 @@ transient target. Cargo 1.85.1 пересортировал только лок�
 
 Остаток: независимый review root и CI PR; desktop integration, platform event
 sources, persisted due и полная P10 матрица остаются отдельной задачей.
+
+
+## Исправления двух P2 после независимого review
+
+Проверенный review head: `c5d908b059b200a3c13083ff918815bd92c32cb3`.
+Область изменения ограничена subscriptions/runtime, их прямыми тестами и evidence.
+
+1. При сигнале отмены stage_body operation остаётся pinned и дожидается
+   фактического завершения spawn_blocking, включая освобождение IMPORT_GATE.
+   Только затем возвращается Cancelled и runtime освобождает inflight slot.
+   Сигналы superseded и внешнего watch идут тем же путём. Это защищает как
+   refresh_with_host, так и прежний refresh(id, timeout, receiver).
+   Host отменяет через watch и дожидается результата; произвольный Drop
+   внешнего refresh future не является acknowledgement и не заменяет этот протокол.
+   При прекращении ожидания next_event операция остаётся в bounded наборе runtime.
+2. Новый точный API: `finish_review(&mut self, service: &SubscriptionService,
+   id: i64, approve: bool, clock: impl Fn() -> Duration)
+   -> Result<Option<i64>, SubscriptionError>` (async).
+   clock вызывается после decision.await, непосредственно перед Scheduler::complete.
+   GUI передаёт closure монотонных часов, аналогично next_event. При прерывании
+   ожидания decision остаётся в Active; повторное ожидание продолжает прежнее
+   approve/discard, а completion time берётся из closure повторного вызова.
+   Ни начальное время вызова, ни время до commit не используются для deadline.
+
+Детерминированные unit-регрессии в subscription_scheduler_tests.rs используют
+синтетический hold parser (только cfg(test), hook по точному телу) и блокировку
+requests mutex перед commit. Проверены удержание parallelism=1 при parser hold,
+повторный dispatch без старта второго fetch, ожидание shutdown до release,
+суточный deadline после задержанного commit, backoff после задержанной ошибки,
+прерывание finish_review и повтор с неизменным решением. Время задаётся Cell;
+короткий timeout проверяет только отсутствие завершения при удерживаемом gate.
+
+RED до исправлений: три теста упали по существу — ранний Cancelled, deadline
+86410s вместо 86490s, backoff 11s вместо 91s. GREEN после исправлений: 3 passed.
+Логи этой итерации имеют префикс review- рядом с исходными evidence.
+
+Финальная проверка исправлений Rust 1.85.1, jobs=2, под flock корня
+`/var/tmp/codex-myrs/transient/yonik-scheduler-review`, target в его `target/`:
+
+- `cargo +1.85.1 test --workspace`: exit 0; 534 passed, 0 failed, 24 ignored.
+- `cargo +1.85.1 clippy --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo +1.85.1 fmt --all -- --check`: exit 0.
+- `git diff --check`: exit 0 после нормализации завершающих строк evidence.
+
+Изменения Cargo.lock ограничивались автоматической сортировкой Cargo;
+они убраны, зависимости не менялись. Новые бинарники для передачи не нужны.
+Логи сохранены до cargo clean. Эта итерация закрывает только два P2;
+GUI wiring и прочий ранее указанный остаток P10 сохраняются.

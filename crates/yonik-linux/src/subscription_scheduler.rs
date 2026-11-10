@@ -171,7 +171,7 @@ impl SubscriptionScheduler {
         service: &SubscriptionService,
         id: i64,
         approve: bool,
-        now: Duration,
+        clock: impl Fn() -> Duration,
     ) -> Result<Option<i64>, SubscriptionError> {
         let active = self
             .active
@@ -197,6 +197,7 @@ impl SubscriptionScheduler {
             .as_mut()
             .ok_or(SubscriptionError::StaleUpdate)?
             .await;
+        let now = clock();
         let work = active.work;
         self.active.remove(&id);
         self.scheduler

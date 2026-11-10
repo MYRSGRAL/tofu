@@ -250,7 +250,7 @@ async fn review_сохраняет_прежний_snapshot_до_явного_app
     ));
     assert_eq!(
         runtime
-            .finish_review(&service, id, true, Duration::ZERO)
+            .finish_review(&service, id, true, || Duration::ZERO)
             .await
             .unwrap(),
         Some(1)
@@ -279,7 +279,7 @@ async fn review_сохраняет_прежний_snapshot_до_явного_app
     );
     assert_eq!(runtime.next_deadline(policy()), None);
     runtime
-        .finish_review(&service, id, false, deadline)
+        .finish_review(&service, id, false, || deadline)
         .await
         .unwrap();
     assert!(runtime.review(id).is_none());
@@ -339,7 +339,7 @@ async fn смена_источника_и_удаление_блокируют_у
         .unwrap();
     runtime.next_event(|| Duration::ZERO).await.unwrap();
     runtime
-        .finish_review(&service, id, true, Duration::ZERO)
+        .finish_review(&service, id, true, || Duration::ZERO)
         .await
         .unwrap();
     let due = runtime.next_deadline(policy()).unwrap();
