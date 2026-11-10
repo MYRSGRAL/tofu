@@ -15,3 +15,7 @@ Stop и освобождает callback. RED: ACK не пришёл за 10 се
 В ветку обычным merge включён async provider shutdown из PR62. Исходный
 Rust CI f7b8067 падал на p10_e2e.rs:412 (provider ещё подключён при closed).
 Сырые логи: /home/myrs/projects/yonik/local/validation/p10-close-observation/.
+
+Combined workspace: 593 passed, 0 failed, 24 ignored; отдельный P10 gate PASS.
+Workspace clippy all-targets --locked -D warnings прошёл. Из PR62 также включён
+02a2abf: ограниченное закрытие network monitor с cleanup failure outcome.
