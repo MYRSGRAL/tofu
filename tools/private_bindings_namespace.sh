@@ -6,5 +6,5 @@ mount --make-rprivate /
 mount -t tmpfs tmpfs /run
 mount -t tmpfs tmpfs /tmp
 mount -t sysfs sysfs /sys
-exec "$1" private_bindings --ignored --nocapture
-' sh "$1"
+exec "$1" "$2" --ignored --nocapture
+' sh "$1" "${2:-private_bindings}"

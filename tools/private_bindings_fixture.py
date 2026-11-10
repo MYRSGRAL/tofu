@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 from public_block_fixture import PEER, guard_namespace, run_ip, setup
 
@@ -11,10 +12,8 @@ def wg(arguments: list[str], data: bytes | None = None) -> bytes:
     return result.stdout
 
 
-def main() -> None:
+def connect() -> None:
     guard_namespace()
-    setup()
-    run_ip("link", "del", "vpn")
     for ns in ([], ["-n", PEER]):
         run_ip(*ns, "link", "add", "vpn", "type", "wireguard")
     # Приватные ключи остаются в памяти и stdin; argv и evidence их не содержат.
@@ -32,6 +31,21 @@ def main() -> None:
         run_ip(*ip_ns, "link", "set", "vpn", "up")
         for addr in (f"10.42.1.{i+1}/24", f"fd42:1::{i+1}/64"):
             run_ip(*ip_ns, "address", "add", addr, "dev", "vpn", "nodad")
+
+
+def main() -> None:
+    guard_namespace()
+    action = sys.argv[1] if len(sys.argv) == 2 else "setup"
+    if action in ("setup", "underlay"):
+        setup()
+        run_ip("link", "del", "vpn")
+    if action in ("setup", "connect"):
+        connect()
+    elif action == "disconnect":
+        run_ip("link", "del", "vpn")
+        run_ip("-n", PEER, "link", "del", "vpn")
+    elif action != "underlay":
+        raise ValueError("Неизвестное действие fixture")
 
 
 if __name__ == "__main__":

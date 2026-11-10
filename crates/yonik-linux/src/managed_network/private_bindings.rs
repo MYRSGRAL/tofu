@@ -18,6 +18,7 @@ pub struct BindingRequest {
 
 /// Не Policy: проверенные входы существующего PublicBlockPolicy.
 pub struct PrivateBindings {
+    invalidated: bool,
     stamp: NetworkStamp,
     topology: LinuxTopology,
     requests: Vec<BindingRequest>,
@@ -111,6 +112,7 @@ impl PrivateBindings {
             }
         }
         Ok(Self {
+            invalidated: false,
             stamp: before.stamp,
             topology,
             requests,
@@ -124,7 +126,8 @@ impl PrivateBindings {
         snapshot: NetworkSnapshot,
         topology: &LinuxTopology,
     ) -> (Vec<PrivateRoute>, Vec<LanException>) {
-        let valid = current(snapshot, self.stamp)
+        let valid = !self.invalidated
+            && current(snapshot, self.stamp)
             && crate::network::same_external_topology(topology, &self.topology);
         let mut private = Vec::new();
         let mut lan = Vec::new();
@@ -150,3 +153,8 @@ fn current(snapshot: NetworkSnapshot, stamp: NetworkStamp) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+mod watch;
+pub use watch::BindingInvalidation;
+#[cfg(test)]
+mod event_tests;
