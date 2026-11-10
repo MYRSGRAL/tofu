@@ -538,8 +538,8 @@ flock -s "$yonik_build" env CARGO_TARGET_DIR="$yonik_build/target" cargo run --q
 содержат документационные назначения: замените их своими правилами. Schema version 1:
 `default_action`, `user_rules`, `preset_rules`, `lan`, `private_networks`, `private_domains`.
 Правило содержит `id`, `action`, необязательные `enabled` и `conditions` с массивами
-`domain`, `domain_suffix`, `ip_cidr`, `executable_paths`. Значения назначения объединены
-ИЛИ, источник и назначение — И. Личные правила идут перед пресетами. Недоступные
+`domain`, `domain_suffix`, `ip_cidr`, `executable_paths`. Группы executable, домена и CIDR соединены
+через И, значения внутри каждой группы — через ИЛИ. Пустая группа означает любое значение. Личные правила идут перед пресетами. Недоступные
 приватные сети/зоны блокируются раньше LAN и личных правил. `available: true` не
 разрешает использовать VPN: нужна будущая подтверждённая NetworkHost binding.
 
