@@ -58,6 +58,7 @@ def run(binary: Path, output: Path) -> None:
 
 def active(binary: Path, engines: Path, output: Path) -> None:
     """Настоящие Qt SNI, IPC relaunch и SOCKS traffic без пользовательской bus."""
+    output.mkdir(parents=True, exist_ok=False)
     import dbus
     import dbus.service
     from dbus.mainloop.glib import DBusGMainLoop
@@ -87,7 +88,6 @@ def active(binary: Path, engines: Path, output: Path) -> None:
     loop = GLib.MainLoop()
     thread = threading.Thread(target=loop.run)
     thread.start()
-    output.mkdir(parents=True, exist_ok=False)
     try:
         with tempfile.TemporaryDirectory(prefix="yt-") as temporary:
             root = Path(temporary)

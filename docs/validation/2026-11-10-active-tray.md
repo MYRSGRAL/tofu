@@ -50,3 +50,13 @@ PASS, `cargo fmt --all -- --check` PASS, `git diff --check` PASS.
 останавливается на существующем `clippy::collapsible_match` в
 `crates/yonik-engine/src/lib.rs:165` (вне ownership). Лог:
 `/home/myrs/projects/yonik/local/validation/active-tray-clippy.log`.
+
+## Исправление preflight cleanup
+
+Независимый review выявил запуск non-daemon GLib thread до проверки output
+каталога. Создание output теперь выполняется до D-Bus/GLib ресурсов.
+Control-flow regression со stub GLib/Thread дал RED (started loop без cleanup)
+→ GREEN; он допускает и отсутствие старта, и полноценный cleanup при отказе.
+Штатный Python discovery: 126 PASS; Ruff format/check PASS. Это проверка
+error path стенда, не повтор native Qt smoke и не доказательство live Plasma.
+Логи: /home/myrs/projects/yonik/local/validation/pr74-cleanup-fix/.
