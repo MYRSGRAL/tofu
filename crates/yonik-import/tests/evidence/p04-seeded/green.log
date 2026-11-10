@@ -1,0 +1,169 @@
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-b07ff935-7fa18f6f74fa0338/crates/yonik-import)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.93s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/yonik_import-cbbc795c3c2cd06e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/yonik_import-bcc94d0dc0e40f11)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/cli-4b57cea881bceef1)
+
+running 2 tests
+test argument_error_does_not_echo_secret_argument ... ok
+test stdin_summary_and_errors_do_not_reveal_credentials ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/failure_source.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/failure_source-b01486899a54b71b)
+
+running 2 tests
+test fatal_errors_keep_original_bytes_without_debug_leakage ... ok
+test oversized_stream_retains_only_bounded_prefix_and_marks_it_incomplete ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/identity.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/identity-5a52be8bfc1cc620)
+
+running 9 tests
+test legacy_shadowsocks_uses_decoded_credentials ... ok
+test display_names_are_safe_bounded_and_source_is_unchanged ... ok
+test reserved_path_escape_does_not_collapse_different_options ... ok
+test query_encoding_order_and_unknown_options ... ok
+test unknown_json_numbers_never_round_to_the_same_identity ... ok
+test vmess_recursive_canonicalization ... ok
+test every_protocol_tracks_credentials_and_options ... ok
+test names_do_not_change_identity_for_all_protocols ... ok
+test vmess_keeps_nested_duplicate_keys_and_their_relative_order ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/import.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/import-ca4d2c90826d08fd)
+
+running 7 tests
+test partial_import_reports_indices_without_echoing_input ... ok
+test standard_base64_one_layer_and_uri_list ... ok
+test json_is_opaque_and_depth_limited ... ok
+test all_initial_protocols_parse_core_credentials ... ok
+test unknown_and_unsafe_parameters_are_retained_and_require_review ... ok
+test vless_normalizes_endpoint_and_keeps_opaque_source ... ok
+test bounded_read_stops_before_consuming_unbounded_source ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/intent.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/intent-97568b9c1ad40cd9)
+
+running 6 tests
+test закрытый_контракт_и_ограничение_размера ... ok
+test отклоняет_неизвестные_повторные_и_избыточные_поля ... ok
+test сохраняет_http_host_с_портом_и_скрывает_ошибку_секрета ... ok
+test reality_xhttp_и_неподдерживаемые_опции ... ok
+test сохраняет_протоколы_и_секреты_не_попадают_в_debug ... ok
+test проверяет_endpoint_uuid_и_управляющие_символы ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/invalid.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/invalid-c0fcb7ba1f0302fe)
+
+running 5 tests
+test aead_2022_userinfo_must_not_use_base64_wrapper ... ok
+test vmess_duplicate_or_mistyped_core_fields_are_rejected ... ok
+test oversized_uri_and_control_credentials_do_not_become_profiles ... ok
+test hostile_reader_errors_are_redacted_and_invalid_utf8_is_rejected ... ok
+test exact_contract_limits_accept_valid_input ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests/matrix.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/matrix-bc190b6d56c28a0b)
+
+running 8 tests
+test idna_и_ip_нормализуются_одинаково_в_uri_и_vmess ... ok
+test алфавиты_base64_и_отказ_от_повторной_обёртки ... ok
+test неизвестные_опции_сохраняются_и_требуют_review ... ok
+test опасные_uri_отклоняются_без_потери_соседней_записи ... ok
+test вложенность_считает_контейнеры_но_не_экранированные_строки ... ok
+test граница_размера_uri_в_обычном_и_base64_списке ... ok
+test непустые_отклонённые_записи_тоже_расходуют_лимит ... ok
+test граница_входа_измеряется_до_декодирования ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.25s
+
+     Running tests/review.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/review-3a1f0c1b8be9a677)
+
+running 3 tests
+test vmess_json_accepts_bare_ipv6_and_normalizes_it ... ok
+test http_proxy_security_cannot_conflict_with_scheme ... ok
+test vmess_alter_id_rejects_malformed_values_and_flags_legacy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/seeded_input.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/seeded_input-4af8a52f9c092532)
+
+running 4 tests
+test скрытый_fragment_legacy_ss_не_теряется ... ok
+test native_обоих_cores_сохраняется_при_обёртке_а_дубли_отклоняются ... ok
+test генерируемые_credentials_endpoint_и_ручной_roundtrip ... ok
+test seeded_мутации_детерминированы_и_сохраняют_вход ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/variants.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/variants-c2f49b8ec716386b)
+
+running 4 tests
+test json_brackets_in_strings_do_not_consume_nesting_budget ... ok
+test shadowsocks_legacy_and_escaped_userinfo_keep_password_exact ... ok
+test urlsafe_unpadded_envelope_and_bom_are_supported ... ok
+test ipv6_idna_and_default_ports_are_normalized ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/xray.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/xray-4ebcc85b48acd96b)
+
+running 18 tests
+test disabled_tls_session_resumption_is_noop_but_enabled_or_malformed_is_blocked ... ok
+test explicitly_disabled_mux_and_plain_tcp_header_are_noops ... ok
+test endpoints_users_and_names_are_distinct_and_stable ... ok
+test grpc_boolean_mode_stays_visible_but_cannot_activate ... ok
+test maps_ws_grpc_xhttp_without_losing_parameters ... ok
+test rejects_duplicate_nested_auth_fields ... ok
+test grpc_and_reality_options_reject_non_string_values ... ok
+test grpc_gun_mode_is_preserved_without_accepting_unknown_siblings ... ok
+test remna_array_extracts_only_servers_and_keeps_native_json ... ok
+test shadowsocks_json_preserves_credentials_endpoints_and_native_source ... ok
+test shadowsocks_unknown_options_and_malformed_credentials_are_not_lost ... ok
+test tls_unsafe_and_unknown_nested_options_cannot_be_lost ... ok
+test unknown_protocol_and_malformed_credentials_are_reported ... ok
+test unrelated_native_numbers_keep_their_original_opaque_representation ... ok
+test escaped_root_keys_are_recognized_and_large_names_are_bounded ... ok
+test unsupported_semantics_are_blocking_review_flags ... ok
+test unknown_native_is_opaque_and_oversized_outbound_is_rejected ... ok
+test native_json_bounds_and_duplicate_security_fields_are_enforced ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/xray_protocols.rs (/var/tmp/codex-myrs/transient/p04-seeded-b07ff935/target/debug/deps/xray_protocols-9df029572dc73e6a)
+
+running 8 tests
+test ipv6_grpc_и_непредставимые_reality_опции_не_теряются ... ok
+test alpn_с_запятой_не_превращается_в_несколько_протоколов ... ok
+test legacy_vmess_и_неизвестные_credentials_остаются_на_review ... ok
+test извлекает_оба_протокола_и_сохраняет_intent_и_исходник ... ok
+test неоднозначные_массивы_отклоняются_целиком ... ok
+test повреждённые_endpoint_и_credentials_отклоняются ... ok
+test неизвестные_и_небезопасные_поля_блокируют_intent ... ok
+test дубли_escaped_keys_размер_и_глубина_проверяются_до_экстракции ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests yonik_import
+
+running 1 test
+test crates/yonik-import/src/intent.rs - intent::ServerIntent (line 110) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
