@@ -1,0 +1,598 @@
+{
+  "catalog_version": 1,
+  "schema_version": 1,
+  "messages": [
+    {
+      "code": "LISTEN_PORT_BUSY",
+      "message_key": "listen_port_busy",
+      "ru": "Порт занят. Повторите подключение.",
+      "en": "Port is busy. Try connecting again.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP",
+      "message_key": "startup",
+      "ru": "Не удалось запустить приложение.",
+      "en": "Could not start the application.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "KEYRING_LOCKED",
+      "message_key": "keyring_locked",
+      "ru": "Хранилище секретов заблокировано. Разблокируйте системный кошелёк и повторите запуск.",
+      "en": "Secret storage is locked. Unlock the system wallet and restart.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "KEYRING_MISSING",
+      "message_key": "keyring_missing",
+      "ru": "Системное хранилище секретов недоступно.",
+      "en": "System secret storage is unavailable.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STORAGE",
+      "message_key": "storage",
+      "ru": "Ошибка локального хранилища. Проверьте доступ к данным приложения.",
+      "en": "Local storage error. Check access to application data.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "PREFERENCES_WRITE",
+      "message_key": "preferences_write",
+      "ru": "Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.",
+      "en": "Could not save settings. The change was not applied. Check preferences.json in the data directory.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_INPUT",
+      "message_key": "invalid_input",
+      "ru": "Проверьте введённые данные и адрес подписки.",
+      "en": "Check the input and subscription URL.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "BUSY",
+      "message_key": "busy",
+      "ru": "Дождитесь завершения текущей операции.",
+      "en": "Wait for the current operation to finish.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SOURCE_IN_USE",
+      "message_key": "source_in_use",
+      "ru": "Сначала отключите прокси, затем удалите подписку.",
+      "en": "Disconnect the proxy before deleting this subscription.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "REFRESH_REQUIRED",
+      "message_key": "refresh_required",
+      "ru": "Загрузка уже завершилась. Проверьте список серверов.",
+      "en": "Loading has already finished. Check the server list.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SOURCE_REQUIRED",
+      "message_key": "source_required",
+      "ru": "Сначала выберите подписку.",
+      "en": "Select a subscription first.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_PROXY",
+      "message_key": "unsupported_proxy",
+      "ru": "Загрузка подписки через прокси пока не поддерживается. Выберите прямой маршрут.",
+      "en": "Fetching subscriptions through a proxy is not supported yet. Choose Direct.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "HWID_REQUIRED",
+      "message_key": "hwid_required",
+      "ru": "Провайдер требует ID устройства. Включите его в настройках подписки.",
+      "en": "The provider requires a device ID. Enable it in subscription settings.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "HWID_LIMIT",
+      "message_key": "hwid_limit",
+      "ru": "Достигнут лимит устройств подписки. Проверьте устройства у провайдера.",
+      "en": "The subscription device limit has been reached. Review devices with your provider.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "HWID_REJECTED",
+      "message_key": "hwid_rejected",
+      "ru": "Провайдер отклонил ID устройства. Обратитесь в поддержку провайдера.",
+      "en": "The provider rejected the device ID. Contact provider support.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "HWID_REDIRECT",
+      "message_key": "hwid_redirect",
+      "ru": "Провайдер перенаправляет запрос с ID устройства. Проверьте ссылку подписки.",
+      "en": "The provider redirects device ID requests. Check the subscription link.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "FETCH",
+      "message_key": "fetch",
+      "ru": "Не удалось загрузить подписку. Проверьте сеть и адрес. Сохранённые профили не изменены.",
+      "en": "Could not fetch the subscription. Check the network and URL. Saved profiles are unchanged.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "IMPORT",
+      "message_key": "import",
+      "ru": "Не удалось распознать профили подписки.",
+      "en": "Could not parse subscription profiles.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "REVIEW_REQUIRED",
+      "message_key": "review_required",
+      "ru": "Сначала подтвердите или отмените текущий импорт.",
+      "en": "Approve or discard the current import first.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "PROFILE_REQUIRED",
+      "message_key": "profile_required",
+      "ru": "Сначала выберите профиль.",
+      "en": "Select a profile first.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "PROFILE_UNAVAILABLE",
+      "message_key": "profile_unavailable",
+      "ru": "Профиль недоступен или список изменился. Выберите профиль заново.",
+      "en": "The profile is unavailable or the list has changed. Select the profile again.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ENGINE_MISSING",
+      "message_key": "engine_missing",
+      "ru": "Прокси-ядро не найдено. Установите выбранное ядро и перезапустите приложение.",
+      "en": "Proxy engine not found. Install the selected engine and restart the application.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SYSTEM_UNSUPPORTED",
+      "message_key": "system_unsupported",
+      "ru": "Системный режим недоступен: helper сообщает system_tun=false.",
+      "en": "System mode unavailable: helper reports system_tun=false.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SYSTEM_DENIED",
+      "message_key": "system_denied",
+      "ru": "Нет разрешения на системное подключение.",
+      "en": "System connection authorization denied.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SYSTEM_OWNER_LOST",
+      "message_key": "system_owner_lost",
+      "ru": "Helper перезапущен. Проверьте состояние сети.",
+      "en": "Helper restarted. Check network state.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SYSTEM_TIMEOUT",
+      "message_key": "system_timeout",
+      "ru": "Время ожидания helper истекло. Исход неизвестен.",
+      "en": "Helper timed out. Outcome unknown.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "SYSTEM_UNAVAILABLE",
+      "message_key": "system_unavailable",
+      "ru": "Helper недоступен. Проверьте состояние сети.",
+      "en": "Helper unavailable. Check network state.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ENGINE_CONFIG",
+      "message_key": "engine_config",
+      "ru": "Профиль несовместим с выбранным ядром. Проверьте параметры подключения.",
+      "en": "The profile is incompatible with the selected engine. Check connection settings.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ENGINE_FAILED",
+      "message_key": "engine_failed",
+      "ru": "Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.",
+      "en": "Could not start the proxy engine. Check the profile and engine installation.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "PROBE_TARGET_INVALID",
+      "message_key": "probe_target_invalid",
+      "ru": "Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.",
+      "en": "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CHECK_HTTP_STATUS",
+      "message_key": "check_http_status",
+      "ru": "Сайт проверки вернул неожиданный HTTP-статус. Редирект не считается успехом.",
+      "en": "The check endpoint returned an unexpected HTTP status. Redirects are not successful.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CHECK_TLS",
+      "message_key": "check_tls",
+      "ru": "Не удалось проверить TLS сайта проверки.",
+      "en": "TLS verification failed for the check endpoint.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CHECK_TIMEOUT",
+      "message_key": "check_timeout",
+      "ru": "Истекло время проверки доступа через прокси.",
+      "en": "The connectivity check through the proxy timed out.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CHECK_TRANSPORT",
+      "message_key": "check_transport",
+      "ru": "Не удалось выполнить запрос через прокси: ошибка транспорта.",
+      "en": "The request through the proxy failed with a transport error.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CHECK_FAILED",
+      "message_key": "check_failed",
+      "ru": "Прокси работает, но доступность интернета не подтверждена.",
+      "en": "The proxy is running, but internet access is unconfirmed.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "NETWORK_CHANGED",
+      "message_key": "network_changed",
+      "ru": "Обнаружено изменение сети. Прежняя HTTPS-проверка больше не актуальна; прокси-ядро продолжает работать с ограниченным статусом. Переподключитесь для новой HTTPS-проверки.",
+      "en": "A network change was detected. The previous HTTPS check is no longer current; the proxy engine keeps running with limited status. Reconnect for a new HTTPS check.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "TCP_FAILED",
+      "message_key": "tcp_failed",
+      "ru": "Не удалось выполнить TCP-проверку. Повторите попытку.",
+      "en": "Could not complete the TCP check. Try again.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CANCELLED",
+      "message_key": "cancelled",
+      "ru": "Операция отменена.",
+      "en": "Operation cancelled.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CLEANUP_FAILED",
+      "message_key": "cleanup_failed",
+      "ru": "Не удалось завершить отключение. Повторите остановку перед выходом.",
+      "en": "Cleanup failed. Retry stopping before quitting.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ROUTING_STALE",
+      "message_key": "routing_stale",
+      "ru": "Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.",
+      "en": "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ROUTING_ACK_IDENTITY",
+      "message_key": "routing_ack_identity",
+      "ru": "Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.",
+      "en": "Save response did not match the rule. Input is preserved; check the draft.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ROUTING_STORAGE",
+      "message_key": "routing_storage",
+      "ru": "Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.",
+      "en": "Draft not saved: damaged database or conflict. Original preserved; restart the application.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "DOMAIN",
+      "message_key": "domain",
+      "ru": "Некорректный домен",
+      "en": "Invalid domain",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CIDR",
+      "message_key": "cidr",
+      "ru": "Некорректный IP/CIDR: проверьте биты сети",
+      "en": "Invalid IP/CIDR: check network bits",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "EXECUTABLE",
+      "message_key": "executable",
+      "ru": "Нужен абсолютный путь без . и ..",
+      "en": "An absolute path without . and .. is required",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "BROAD",
+      "message_key": "broad",
+      "ru": "Подтвердите правило для любого трафика",
+      "en": "Confirm matching all traffic",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ID",
+      "message_key": "id",
+      "ru": "Недопустимый или повторяющийся ID",
+      "en": "Invalid or duplicate ID",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "LIMIT",
+      "message_key": "limit",
+      "ru": "Лимит: 256 правил, 64 значения в группе, 4096 байт в значении",
+      "en": "Limit: 256 rules, 64 values per group, 4096 bytes per value",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "MALFORMED_URI",
+      "message_key": "malformed_uri",
+      "ru": "Некорректная ссылка",
+      "en": "Malformed URI",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_PROTOCOL",
+      "message_key": "unsupported_protocol",
+      "ru": "Протокол не поддерживается",
+      "en": "Unsupported protocol",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_PORT",
+      "message_key": "invalid_port",
+      "ru": "Некорректный порт",
+      "en": "Invalid port",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_HOST",
+      "message_key": "invalid_host",
+      "ru": "Некорректный адрес",
+      "en": "Invalid host",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_CREDENTIALS",
+      "message_key": "invalid_credentials",
+      "ru": "Некорректные учётные данные",
+      "en": "Invalid credentials",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_ENCODING",
+      "message_key": "invalid_encoding",
+      "ru": "Некорректная кодировка",
+      "en": "Invalid encoding",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_JSON",
+      "message_key": "invalid_json",
+      "ru": "Некорректный JSON",
+      "en": "Invalid JSON",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "TOO_LARGE",
+      "message_key": "too_large",
+      "ru": "Превышен размер записи",
+      "en": "Record too large",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "DUPLICATE_PARAMETER",
+      "message_key": "duplicate_parameter",
+      "ru": "Повторяющийся параметр",
+      "en": "Duplicate parameter",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CONFLICTING_PARAMETER",
+      "message_key": "conflicting_parameter",
+      "ru": "Конфликт параметров",
+      "en": "Conflicting parameters",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNKNOWN_PARAMETER",
+      "message_key": "unknown_parameter",
+      "ru": "Неизвестный параметр",
+      "en": "Unknown parameter",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_TRANSPORT",
+      "message_key": "unsupported_transport",
+      "ru": "Транспорт не поддерживается",
+      "en": "Unsupported transport",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_SECURITY",
+      "message_key": "unsupported_security",
+      "ru": "Защита не поддерживается",
+      "en": "Unsupported security",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_CIPHER",
+      "message_key": "unsupported_cipher",
+      "ru": "Шифр не поддерживается",
+      "en": "Unsupported cipher",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSUPPORTED_OPTION",
+      "message_key": "unsupported_option",
+      "ru": "Опция не поддерживается",
+      "en": "Unsupported option",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "UNSAFE_OPTION",
+      "message_key": "unsafe_option",
+      "ru": "Небезопасная опция",
+      "en": "Unsafe option",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "LEGACY_OPTION",
+      "message_key": "legacy_option",
+      "ru": "Устаревшая опция",
+      "en": "Legacy option",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "RESOLVER_UNAVAILABLE",
+      "message_key": "resolver_unavailable",
+      "ru": "DNS недоступен: требуется systemd-resolved с Varlink",
+      "en": "DNS unavailable: systemd-resolved with Varlink is required",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "DNS_FAILED",
+      "message_key": "dns_failed",
+      "ru": "Не удалось разрешить DNS-имя",
+      "en": "DNS resolution failed",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CONNECT_FAILED",
+      "message_key": "connect_failed",
+      "ru": "Не удалось установить TCP-соединение",
+      "en": "TCP connection failed",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "DNS_TIMEOUT",
+      "message_key": "dns_timeout",
+      "ru": "Истекло время DNS-запроса",
+      "en": "DNS timed out",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CONNECT_TIMEOUT",
+      "message_key": "connect_timeout",
+      "ru": "Истекло время TCP-соединения",
+      "en": "TCP connection timed out",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "TLS",
+      "message_key": "tls",
+      "ru": "Ошибка TLS",
+      "en": "TLS error",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "TIMEOUT",
+      "message_key": "timeout",
+      "ru": "Истекло время проверки",
+      "en": "Check timed out",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "TRANSPORT",
+      "message_key": "transport",
+      "ru": "Ошибка транспорта",
+      "en": "Transport error",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "CATALOG",
+      "message_key": "catalog",
+      "ru": "Не удалось прочитать каталог приложений.",
+      "en": "Could not read the application catalog.",
+      "stage": "operation",
+      "retryable": false
+    }
+  ]
+}

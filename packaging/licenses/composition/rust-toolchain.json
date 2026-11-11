@@ -1,0 +1,52 @@
+{
+  "version": "1.85.1",
+  "commit": "4eb161250e340c8f48f66e2b929ef4a5bed7c181",
+  "installed_manifest_sha256": "7e97a1235ea88353e5b930cd19308477d1fcb854e1c69bd4f1a5140e087e54d2",
+  "packages": {
+    "rustc": {
+      "available": true,
+      "url": "https://static.rust-lang.org/dist/2025-03-18/rustc-1.85.1-x86_64-unknown-linux-gnu.tar.gz",
+      "hash": "2c7c89df662fc62bde0b75e60602ca2c64906edbecd79fd95745dfc635b05479",
+      "xz_url": "https://static.rust-lang.org/dist/2025-03-18/rustc-1.85.1-x86_64-unknown-linux-gnu.tar.xz",
+      "xz_hash": "92a5c532b9e87912190128704e0d65825912e3b08a6ee9203c4068d6d1df62c4",
+      "components": [],
+      "extensions": []
+    },
+    "rust-std": {
+      "available": true,
+      "url": "https://static.rust-lang.org/dist/2025-03-18/rust-std-1.85.1-x86_64-unknown-linux-gnu.tar.gz",
+      "hash": "3e14ec3f9f622f2b577817f71413259a401c0b233a527ef561342f3c10a777a6",
+      "xz_url": "https://static.rust-lang.org/dist/2025-03-18/rust-std-1.85.1-x86_64-unknown-linux-gnu.tar.xz",
+      "xz_hash": "0aaeffba85359503f874315cd08e0ae8490275d14b41470d36d4fa57fd085916",
+      "components": [],
+      "extensions": []
+    },
+    "cargo": {
+      "available": true,
+      "url": "https://static.rust-lang.org/dist/2025-03-18/cargo-1.85.1-x86_64-unknown-linux-gnu.tar.gz",
+      "hash": "1646065e914ff61d2073aa0a9da8fafe31544dc7234a378b60f7b5aa5aebb22b",
+      "xz_url": "https://static.rust-lang.org/dist/2025-03-18/cargo-1.85.1-x86_64-unknown-linux-gnu.tar.xz",
+      "xz_hash": "7373132c13e394755d15f01bda4374af59b4daef01b12a83cb3df3f3be38e289",
+      "components": [],
+      "extensions": []
+    }
+  },
+  "texts": [
+    {
+      "source_path": "share/doc/rust/COPYRIGHT",
+      "sha256": "252b04f034f7383e09401dc700c8b933e3e38818eaa8b2f09dd247542be92292",
+      "file": "texts/252b04f034f7383e09401dc700c8b933e3e38818eaa8b2f09dd247542be92292"
+    },
+    {
+      "source_path": "share/doc/rust/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "source_path": "share/doc/rust/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    }
+  ],
+  "limits": "COPYRIGHT/лицензии официального installed toolchain; retained std/vendor symbols не атрибутированы по файлам"
+}

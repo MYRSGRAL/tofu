@@ -76,7 +76,13 @@ fn normalize_rule(
             == Some("oif")
         {
             if let Some(name) = expression.pointer("/match/right").and_then(Value::as_str) {
-                let index = resolve(name)?;
+                let index = match resolve(name) {
+                    Ok(index) => index,
+                    Err(error) => match name.parse::<std::num::NonZeroU32>() {
+                        Ok(index) if index.to_string() == name => index.get(),
+                        _ => return Err(error),
+                    },
+                };
                 expression["match"]["right"] = json!(index);
             }
         }
@@ -318,3 +324,29 @@ impl NftExecutor {
 #[cfg(test)]
 #[path = "nft_block_tests.rs"]
 pub(super) mod tests;
+
+#[cfg(test)]
+mod numeric_oif_regression {
+    use super::{NftError, normalize_rule};
+    use serde_json::json;
+    #[test]
+    fn deleted_oif_numeric_and_real_numeric_ifname() {
+        let mut rule =
+            json!({"expr":[{"match":{"op":"==","left":{"meta":{"key":"oif"}},"right":"27"}}]});
+        assert_eq!(
+            normalize_rule(&mut rule, &|_| Err(NftError::Evidence)),
+            Ok(())
+        );
+        assert_eq!(rule["expr"][0]["match"]["right"], 27);
+        rule["expr"][0]["match"]["right"] = json!("27");
+        normalize_rule(&mut rule, &|_| Ok(81)).unwrap();
+        assert_eq!(rule["expr"][0]["match"]["right"], 81);
+        for invalid in ["0", "00", "027", "+27", "-27", "4294967296", "vpn"] {
+            rule["expr"][0]["match"]["right"] = json!(invalid);
+            assert_eq!(
+                normalize_rule(&mut rule, &|_| Err(NftError::Evidence)),
+                Err(NftError::Evidence)
+            );
+        }
+    }
+}

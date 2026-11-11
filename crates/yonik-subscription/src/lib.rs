@@ -3,7 +3,7 @@
 pub mod scheduler;
 
 use std::{fmt, num::NonZeroU64};
-use yonik_import::{FatalError, ImportReport, import_bytes};
+use yonik_import::{FatalError, ImportReport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -13,6 +13,23 @@ pub enum Error {
     NoUsableRecords,
     ReviewRequired,
 }
+
+/// Ошибка совместимого staging отделена от кооперативной отмены.
+#[derive(Debug)]
+pub enum CancellableStageError {
+    Cancelled,
+    Stage(Error),
+}
+
+impl fmt::Display for CancellableStageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("Обработка подписки отменена"),
+            Self::Stage(error) => error.fmt(f),
+        }
+    }
+}
+impl std::error::Error for CancellableStageError {}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -179,21 +196,48 @@ impl Subscription {
     }
 
     pub fn stage(&self, ticket: Ticket, body: Vec<u8>) -> Result<StagedUpdate, Error> {
-        self.check(ticket)?;
-        let report = import_bytes(body).map_err(|failure| Error::InvalidImport(failure.kind()))?;
+        self.stage_cancellable(ticket, body, || true)
+            .map_err(|error| match error {
+                CancellableStageError::Stage(error) => error,
+                CancellableStageError::Cancelled => Error::Stale,
+            })
+    }
+
+    pub fn stage_cancellable(
+        &self,
+        ticket: Ticket,
+        body: Vec<u8>,
+        proceed: impl Fn() -> bool,
+    ) -> Result<StagedUpdate, CancellableStageError> {
+        self.check(ticket).map_err(CancellableStageError::Stage)?;
+        let report =
+            yonik_import::import_bytes_cancellable(body, &proceed).map_err(
+                |error| match error {
+                    yonik_import::CancellableImportError::Cancelled => {
+                        CancellableStageError::Cancelled
+                    }
+                    yonik_import::CancellableImportError::Import(error) => {
+                        CancellableStageError::Stage(Error::InvalidImport(error.kind()))
+                    }
+                },
+            )?;
         if report.servers.is_empty() && report.native_json.is_none() {
-            return Err(Error::NoUsableRecords);
+            return Err(CancellableStageError::Stage(Error::NoUsableRecords));
         }
         let summary = Summary {
             accepted: report.servers.len(),
             rejected: report.issues.len(),
-            flagged: report
-                .servers
-                .iter()
-                .filter(|server| !server.review_flags().is_empty())
-                .count(),
+            flagged: report.servers.iter().try_fold(0, |count, server| {
+                if !proceed() {
+                    return Err(CancellableStageError::Cancelled);
+                }
+                Ok(count + usize::from(!server.review_flags().is_empty()))
+            })?,
             native_json: report.native_json.is_some(),
         };
+        if !proceed() {
+            return Err(CancellableStageError::Cancelled);
+        }
         Ok(StagedUpdate {
             ticket,
             report,
