@@ -318,7 +318,12 @@ pub fn export_snapshot_v2(raw: &str) -> Option<String> {
                 "maintenance_generation"
             } else if expected.stage == context::Stage::RoutingSave {
                 "routing_generation"
-            } else if expected.stage == context::Stage::SchedulerAdmission {
+            } else if matches!(
+                expected.stage,
+                context::Stage::SchedulerAdmission
+                    | context::Stage::SchedulerService
+                    | context::Stage::SchedulerValidation
+            ) {
                 "scheduler_generation"
             } else if expected.stage == context::Stage::HelperRpc {
                 "helper_generation"

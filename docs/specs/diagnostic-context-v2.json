@@ -1031,5 +1031,165 @@
       "maintenance_ack"
     ],
     "generation_required": true
+  },
+  "scheduler_service_corrupt_snapshot": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_no_snapshot": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_exhausted": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_foreign_approval": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_stale_update": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_worker": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_invalid_input": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_unsafe_path": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_conflict": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_repository_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_interval_invalid": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "scheduler_validation",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_invalid_source": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "scheduler_validation",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
   }
 }

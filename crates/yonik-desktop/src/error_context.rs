@@ -18,6 +18,8 @@ pub enum Slot {
 pub enum Stage {
     SchedulerInitialize,
     SchedulerAdmission,
+    SchedulerService,
+    SchedulerValidation,
     Startup,
     StorageOpen,
     EngineStart,
@@ -45,6 +47,23 @@ pub enum Cause {
     SchedulerDuplicate,
     SchedulerExhausted,
     SchedulerStale,
+    SchedulerIntervalInvalid,
+    SchedulerServiceInvalidSource,
+    SchedulerServiceCorruptSnapshot,
+    SchedulerServiceNotFound,
+    SchedulerServiceNoSnapshot,
+    SchedulerServiceExhausted,
+    SchedulerServiceForeignApproval,
+    SchedulerServiceStaleUpdate,
+    SchedulerServiceWorker,
+    SchedulerRepositoryInvalidInput,
+    SchedulerRepositoryUnsafePath,
+    SchedulerRepositoryUnsupportedVersion,
+    SchedulerRepositoryCorrupt,
+    SchedulerRepositoryStorage,
+    SchedulerRepositoryConflict,
+    SchedulerRepositoryNotFound,
+
     DataDirectoryRelative,
     DataDirectoryCreate,
     DataDirectoryMetadata,
@@ -162,7 +181,9 @@ impl Cause {
             | Stage::MaintenanceReopen => slot == Slot::MaintenanceAck,
             Stage::LogsRead => slot == Slot::LogsRead,
             Stage::LogsSave => slot == Slot::LogsSave,
-            Stage::SchedulerAdmission => matches!(slot, Slot::Error | Slot::Source),
+            Stage::SchedulerAdmission | Stage::SchedulerService | Stage::SchedulerValidation => {
+                matches!(slot, Slot::Error | Slot::Source)
+            }
             Stage::SchedulerInitialize => matches!(slot, Slot::Error | Slot::Source),
             Stage::StorageWrite => matches!(slot, Slot::Error | Slot::Connection | Slot::Source),
             Stage::RoutingSave => matches!(slot, Slot::Error | Slot::Connection | Slot::RoutingAck),
@@ -185,6 +206,31 @@ impl Cause {
             | Self::SchedulerDuplicate
             | Self::SchedulerExhausted
             | Self::SchedulerStale => ("STORAGE", "storage", Stage::SchedulerAdmission),
+            Self::SchedulerIntervalInvalid | Self::SchedulerServiceInvalidSource => {
+                ("INVALID_INPUT", "invalid_input", Stage::SchedulerValidation)
+            }
+            Self::SchedulerServiceCorruptSnapshot => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceNotFound => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceNoSnapshot => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceExhausted => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceForeignApproval => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryInvalidInput => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerRepositoryUnsafePath => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryUnsupportedVersion => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerRepositoryCorrupt => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryStorage => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryConflict => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryNotFound => ("STORAGE", "storage", Stage::SchedulerService),
             Self::RepositoryOpenInvalidInput => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsafePath => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsupportedVersion => ("STORAGE", "storage", Stage::StorageOpen),

@@ -11,6 +11,42 @@ impl ScheduleFailure {
     pub fn key(&self) -> &'static str {
         self.error.key()
     }
+    pub fn interval(error: SubscriptionSchedulerError) -> Self {
+        Self {
+            error: DesktopError("invalid_input"),
+            cause: match error {
+                SubscriptionSchedulerError::InvalidLimits => Some(Cause::SchedulerIntervalInvalid),
+                _ => None,
+            },
+        }
+    }
+    pub fn service(error: yonik_linux::SubscriptionError) -> Self {
+        use yonik_linux::{RepositoryError as R, SubscriptionError as E};
+        let cause = match error {
+            E::InvalidSource => Some(Cause::SchedulerServiceInvalidSource),
+            E::CorruptSnapshot => Some(Cause::SchedulerServiceCorruptSnapshot),
+            E::NotFound => Some(Cause::SchedulerServiceNotFound),
+            E::NoSnapshot => Some(Cause::SchedulerServiceNoSnapshot),
+            E::Exhausted => Some(Cause::SchedulerServiceExhausted),
+            E::ForeignApproval => Some(Cause::SchedulerServiceForeignApproval),
+            E::StaleUpdate => Some(Cause::SchedulerServiceStaleUpdate),
+            E::Worker => Some(Cause::SchedulerServiceWorker),
+            E::Repository(R::InvalidInput) => Some(Cause::SchedulerRepositoryInvalidInput),
+            E::Repository(R::UnsafePath) => Some(Cause::SchedulerRepositoryUnsafePath),
+            E::Repository(R::UnsupportedVersion) => {
+                Some(Cause::SchedulerRepositoryUnsupportedVersion)
+            }
+            E::Repository(R::Corrupt) => Some(Cause::SchedulerRepositoryCorrupt),
+            E::Repository(R::Storage) => Some(Cause::SchedulerRepositoryStorage),
+            E::Repository(R::Conflict) => Some(Cause::SchedulerRepositoryConflict),
+            E::Repository(R::NotFound) => Some(Cause::SchedulerRepositoryNotFound),
+            E::Fetch(_) | E::Import(_) => None,
+        };
+        Self {
+            error: super::map_subscription(error),
+            cause,
+        }
+    }
     pub fn runtime(error: SubscriptionSchedulerError) -> Self {
         let cause = match error {
             SubscriptionSchedulerError::InvalidLimits => Cause::SchedulerInvalidLimits,
@@ -107,7 +143,7 @@ impl DesktopSchedule {
         replacement
             .runtime
             .set_interval(self.interval)
-            .map_err(|_| DesktopError("invalid_input"))?;
+            .map_err(ScheduleFailure::interval)?;
         replacement.background_enabled = self.background_enabled;
         replacement.window_until = self.window_until;
         replacement.next_window = self.next_window;
@@ -185,7 +221,7 @@ impl DesktopSchedule {
             let page = service
                 .schedule_metadata_page(offset)
                 .await
-                .map_err(super::map_subscription)?;
+                .map_err(ScheduleFailure::service)?;
             let count = page.len();
             for token in page {
                 let id = token.id;
@@ -206,7 +242,7 @@ impl DesktopSchedule {
                             service
                                 .persist_schedule(token, state)
                                 .await
-                                .map_err(super::map_subscription)?;
+                                .map_err(ScheduleFailure::service)?;
                             Some(state)
                         }
                         Some(state) => Some(state),
@@ -221,7 +257,7 @@ impl DesktopSchedule {
                             service
                                 .persist_schedule(token, state)
                                 .await
-                                .map_err(super::map_subscription)?;
+                                .map_err(ScheduleFailure::service)?;
                             Some(state)
                         }
                     };
@@ -264,7 +300,7 @@ impl DesktopSchedule {
         if let Some(token) = service
             .schedule_metadata(id)
             .await
-            .map_err(super::map_subscription)?
+            .map_err(ScheduleFailure::service)?
         {
             let generation = token.generation;
             let wall = std::time::SystemTime::now()
@@ -285,7 +321,7 @@ impl DesktopSchedule {
                         },
                     )
                     .await
-                    .map_err(super::map_subscription)?;
+                    .map_err(ScheduleFailure::service)?;
             }
             let due = state.map_or_else(
                 || now.saturating_add(self.interval),
@@ -342,6 +378,101 @@ impl DesktopSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn actual_persisted_corrupt_store_and_invalid_interval_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-service-payload-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        repo.create_source(b"{}".to_vec()).await.unwrap();
+        // Повреждаем только encrypted payload собственной persisted fixture.
+        let status = std::process::Command::new("python3").args(["-c",
+            "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"])
+            .arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let service = SubscriptionService::new(repo);
+        let mut owner = DesktopSchedule::with_limits(NonZeroU64::new(77).unwrap(), 1).unwrap();
+        let failure = owner
+            .load_at(&service, Duration::ZERO, 100)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.cause,
+            Some(Cause::SchedulerRepositoryCorrupt),
+            "typed persisted-store failure lost its context"
+        );
+        assert!(
+            owner
+                .reload_id(&service, 1, Duration::ZERO)
+                .await
+                .unwrap_err()
+                .cause
+                .is_some()
+        );
+        let mut failures = vec![("store", failure)];
+        owner.interval = Duration::ZERO;
+        let invalid = owner.replacement().err().unwrap();
+        assert_eq!(invalid.key(), "invalid_input");
+        assert!(
+            invalid.cause.is_some(),
+            "validator failure lost its context"
+        );
+        failures.push(("interval", invalid));
+        for (name, failure) in failures {
+            let mut state = super::super::Snapshot::new(true);
+            state.schedule_error(failure, Some(77));
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            let output = captured.clone();
+            let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+                *output.lock().unwrap() = raw;
+            });
+            state.emit(&callback);
+            let raw = captured.lock().unwrap().clone();
+            let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+            let document: serde_json::Value = serde_json::from_str(&export).unwrap();
+            for item in document["errors"].as_array().unwrap() {
+                assert_eq!(
+                    item["reason"],
+                    if name == "store" {
+                        "scheduler_repository_corrupt"
+                    } else {
+                        "scheduler_interval_invalid"
+                    }
+                );
+                assert_eq!(item["params"], serde_json::json!({}));
+            }
+            if let Ok(directory) = std::env::var("YONIK_SCHEDULER_EVIDENCE") {
+                std::fs::write(
+                    std::path::Path::new(&directory).join(format!("actual-{name}-export.json")),
+                    &export,
+                )
+                .unwrap();
+                std::fs::write(
+                    std::path::Path::new(&directory).join(format!("actual-{name}-snapshot.json")),
+                    &raw,
+                )
+                .unwrap();
+            }
+            let mut bad: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            bad["scheduler_generation"] = serde_json::json!(78);
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["scheduler_generation"] = serde_json::json!(77);
+            bad["error_contexts"][0]["slot"] = serde_json::json!("routing_ack");
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["error_contexts"] = serde_json::json!([]);
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[tokio::test]
     async fn actual_restore_full_exports_only_current_generation() {

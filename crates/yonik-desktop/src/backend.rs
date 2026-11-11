@@ -1398,7 +1398,8 @@ impl Actor {
             identity,
             Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
         )
-        .await?;
+        .await
+        .map_err(|failure| failure.error)?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -2572,19 +2573,19 @@ async fn extend_schedule_interval(
     service: &SubscriptionService,
     identity: SubscriptionIdentity,
     interval: Duration,
-) -> Result<()> {
+) -> std::result::Result<(), desktop_schedule::ScheduleFailure> {
     if interval <= Duration::from_secs(86400) {
         return Ok(());
     }
     let Some(token) = service
         .schedule_metadata(identity.id)
         .await
-        .map_err(map_subscription)?
+        .map_err(desktop_schedule::ScheduleFailure::service)?
     else {
-        return Err(DesktopError("storage"));
+        return Err(DesktopError("storage").into());
     };
     if token.generation != identity.generation {
-        return Err(DesktopError("storage"));
+        return Err(DesktopError("storage").into());
     }
     let Some(state) = token
         .state
@@ -2601,7 +2602,7 @@ async fn extend_schedule_interval(
             },
         )
         .await
-        .map_err(map_subscription)
+        .map_err(desktop_schedule::ScheduleFailure::service)
 }
 
 /// Completion старого ресурса не отменяет очередь/review нового поколения.
@@ -2615,7 +2616,7 @@ async fn reconcile_manual_schedule(
     if service
         .schedule_generation(identity.id)
         .await
-        .map_err(map_subscription)?
+        .map_err(desktop_schedule::ScheduleFailure::service)?
         != Some(identity.generation)
     {
         return Ok(());
@@ -3284,8 +3285,11 @@ async fn run(
         scheduled.interval =
             Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
-        if scheduled.runtime.set_interval(scheduled.interval).is_err() {
-            actor.state.command_error(true, "invalid_input");
+        if let Err(error) = scheduled.runtime.set_interval(scheduled.interval) {
+            actor.state.schedule_error(
+                desktop_schedule::ScheduleFailure::interval(error),
+                Some(scheduled.generation),
+            );
         }
         let now = origin.elapsed();
         let policy = scheduled.policy();
@@ -3491,7 +3495,7 @@ async fn run(
                             }
                         }
                     }
-                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.command_error(true, map_subscription(error).key()),
+                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::service(error), Some(scheduled.generation)),
                     Ok(_) => {},
                     Err(error) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)),
                 }

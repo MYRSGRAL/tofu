@@ -55,7 +55,9 @@ def main() -> None:
     catalog = json.loads(
         (ROOT / "docs/specs/diagnostic-message-catalog.json").read_text()
     )
-    message = next(m for m in catalog["messages"] if m["message_key"] == "storage")
+    snapshot = json.loads(args.snapshot.read_text())
+    key = snapshot["error_contexts"][0]["message_key"]
+    message = next(m for m in catalog["messages"] if m["message_key"] == key)
     qml = (
         """import QtQuick
 import QtQuick.Controls
@@ -73,7 +75,7 @@ ApplicationWindow {
   const state=SNAPSHOT
   for (let locale of ["ru", "en"]) {
    language=locale
-   require(window.errorText("storage")===MESSAGES[locale])
+   require(window.errorText(KEY)===MESSAGES[locale])
    backend.snapshot_json=JSON.stringify(state)
    require(backend.copy_diagnostics_v2())
    console.log("SCHEDULER EXPORT " + locale + " " + clipboard())
@@ -93,6 +95,7 @@ ApplicationWindow {
 }
 """.replace("MAPPING", mapping)
         .replace("SNAPSHOT", args.snapshot.read_text())
+        .replace("KEY", json.dumps(key))
         .replace(
             "MESSAGES",
             json.dumps({k: message[k] for k in ("ru", "en")}, ensure_ascii=False),
