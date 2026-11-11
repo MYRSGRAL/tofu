@@ -87,3 +87,9 @@ bundle digests, sealed resources в том же порядке, отдельны
 
 Evidence вне TTL: `/home/myrs/projects/yonik/local/evidence/pr101-bound/`.
 48 performance и 20 snapshot прогонов не повторялись; 10x RSS/performance не заявлены.
+
+## Граница количества файлов
+
+P2: прежняя проверка учитывала только существующие файлы. Новая atomic_write резервирует также один staging-slot до CREATE; 129-я публикация и первая запись state в уже полном каталоге отказываются до изменения файлов. Metadata write failure сохраняет прежнее поведение poisoned экземпляра: последующее reopen остаётся допустимым, прежний state/ресурсы сохраняются. Это отказ по quota, не автоматическое удаление retained.
+
+RED двух граничных тестов → GREEN пяти store-тестов: после каждой принятой публикации проверяются reservations и reopen, первая state при 128 ресурсах не создаётся. Rust1.85.1 pinned Clippy all-targets/fmt PASS. Native membership не повторялся. Evidence `/home/myrs/projects/yonik/local/validation/pr101-file-cap/`; manifest записан после проверок.
