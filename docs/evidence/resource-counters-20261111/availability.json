@@ -1,0 +1,175 @@
+{
+  "purpose": "availability_only_not_benchmark",
+  "kernel": "7.2.9-1-cachyos",
+  "sample": {
+    "schema_version": 1,
+    "energy": {
+      "status": "unavailable",
+      "scope": "independent_sources_never_sum"
+    },
+    "readings": {
+      "wakeups": {
+        "status": "unavailable",
+        "reason": "schedstats_disabled",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl-mmio:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl-mmio:0:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:1": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:2": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "battery:BAT0": {
+        "status": "unavailable",
+        "reason": "not_discharging",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      }
+    },
+    "intervals": {
+      "wakeups": {
+        "status": "unavailable",
+        "reason": "schedstats_disabled",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl-mmio:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl-mmio:0:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:0": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:1": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "intel-rapl:0:2": {
+        "status": "unavailable",
+        "reason": "permission_denied",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      },
+      "battery:BAT0": {
+        "status": "unavailable",
+        "reason": "not_discharging",
+        "value": null,
+        "monotonic_ns": null,
+        "scope": null,
+        "range_uj": null,
+        "identity": [],
+        "max_power_uw": null
+      }
+    }
+  }
+}

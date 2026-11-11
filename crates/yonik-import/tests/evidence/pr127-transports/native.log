@@ -1,0 +1,13 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+PASS vless/ws/xray: exact roundtrip + compile + pinned native check
+PASS vless/ws/sing-box: exact roundtrip + compile + pinned native check
+PASS vless/grpc/xray: exact roundtrip + compile + pinned native check
+PASS vless/grpc/sing-box: exact roundtrip + compile + pinned native check
+PASS vmess/ws/xray: exact roundtrip + compile + pinned native check
+PASS vmess/ws/sing-box: exact roundtrip + compile + pinned native check
+PASS vmess/grpc/xray: exact roundtrip + compile + pinned native check
+PASS vmess/grpc/sing-box: exact roundtrip + compile + pinned native check
+PASS trojan/ws/xray: exact roundtrip + compile + pinned native check
+PASS trojan/ws/sing-box: exact roundtrip + compile + pinned native check
+PASS trojan/grpc/xray: exact roundtrip + compile + pinned native check
+PASS trojan/grpc/sing-box: exact roundtrip + compile + pinned native check
