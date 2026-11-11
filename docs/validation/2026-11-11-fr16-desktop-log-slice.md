@@ -80,3 +80,12 @@ exit/cleanup сценария и test-support hook нет. Ненулевые ev
 Перед завершением pre-clean.json подтвердил 0 активных task-процессов и 0 открытых
 handles build-каталога. Cargo clean удалил 11.9 GiB; собственный transient root
 удалён. Binary/evidence сохранены в workspace вне TTL.
+
+
+## Отказ передачи запроса GUI
+
+P2 устранён: отказ очереди `logs_read` возвращает ACK с исходным ID, статусом busy и пустыми events/export. При отсутствии host запрос также завершается ошибкой startup. Общий путь routing ACK сохранён. Невалидный ID не попадает в ответ.
+
+Регрессия RED: вместо ID 7 оставался ID старой страницы 6; GREEN: четыре Rust-теста общего helper. Выполнены rustc/clippy-driver 1.85.1 с существующей readonly serde_json rlib, fmt и diff-check. Полный GUI для этой дельты не пересобирался. Настоящий QtTest 6.11.2 проверил busy ACK → повторный запрос → игнорирование старого ACK → готовая страница; один поведенческий тест плюс init/cleanup. Stub dispatch в этом QtTest не воспроизводит реальное переполнение очереди. CLI qmltestrunner из PATH оказался Qt5 и вернул exit1; он не считается пройденной проверкой.
+
+Evidence: `/home/myrs/projects/yonik/local/validation/pr98-logs-ack/`. Manifest записан после проверок; прежний native evidence не изменён. Actual GUI busy/loss и прочие открытые gates остаются открытыми.
