@@ -842,6 +842,12 @@ ApplicationWindow {
                     window.sendRouting({command: "routing_order", ids: ids})
                 }
                 SectionTitle { text: window.tr("Черновик маршрутизации", "Routing draft") }
+                PresetPanel {
+                    Layout.fillWidth: true
+                    snapshot: window.state.presets || ({})
+                    language: window.language
+                    onCommand: payload => window.send(payload)
+                }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }

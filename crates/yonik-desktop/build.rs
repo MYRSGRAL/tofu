@@ -73,7 +73,8 @@ fn main() {
             QmlModule::new("cloud.highpriority.yonik")
                 .qml_file("qml/Main.qml")
                 .qml_file("qml/DiagnosticsExport.qml")
-                .qml_file("qml/LogsView.qml"),
+                .qml_file("qml/LogsView.qml")
+                .qml_file("qml/PresetPanel.qml"),
         )
         .file("src/bridge.rs")
         .cpp_file("src/application.cpp")

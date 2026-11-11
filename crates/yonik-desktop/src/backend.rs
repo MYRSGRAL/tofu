@@ -6,6 +6,8 @@ mod batch_diagnostics;
 mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
+#[path = "presets.rs"]
+mod presets;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
@@ -125,6 +127,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    PresetStatus,
+    PresetRollback,
+    PresetPrepare {
+        target: String,
+    },
     #[cfg(feature = "test-support")]
     #[serde(skip)]
     LogsTest {
@@ -680,6 +687,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    presets: presets::Status,
     logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
@@ -748,6 +756,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            presets: presets::Status::default(),
             logs: logs::Page::default(),
             routing_diagnostics: crate::editor::Draft::default().diagnostics(),
             routing_explanation: serde_json::Value::Null,
@@ -936,6 +945,7 @@ async fn open(
 }
 
 struct Actor {
+    presets: Option<presets::Controller>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: EncryptedSubscriptionRepository,
@@ -1243,6 +1253,35 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::PresetStatus | Command::PresetRollback | Command::PresetPrepare { .. } => {
+                let controller = self
+                    .presets
+                    .as_ref()
+                    .ok_or(DesktopError("preset_storage"))?;
+                self.state.presets = match command {
+                    Command::PresetRollback => controller.rollback(),
+                    Command::PresetPrepare { target } => {
+                        let destination =
+                            target.parse().map_err(|_| DesktopError("preset_invalid"))?;
+                        let policy = controller
+                            .prepare(self.state.routing.policy().map_err(DesktopError)?)
+                            .map_err(|_| DesktopError("preset_invalid"))?;
+                        let mut status = controller.status();
+                        status.prepared = true;
+                        let decision = policy.evaluate(&yonik_domain::Flow {
+                            executable: None,
+                            destination,
+                        });
+                        status.decision =
+                            Some(format!("{:?} · {:?}", decision.action, decision.origin));
+                        Ok(status)
+                    }
+                    _ => Ok(controller.status()),
+                }
+                .map_err(|_| DesktopError("preset_invalid"))?;
+                Ok(())
+            }
+
             #[cfg(feature = "test-support")]
             Command::LogsTest { reply } => {
                 let _ = reply.send(self.state.ephemeral.then(|| self.event_log.clone()));
@@ -1857,6 +1896,8 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
+                .ok(),
             event_log: yonik_linux::event_log::EventLog::new(),
             logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository,
@@ -2640,6 +2681,7 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets")).ok(),
         event_log: yonik_linux::event_log::EventLog::new(),
         logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository,
@@ -2655,6 +2697,9 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
+    if let Some(controller) = &actor.presets {
+        actor.state.presets = controller.status();
+    }
     match actor.routing_repository.routing_draft().await {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
@@ -3451,6 +3496,7 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository,
@@ -3477,6 +3523,33 @@ mod routing_regressions {
     }
     fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
         serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
+    }
+    #[tokio::test]
+    async fn preset_status_and_failed_preparation_preserve_routing_draft() {
+        let (mut actor, lock, path) = fixture().await;
+        actor.presets =
+            Some(super::presets::Controller::open(&path.join("presets")).expect("store"));
+        send(&mut actor, put(1, 0, 1, true))
+            .await
+            .expect("user rule");
+        let before = actor.state.routing.json();
+        send(&mut actor, serde_json::json!({"command":"preset_status"}))
+            .await
+            .expect("status");
+        assert!(actor.state.presets.current.is_none());
+        assert!(
+            send(
+                &mut actor,
+                serde_json::json!({"command":"preset_prepare", "target":"8.8.8.8"})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(actor.state.routing.json(), before);
+        assert_eq!(actor.state.routing_revision, Some(1));
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("собственная fixture");
     }
     #[tokio::test]
     async fn explanation_ack_and_diagnostics_follow_revision() {

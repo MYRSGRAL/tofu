@@ -88,6 +88,18 @@ impl Store {
             })
             .transpose()
     }
+    /// Резервная версия читается независимо от здоровья active.
+    pub fn previous(&self) -> Result<Option<(Metadata, Candidate)>, Error> {
+        self.read_index()?
+            .previous
+            .map(|id| {
+                self.load(&id).and_then(|s| {
+                    let candidate = validate(&s)?;
+                    Ok((s.metadata, candidate))
+                })
+            })
+            .transpose()
+    }
     /// Explicit local разрешает loopback/LAN HTTP только по выбору вызывающего кода.
     pub async fn update(
         &self,
