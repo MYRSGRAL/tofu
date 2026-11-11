@@ -129,6 +129,14 @@ fn send_reply(
     }
 }
 
+#[cfg(test)]
+type LookupHook = Box<dyn FnOnce(&mut Session)>;
+#[cfg(test)]
+thread_local! {
+    static BEFORE_LOOKUP: std::cell::RefCell<Option<LookupHook>> =
+        std::cell::RefCell::new(None);
+}
+
 impl Session {
     /// Потребляет все роли. metadata — только от helper resource owner.
     /// cancel не является authority и может только отозвать существующую сессию.
@@ -167,6 +175,12 @@ impl Session {
                 return Ok(());
             }
             let deadline = (Instant::now() + Duration::from_nanos(wire::OWNER_TTL_NS)).min(expires);
+            #[cfg(test)]
+            BEFORE_LOOKUP.with(|hook| {
+                if let Some(callback) = hook.borrow_mut().take() {
+                    callback(self);
+                }
+            });
             let lookup = self.lookup(&bytes).map_err(|_| Unavailable::Malformed)?;
             let snapshot_expiry = match &lookup {
                 Lookup::KnownOwner(owner) => Some(
@@ -279,6 +293,9 @@ pub(super) mod tests {
         (session, peer, metadata)
     }
     fn handshake(peer: &OwnedFd, acknowledge: bool) -> Vec<u8> {
+        handshake_delayed(peer, acknowledge, Duration::ZERO)
+    }
+    fn handshake_delayed(peer: &OwnedFd, acknowledge: bool, delay: Duration) -> Vec<u8> {
         let cancel = AtomicBool::new(false);
         let deadline = Instant::now() + Duration::from_secs(2);
         let hello = receive(peer, deadline, &cancel).unwrap();
@@ -340,6 +357,7 @@ pub(super) mod tests {
         .unwrap();
         ack[96..104].fill(0);
         ack[99] = 1;
+        std::thread::sleep(delay);
         if acknowledge {
             send(peer, &ack, None, deadline, &cancel).unwrap();
         }
@@ -347,12 +365,21 @@ pub(super) mod tests {
     }
     pub(in crate::attribution) fn known_roundtrip(
         broker: super::super::super::broker::Broker,
+        prepare: impl FnOnce(&mut super::super::super::broker::Broker) + Send + 'static,
         flow: super::super::super::broker::Flow,
     ) {
         let (mut session, peer, metadata) = fixture();
         session.roles.as_mut().unwrap().broker = Some(broker);
-        let thread = std::thread::spawn(move || session.serve(&metadata, &AtomicBool::new(false)));
-        let hello = handshake(&peer, true);
+        let thread = std::thread::spawn(move || {
+            BEFORE_LOOKUP.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move |session| {
+                    prepare(session.roles.as_mut().unwrap().broker.as_mut().unwrap());
+                }));
+            });
+            session.serve(&metadata, &AtomicBool::new(false))
+        });
+        // Задержка bootstrap заведомо превышает owner TTL; наблюдение ещё не начато.
+        let hello = handshake_delayed(&peer, true, Duration::from_millis(30));
         let mut lookup = vec![0; 144];
         Header {
             kind: Kind::Lookup,
@@ -373,6 +400,8 @@ pub(super) mod tests {
         let cancel = AtomicBool::new(false);
         send(&peer, &lookup, None, deadline, &cancel).unwrap();
         let reply = receive(&peer, deadline, &cancel).unwrap();
+        drop(peer);
+        assert_eq!(thread.join().unwrap(), Err(Unavailable::Disconnected));
         assert_eq!(Header::decode(&reply, 0).unwrap().request_id, 43);
         assert_eq!(&reply[96..98], &[1, 0]);
         assert_eq!(
@@ -383,8 +412,6 @@ pub(super) mod tests {
                 .unwrap()
                 .as_bytes()
         );
-        drop(peer);
-        assert_eq!(thread.join().unwrap(), Err(Unavailable::Disconnected));
     }
     #[test]
     fn socket_handshake_reply_correlation_and_replay_retire() {
