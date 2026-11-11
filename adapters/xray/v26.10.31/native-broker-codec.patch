@@ -1485,10 +1485,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
-index 0000000..f210eac
+index 0000000..40ed855
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,107 @@
 +package nativehooks
 +
 +import (
@@ -1586,6 +1586,15 @@ index 0000000..f210eac
 +	now := time.Now()
 +	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
 +	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
++}
++
++// HasFlowContext различает закрытый handoff и legacy callers; authority не создаёт.
++func HasFlowContext(ctx context.Context) bool {
++	if ctx == nil {
++		return false
++	}
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	return ok && c != nil
 +}
 diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
 new file mode 100644
@@ -2878,7 +2887,7 @@ index 6eb4bd0..b564907 100644
  //
  // xray:api:beta
 diff --git a/features/routing/dns/context.go b/features/routing/dns/context.go
-index 2cf9d26..43a15d1 100644
+index 2cf9d26..9af9552 100644
 --- a/features/routing/dns/context.go
 +++ b/features/routing/dns/context.go
 @@ -2,6 +2,7 @@ package dns
@@ -2889,11 +2898,12 @@ index 2cf9d26..43a15d1 100644
  
  	"github.com/xtls/xray-core/common/errors"
  	"github.com/xtls/xray-core/common/net"
-@@ -19,7 +20,15 @@ type ResolvableContext struct {
+@@ -19,7 +20,16 @@ type ResolvableContext struct {
  
  // GetTargetIPs overrides original routing.Context's implementation.
  func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
-+	flow, managed := ctx.Context.(interface{ FlowContext() context.Context })
++	flow, hasFlow := ctx.Context.(interface{ FlowContext() context.Context })
++	managed := hasFlow && hooks.HasFlowContext(flow.FlowContext())
 +	if managed && (flow.FlowContext() == nil || flow.FlowContext().Err() != nil) {
 +		ctx.hasError = true
 +		return nil
@@ -2905,7 +2915,7 @@ index 2cf9d26..43a15d1 100644
  		return ctx.cacheIPs
  	}
  
-@@ -28,11 +37,27 @@ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
+@@ -28,11 +38,27 @@ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
  	}
  
  	if domain := ctx.GetTargetDomain(); len(domain) != 0 {
