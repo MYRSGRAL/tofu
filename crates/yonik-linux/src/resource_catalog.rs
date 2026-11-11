@@ -19,6 +19,7 @@ pub struct ResourceCatalog {
     manifest: Vec<ExternalRef>,
     indices: Vec<RuleSetIndex>,
     references: Vec<RuleSetRef>,
+    _reservation: crate::resource_fd_receiver::Reservation,
 }
 pub struct SourceResource<'a> {
     pub source: &'a [u8],
@@ -60,6 +61,32 @@ impl ResourceCatalog {
                 return Err(bad());
             }
         }
+        // Отдельный physical pool до индексов и whole-buffer artifacts. Dry encoder
+        // считает фактический native размер без накопления native bytes.
+        let mut physical = 0u64;
+        for s in sources {
+            let format = match (engine, s.kind) {
+                (Engine::Xray, ResourceKind::Domains) => Format::XrayDomains,
+                (Engine::Xray, ResourceKind::Cidrs) => Format::XrayCidrs,
+                (_, ResourceKind::Domains) => Format::SingDomains,
+                (_, ResourceKind::Cidrs) => Format::SingCidrs,
+            };
+            let mut size = CountWriter(0);
+            compile_records(
+                std::io::Cursor::new(s.source),
+                &mut size,
+                format,
+                s.count,
+                Limits::default(),
+            )?;
+            let allocation = (s.source.len() as u64)
+                .checked_mul(3)
+                .and_then(|n| n.checked_add(size.0.checked_mul(6)?))
+                .and_then(|n| n.checked_add(s.count.checked_mul(128)?))
+                .ok_or_else(bad)?;
+            physical = physical.checked_add(allocation).ok_or_else(bad)?;
+        }
+        let reservation = crate::resource_fd_receiver::Reservation::acquire(physical)?;
         for s in sources {
             let index = RuleSetIndex::parse(s.source, s.kind, s.count)?;
             let (format, stored) = match (engine, s.kind) {
@@ -83,6 +110,7 @@ impl ResourceCatalog {
             let digest = Sha256::digest(&*artifact).into();
             let reference = RuleSetRef::new(digest, artifact.len() as u64, s.count, stored)?;
             store.publish(&reference, &artifact)?;
+            store.publish_canonical_reserved(&reference, s.source, s.kind, true)?;
             manifest.push(ExternalRef {
                 engine,
                 digest,
@@ -98,6 +126,7 @@ impl ResourceCatalog {
             manifest,
             indices,
             references,
+            _reservation: reservation,
         })
     }
     pub fn references(&self) -> &[RuleSetRef] {
@@ -179,6 +208,17 @@ pub fn bundle_digest(
         hash.update(r.format_version.to_be_bytes());
     }
     Ok(hash.finalize().into())
+}
+
+struct CountWriter(u64);
+impl std::io::Write for CountWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 = self.0.checked_add(bytes.len() as u64).ok_or_else(bad)?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

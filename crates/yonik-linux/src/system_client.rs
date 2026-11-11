@@ -53,6 +53,28 @@ pub struct Capabilities {
     pub system_tun: bool,
     pub allow_lan: bool,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleCapabilities {
+    version: u32,
+    pub canonical_fd_transport: bool,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BundlePreparedReply {
+    version: u32,
+    handle: [u8; 32],
+    intent_digest: [u8; 32],
+    runtime_config_digest: [u8; 32],
+    runtime_bundle_digest: [u8; 32],
+}
+pub struct PreparedBundle {
+    prepared: Prepared,
+    pub intent_digest: [u8; 32],
+    pub runtime_config_digest: [u8; 32],
+    pub runtime_bundle_digest: [u8; 32],
+}
 /// Одноразовый непрозрачный handle привязан к экземпляру клиента; Debug скрыт.
 pub struct Prepared {
     handle: [u8; 32],
@@ -239,6 +261,80 @@ impl SystemClient {
             };
             if reply.header().sender().map(|s| s.as_str()) != Some(self.owner.as_str())
                 || reply.body().len() > MAX_JSON + 8
+                || method == "BundleCapabilitiesV1"
+                    && (reply.header().unix_fds().unwrap_or(0) != 0
+                        || reply.body().signature().as_ref().map(|s| s.as_str()) != Some("s"))
+            {
+                return Err(ClientError::Protocol);
+            }
+            let json: String = reply
+                .body()
+                .deserialize()
+                .map_err(|_| ClientError::Protocol)?;
+            if json.len() > MAX_JSON {
+                return Err(ClientError::Protocol);
+            }
+            if Self::owner(&self.connection).await? != self.owner {
+                return Err(ClientError::OwnerLost);
+            }
+            if failed {
+                if reply.header().error_name().map(|name| name.as_str())
+                    != Some("cloud.highpriority.yonik.Network1.Error")
+                {
+                    return Err(ClientError::Protocol);
+                }
+                return Err(helper_error(&json));
+            }
+            Ok(json)
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ClientError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(ClientError::Deadline),
+            _ = self.lost.changed() => Err(ClientError::OwnerLost),
+            result = operation => result,
+        }
+    }
+    async fn call_with_resources(
+        &mut self,
+        method: &str,
+        request: String,
+        resources: &[std::fs::File],
+        deadline: Instant,
+        mut cancel: Cancellation,
+    ) -> Result<String, ClientError> {
+        if *self.lost.borrow() || self.lost.has_changed().is_err() {
+            return Err(ClientError::OwnerLost);
+        }
+        if request.len() > MAX_JSON {
+            return Err(ClientError::InvalidRequest);
+        }
+        use std::os::fd::AsFd;
+        if resources.is_empty() || resources.len() > 16 {
+            return Err(ClientError::InvalidRequest);
+        }
+        let fds: Vec<zbus::zvariant::Fd<'_>> =
+            resources.iter().map(|file| file.as_fd().into()).collect();
+        let operation = async {
+            let (reply, failed) = match self
+                .connection
+                .call_method(
+                    Some(self.owner.as_str()),
+                    SERVICE_PATH,
+                    Some(SERVICE_INTERFACE),
+                    method,
+                    &(request, fds),
+                )
+                .await
+            {
+                Ok(reply) => (reply, false),
+                Err(zbus::Error::MethodError(_, _, reply)) => (reply, true),
+                Err(error) => return Err(remote(error)),
+            };
+            if reply.header().sender().map(|s| s.as_str()) != Some(self.owner.as_str())
+                || reply.body().len() > MAX_JSON + 8
+                || reply.header().unix_fds().unwrap_or(0) != 0
+                || reply.body().signature().as_ref().map(|s| s.as_str()) != Some("s")
             {
                 return Err(ClientError::Protocol);
             }
@@ -396,6 +492,74 @@ impl SystemClient {
     pub fn owner_lost(&self) -> bool {
         *self.lost.borrow() || self.lost.has_changed().is_err()
     }
+    pub async fn bundle_capabilities(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<BundleCapabilities, ClientError> {
+        let json = self
+            .call(
+                "BundleCapabilitiesV1",
+                "{\"version\":1}".into(),
+                deadline,
+                cancel,
+            )
+            .await?;
+        let reply: BundleCapabilities = decode(&json)?;
+        version(reply.version)?;
+        Ok(reply)
+    }
+    pub async fn prepare_bundle(
+        &mut self,
+        request: &crate::bundle_request::BundleRequest,
+        resources: &[std::fs::File],
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<PreparedBundle, ClientError> {
+        if resources.len() != request.canonical.len() {
+            return Err(ClientError::InvalidRequest);
+        }
+        if !self
+            .bundle_capabilities(deadline, cancel.clone())
+            .await?
+            .canonical_fd_transport
+        {
+            return Err(ClientError::Unsupported);
+        }
+        let intent = request.digest().map_err(|_| ClientError::InvalidRequest)?;
+        let json = request.encode().map_err(|_| ClientError::InvalidRequest)?;
+        let reply = self
+            .call_with_resources("PrepareBundleV1", json, resources, deadline, cancel)
+            .await?;
+        let dto: BundlePreparedReply = decode(&reply)?;
+        version(dto.version)?;
+        if dto.intent_digest != intent {
+            return Err(ClientError::Protocol);
+        }
+        Ok(PreparedBundle {
+            prepared: Prepared {
+                handle: dto.handle,
+                owner: self.owner.clone(),
+                peer: self
+                    .connection
+                    .unique_name()
+                    .ok_or(ClientError::Unavailable)?
+                    .to_string(),
+            },
+            intent_digest: intent,
+            runtime_config_digest: dto.runtime_config_digest,
+            runtime_bundle_digest: dto.runtime_bundle_digest,
+        })
+    }
+    pub async fn apply_bundle(
+        &mut self,
+        prepared: PreparedBundle,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<State, ClientError> {
+        self.apply(prepared.prepared, deadline, cancel).await
+    }
+
     pub async fn apply(
         &mut self,
         prepared: Prepared,

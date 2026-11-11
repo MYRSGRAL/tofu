@@ -1,0 +1,13 @@
+usage: ui_benchmark.py [-h] --binary BINARY --rows {1000,10000}
+                       --output OUTPUT [--idle-seconds IDLE_SECONDS]
+                       [--timeout TIMEOUT]
+
+Последовательный benchmark одного native GUI; только синтетические данные.
+
+options:
+  -h, --help            show this help message and exit
+  --binary BINARY
+  --rows {1000,10000}
+  --output OUTPUT
+  --idle-seconds IDLE_SECONDS
+  --timeout TIMEOUT

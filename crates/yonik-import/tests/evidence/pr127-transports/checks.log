@@ -1,0 +1,110 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling syn v3.0.9
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.4
+   Compiling zerovec-derive v0.11.7
+   Compiling zerovec v0.11.9
+   Compiling displaydoc v0.2.7
+   Compiling tinystr v0.8.5
+   Compiling litemap v0.8.3
+   Compiling writeable v0.6.4
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling serde_core v1.0.229
+   Compiling smallvec v1.16.5
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling utf_types v1.0.0
+   Compiling zmij v1.0.23
+   Compiling utf8_iter v1.1.0
+   Compiling idna_adapter v1.2.1
+   Compiling percent-encoding v2.3.2
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling form_urlencoded v1.2.2
+   Compiling idna v1.1.0
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling url v2.5.8
+   Compiling base64 v0.23.1
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-import)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.73s
+     Running tests/singbox.rs (/var/tmp/codex-myrs/transient/pr127-transports/target/debug/deps/singbox-b8cd963a5feb4387)
+
+running 7 tests
+test неизвестные_опции_не_активируются ... ok
+test native_credentials_скрыты_в_диагностике ... ok
+test mixed_dispatch_и_неизвестные_ws_headers_не_дают_intent ... ok
+test tls_ws_и_grpc_представимы ... ok
+test шесть_протоколов_сохраняют_оригинал_и_intent ... ok
+test fixture_и_контекст_конфига ... ok
+test повреждения_и_лимиты_отклоняются ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+   Compiling idna v1.1.0
+   Compiling libc v0.2.191
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+   Compiling rustix v1.1.6
+   Compiling url v2.5.8
+   Compiling bitflags v2.13.2
+   Compiling cfg-if v1.0.5
+   Compiling linux-raw-sys v0.12.1
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-import)
+   Compiling getrandom v0.2.17
+   Compiling yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-domain)
+   Compiling yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.87s
+    Checking zerofrom v0.1.8
+    Checking stable_deref_trait v1.2.1
+    Checking yoke v0.8.4
+    Checking zerovec v0.11.9
+    Checking tinystr v0.8.5
+    Checking litemap v0.8.3
+    Checking writeable v0.6.4
+    Checking icu_locale_core v2.1.1
+    Checking zerotrie v0.2.5
+    Checking potential_utf v0.1.6
+    Checking icu_collections v2.1.1
+    Checking icu_provider v2.1.1
+    Checking icu_normalizer_data v2.1.1
+    Checking icu_properties_data v2.1.2
+    Checking smallvec v1.16.5
+    Checking icu_normalizer v2.1.1
+    Checking icu_properties v2.1.2
+    Checking utf_types v1.0.0
+    Checking utf8_iter v1.1.0
+    Checking idna_adapter v1.2.1
+    Checking idna v1.1.0
+    Checking serde_core v1.0.229
+    Checking percent-encoding v2.3.2
+    Checking form_urlencoded v1.2.2
+    Checking zmij v1.0.23
+    Checking itoa v1.0.18
+    Checking memchr v2.8.3
+    Checking serde_json v1.0.154
+    Checking serde v1.0.229
+    Checking url v2.5.8
+    Checking base64 v0.23.1
+    Checking yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-import)
+    Checking libc v0.2.191
+    Checking bitflags v2.13.2
+    Checking cfg-if v1.0.5
+    Checking linux-raw-sys v0.12.1
+    Checking rustix v1.1.6
+    Checking getrandom v0.2.17
+    Checking yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-domain)
+    Checking yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-cc3bf7e3-82e05ff5e6ac79dd/crates/yonik-engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.21s

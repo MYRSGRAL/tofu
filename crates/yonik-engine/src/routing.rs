@@ -170,6 +170,49 @@ pub(crate) fn compile_tun_policy(
     )
 }
 
+pub(crate) fn compile_tun_policy_resources<C: crate::resource_bundle::VerifiedCatalog>(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    bound: &crate::resource_bundle::BoundPolicy<'_, C>,
+) -> Result<CompiledConfig, PolicyCompileError> {
+    struct WorkerRoutes<'a>(&'a dyn crate::resource_bundle::ResourceRoutes);
+    impl crate::resource_bundle::ResourceRoutes for WorkerRoutes<'_> {
+        fn refs(
+            &self,
+            rule: yonik_domain::ResourceRule,
+            kind: crate::resource_bundle::ResourceKind,
+        ) -> Vec<&crate::resource_bundle::ExternalRef> {
+            self.0.refs(rule, kind)
+        }
+        fn manifest(&self) -> &[crate::resource_bundle::ExternalRef] {
+            self.0.manifest()
+        }
+        fn worker_slot(&self, resource: &crate::resource_bundle::ExternalRef) -> Option<u32> {
+            if resource.engine == Engine::Xray {
+                return None;
+            }
+            self.0
+                .manifest()
+                .iter()
+                .position(|r| r.digest == resource.digest)
+                .map(|i| 32 + i as u32)
+        }
+    }
+    let resources = WorkerRoutes(bound);
+    compile_policy_resources_inner(
+        server,
+        engine,
+        port,
+        probe_port,
+        bound.policy(),
+        PolicyMode::IpOnly,
+        true,
+        Some(&resources),
+    )
+}
+
 fn compile_policy_inner(
     server: &ParsedServer,
     engine: Engine,
@@ -353,7 +396,7 @@ fn compile_policy_resources_inner(
     }
     if engine == Engine::SingBox {
         if let Some(resources) = resources {
-            config.value["route"]["rule_set"]=json!(resources.manifest().iter().map(|r|json!({"type":"local","tag":r.tag(),"format":"source","path":format!("{}.json",r.tag())})).collect::<Vec<_>>());
+            config.value["route"]["rule_set"]=json!(resources.manifest().iter().map(|r|json!({"type":"local","tag":r.tag(),"format":"source","path":resources.worker_slot(r).map_or_else(||format!("{}.json",r.tag()),|slot|format!("/proc/self/fd/{slot}"))})).collect::<Vec<_>>());
         }
     }
     config.probe_port = probe_port;
@@ -520,12 +563,22 @@ fn resource_rule(
         if !dr.is_empty() {
             domains
                 .get_or_insert_with(Vec::new)
-                .extend(dr.iter().map(|r| format!("ext:{}.dat:YONIK", r.tag())));
+                .extend(dr.iter().map(|r| {
+                    resources.worker_slot(r).map_or_else(
+                        || format!("ext:{}.dat:YONIK", r.tag()),
+                        |slot| format!("ext:/proc/self/fd/{slot}:YONIK"),
+                    )
+                }));
         }
         if !cr.is_empty() {
             cidrs
                 .get_or_insert_with(Vec::new)
-                .extend(cr.iter().map(|r| format!("ext:{}.dat:YONIK", r.tag())));
+                .extend(cr.iter().map(|r| {
+                    resources.worker_slot(r).map_or_else(
+                        || format!("ext:{}.dat:YONIK", r.tag()),
+                        |slot| format!("ext:/proc/self/fd/{slot}:YONIK"),
+                    )
+                }));
         }
         return route_rule(engine, action, domains, cidrs);
     }
