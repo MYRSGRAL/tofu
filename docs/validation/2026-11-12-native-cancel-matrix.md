@@ -65,3 +65,10 @@ with-rust-slot, jobs=1, внешний target под flock собственно�
 Первый preflight `attempt-1` завершился до native cases: `/sys/class/net`
 отражал host sysfs mount. Проверка интерфейсов переведена на namespaced
 `/proc/net/dev`; первый raw failure сохранён. Приёмочный run — `attempt-2`.
+
+Финальный повтор после Ruff: **8/8 + negative PASS**, source HEAD
+`734274113200f5654943e72a121af5720cf738c0`, raw `attempt-final/`.
+Это повтор только bounded 8-case campaign, старые 100 cycles не запускались.
+`cargo +1.85.1 clippy --locked -p yonik-desktop --all-targets -- -D warnings`,
+`cargo +1.85.1 fmt --all -- --check`, Ruff format/check и 2 Python tests — PASS.
+Production hooks, новые зависимости, pins/capabilities/ABI не менялись.
