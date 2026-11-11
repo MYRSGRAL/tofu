@@ -262,3 +262,24 @@ fn p05_source_change_отменяет_fetch_до_мутации() {
         server.join().unwrap();
     }
 }
+
+#[test]
+fn p05_source_change_ack_сохраняет_generation_при_ошибке_расписания() {
+    let dir = Directory::new();
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"add_source","name":"P05","url":"https://example.invalid/old","local_exception":false,"route":"proxy"}));
+    let id = app.wait(|v| v["source_id"].is_i64())["source_id"].clone();
+    // CAS меняет generation; последующая запись расписания сохраняет её.
+    let injected = std::process::Command::new("python3")
+        .arg("-c")
+        .arg("import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute(\"CREATE TRIGGER fail_schedule BEFORE UPDATE OF payload ON sources WHEN OLD.generation = 2 AND NEW.generation = 2 BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END\"); db.commit()")
+        .arg(dir.0.join("subscriptions.sqlite"))
+        .status().expect("инъекция SQLite");
+    assert!(injected.success());
+    app.send(json!({"command":"source_change","request_id":93,"id":id,"expected_generation":1,"name":"P05","url":"https://example.invalid/new","local_exception":false,"route":"proxy"}));
+    let ack = app.wait(|v| v["source_change_ack"]["request_id"] == 93);
+    assert_eq!(ack["source_change_ack"]["generation"], 2);
+    assert_eq!(ack["source_change_ack"]["error"], "storage");
+    app.close();
+}

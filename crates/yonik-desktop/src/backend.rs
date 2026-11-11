@@ -4018,9 +4018,11 @@ async fn run(
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
+                let mut schedule_reload_error = None;
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
                         if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
+                            schedule_reload_error = Some(error.key());
                             actor.state.command_error(true, error.key());
                         }
                     }
@@ -4028,7 +4030,7 @@ async fn run(
 
                 if source_change.is_some() {
                     if let Some(ack) = actor.state.source_change_ack.as_mut() {
-                        ack.error = outcome.as_ref().err().map(|error| error.key());
+                        ack.error = outcome.as_ref().err().map(|error| error.key()).or(schedule_reload_error);
                     }
                 }
 
