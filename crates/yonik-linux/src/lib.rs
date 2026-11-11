@@ -94,3 +94,9 @@ pub mod rule_set_store;
 
 #[cfg(target_os = "linux")]
 pub mod resource_catalog;
+
+#[cfg(target_os = "linux")]
+pub mod resource_fd_receiver;
+
+#[cfg(target_os = "linux")]
+pub mod bundle_identity;
