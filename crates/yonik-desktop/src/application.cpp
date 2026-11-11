@@ -329,6 +329,7 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
         const auto tcp = snapshot.value(QStringLiteral("tcp_result")).toObject();
         for (auto it = when.begin(); it != when.end(); ++it) {
             QJsonValue actual = snapshot.value(it.key());
+            if (it.key() == QStringLiteral("tray_available")) actual = QSystemTrayIcon::isSystemTrayAvailable();
             if (it.key() == QStringLiteral("sources_count")) actual = snapshot.value(QStringLiteral("sources")).toArray().size();
             if (it.key() == QStringLiteral("profiles_count")) actual = snapshot.value(QStringLiteral("profiles")).toArray().size();
             if (it.key() == QStringLiteral("pending")) actual = snapshot.value(QStringLiteral("pending")).isObject();
@@ -349,6 +350,12 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
         const auto perform = [&, bridge, window, step, ui] {
             if (ui && step.value(QStringLiteral("ui")).toObject().value(QStringLiteral("action")).toString() == QStringLiteral("quit")) {
                 quitAction->trigger();
+            } else if (ui && step.value(QStringLiteral("ui")).toObject().value(QStringLiteral("action")).toString() == QStringLiteral("menuConnect")) {
+                if (!connectAction->isEnabled()) { smokeFailed = true; bridge->shutdown(); }
+                else connectAction->trigger();
+            } else if (ui && step.value(QStringLiteral("ui")).toObject().value(QStringLiteral("action")).toString() == QStringLiteral("menuDisconnect")) {
+                if (!stopAction->isEnabled()) { smokeFailed = true; bridge->shutdown(); }
+                else stopAction->trigger();
             } else if (ui) {
                 if (!smoke::perform(qobject_cast<QQuickWindow*>(window), step.value(QStringLiteral("ui")).toObject())) {
                     qWarning("yonik smoke: UI action failed at step %lld", static_cast<long long>(stepIndex));
