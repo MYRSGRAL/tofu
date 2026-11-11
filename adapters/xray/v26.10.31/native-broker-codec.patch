@@ -1588,7 +1588,7 @@ diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,83 @@
 +package nativehooks
 +
 +import (
@@ -1635,7 +1635,9 @@ new file mode 100644
 +		lookup = c.lookupAuthenticated
 +	}
 +	proof, err := lookup(ctx, c.flow)
-+	if err != nil {
++	if err != nil || ctx.Err() != nil {
++		c.sequence.Retire()
++		_ = c.session.Revoke()
 +		return ErrDenied
 +	}
 +	return c.session.Guard(time.Now(), BeforeRouting, true, c.flow, proof)
@@ -1663,7 +1665,7 @@ new file mode 100644
 +	for _, file := range files {
 +		_ = file.Close()
 +	}
-+	if err != nil || len(files) != 0 || reply.Header.Kind != ReplyKind || reply.CheckBinding(c.bootstrap.Binding, c.next) != nil || c.sequence.Complete(c.next) != nil {
++	if ctx.Err() != nil || err != nil || len(files) != 0 || reply.Header.Kind != ReplyKind || reply.CheckBinding(c.bootstrap.Binding, c.next) != nil || c.sequence.Complete(c.next) != nil {
 +		return fail()
 +	}
 +	now := time.Now()
@@ -1674,7 +1676,7 @@ diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_tes
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/routing_test.go
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,58 @@
 +package nativehooks
 +
 +import (
@@ -1709,6 +1711,7 @@ new file mode 100644
 +			t.Fatal("нет trusted lookup")
 +		}
 +	}
++	s, _, _ = fixture(t)
 +	ctx := context.WithValue(context.Background(), routingKey{}, &routingConsumer{session: s})
 +	if err := RoutingEntry(ctx); err != nil {
 +		t.Fatal("non-app control", err)
@@ -1717,6 +1720,19 @@ new file mode 100644
 +	cancel()
 +	if RoutingEntry(cancelctx) == nil {
 +		t.Fatal("cancel")
++	}
++}
++
++func TestRoutingEntryCancelDuringLookup(t *testing.T) {
++	s, p, _ := fixture(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	c := &routingConsumer{session: s, required: true, flow: p.Flow, lookup: func(context.Context, Flow) (Evidence, error) { cancel(); return p, nil }}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if RoutingEntry(ctx) == nil {
++		t.Fatal("отмена во время lookup пропустила routing")
++	}
++	if s.Guard(p.Observed, BeforeRouting, true, p.Flow, p) == nil {
++		t.Fatal("отмена не отозвала сессию")
 +	}
 +}
 diff --git a/app/dispatcher/yonik_guard_test.go b/app/dispatcher/yonik_guard_test.go

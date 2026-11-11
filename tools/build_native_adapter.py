@@ -308,9 +308,16 @@ def build_locked(
         runner.run(
             ["go", "test", "-p=1", "-mod=readonly", "./common/yonikbroker"], source
         )
-        if engine == "xray" and metadata.get("routing_entry_guard_connected"):
+        if metadata.get("routing_entry_guard_connected"):
             runner.run(
-                ["go", "test", "-p=1", "-mod=readonly", "./app/dispatcher"], source
+                [
+                    "go",
+                    "test",
+                    "-p=1",
+                    "-mod=readonly",
+                    "./app/dispatcher" if engine == "xray" else "./route",
+                ],
+                source,
             )
         if modules != {name: sha256(source / name) for name in modules}:
             raise BuildError("Codec изменил go.mod/go.sum")
@@ -318,6 +325,10 @@ def build_locked(
             "patch_sha256": digest,
             "runtime_hooks_connected": False,
             "frozen_spec_commit": metadata["frozen_spec_commit"],
+            "routing_entry_guard_connected": metadata.get(
+                "routing_entry_guard_connected", False
+            ),
+            "callsite_files_sha256": metadata.get("callsite_files_sha256", {}),
         }
     raw_tags = (
         (source / "release/DEFAULT_BUILD_TAGS_OTHERS").read_text().strip()

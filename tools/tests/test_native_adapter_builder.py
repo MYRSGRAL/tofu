@@ -138,10 +138,26 @@ class BuilderTests(unittest.TestCase):
 
         def run(runner: builder.Runner, argv: list[str], cwd: Path) -> str:
             if argv[:2] == ["git", "apply"] and "native-broker-codec.patch" in argv[-1]:
-                subprocess.run(argv, cwd=cwd, check=True, capture_output=True)
+                subprocess.run(
+                    [*argv[:-1], "--exclude=route/route.go", argv[-1]],
+                    cwd=cwd,
+                    check=True,
+                    capture_output=True,
+                )
             return original(runner, argv, cwd)
 
+        metadata = json.loads(
+            builder.DEFAULT_PATCH.with_name("native-broker-codec.json").read_text()
+        )
+        real_sha256 = builder.sha256
+
+        def sha256(path: Path) -> str:
+            if path == self.source / "route/route.go":
+                return metadata["callsite_files_sha256"]["route/route.go"]
+            return real_sha256(path)
+
         with (
+            patch.object(builder, "sha256", side_effect=sha256),
             patch.object(builder.Runner, "run", autospec=True, side_effect=run),
             patch.object(builder, "EXTRA_PATCHES", tuple(self.extra_patches)),
         ):
@@ -150,6 +166,10 @@ class BuilderTests(unittest.TestCase):
             )
         manifest = json.loads(result.read_text())
         self.assertFalse(manifest["native_codec_component"]["runtime_hooks_connected"])
+        self.assertTrue(
+            manifest["native_codec_component"]["routing_entry_guard_connected"]
+        )
+        self.assertIn(["go", "test", "-p=1", "-mod=readonly", "./route"], self.commands)
         self.assertIsNone(manifest["native_protocol"])
         self.assertNotIn("native_broker", manifest["adapter_features"])
         self.assertIn(
