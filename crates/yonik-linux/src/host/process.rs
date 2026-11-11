@@ -137,3 +137,23 @@ pub(crate) async fn config_check(
     }
     operation
 }
+
+/// Событие Engine берётся из фактического OS exit status после reap, не из текста.
+pub(crate) async fn terminate_logged(
+    child: &mut Child,
+    log: Option<&crate::event_log::EventLog>,
+) -> Result<(), HostError> {
+    terminate(child).await?;
+    if let Some(log) = log {
+        if let Ok(Some(status)) = child.try_wait() {
+            log.record(
+                crate::event_log::EventSource::Engine,
+                crate::event_log::EventCode::ProcessExited,
+                status.code(),
+            );
+        } else {
+            log.reject();
+        }
+    }
+    Ok(())
+}

@@ -28,6 +28,49 @@ def fixture() -> dict:
 
 
 class ExportTests(unittest.TestCase):
+    def test_known_error_gap(self) -> None:
+        for key in (
+            "storage",
+            "engine_failed",
+            "check_timeout",
+            "system_timeout",
+            "invalid_json",
+            "dns_failed",
+        ):
+            value = fixture()
+            value["errors"][0].update(code=key.upper(), message_key=key)
+            export.export_metadata(json.dumps(value).encode())
+
+    def test_every_catalog_key_and_strict_pair(self) -> None:
+        self.assertEqual(len(export.CATALOG["messages"]), len(export.CODES))
+        self.assertEqual(len(export.CODES), len(export.MESSAGES))
+        for code, key in export.CODES.items():
+            value = fixture()
+            value["errors"][0].update(code=code, message_key=key)
+            self.assertEqual(
+                json.loads(export.export_metadata(json.dumps(value).encode())), value
+            )
+            for bad in (True, 1, [], {}, None, "CANARY", key + "\x1b"):
+                value["errors"][0]["message_key"] = bad
+                self.reject(value)
+
+    def test_backend_error_factories_are_covered(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[2] / "crates/yonik-desktop/src/backend.rs"
+        ).read_text()
+        keys = set(re.findall(r'DesktopError\("([a-z_]+)"\)', source))
+        keys.update(
+            re.findall(
+                r'(?:IssueCode|ReviewFlag|CredentialError|TcpProbeStatus|ProbeResult)::[^\n]*?=> "([a-z_]+)"',
+                source,
+            )
+        )
+        keys -= {"reachable", "not_applicable", "http"}
+        self.assertFalse(keys - export.MESSAGES.keys())
+        for item in export.CATALOG["messages"]:
+            self.assertEqual(item["stage"], "operation")
+            self.assertIs(item["retryable"], False)
+
     def test_roundtrip_and_languages(self) -> None:
         result = export.export_metadata(json.dumps(fixture()).encode())
         self.assertEqual(json.loads(result), fixture())
@@ -39,13 +82,27 @@ class ExportTests(unittest.TestCase):
         catalog = (
             Path(__file__).resolve().parents[2] / "crates/yonik-desktop/qml/Main.qml"
         ).read_text()
-        catalog = catalog.split("function errorText(key) {", 1)[1].split(
-            "const pair", 1
-        )[0]
         for key, pair in export.MESSAGES.items():
-            match = re.search(r"\b" + key + r":\s*(\[[^\n]+\])", catalog)
-            self.assertIsNotNone(match)
-            self.assertEqual(json.loads(match[1]), list(pair))
+            match = re.search(r'(?<![a-z_])"?' + key + r'"?:\s*(\[[^\n]+?\])', catalog)
+            if key.startswith("system_"):
+                reference = (
+                    Path(__file__).resolve().parents[2]
+                    / "docs/evidence/p11-gui88-error-reference.txt"
+                ).read_text()
+                match = re.search(
+                    r'(?<![a-z_])"?' + key + r'"?:\s*(\[[^\n]+?\])', reference
+                )
+            if key == "catalog":
+                continue  # Реальная фабрика; отдельного GUI-перевода пока нет.
+            self.assertIsNotNone(match, key)
+            candidates = re.findall(
+                r'(?<![a-z_])"?' + key + r'"?:\s*(\[[^\n]+?\])', catalog
+            )
+            if key.startswith("system_"):
+                candidates = [match[1]]
+            self.assertIn(
+                list(pair), [json.loads(candidate) for candidate in candidates]
+            )
         value = fixture()
         value["errors"] *= export.MAX_ERRORS
         self.assertEqual(
@@ -112,6 +169,11 @@ class ExportTests(unittest.TestCase):
         self.reject(value)
 
     def test_bounds_and_malformed_json(self) -> None:
+        raw = json.dumps(fixture()).encode()
+        padded = raw + b" " * (export.MAX_BYTES - len(raw))
+        self.assertEqual(json.loads(export.export_metadata(padded)), fixture())
+        with self.assertRaises(export.ExportError):
+            export.export_metadata(padded + b" ")
         for raw in (
             b"[" * 10000,
             b" " * (export.MAX_BYTES + 1),

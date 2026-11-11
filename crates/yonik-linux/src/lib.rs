@@ -77,4 +77,9 @@ pub use subscription_policy::{system_subscription_policy, system_subscription_po
 pub mod policy_test_support;
 
 #[cfg(target_os = "linux")]
+pub mod presets;
+#[cfg(target_os = "linux")]
 pub mod system_client;
+
+#[cfg(target_os = "linux")]
+pub mod event_log;

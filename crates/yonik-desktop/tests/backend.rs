@@ -1781,3 +1781,17 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
     app.close();
     server.join().expect("HTTP fixture");
 }
+
+#[test]
+fn явный_системный_режим_не_подменяется_local_socks() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_connection_mode", "mode":"system"}));
+    let state = app.wait(|v| v["connection_mode"] == "system");
+    assert_ne!(state["status"], "Connected");
+    assert_eq!(state["system_state"], "Unknown");
+    app.send(json!({"command":"set_connection_mode", "mode":"local"}));
+    app.wait(|v| v["connection_mode"] == "local");
+    app.close();
+}

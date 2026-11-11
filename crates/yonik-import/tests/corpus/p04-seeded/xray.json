@@ -1,0 +1,1 @@
+{"outbounds":[{"protocol":"trojan","settings":{"servers":[{"address":"example.test","port":443,"password":"CANARY"}]},"future":{"nested":[1,2]}}]}

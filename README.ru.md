@@ -4,6 +4,8 @@
 
 [English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
 
+[Руководство пользователя Linux](docs/user/linux-ru.md).
+
 [План завершения и текущая готовность](docs/PLAN.md).
 
 Нативный прокси-клиент с открытым исходным кодом. Сначала Linux

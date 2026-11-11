@@ -32,7 +32,7 @@ ApplicationWindow {
     FontLoader { id: displayFont; source: "qrc:/fonts/Unbounded.ttf" }
     readonly property color surface: "#191919"
     readonly property color line: "#29262e"
-    readonly property bool editable: state.ready && !state.busy && !state.can_stop && !state.closed
+    readonly property bool editable: state.ready && !state.busy && !state.system_busy && !state.can_stop && !state.closed
     readonly property string actionText: state.can_stop
         ? (state.status === "CleanupError" ? tr("Повторить остановку", "Retry stopping")
            : (["Preparing", "Starting", "Checking"].indexOf(state.status) >= 0 ? tr("Отменить подключение", "Cancel connection") : tr("Отключить", "Disconnect")))
@@ -92,7 +92,7 @@ ApplicationWindow {
         tcp_invalidated: false, network_observed: false,
         network_routes: false, network_resolver: false, network_manager: false,
         selected_name: "", engine: "xray", active_name: "", active_engine: "", port: 10808, can_connect: false, can_stop: false})
-    readonly property bool canEditProbe: state.ready && !state.busy && !state.can_stop && !state.closed
+    readonly property bool canEditProbe: state.ready && !state.busy && !state.system_busy && !state.can_stop && !state.closed
     readonly property color ink: "#f5f3f8"
     readonly property color muted: "#bdb4cd"
     readonly property color accent: "#c3a6ef"
@@ -168,6 +168,11 @@ ApplicationWindow {
     }
     function statusText(status) {
         const values = {
+            Unknown: ["Состояние сети неизвестно", "Network state unknown"],
+            NoManagedPolicy: ["Управляемых правил нет", "No managed policy"],
+            TunnelStarting: ["Туннель запускается; доступ не подтверждён", "Tunnel starting; connectivity unverified"],
+            VerifiedRules: ["Правила подтверждены; доступ не подтверждён", "Rules verified; connectivity unverified"],
+            RecoveryRequired: ["Требуется восстановление сети", "Network recovery required"],
             Disconnected: ["Отключено", "Disconnected"], Preparing: ["Подготовка…", "Preparing…"],
             Starting: ["Запуск ядра…", "Starting engine…"], Checking: ["Проверка доступа…", "Checking connectivity…"],
             Connected: ["Подключено", "Connected"], Stopping: ["Отключение…", "Stopping…"],
@@ -290,6 +295,11 @@ ApplicationWindow {
             profile_required: ["Сначала выберите профиль.", "Select a profile first."],
             profile_unavailable: ["Профиль недоступен или список изменился. Выберите профиль заново.", "The profile is unavailable or the list has changed. Select the profile again."],
             engine_missing: ["Прокси-ядро не найдено. Установите выбранное ядро и перезапустите приложение.", "Proxy engine not found. Install the selected engine and restart the application."],
+            system_unsupported: ["Системный режим недоступен: helper сообщает system_tun=false.", "System mode unavailable: helper reports system_tun=false."],
+            system_denied: ["Нет разрешения на системное подключение.", "System connection authorization denied."],
+            system_owner_lost: ["Helper перезапущен. Проверьте состояние сети.", "Helper restarted. Check network state."],
+            system_timeout: ["Время ожидания helper истекло. Исход неизвестен.", "Helper timed out. Outcome unknown."],
+            system_unavailable: ["Helper недоступен. Проверьте состояние сети.", "Helper unavailable. Check network state."],
             engine_config: ["Профиль несовместим с выбранным ядром. Проверьте параметры подключения.", "The profile is incompatible with the selected engine. Check connection settings."],
             engine_failed: ["Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.", "Could not start the proxy engine. Check the profile and engine installation."],
             probe_target_invalid: ["Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.", "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299."],
@@ -831,6 +841,25 @@ ApplicationWindow {
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
+                SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: "Ограниченная диагностика сохранённой ревизии " + window.state.routing_revision + ". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены." }
+                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? "Отчёт устарел: черновик изменился. Требуется актуальный снимок." : "Анализ неполный: достигнут лимит или вход не поддерживается." }
+                Repeater {
+                    model: window.state.routing_diagnostics ? window.state.routing_diagnostics.warnings : []
+                    delegate: SmallLabel {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: "#" + modelData.rule_id + " ← " + modelData.earlier + (modelData.kind === "shadowed" ? " · условия перекрыты старшим правилом" : " · возможное пересечение; существование потока не доказано")
+                    }
+                }
+                TextField { id: explainTarget; objectName: "routingExplainTarget"; Layout.fillWidth: true; placeholderText: "Почему такой маршрут: IP или домен (синтетический ввод)"; maximumLength: 253 }
+                ActionButton { objectName: "routingExplainButton"; text: "Объяснить сохранённый черновик"; onClicked: window.sendRouting({command: "routing_explain", target: explainTarget.text}) }
+                PlainLabel {
+                    objectName: "routingExplanation"
+                    Layout.fillWidth: true
+                    property var explanation: window.state.routing_explanation
+                    visible: !!explanation && explanation.revision === window.state.routing_revision && explanation.request_id === window.routingRequestId
+                    text: !explanation ? "" : explanation.result.status === "fixture" ? "Предварительный расчёт: " + explanation.result.action + " · " + explanation.result.origin : "Неизвестно: " + (explanation.result.reason === "application_witness_missing" ? "нет подтверждённой атрибуции приложения" : "нет подтверждённых DNS-данных") + ". Это не проверка применения."
+                }
                 RowLayout {
                     PlainLabel { text: window.tr("Остальной трафик", "Other traffic") }
                     ComboBox { model: ["Proxy", "Direct", "Block"]; currentIndex: window.state.routing ? ["proxy", "direct", "block"].indexOf(window.state.routing.default_action) : 0; onActivated: window.sendRouting({command: "routing_default", action: ["proxy", "direct", "block"][currentIndex]}) }
@@ -844,12 +873,12 @@ ApplicationWindow {
                         PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
                         SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules") }
                         RowLayout {
-                            ActionButton { text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
-                            ActionButton { text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
+                            ActionButton { objectName: "routingEdit" + ruleRow.modelData.id; text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
+                            ActionButton { objectName: "routingUp" + ruleRow.modelData.id; text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
                             ActionButton { text: "↓"; Accessible.name: window.tr("Ниже", "Move down"); onClicked: editor.order(ruleRow.modelData.id, 1, false) }
                             ActionButton { text: "×"; Accessible.name: window.tr("Удалить", "Delete"); onClicked: editor.order(ruleRow.modelData.id, 0, true) }
                         }
-                        ActionButton { text: window.tr("Дублировать", "Duplicate"); onClicked: { editor.load(ruleRow.modelData); editor.selectedId = 0; editor.formRevision = window.state.routing_revision } }
+                        ActionButton { objectName: "routingDuplicate" + ruleRow.modelData.id; text: window.tr("Дублировать", "Duplicate"); onClicked: { editor.load(ruleRow.modelData); editor.selectedId = 0; editor.formRevision = window.state.routing_revision } }
                         Divider {}
                     }
                 }
@@ -882,7 +911,7 @@ ApplicationWindow {
                 TextArea { visible: editor.advanced || editor.simpleGroup === 2; id: cidrInput; objectName: "routingCidr"; Layout.fillWidth: true; placeholderText: "192.0.2.0/24"; wrapMode: TextEdit.Wrap; selectByMouse: true }
                 SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Порты, протоколы, process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Ports, protocols, process names, UID, cgroup and PID are unsupported by the current model.") }
                 ComboBox { id: actionInput; model: ["Proxy", "Direct", "Block"] }
-                CheckBox { id: enabledInput; checked: true; text: window.tr("Правило включено", "Rule enabled") }
+                CheckBox { id: enabledInput; objectName: "routingEnabled"; checked: true; text: window.tr("Правило включено", "Rule enabled") }
                 CheckBox { id: broadInput; text: window.tr("Подтверждаю правило для любого трафика", "Confirm matching all traffic") }
                 RowLayout {
                     ActionButton {
@@ -921,9 +950,18 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     PlainLabel { Layout.fillWidth: true; text: window.tr("Режим", "Mode") }
-                    PlainLabel { text: window.tr("Локальный SOCKS5", "Local SOCKS5") }
-                    HelpButton { explanation: window.tr("Настройте прокси в нужном приложении. Системный VPN, TUN, DNS/Fake-IP и kill switch пока недоступны: трафик всей системы не перенаправляется.", "Configure the proxy in your application. System VPN, TUN, DNS/Fake-IP and kill switch are unavailable: system-wide traffic is not redirected.") }
+                    ComboBox {
+                        objectName: "connectionModeChoice"
+                        model: [window.tr("Локальный SOCKS5", "Local SOCKS5"), window.tr("Системное подключение", "System connection")]
+                        currentIndex: window.state.connection_mode === "system" ? 1 : 0
+                        enabled: window.editable && !window.state.can_unlock
+                        onActivated: window.send({command: "set_connection_mode", mode: currentIndex === 1 ? "system" : "local"})
+                    }
+                    HelpButton { explanation: window.tr("Локальный SOCKS настраивается в нужном приложении. Системный режим требует capability и разрешения helper. Подтверждение правил ещё не подтверждает доступ через туннель.", "Configure local SOCKS in your application. System mode requires helper capability and authorization. Verified rules do not confirm tunnel connectivity.") }
                 }
+                PlainLabel { visible: window.state.connection_mode === "system"; text: window.tr("Состояние helper: ", "Helper state: ") + (window.state.system_state || "Unknown") }
+                ActionButton { objectName: "systemStateButton"; visible: window.state.connection_mode === "system"; enabled: !window.state.system_busy; text: window.tr("Проверить состояние", "Check state"); onClicked: window.send({command: "system_state"}) }
+                ActionButton { objectName: "systemUnlockButton"; visible: window.state.connection_mode === "system"; enabled: !!window.state.can_unlock && !window.state.system_busy && !window.state.can_stop; text: window.tr("Снять сохранённую блокировку", "Unlock retained protection"); onClicked: window.send({command: "system_unlock"}) }
                 PlainLabel { text: window.tr("Адрес прокси", "Proxy address") }
                 RowLayout {
                     Layout.fillWidth: true
@@ -1016,6 +1054,48 @@ ApplicationWindow {
                                     text: window.tr("Отменить", "Cancel")
                                     enabled: !!window.state.tcp_busy
                                     onClicked: window.send({command: "cancel_tcp"})
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ActionButton {
+                                    objectName: "batchCheckButton"
+                                    text: window.tr("Проверить источник", "Check source")
+                                    enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !(window.state.batch && window.state.batch.busy)
+                                    onClicked: window.send({command: "check_batch"})
+                                }
+                                ActionButton {
+                                    objectName: "batchCancelButton"
+                                    text: window.tr("Отменить серию", "Cancel batch")
+                                    visible: !!window.state.batch && window.state.batch.busy
+                                    onClicked: window.send({command: "cancel_batch"})
+                                }
+                            }
+                            SmallLabel {
+                                objectName: "batchProgress"
+                                Layout.fillWidth: true
+                                text: window.state.batch ? (window.state.batch.invalidated ? window.tr("Результаты устарели", "Results invalidated") : window.state.batch.completed + " / " + window.state.batch.total + (window.state.batch.cancelled ? window.tr(" · отменено", " · cancelled") : "")) : ""
+                            }
+                            Repeater {
+                                model: window.state.batch ? window.state.batch.rows : []
+                                delegate: SmallLabel {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    text: modelData.name + " · " + modelData.host + ":" + modelData.port + " · " + window.tcpStatusText(modelData.status) + (modelData.connect_ms !== null ? " · " + modelData.connect_ms + " ms" : "")
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            RowLayout {
+                                visible: !!window.state.batch && window.state.batch.completed > 32
+                                ActionButton {
+                                    text: "←"
+                                    enabled: window.state.batch && window.state.batch.offset > 0
+                                    onClicked: window.send({command: "batch_page", offset: Math.max(0, window.state.batch.offset - 32)})
+                                }
+                                ActionButton {
+                                    text: "→"
+                                    enabled: window.state.batch && window.state.batch.offset + 32 < window.state.batch.completed
+                                    onClicked: window.send({command: "batch_page", offset: window.state.batch.offset + 32})
                                 }
                             }
                             SmallLabel {

@@ -1,0 +1,1771 @@
+{
+  "binary_sha256": "60a0548f169272ee2ca0b25ab832134076fda0e1f2ed31f7fabc94ba43a2aeeb",
+  "snapshots": [
+    {
+      "sample": 0,
+      "pid": 5521
+    },
+    {
+      "sample": 1,
+      "pid": 5521
+    },
+    {
+      "sample": 2,
+      "pid": 5521
+    },
+    {
+      "sample": 3,
+      "pid": 5521
+    }
+  ],
+  "files": [
+    {
+      "path": "/etc/ld.so.cache",
+      "resolved_path": "/etc/ld.so.cache",
+      "sha256": "bbdd572ad1eacafd9f2b6a01825ab487f3770a9d49d20af1639df009b375c1a7",
+      "observed": "maps",
+      "owner": [],
+      "package_version": ""
+    },
+    {
+      "path": "/memfd:JITCode:QtQml (deleted)",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/memfd:JSGCHeap:QtQml (deleted)",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/memfd:JSVMStack:QtQml (deleted)",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/memfd:unknown-usage:QtQml (deleted)",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/memfd:xorg (deleted)",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/opt/preserved/usr/bin/yonik-desktop",
+      "resolved_path": "/opt/preserved/usr/bin/yonik-desktop",
+      "sha256": "60a0548f169272ee2ca0b25ab832134076fda0e1f2ed31f7fabc94ba43a2aeeb",
+      "observed": "maps",
+      "owner": [],
+      "package_version": ""
+    },
+    {
+      "path": "/usr/lib/gconv/gconv-modules.cache",
+      "resolved_path": "/usr/lib/gconv/gconv-modules.cache",
+      "sha256": "0fde9bfd93c2ac83b23f0ab2e89f438be92f3c368247410eff58ccc847d7a783",
+      "observed": "maps",
+      "owner": [],
+      "package_version": ""
+    },
+    {
+      "path": "/usr/lib/ld-linux-x86-64.so.2",
+      "resolved_path": "/usr/lib/ld-linux-x86-64.so.2",
+      "sha256": "f5e11cc62f8f2c24dff532982559f4303dba3b17e7450551372a88c8e7ea8757",
+      "observed": "maps",
+      "owner": [
+        "glibc"
+      ],
+      "package_version": "glibc 2.44+r50+g1848099f063e-1"
+    },
+    {
+      "path": "/usr/lib/libEGL.so.1.1.0",
+      "resolved_path": "/usr/lib/libEGL.so.1.1.0",
+      "sha256": "89d5d0f68f7e42397544db26347c24a893be2e08b81406e8e8714803c29db03b",
+      "observed": "maps",
+      "owner": [
+        "libglvnd"
+      ],
+      "package_version": "libglvnd 1.7.0-3"
+    },
+    {
+      "path": "/usr/lib/libGLX.so.0.0.0",
+      "resolved_path": "/usr/lib/libGLX.so.0.0.0",
+      "sha256": "4eca76728c640b67b1ed656a22b53d3734c100ba4f992aecd705d2e70bfe743a",
+      "observed": "maps",
+      "owner": [
+        "libglvnd"
+      ],
+      "package_version": "libglvnd 1.7.0-3"
+    },
+    {
+      "path": "/usr/lib/libGLdispatch.so.0.0.0",
+      "resolved_path": "/usr/lib/libGLdispatch.so.0.0.0",
+      "sha256": "b6d068112d4fd36750b6fedcddea0df7719b707495611cbe6fd92f6887eda467",
+      "observed": "maps",
+      "owner": [
+        "libglvnd"
+      ],
+      "package_version": "libglvnd 1.7.0-3"
+    },
+    {
+      "path": "/usr/lib/libICE.so.6.3.0",
+      "resolved_path": "/usr/lib/libICE.so.6.3.0",
+      "sha256": "71c71c05e3cbd25d19460ef5bdf3b3a4538c95a86473a4e4222bf85c2c419a9c",
+      "observed": "maps",
+      "owner": [
+        "libice"
+      ],
+      "package_version": "libice 1.1.2-1"
+    },
+    {
+      "path": "/usr/lib/libOpenGL.so.0.0.0",
+      "resolved_path": "/usr/lib/libOpenGL.so.0.0.0",
+      "sha256": "5ec13550cb78002495db99017a034c810e0a61facc9c289091420ba1edbd441e",
+      "observed": "maps",
+      "owner": [
+        "libglvnd"
+      ],
+      "package_version": "libglvnd 1.7.0-3"
+    },
+    {
+      "path": "/usr/lib/libQt6Core.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Core.so.6.12.0",
+      "sha256": "0d7cf0802b3bf2c67daf41525a9365ed77b6ccc62905c74a5c38087df00ac375",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6DBus.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6DBus.so.6.12.0",
+      "sha256": "90d25952f1e93522e0c37997c5fd52cfcb7baf5e233f86feedea2672b8dec4d2",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6Gui.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Gui.so.6.12.0",
+      "sha256": "9fa6e5fb9732b2d657002011c13883080af97f3304c8e195bf1cf29e13662850",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6Network.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Network.so.6.12.0",
+      "sha256": "0d527b080b250475390f5851259ed928a8d5fc12a1e24be23b316d61cecd6ec7",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6OpenGL.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6OpenGL.so.6.12.0",
+      "sha256": "6c16d4d98832392f156e61d560bea0a52ac18bf21ff5d4da3f0ce11cc29447e6",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6Qml.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Qml.so.6.12.0",
+      "sha256": "cf7ca8c2f1593524b1b3b06f4c32872bc6e5fd31dae8b6c2a928402265ad9f09",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QmlMeta.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QmlMeta.so.6.12.0",
+      "sha256": "4c8945a478cdf3e897cf0943b6cdbcc8ccde83a24fda1de71be580b1991beccb",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QmlModels.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QmlModels.so.6.12.0",
+      "sha256": "490785a8b7fa232a9d613724693da733e650678f5f5d3d2b0a798e6e5c88f4dd",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QmlWorkerScript.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QmlWorkerScript.so.6.12.0",
+      "sha256": "0f5182c33058f51da2d3f36011ee3a3282e3ef48e06b7e3e97b7e62dde8a3e3f",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6Quick.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Quick.so.6.12.0",
+      "sha256": "81c159125a0084a8980eb603a550fb09befaebd720c79d22318dac71eb625f29",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickControls2.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickControls2.so.6.12.0",
+      "sha256": "a5ae8cb59064bbcc81cb920a1b41a9f4359748f0296437587a281cf89b0ca76e",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickControls2Basic.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickControls2Basic.so.6.12.0",
+      "sha256": "7fad74edf35fd3cbf35d72b57b6274837b3e7c1718438a60269840e6053e140b",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickControls2BasicStyleImpl.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickControls2BasicStyleImpl.so.6.12.0",
+      "sha256": "0cf85a202a9f97dfdd72f4b36fcf105168f4e2e10e3f7393f5f8e0385145c16a",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickControls2Impl.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickControls2Impl.so.6.12.0",
+      "sha256": "36459a7d040e6f16bdb19ac8c40602be9137fd7a1bd5191776b61fb85b6c292e",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickLayouts.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickLayouts.so.6.12.0",
+      "sha256": "0355a8bd82f78545e6b0c58f6d09ff06e31933c265670d248ae3362332064c5e",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6QuickTemplates2.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6QuickTemplates2.so.6.12.0",
+      "sha256": "c9eaca976a0d09d1da32f5955bd10266d55ee963fda0a3df6dee62acbb6e5ee7",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6Svg.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Svg.so.6.12.0",
+      "sha256": "1ec8efb2bd9dc34c161ec6f22a9967a742455c9ea68b5c7e2af5957d186b42ee",
+      "observed": "maps",
+      "owner": [
+        "qt6-svg"
+      ],
+      "package_version": "qt6-svg 6.12.0-1"
+    },
+    {
+      "path": "/usr/lib/libQt6Widgets.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6Widgets.so.6.12.0",
+      "sha256": "01e094fd51ad9411e70f3f2480032b99cab360f646b88d4348474308a94e3b3f",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libQt6XcbQpa.so.6.12.0",
+      "resolved_path": "/usr/lib/libQt6XcbQpa.so.6.12.0",
+      "sha256": "6251fe291367486846b7cc1f704c706e7d4e69c7c2049b7130cc30d2e01b58fc",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/libSM.so.6.0.1",
+      "resolved_path": "/usr/lib/libSM.so.6.0.1",
+      "sha256": "1366597b21814c4290eda5f83d8bd63144273f99ab15197f49fc26037459d4c3",
+      "observed": "maps",
+      "owner": [
+        "libsm"
+      ],
+      "package_version": "libsm 1.2.6-1"
+    },
+    {
+      "path": "/usr/lib/libX11-xcb.so.1.0.0",
+      "resolved_path": "/usr/lib/libX11-xcb.so.1.0.0",
+      "sha256": "8d3bed500d5b774f95068b219846923564d856c0dfe04538afa29383b12b5c4b",
+      "observed": "maps",
+      "owner": [
+        "libx11"
+      ],
+      "package_version": "libx11 1.8.14-1"
+    },
+    {
+      "path": "/usr/lib/libX11.so.6.4.0",
+      "resolved_path": "/usr/lib/libX11.so.6.4.0",
+      "sha256": "8c202bd93c4f4f3967ac66a20588da1e8f44a17b57ecc292d5cce51aa1168b74",
+      "observed": "maps",
+      "owner": [
+        "libx11"
+      ],
+      "package_version": "libx11 1.8.14-1"
+    },
+    {
+      "path": "/usr/lib/libXau.so.6.0.0",
+      "resolved_path": "/usr/lib/libXau.so.6.0.0",
+      "sha256": "3e229dba702d7b56f1c58ac0e004ae691ae2ad5ede7b50968e1cd7d8b2ccdecc",
+      "observed": "maps",
+      "owner": [
+        "libxau"
+      ],
+      "package_version": "libxau 1.0.12-1"
+    },
+    {
+      "path": "/usr/lib/libXdmcp.so.6.0.0",
+      "resolved_path": "/usr/lib/libXdmcp.so.6.0.0",
+      "sha256": "0c572ba75de0f967c9c4d088161d3e435ea721bd99c169aae707aba6870a71b1",
+      "observed": "maps",
+      "owner": [
+        "libxdmcp"
+      ],
+      "package_version": "libxdmcp 1.1.5-2"
+    },
+    {
+      "path": "/usr/lib/libb2.so.1.0.4",
+      "resolved_path": "/usr/lib/libb2.so.1.0.4",
+      "sha256": "2e1b5045b932561e84fa4e9fe141b462d23134f145ec12e4b65f7fe40d51a93e",
+      "observed": "maps",
+      "owner": [
+        "libb2"
+      ],
+      "package_version": "libb2 0.98.1-3"
+    },
+    {
+      "path": "/usr/lib/libblkid.so.1.1.0",
+      "resolved_path": "/usr/lib/libblkid.so.1.1.0",
+      "sha256": "aeaf48e3e206ee795262b7d83be9ba37803f1ee1391bb1ac48359ace60a9d2dd",
+      "observed": "maps",
+      "owner": [
+        "util-linux-libs"
+      ],
+      "package_version": "util-linux-libs 2.42.4-1"
+    },
+    {
+      "path": "/usr/lib/libbrotlicommon.so.1.2.1",
+      "resolved_path": "/usr/lib/libbrotlicommon.so.1.2.1",
+      "sha256": "98826693f4a8c563890f89ed04ab255d871948e07eabf314d10f79c895e0f03c",
+      "observed": "maps",
+      "owner": [
+        "brotli"
+      ],
+      "package_version": "brotli 1.2.1-1"
+    },
+    {
+      "path": "/usr/lib/libbrotlidec.so.1.2.1",
+      "resolved_path": "/usr/lib/libbrotlidec.so.1.2.1",
+      "sha256": "380ec042c35705a2dbfcb3e0ed392ce7e1262d62b7e626252cd8bce4adad43f2",
+      "observed": "maps",
+      "owner": [
+        "brotli"
+      ],
+      "package_version": "brotli 1.2.1-1"
+    },
+    {
+      "path": "/usr/lib/libbrotlienc.so.1.2.1",
+      "resolved_path": "/usr/lib/libbrotlienc.so.1.2.1",
+      "sha256": "036fd3cac00bc8a28de8b9e01380a8872e034203b81222ee3c4f92510593805f",
+      "observed": "maps",
+      "owner": [
+        "brotli"
+      ],
+      "package_version": "brotli 1.2.1-1"
+    },
+    {
+      "path": "/usr/lib/libbz2.so.1.0.8",
+      "resolved_path": "/usr/lib/libbz2.so.1.0.8",
+      "sha256": "3265f0647d9157aaa820c5094eba03c5be0f101c49e9ffd21289978b8e1875af",
+      "observed": "maps",
+      "owner": [
+        "bzip2"
+      ],
+      "package_version": "bzip2 1.0.8-6"
+    },
+    {
+      "path": "/usr/lib/libc.so.6",
+      "resolved_path": "/usr/lib/libc.so.6",
+      "sha256": "02c8c3d06180beee9c7d0392aa85736c7d19f274a81e7f8f0b3d9e28e0641524",
+      "observed": "maps",
+      "owner": [
+        "glibc"
+      ],
+      "package_version": "glibc 2.44+r50+g1848099f063e-1"
+    },
+    {
+      "path": "/usr/lib/libcom_err.so.2.1",
+      "resolved_path": "/usr/lib/libcom_err.so.2.1",
+      "sha256": "67ed8a11c44542ffdbaa04b3521f48729afddf936568632b6aa9d04c595316cd",
+      "observed": "maps",
+      "owner": [
+        "e2fsprogs"
+      ],
+      "package_version": "e2fsprogs 1.47.4-1"
+    },
+    {
+      "path": "/usr/lib/libcrypto.so.4",
+      "resolved_path": "/usr/lib/libcrypto.so.4",
+      "sha256": "2d6cb0b466c46ac0f853e63c9473a582a17bc525f30a7beb6de187019187d746",
+      "observed": "maps",
+      "owner": [
+        "openssl"
+      ],
+      "package_version": "openssl 4.1.0-1"
+    },
+    {
+      "path": "/usr/lib/libcurl.so.4.8.0",
+      "resolved_path": "/usr/lib/libcurl.so.4.8.0",
+      "sha256": "42d01bc6c7e0b9b21ee96ccc23c722b61312dbe2fe3e39f7de7ea7c918c80373",
+      "observed": "maps",
+      "owner": [
+        "curl"
+      ],
+      "package_version": "curl 8.23.0-2"
+    },
+    {
+      "path": "/usr/lib/libdbus-1.so.3.38.3",
+      "resolved_path": "/usr/lib/libdbus-1.so.3.38.3",
+      "sha256": "2d6bb6fb31dd78f3ad7e871bca2ed4ed41e45eaff77bd3cb3e130a78aca89118",
+      "observed": "maps",
+      "owner": [
+        "dbus"
+      ],
+      "package_version": "dbus 1.16.2-2"
+    },
+    {
+      "path": "/usr/lib/libdouble-conversion.so.3.4.0",
+      "resolved_path": "/usr/lib/libdouble-conversion.so.3.4.0",
+      "sha256": "d650a36479806f9425ba69871745fae91e63a7a72d4c199b4220637c4fe36d0a",
+      "observed": "maps",
+      "owner": [
+        "double-conversion"
+      ],
+      "package_version": "double-conversion 3.4.0-1"
+    },
+    {
+      "path": "/usr/lib/libduktape.so.207.20700",
+      "resolved_path": "/usr/lib/libduktape.so.207.20700",
+      "sha256": "af2c5a3acc2a8e341660128b47fe6f5b1579404501af46dfe14836432d6781d8",
+      "observed": "maps",
+      "owner": [
+        "duktape"
+      ],
+      "package_version": "duktape 2.7.0-7"
+    },
+    {
+      "path": "/usr/lib/libexpat.so.1.13.1",
+      "resolved_path": "/usr/lib/libexpat.so.1.13.1",
+      "sha256": "23bc4e91a01fad037125ea1377855880f1c322c172bf002a89a64de08dce44d6",
+      "observed": "maps",
+      "owner": [
+        "expat"
+      ],
+      "package_version": "expat 2.10.0-1"
+    },
+    {
+      "path": "/usr/lib/libffi.so.8.5.0",
+      "resolved_path": "/usr/lib/libffi.so.8.5.0",
+      "sha256": "b38bb3a55ba04dfbb5be68e881a72385d6c30010afffb1cf1dfc373b72c2278c",
+      "observed": "maps",
+      "owner": [
+        "libffi"
+      ],
+      "package_version": "libffi 3.8.0-1"
+    },
+    {
+      "path": "/usr/lib/libfontconfig.so.1.17.0",
+      "resolved_path": "/usr/lib/libfontconfig.so.1.17.0",
+      "sha256": "9d103ae2234c4a8140250935ec6f8d72b0ce1a389fc1a75e17a485c16adc566b",
+      "observed": "maps",
+      "owner": [
+        "fontconfig"
+      ],
+      "package_version": "fontconfig 2:2.18.3-2"
+    },
+    {
+      "path": "/usr/lib/libfreetype.so.6.20.7",
+      "resolved_path": "/usr/lib/libfreetype.so.6.20.7",
+      "sha256": "0b0e16faaaed2145c89e193bc52f308bfb909ccd182fbed0d2f245329c248fca",
+      "observed": "maps",
+      "owner": [
+        "freetype2"
+      ],
+      "package_version": "freetype2 2.15.0-1"
+    },
+    {
+      "path": "/usr/lib/libgcc_s.so.1",
+      "resolved_path": "/usr/lib/libgcc_s.so.1",
+      "sha256": "e618cb9c90c2eb3a1dad1cfea5b6c1eebcf2e799ad805976f4ae47bdd61c716a",
+      "observed": "maps",
+      "owner": [
+        "libgcc"
+      ],
+      "package_version": "libgcc 16.2.1+r23+gd564253eb6c8-1"
+    },
+    {
+      "path": "/usr/lib/libgio-2.0.so.0.9000.1",
+      "resolved_path": "/usr/lib/libgio-2.0.so.0.9000.1",
+      "sha256": "b38001cca69b2890a22fd3f6590bea7392bf489009de7ddfb6dbf296a133685e",
+      "observed": "maps",
+      "owner": [
+        "glib2"
+      ],
+      "package_version": "glib2 2.90.1-1"
+    },
+    {
+      "path": "/usr/lib/libglib-2.0.so.0.9000.1",
+      "resolved_path": "/usr/lib/libglib-2.0.so.0.9000.1",
+      "sha256": "1e8739af791b1a2f1f01fc7c6f3b9158888387d5a816195475e406438d41b688",
+      "observed": "maps",
+      "owner": [
+        "glib2"
+      ],
+      "package_version": "glib2 2.90.1-1"
+    },
+    {
+      "path": "/usr/lib/libgmodule-2.0.so.0.9000.1",
+      "resolved_path": "/usr/lib/libgmodule-2.0.so.0.9000.1",
+      "sha256": "b259a089b405eaa747fa15b62800301dfc948523f547dec84ec5ea679cd51a4b",
+      "observed": "maps",
+      "owner": [
+        "glib2"
+      ],
+      "package_version": "glib2 2.90.1-1"
+    },
+    {
+      "path": "/usr/lib/libgobject-2.0.so.0.9000.1",
+      "resolved_path": "/usr/lib/libgobject-2.0.so.0.9000.1",
+      "sha256": "ec51ca8b317565beecf3b370743491a9da108f885ddb0a01976c3eac1711dd67",
+      "observed": "maps",
+      "owner": [
+        "glib2"
+      ],
+      "package_version": "glib2 2.90.1-1"
+    },
+    {
+      "path": "/usr/lib/libgomp.so.1.0.0",
+      "resolved_path": "/usr/lib/libgomp.so.1.0.0",
+      "sha256": "d6c6309ee83dbe9b50bf38342489799a4822ee22451677730ff5542aa74bdefc",
+      "observed": "maps",
+      "owner": [
+        "libgomp"
+      ],
+      "package_version": "libgomp 16.2.1+r23+gd564253eb6c8-1"
+    },
+    {
+      "path": "/usr/lib/libgraphite2.so.3.3.1",
+      "resolved_path": "/usr/lib/libgraphite2.so.3.3.1",
+      "sha256": "70eebd2fda11b867ebff5a8e3bdf272875acdde0851d258c98b3b046b01b4fc7",
+      "observed": "maps",
+      "owner": [
+        "graphite"
+      ],
+      "package_version": "graphite 1:1.3.15-1"
+    },
+    {
+      "path": "/usr/lib/libgssapi_krb5.so.2.2",
+      "resolved_path": "/usr/lib/libgssapi_krb5.so.2.2",
+      "sha256": "2ed8479f7a3dc219b9d362e5e2a40b54578a1272809e74e1cc1941dfcbe1b82e",
+      "observed": "maps",
+      "owner": [
+        "krb5"
+      ],
+      "package_version": "krb5 1.22.2-2"
+    },
+    {
+      "path": "/usr/lib/libharfbuzz.so.0.61510.0",
+      "resolved_path": "/usr/lib/libharfbuzz.so.0.61510.0",
+      "sha256": "70b65f53855877c74f99189eaa3652c8abd67ce3c9d5e3611a6d0e36291c6482",
+      "observed": "maps",
+      "owner": [
+        "harfbuzz"
+      ],
+      "package_version": "harfbuzz 15.1.0-1"
+    },
+    {
+      "path": "/usr/lib/libicudata.so.78.3",
+      "resolved_path": "/usr/lib/libicudata.so.78.3",
+      "sha256": "d72003b08760852bee4c80cff32c1e6248ae6b1fda5bd313482733a4d5e70dc9",
+      "observed": "maps",
+      "owner": [
+        "icu"
+      ],
+      "package_version": "icu 78.3-1"
+    },
+    {
+      "path": "/usr/lib/libicui18n.so.78.3",
+      "resolved_path": "/usr/lib/libicui18n.so.78.3",
+      "sha256": "60d7ad7b3f8e6e1c42895c03379954ee46008948dcdb2e556fa8e4c875742c60",
+      "observed": "maps",
+      "owner": [
+        "icu"
+      ],
+      "package_version": "icu 78.3-1"
+    },
+    {
+      "path": "/usr/lib/libicuuc.so.78.3",
+      "resolved_path": "/usr/lib/libicuuc.so.78.3",
+      "sha256": "c99f0dd0c797c07f9ab64413d36c595393cdded6fa04cc4edd6f6a521fd155ca",
+      "observed": "maps",
+      "owner": [
+        "icu"
+      ],
+      "package_version": "icu 78.3-1"
+    },
+    {
+      "path": "/usr/lib/libidn2.so.0.4.0",
+      "resolved_path": "/usr/lib/libidn2.so.0.4.0",
+      "sha256": "9a36fa67dc82ce0e5dc38ef190c76231f532676f7ba13e363fc1df16a9c50a15",
+      "observed": "maps",
+      "owner": [
+        "libidn2"
+      ],
+      "package_version": "libidn2 2.3.8-1"
+    },
+    {
+      "path": "/usr/lib/libjpeg.so.8.3.2",
+      "resolved_path": "/usr/lib/libjpeg.so.8.3.2",
+      "sha256": "48fc7b690f980fc7c3401d6e532b8c80f25f6b7cf688997ab471e110a09f49ef",
+      "observed": "maps",
+      "owner": [
+        "libjpeg-turbo"
+      ],
+      "package_version": "libjpeg-turbo 3.2.1-1"
+    },
+    {
+      "path": "/usr/lib/libk5crypto.so.3.1",
+      "resolved_path": "/usr/lib/libk5crypto.so.3.1",
+      "sha256": "05e43f1ab830827afe46effb2c994436238a5dfc2935599f5eb609168c5083a2",
+      "observed": "maps",
+      "owner": [
+        "krb5"
+      ],
+      "package_version": "krb5 1.22.2-2"
+    },
+    {
+      "path": "/usr/lib/libkeyutils.so.1.10",
+      "resolved_path": "/usr/lib/libkeyutils.so.1.10",
+      "sha256": "a82e692581b6215475c03538fa4b25681b5c71e8554c67afa7e34074b968b0d7",
+      "observed": "maps",
+      "owner": [
+        "keyutils"
+      ],
+      "package_version": "keyutils 1.6.3-4"
+    },
+    {
+      "path": "/usr/lib/libkrb5.so.3.3",
+      "resolved_path": "/usr/lib/libkrb5.so.3.3",
+      "sha256": "c568bc0f0b96ec094a910475a8230d10a8b0bab3f2a50c3a0b9975ff8688ed0b",
+      "observed": "maps",
+      "owner": [
+        "krb5"
+      ],
+      "package_version": "krb5 1.22.2-2"
+    },
+    {
+      "path": "/usr/lib/libkrb5support.so.0.1",
+      "resolved_path": "/usr/lib/libkrb5support.so.0.1",
+      "sha256": "85c806c05f4b5784f59cbc5977e26ebf5bf3b0ef89c1f3c1b95762b427f8ed79",
+      "observed": "maps",
+      "owner": [
+        "krb5"
+      ],
+      "package_version": "krb5 1.22.2-2"
+    },
+    {
+      "path": "/usr/lib/libm.so.6",
+      "resolved_path": "/usr/lib/libm.so.6",
+      "sha256": "965106704753eefe8c31ae7da6daba3ead3d18c52b19b5fcc41178bcc4aa999d",
+      "observed": "maps",
+      "owner": [
+        "glibc"
+      ],
+      "package_version": "glibc 2.44+r50+g1848099f063e-1"
+    },
+    {
+      "path": "/usr/lib/libmd4c.so.0.6.0",
+      "resolved_path": "/usr/lib/libmd4c.so.0.6.0",
+      "sha256": "2e45339bd8dac909ab68d1fbb3077b5b4e72022f2bc83e75bd985fe6a483652c",
+      "observed": "maps",
+      "owner": [
+        "md4c"
+      ],
+      "package_version": "md4c 0.6.0-2"
+    },
+    {
+      "path": "/usr/lib/libmount.so.1.1.0",
+      "resolved_path": "/usr/lib/libmount.so.1.1.0",
+      "sha256": "967882491416426236028ba5290b3c88ed9b108d69f3a272a317341146fb2c09",
+      "observed": "maps",
+      "owner": [
+        "util-linux-libs"
+      ],
+      "package_version": "util-linux-libs 2.42.4-1"
+    },
+    {
+      "path": "/usr/lib/libnghttp2.so.14.30.0",
+      "resolved_path": "/usr/lib/libnghttp2.so.14.30.0",
+      "sha256": "08b19458ffaa03e7fed45b545fee9c98721c5db111c1a066960a46d7cdb8b4b7",
+      "observed": "maps",
+      "owner": [
+        "libnghttp2"
+      ],
+      "package_version": "libnghttp2 1.71.0-1"
+    },
+    {
+      "path": "/usr/lib/libnghttp3.so.9.9.1",
+      "resolved_path": "/usr/lib/libnghttp3.so.9.9.1",
+      "sha256": "bd7ae045f2f55efdf18feb03ca8a4f9352ac3e99c354d9746d0e1b4cf893cfa9",
+      "observed": "maps",
+      "owner": [
+        "libnghttp3"
+      ],
+      "package_version": "libnghttp3 1.19.0-1"
+    },
+    {
+      "path": "/usr/lib/libngtcp2.so.16.12.0",
+      "resolved_path": "/usr/lib/libngtcp2.so.16.12.0",
+      "sha256": "df0714e945c786f87323e06fe96817ae564f0204438ff51564bba236d5875a72",
+      "observed": "maps",
+      "owner": [
+        "libngtcp2"
+      ],
+      "package_version": "libngtcp2 1.26.0-2"
+    },
+    {
+      "path": "/usr/lib/libngtcp2_crypto_ossl.so.0.3.2",
+      "resolved_path": "/usr/lib/libngtcp2_crypto_ossl.so.0.3.2",
+      "sha256": "be8f303f36fa064b5163fded1e74439590739b0d1d515928e7cbe0e5ba766f8b",
+      "observed": "maps",
+      "owner": [
+        "libngtcp2"
+      ],
+      "package_version": "libngtcp2 1.26.0-2"
+    },
+    {
+      "path": "/usr/lib/libpcre2-16.so.0.16.1",
+      "resolved_path": "/usr/lib/libpcre2-16.so.0.16.1",
+      "sha256": "9f12b97a1f676eb6027375ec5869921cbf2cfad444e4d91f10ed79bda082ebfa",
+      "observed": "maps",
+      "owner": [
+        "pcre2"
+      ],
+      "package_version": "pcre2 10.49-1"
+    },
+    {
+      "path": "/usr/lib/libpcre2-8.so.0.16.1",
+      "resolved_path": "/usr/lib/libpcre2-8.so.0.16.1",
+      "sha256": "bfe4fd9948f4ad1e907ec22525515f578eb9eeb181a44741948d99746d0f8e58",
+      "observed": "maps",
+      "owner": [
+        "pcre2"
+      ],
+      "package_version": "pcre2 10.49-1"
+    },
+    {
+      "path": "/usr/lib/libpng16.so.16.59.0",
+      "resolved_path": "/usr/lib/libpng16.so.16.59.0",
+      "sha256": "36579634fdc89d6b7b567f1a890c13194bce0ba95e65ada1f775af1e7452b398",
+      "observed": "maps",
+      "owner": [
+        "libpng"
+      ],
+      "package_version": "libpng 1.6.59-1"
+    },
+    {
+      "path": "/usr/lib/libproxy.so.0.5.12",
+      "resolved_path": "/usr/lib/libproxy.so.0.5.12",
+      "sha256": "d556b6818cffbcdc61ae11cf165768f96e5c55ecf512204d713cfb044eee7fc2",
+      "observed": "maps",
+      "owner": [
+        "libproxy"
+      ],
+      "package_version": "libproxy 0.5.12-1"
+    },
+    {
+      "path": "/usr/lib/libproxy/libpxbackend-1.0.so",
+      "resolved_path": "/usr/lib/libproxy/libpxbackend-1.0.so",
+      "sha256": "e113af64840ceb4b808eced33e31039262bbc8810a4a7bca3af2d5bd6e5f0d51",
+      "observed": "maps",
+      "owner": [
+        "libproxy"
+      ],
+      "package_version": "libproxy 0.5.12-1"
+    },
+    {
+      "path": "/usr/lib/libpsl.so.5.3.5",
+      "resolved_path": "/usr/lib/libpsl.so.5.3.5",
+      "sha256": "b5189c9a4b32b15f0bb1bab989069acd2d0dc89723b990266ad5566cd16f1924",
+      "observed": "maps",
+      "owner": [
+        "libpsl"
+      ],
+      "package_version": "libpsl 0.21.5-2"
+    },
+    {
+      "path": "/usr/lib/libresolv.so.2",
+      "resolved_path": "/usr/lib/libresolv.so.2",
+      "sha256": "ee828b251a61761a9e529a791758ec8a1fbefd85693e2dc23501fedb8cf2f31d",
+      "observed": "maps",
+      "owner": [
+        "glibc"
+      ],
+      "package_version": "glibc 2.44+r50+g1848099f063e-1"
+    },
+    {
+      "path": "/usr/lib/libsqlite3.so.3.54.1",
+      "resolved_path": "/usr/lib/libsqlite3.so.3.54.1",
+      "sha256": "99ad85c87b9c2a461a670a1db545ca17b29d9208fe4e2887a5ff6942f2c2e61a",
+      "observed": "maps",
+      "owner": [
+        "sqlite"
+      ],
+      "package_version": "sqlite 3.54.1-1"
+    },
+    {
+      "path": "/usr/lib/libssh2.so.1.0.1",
+      "resolved_path": "/usr/lib/libssh2.so.1.0.1",
+      "sha256": "5ce3e548e17c8e82614c261f8d64875a62c28940b2b9f96a7784c160e924977e",
+      "observed": "maps",
+      "owner": [
+        "libssh2"
+      ],
+      "package_version": "libssh2 1.11.1-8"
+    },
+    {
+      "path": "/usr/lib/libssl.so.4",
+      "resolved_path": "/usr/lib/libssl.so.4",
+      "sha256": "1dbcc9610f379782c8653d8c3974f9e9038dfbeb7e6d2676a4b46258c081f9a3",
+      "observed": "maps",
+      "owner": [
+        "openssl"
+      ],
+      "package_version": "openssl 4.1.0-1"
+    },
+    {
+      "path": "/usr/lib/libstdc++.so.6.0.36",
+      "resolved_path": "/usr/lib/libstdc++.so.6.0.36",
+      "sha256": "f5fc7380f2ae46fa4053a64be04e7b98109f1066a4bbfff3c37042488aa0be0e",
+      "observed": "maps",
+      "owner": [
+        "libstdc++"
+      ],
+      "package_version": "libstdc++ 16.2.1+r23+gd564253eb6c8-1"
+    },
+    {
+      "path": "/usr/lib/libsystemd.so.0.45.0",
+      "resolved_path": "/usr/lib/libsystemd.so.0.45.0",
+      "sha256": "c003be7361666431b78a72c73d00a43794a0921326151b6dff20bbb688a3e892",
+      "observed": "maps",
+      "owner": [
+        "systemd-libs"
+      ],
+      "package_version": "systemd-libs 262.2-1"
+    },
+    {
+      "path": "/usr/lib/libunistring.so.5.2.1",
+      "resolved_path": "/usr/lib/libunistring.so.5.2.1",
+      "sha256": "ba7a4afb4b6f823d64ebe324416e182cd42a981dba049e3ddcfa1c9af03cb7f3",
+      "observed": "maps",
+      "owner": [
+        "libunistring"
+      ],
+      "package_version": "libunistring 1.4.2-1"
+    },
+    {
+      "path": "/usr/lib/liburing.so.2.15",
+      "resolved_path": "/usr/lib/liburing.so.2.15",
+      "sha256": "b01799e8295bc119d614bf061baad1f2a2a494a0787a057f49997244daf110c5",
+      "observed": "maps",
+      "owner": [
+        "liburing"
+      ],
+      "package_version": "liburing 2.15-1"
+    },
+    {
+      "path": "/usr/lib/libuuid.so.1.3.0",
+      "resolved_path": "/usr/lib/libuuid.so.1.3.0",
+      "sha256": "7881e0279d5ce79b0d8ace923e94df9b543bc8dd8152df0894358b862e1725be",
+      "observed": "maps",
+      "owner": [
+        "util-linux-libs"
+      ],
+      "package_version": "util-linux-libs 2.42.4-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-cursor.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-cursor.so.0.0.0",
+      "sha256": "51999e6c4224606000b80c5795454301232f6b73dd7abe260d8674915418483f",
+      "observed": "maps",
+      "owner": [
+        "xcb-util-cursor"
+      ],
+      "package_version": "xcb-util-cursor 0.1.6-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-icccm.so.4.0.0",
+      "resolved_path": "/usr/lib/libxcb-icccm.so.4.0.0",
+      "sha256": "cd64c092e6a82c24d0683b48825d565dae99a720620d17ac9be832fca6fe60da",
+      "observed": "maps",
+      "owner": [
+        "xcb-util-wm"
+      ],
+      "package_version": "xcb-util-wm 0.4.2-2"
+    },
+    {
+      "path": "/usr/lib/libxcb-image.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-image.so.0.0.0",
+      "sha256": "55f46749702fbff375d226b44c1bea9d887cf025586956c779a6e1c1497ea779",
+      "observed": "maps",
+      "owner": [
+        "xcb-util-image"
+      ],
+      "package_version": "xcb-util-image 0.4.1-3"
+    },
+    {
+      "path": "/usr/lib/libxcb-keysyms.so.1.0.0",
+      "resolved_path": "/usr/lib/libxcb-keysyms.so.1.0.0",
+      "sha256": "3ffbacf50c3bcf9390ce804492a39bd8e549d1b68908e4076444a2651c58468f",
+      "observed": "maps",
+      "owner": [
+        "xcb-util-keysyms"
+      ],
+      "package_version": "xcb-util-keysyms 0.4.1-5"
+    },
+    {
+      "path": "/usr/lib/libxcb-randr.so.0.1.0",
+      "resolved_path": "/usr/lib/libxcb-randr.so.0.1.0",
+      "sha256": "5db40f22bfc3a142d653d69669f509b971dc8cd36215e90f977158d109b3dbf5",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-render-util.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-render-util.so.0.0.0",
+      "sha256": "7331618d11a5974da5629ac3bb383f559d5cad7cbb729cdfa6a77859b8045e3e",
+      "observed": "maps",
+      "owner": [
+        "xcb-util-renderutil"
+      ],
+      "package_version": "xcb-util-renderutil 0.3.10-2"
+    },
+    {
+      "path": "/usr/lib/libxcb-render.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-render.so.0.0.0",
+      "sha256": "402feded6ecab1d6070a3cd0ce0e2b69efe32d849a90c535cdf93948b34c451f",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-shape.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-shape.so.0.0.0",
+      "sha256": "a8f48cbb637f494be0bcb30c35570286c7c5b2a296065066366d71c4b9f4d75b",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-shm.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-shm.so.0.0.0",
+      "sha256": "e04329f8117411113e6094e3dc354ed50b8b3b10e6cf5f8a21a6b7bec4786eec",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-sync.so.1.0.0",
+      "resolved_path": "/usr/lib/libxcb-sync.so.1.0.0",
+      "sha256": "e5e6f35089a65d0d34761fdfb6ea9c74a86b9c7e57ab6fc56e1282491ad6bbd0",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-util.so.1.0.0",
+      "resolved_path": "/usr/lib/libxcb-util.so.1.0.0",
+      "sha256": "41b0171c1bc3ffaf2139754e5d01712534242d017d53e37dee7b1127b0b92e9d",
+      "observed": "maps",
+      "owner": [
+        "xcb-util"
+      ],
+      "package_version": "xcb-util 0.4.1-2"
+    },
+    {
+      "path": "/usr/lib/libxcb-xfixes.so.0.0.0",
+      "resolved_path": "/usr/lib/libxcb-xfixes.so.0.0.0",
+      "sha256": "dad274e042c86866ac9b624a47c2f46648a291dbc1e11f8c906cd355ce60e38f",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-xinput.so.0.1.0",
+      "resolved_path": "/usr/lib/libxcb-xinput.so.0.1.0",
+      "sha256": "3b5ceb0b64a1630639c9d8be9805b816ad61e228d28c629fd5e691da8d6093b0",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb-xkb.so.1.0.0",
+      "resolved_path": "/usr/lib/libxcb-xkb.so.1.0.0",
+      "sha256": "d5ca9d9342388f46740cedfbcf6bf5838b3cf8262538edcbd43e270c5b04887b",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxcb.so.1.1.0",
+      "resolved_path": "/usr/lib/libxcb.so.1.1.0",
+      "sha256": "40df5eff95408b67d969e559f2689b3e50e6151251b1f4e03608ce5cd9c9a133",
+      "observed": "maps",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/libxkbcommon-x11.so.0.13.2",
+      "resolved_path": "/usr/lib/libxkbcommon-x11.so.0.13.2",
+      "sha256": "dec1b2b2b0bb92e657851e8e3b3fa37e17b2a43c9d9a5b129c2d2a7ab4f55f3a",
+      "observed": "maps",
+      "owner": [
+        "libxkbcommon-x11"
+      ],
+      "package_version": "libxkbcommon-x11 1.13.2-1"
+    },
+    {
+      "path": "/usr/lib/libxkbcommon.so.0.13.2",
+      "resolved_path": "/usr/lib/libxkbcommon.so.0.13.2",
+      "sha256": "e475adbf5abd181b1bdfdeba70ad4d501cb296bbf05b13e8649fd71b3989ee07",
+      "observed": "maps",
+      "owner": [
+        "libxkbcommon"
+      ],
+      "package_version": "libxkbcommon 1.13.2-1"
+    },
+    {
+      "path": "/usr/lib/libz.so.1.4",
+      "resolved_path": "/usr/lib/libz.so.1.4",
+      "sha256": "c2c5f54b3ec754b47e843ca661ada7448d73a33d7fa241f342550f1ed87c7f82",
+      "observed": "maps",
+      "owner": [
+        "zlib"
+      ],
+      "package_version": "zlib 1:1.4-1"
+    },
+    {
+      "path": "/usr/lib/libzstd.so.1.5.7",
+      "resolved_path": "/usr/lib/libzstd.so.1.5.7",
+      "sha256": "f023d49e85fb22057bfdd21857263d2638b73356c06f3b342f678a75212379f8",
+      "observed": "maps",
+      "owner": [
+        "zstd"
+      ],
+      "package_version": "zstd 1.5.7-3"
+    },
+    {
+      "path": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "resolved_path": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "sha256": "40680545df4f92443c15e7c6f51a7fdc9154ebedd9eff1ed5c48437039add365",
+      "observed": "maps",
+      "owner": [
+        "glibc"
+      ],
+      "package_version": "glibc 2.44+r50+g1848099f063e-1"
+    },
+    {
+      "path": "/usr/lib/locale/locale-archive",
+      "resolved_path": "/usr/lib/locale/locale-archive",
+      "sha256": "7bf2da63b17127e5976936957419603a8b057f606dcf56de1e81e9256ad06a32",
+      "observed": "maps",
+      "owner": [],
+      "package_version": ""
+    },
+    {
+      "path": "/usr/lib/qt6/plugins",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/iconengines",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/iconengines/../../../libQt6Svg.so.6",
+      "resolved_path": "/usr/lib/libQt6Svg.so.6.12.0",
+      "sha256": "1ec8efb2bd9dc34c161ec6f22a9967a742455c9ea68b5c7e2af5957d186b42ee",
+      "observed": "open",
+      "owner": [
+        "qt6-svg"
+      ],
+      "package_version": "qt6-svg 6.12.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/iconengines/libqsvgicon.so",
+      "resolved_path": "/usr/lib/qt6/plugins/iconengines/libqsvgicon.so",
+      "sha256": "6fa2cf4ab1439e4a6ee4e9162f746df97e4182b89f20bd924bacd4f6680b4da7",
+      "observed": "maps",
+      "owner": [
+        "qt6-svg"
+      ],
+      "package_version": "qt6-svg 6.12.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats/../../../libjpeg.so.8",
+      "resolved_path": "/usr/lib/libjpeg.so.8.3.2",
+      "sha256": "48fc7b690f980fc7c3401d6e532b8c80f25f6b7cf688997ab471e110a09f49ef",
+      "observed": "open",
+      "owner": [
+        "libjpeg-turbo"
+      ],
+      "package_version": "libjpeg-turbo 3.2.1-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats/libqgif.so",
+      "resolved_path": "/usr/lib/qt6/plugins/imageformats/libqgif.so",
+      "sha256": "4368a04e4db217bb3b57946a6b2f941c685c4a6afd291aa82fec784a6f6aa4c1",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats/libqico.so",
+      "resolved_path": "/usr/lib/qt6/plugins/imageformats/libqico.so",
+      "sha256": "6bbca9ceb7fa4ce92737df606b3d540000fb742308711fd54c5591ec8cda868f",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats/libqjpeg.so",
+      "resolved_path": "/usr/lib/qt6/plugins/imageformats/libqjpeg.so",
+      "sha256": "ddcad70400dec78c75f17721d8d1cf6b0cdc1572bc1e9062607e804f920a34e3",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/imageformats/libqsvg.so",
+      "resolved_path": "/usr/lib/qt6/plugins/imageformats/libqsvg.so",
+      "sha256": "b3f088893bab82ab700a33e1cb38cadf0b50b66fb3aacc0d389bd695b628ea89",
+      "observed": "maps",
+      "owner": [
+        "qt6-svg"
+      ],
+      "package_version": "qt6-svg 6.12.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforminputcontexts",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.so",
+      "sha256": "81f738b0aee630130f27f8a2cb11759268dd6f7c72f21607c9a82df1399f924d",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so",
+      "sha256": "13d57d20bbe7c6d5bdeec6a835bd0b03cf67f701bd204b90408a2f1d01716d6c",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libICE.so.6",
+      "resolved_path": "/usr/lib/libICE.so.6.3.0",
+      "sha256": "71c71c05e3cbd25d19460ef5bdf3b3a4538c95a86473a4e4222bf85c2c419a9c",
+      "observed": "open",
+      "owner": [
+        "libice"
+      ],
+      "package_version": "libice 1.1.2-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libQt6XcbQpa.so.6",
+      "resolved_path": "/usr/lib/libQt6XcbQpa.so.6.12.0",
+      "sha256": "6251fe291367486846b7cc1f704c706e7d4e69c7c2049b7130cc30d2e01b58fc",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libSM.so.6",
+      "resolved_path": "/usr/lib/libSM.so.6.0.1",
+      "sha256": "1366597b21814c4290eda5f83d8bd63144273f99ab15197f49fc26037459d4c3",
+      "observed": "open",
+      "owner": [
+        "libsm"
+      ],
+      "package_version": "libsm 1.2.6-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libX11-xcb.so.1",
+      "resolved_path": "/usr/lib/libX11-xcb.so.1.0.0",
+      "sha256": "8d3bed500d5b774f95068b219846923564d856c0dfe04538afa29383b12b5c4b",
+      "observed": "open",
+      "owner": [
+        "libx11"
+      ],
+      "package_version": "libx11 1.8.14-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-cursor.so.0",
+      "resolved_path": "/usr/lib/libxcb-cursor.so.0.0.0",
+      "sha256": "51999e6c4224606000b80c5795454301232f6b73dd7abe260d8674915418483f",
+      "observed": "open",
+      "owner": [
+        "xcb-util-cursor"
+      ],
+      "package_version": "xcb-util-cursor 0.1.6-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-icccm.so.4",
+      "resolved_path": "/usr/lib/libxcb-icccm.so.4.0.0",
+      "sha256": "cd64c092e6a82c24d0683b48825d565dae99a720620d17ac9be832fca6fe60da",
+      "observed": "open",
+      "owner": [
+        "xcb-util-wm"
+      ],
+      "package_version": "xcb-util-wm 0.4.2-2"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-image.so.0",
+      "resolved_path": "/usr/lib/libxcb-image.so.0.0.0",
+      "sha256": "55f46749702fbff375d226b44c1bea9d887cf025586956c779a6e1c1497ea779",
+      "observed": "open",
+      "owner": [
+        "xcb-util-image"
+      ],
+      "package_version": "xcb-util-image 0.4.1-3"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-keysyms.so.1",
+      "resolved_path": "/usr/lib/libxcb-keysyms.so.1.0.0",
+      "sha256": "3ffbacf50c3bcf9390ce804492a39bd8e549d1b68908e4076444a2651c58468f",
+      "observed": "open",
+      "owner": [
+        "xcb-util-keysyms"
+      ],
+      "package_version": "xcb-util-keysyms 0.4.1-5"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-randr.so.0",
+      "resolved_path": "/usr/lib/libxcb-randr.so.0.1.0",
+      "sha256": "5db40f22bfc3a142d653d69669f509b971dc8cd36215e90f977158d109b3dbf5",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-render-util.so.0",
+      "resolved_path": "/usr/lib/libxcb-render-util.so.0.0.0",
+      "sha256": "7331618d11a5974da5629ac3bb383f559d5cad7cbb729cdfa6a77859b8045e3e",
+      "observed": "open",
+      "owner": [
+        "xcb-util-renderutil"
+      ],
+      "package_version": "xcb-util-renderutil 0.3.10-2"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-render.so.0",
+      "resolved_path": "/usr/lib/libxcb-render.so.0.0.0",
+      "sha256": "402feded6ecab1d6070a3cd0ce0e2b69efe32d849a90c535cdf93948b34c451f",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-shape.so.0",
+      "resolved_path": "/usr/lib/libxcb-shape.so.0.0.0",
+      "sha256": "a8f48cbb637f494be0bcb30c35570286c7c5b2a296065066366d71c4b9f4d75b",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-shm.so.0",
+      "resolved_path": "/usr/lib/libxcb-shm.so.0.0.0",
+      "sha256": "e04329f8117411113e6094e3dc354ed50b8b3b10e6cf5f8a21a6b7bec4786eec",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-sync.so.1",
+      "resolved_path": "/usr/lib/libxcb-sync.so.1.0.0",
+      "sha256": "e5e6f35089a65d0d34761fdfb6ea9c74a86b9c7e57ab6fc56e1282491ad6bbd0",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-xfixes.so.0",
+      "resolved_path": "/usr/lib/libxcb-xfixes.so.0.0.0",
+      "sha256": "dad274e042c86866ac9b624a47c2f46648a291dbc1e11f8c906cd355ce60e38f",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-xinput.so.0",
+      "resolved_path": "/usr/lib/libxcb-xinput.so.0.1.0",
+      "sha256": "3b5ceb0b64a1630639c9d8be9805b816ad61e228d28c629fd5e691da8d6093b0",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxcb-xkb.so.1",
+      "resolved_path": "/usr/lib/libxcb-xkb.so.1.0.0",
+      "sha256": "d5ca9d9342388f46740cedfbcf6bf5838b3cf8262538edcbd43e270c5b04887b",
+      "observed": "open",
+      "owner": [
+        "libxcb"
+      ],
+      "package_version": "libxcb 1.17.0-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/../../../libxkbcommon-x11.so.0",
+      "resolved_path": "/usr/lib/libxkbcommon-x11.so.0.13.2",
+      "sha256": "dec1b2b2b0bb92e657851e8e3b3fa37e17b2a43c9d9a5b129c2d2a7ab4f55f3a",
+      "observed": "open",
+      "owner": [
+        "libxkbcommon-x11"
+      ],
+      "package_version": "libxkbcommon-x11 1.13.2-1"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqeglfs.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqeglfs.so",
+      "sha256": "49b2f8f869e755163762b1fe582fa56dd089ebc58cce9f3ac19e68822148b661",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqlinuxfb.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqlinuxfb.so",
+      "sha256": "5a5eda7bd03e7e8d558ce18f2253b4e16283a520be95674eada24f32db6c6dae",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqminimal.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqminimal.so",
+      "sha256": "ceaaccfd6e71f2fc6bacf96d0a2cdb89f13da4013d216678691f85fab810bd7a",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqminimalegl.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqminimalegl.so",
+      "sha256": "6ef2e889bc0b99234f9197fe7190bf634fa49988e6fe2a6a3e922cac23a6aa1d",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqoffscreen.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqoffscreen.so",
+      "sha256": "6bdcc3878e2db18314410b9fba7ee71af0e535aa23519c6e1c3425fab6258eb7",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqvkkhrdisplay.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqvkkhrdisplay.so",
+      "sha256": "de727de4968e32a87b989baa4cf4ee1319e384a6557b5a649b3f38b0b49f9026",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqvnc.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqvnc.so",
+      "sha256": "b3e725809cd831625acb282e740d96b2cb6ccb8a5a48c634a7d5ff8c7596897f",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqwayland.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqwayland.so",
+      "sha256": "478fec00ca6d2eb4959ad4e9dbc6754e255c5eea98c96511981edf3e6fbae366",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platforms/libqxcb.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platforms/libqxcb.so",
+      "sha256": "cfe11a0608fe691069a6bba1a3d706f328c70b08c8a4119e47c5df6b03f25dba",
+      "observed": "maps",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platformthemes",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platformthemes/libqgtk3.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platformthemes/libqgtk3.so",
+      "sha256": "2fec9e2a157754408cc1fba85028d399200bad8ee3c63d41c72134e807ea16b6",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/plugins/platformthemes/libqxdgdesktopportal.so",
+      "resolved_path": "/usr/lib/qt6/plugins/platformthemes/libqxdgdesktopportal.so",
+      "sha256": "a959839bcaaa2c694c195941093ca303f257305f10f1be0faa61316e1c5fa2bc",
+      "observed": "open",
+      "owner": [
+        "qt6-base"
+      ],
+      "package_version": "qt6-base 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQml",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQml/Models",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQml/WorkerScript",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/../../../../libQt6QuickControls2.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickControls2.so.6.12.0",
+      "sha256": "a5ae8cb59064bbcc81cb920a1b41a9f4359748f0296437587a281cf89b0ca76e",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/../../../../libQt6QuickTemplates2.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickTemplates2.so.6.12.0",
+      "sha256": "c9eaca976a0d09d1da32f5955bd10266d55ee963fda0a3df6dee62acbb6e5ee7",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/../../../../../libQt6QuickControls2Basic.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickControls2Basic.so.6.12.0",
+      "sha256": "7fad74edf35fd3cbf35d72b57b6274837b3e7c1718438a60269840e6053e140b",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl/../../../../../../libQt6QuickControls2BasicStyleImpl.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickControls2BasicStyleImpl.so.6.12.0",
+      "sha256": "0cf85a202a9f97dfdd72f4b36fcf105168f4e2e10e3f7393f5f8e0385145c16a",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl/libqtquickcontrols2basicstyleimplplugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl/libqtquickcontrols2basicstyleimplplugin.so",
+      "sha256": "c1eb3488b755932e38d7d64fcdcdef81f7d9a7a6340009b145eb581d6914c634",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/impl/qmldir",
+      "sha256": "3431dcc30f79ae7721b2f5f3068602940bdc87ed1613994b80dca569d1c7e5c2",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/libqtquickcontrols2basicstyleplugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/libqtquickcontrols2basicstyleplugin.so",
+      "sha256": "b3f3a382d75298537d01c41f7e0a6e2e62dbca8c70f44ada5c7fed2fe809f212",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/Basic/qmldir",
+      "sha256": "97c511fb808279e3d45d65cc360fdc0362ea6497b176057cde25aff7799fd1d1",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/impl",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/impl/../../../../../libQt6QuickControls2Impl.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickControls2Impl.so.6.12.0",
+      "sha256": "36459a7d040e6f16bdb19ac8c40602be9137fd7a1bd5191776b61fb85b6c292e",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/impl/libqtquickcontrols2implplugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/impl/libqtquickcontrols2implplugin.so",
+      "sha256": "ab453551bb38033779a2cbbaa5091125aa8f07a7a31e0d2f2f55653c7e508a14",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/impl/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/impl/qmldir",
+      "sha256": "bd8d9e5f35c53bbc11e356a69af48783dfc46def04c436fa35c43220a49469f2",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/libqtquickcontrols2plugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/libqtquickcontrols2plugin.so",
+      "sha256": "26b64d505f53992a13730688dd87f7e32a733f65522e1550d118230ae707cedb",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Controls/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Controls/qmldir",
+      "sha256": "58c8805be066ed32694a5e57f4aba2f0cf53ac30217eb60ce383172d5cff08a7",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Layouts",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Layouts/../../../../libQt6QuickLayouts.so.6",
+      "resolved_path": "/usr/lib/libQt6QuickLayouts.so.6.12.0",
+      "sha256": "0355a8bd82f78545e6b0c58f6d09ff06e31933c265670d248ae3362332064c5e",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Layouts/libqquicklayoutsplugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Layouts/libqquicklayoutsplugin.so",
+      "sha256": "138f182c03204171b5ee6dce0b136e7a341e6ea288a208a18a6dad2a1f483cf0",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Layouts/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Layouts/qmldir",
+      "sha256": "0601e05b583c24ee72158ab8553f9d2435dfe08dc5be20bf2e03fa24058ba4cb",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Templates",
+      "unresolved": "не regular file"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Templates/libqtquicktemplates2plugin.so",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Templates/libqtquicktemplates2plugin.so",
+      "sha256": "78476da5e074c241dad02f38a282f436b554edcaf94d0bc45da98c0b1bb3870f",
+      "observed": "maps",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    },
+    {
+      "path": "/usr/lib/qt6/qml/QtQuick/Templates/qmldir",
+      "resolved_path": "/usr/lib/qt6/qml/QtQuick/Templates/qmldir",
+      "sha256": "6c4901deefe4a212338556fd7fbabeff9b0d3b64b7b0e43245fde11b15dd31a3",
+      "observed": "open",
+      "owner": [
+        "qt6-declarative"
+      ],
+      "package_version": "qt6-declarative 6.12.0-4"
+    }
+  ],
+  "process_exit": 0,
+  "limits": "Один startup в Xvfb/software; прочие платформы/пути UI не покрыты. Новые guest packages не объявляются исторической runtime средой package78."
+}
