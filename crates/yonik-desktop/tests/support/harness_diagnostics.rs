@@ -7,12 +7,13 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc::RecvTimeoutError,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 pub(super) struct Trace {
     id: u64,
+    started: Instant,
     state: Mutex<State>,
 }
 #[derive(Default)]
@@ -21,6 +22,7 @@ struct State {
     snapshot: Value,
     received: u64,
     startup_phase: Option<String>,
+    startup_phase_at: Option<Instant>,
 }
 fn project(value: &Value) -> Value {
     let mut result = serde_json::Map::new();
@@ -118,12 +120,15 @@ impl Trace {
     pub(super) fn new() -> Self {
         Self {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
+            started: Instant::now(),
             state: Mutex::new(State::default()),
         }
     }
     #[cfg(feature = "startup-diagnostics")]
     pub(super) fn startup(&self, phase: yonik_desktop::StartupPhase) {
-        self.state.lock().unwrap().startup_phase = Some(format!("{phase:?}"));
+        let mut state = self.state.lock().unwrap();
+        state.startup_phase = Some(format!("{phase:?}"));
+        state.startup_phase_at = Some(Instant::now());
     }
     pub(super) fn snapshot(&self, value: &Value) {
         let mut state = self.state.lock().unwrap();
@@ -177,7 +182,11 @@ impl Trace {
         let state = self.state.lock().unwrap();
         let diagnostic = json!({"event":"yonik_harness_wait_failed", "pid":std::process::id(), "harness":self.id,
             "wait_file":caller.file(),"wait_line":caller.line(), "wait_column":caller.column(), "elapsed_ms":elapsed.as_millis(),
-            "startup_phase":state.startup_phase, "receive_error":format!("{error:?}"), "received":state.received,"last_command":state.command,"last_snapshot":state.snapshot});
+            "startup_phase":state.startup_phase,
+            "startup_phase_elapsed_ms":state.startup_phase_at.map(|at| at.duration_since(self.started).as_millis()),
+            "startup_phase_age_ms":state.startup_phase_at.map(|at| at.elapsed().as_millis()), "receive_error":format!("{error:?}"), "received":state.received,"last_command":state.command,"last_snapshot":state.snapshot});
+        // Panic теста не должен отравлять mutex, который ещё нужен backend observer.
+        drop(state);
         panic!("snapshot до deadline: {diagnostic}");
     }
 }
@@ -216,7 +225,11 @@ fn timeout_reports_wait_site_and_safe_last_state() {
     assert!(text.contains("storage"));
     assert!(text.contains("wait_line"));
     #[cfg(feature = "startup-diagnostics")]
-    assert!(text.contains("RepositoryOpen"));
+    {
+        assert!(text.contains("RepositoryOpen"));
+        assert!(text.contains("startup_phase_elapsed_ms"));
+        assert!(text.contains("startup_phase_age_ms"));
+    }
     assert!(text.contains("add_source"));
     assert!(!text.contains("CANARY_PRIVATE"));
 }

@@ -1926,3 +1926,44 @@ fn closed_snapshot_has_released_last_database_handle() {
         })
     );
 }
+
+#[test]
+fn startup_timeout_captures_original_harness_phase_and_allows_shutdown() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == false && value["busy"] == true {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let (_released, timeout) = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+            assert!(!timeout.timed_out(), "test должен отпустить callback");
+        }
+    });
+    app.wait(|v| v["ready"] == false && v["busy"] == true);
+    // Воспроизводим diagnostic path без ожидания настоящего десятисекундного hang.
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.diagnostic.fail(
+            mpsc::RecvTimeoutError::Timeout,
+            std::panic::Location::caller(),
+            Duration::ZERO,
+        );
+    }))
+    .expect_err("контролируемый timeout");
+    let message = failure.downcast_ref::<String>().expect("diagnostic");
+    assert!(
+        message.contains("RuntimeBuild"),
+        "observer должен работать без CLI features"
+    );
+    assert!(message.contains("startup_phase_elapsed_ms"));
+    assert!(message.contains("startup_phase_age_ms"));
+    app.host.shutdown();
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    app.wait(|v| v["closed"] == true);
+    assert!(app.host.wait_closed(Duration::from_secs(2)));
+}

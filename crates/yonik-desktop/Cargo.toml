@@ -44,6 +44,8 @@ cxx-gen = { version = "=0.7.176", optional = true }
 unsafe_code = "deny"
 
 [dev-dependencies]
+# Включает observer в исходном integration harness при обычном cargo test.
+yonik-desktop = { path = ".", features = ["startup-diagnostics"] }
 yonik-linux = { path = "../yonik-linux", features = ["test-support"] }
 
 [[test]]

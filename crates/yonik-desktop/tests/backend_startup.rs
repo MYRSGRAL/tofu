@@ -121,3 +121,25 @@ fn parallel_startup_reports_phases_and_keeps_owned_fds_close_on_exec() {
         assert!(host.wait_closed(Duration::from_secs(10)));
     }
 }
+
+#[test]
+fn controlled_fork_before_exec_retains_directory_ofd_until_exec() {
+    let fixture = Fixture::new();
+    let output = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/startup_fork_ofd.py"
+        ))
+        .arg(&fixture.0)
+        .output()
+        .expect("Python fixture fork/OFD");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let witness = String::from_utf8(output.stdout).expect("статические метки");
+    assert!(witness.contains("fork_before_exec: inherited OFD"));
+    assert!(witness.contains("after_exec: CLOEXEC releases"));
+    eprint!("{witness}");
+}
