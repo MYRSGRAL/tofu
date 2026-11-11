@@ -57,7 +57,7 @@ cancel. ACK-permit принадлежит worker, освобождается п�
   отсутствие публикации при отмене и сохранение старой revision.
 
 Это проверка cancellation, не полный PASS P04/P05. Не повторялись performance
-campaign, helper/engine/DNS/GUI/keyring/Android проверки. Deadline 1 с проверяется
+campaign, installed helper/native engine runtime, DNS lookup, GUI/keyring/Android проверки. Deadline 1 с проверяется
 для actual SQLite write-lock cancellation; это не универсальный real-time SLA
 для любых нагрузок и системного I/O. Криптографический вызов ограничен прежним
 BODY_LIMIT и сохраняет прежний формат; он не прерывается внутри AEAD.
@@ -69,3 +69,10 @@ Linux `--lib cancellation_` 22/22, существующие HWID regressions 9/9
 и shared flock собственного transient root. Первый широкий прогон выявил
 лишнее удержание внешнего fetch token на review; это исправлено, HWID 9/9
 перепроверены на исправленном коде (`compat-hwid.log`).
+
+Финальная совместная проверка с scoped DNS-label fix: Rust 1.85.1,
+`cargo test --workspace --locked --offline` — 776 passed, 0 failed, 39 ignored
+(сумма результатов 70 harness/doc-test suites; ignored не считаются PASS).
+`cargo clippy --workspace --all-targets --locked --offline -- -D warnings`
+и `cargo fmt --all -- --check` прошли. Логи `workspace-tests.log`,
+`workspace-clippy.log`, `fmt.log` сохранены во внешнем evidence-каталоге.
