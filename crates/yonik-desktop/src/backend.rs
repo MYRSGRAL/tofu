@@ -3339,11 +3339,10 @@ async fn run(
             if scheduled.review.is_some() {
                 actor.state.pending = None;
             }
-            if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await {
-                actor.state.schedule_error(
-                    desktop_schedule::ScheduleFailure::runtime(error),
-                    Some(scheduled.generation),
-                );
+            if let Err(error) = scheduled.shutdown(origin.elapsed()).await {
+                actor
+                    .state
+                    .schedule_error(error, Some(scheduled.generation));
             }
             if let Ok(mut replacement) = scheduled.replacement() {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
@@ -3386,7 +3385,7 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await { actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)); }
+                if let Err(error) = scheduled.shutdown(origin.elapsed()).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
                     let policy = scheduled.policy;
@@ -4072,11 +4071,10 @@ async fn run(
             break;
         }
     }
-    if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await {
-        actor.state.schedule_error(
-            desktop_schedule::ScheduleFailure::runtime(error),
-            Some(scheduled.generation),
-        );
+    if let Err(error) = scheduled.shutdown(origin.elapsed()).await {
+        actor
+            .state
+            .schedule_error(error, Some(scheduled.generation));
     }
     // Отмена с acknowledgement: Drop может отложить zbus cleanup до следующего poll.
     provider_stop.send_replace(true);

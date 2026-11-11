@@ -347,12 +347,28 @@ impl DesktopSchedule {
         }
         Ok(())
     }
+    pub async fn shutdown(&mut self, now: Duration) -> ScheduleResult<()> {
+        let failures = self
+            .runtime
+            .shutdown_report(now)
+            .await
+            .map_err(ScheduleFailure::runtime)?;
+        self.fetching = false;
+        self.review = None;
+        self.deferred = None;
+        self.generations.clear();
+        match failures.into_iter().next() {
+            Some(error) => Err(ScheduleFailure::service(error)),
+            None => Ok(()),
+        }
+    }
     pub async fn cancel(&mut self, id: i64, clock: impl Fn() -> Duration) -> ScheduleResult<()> {
         self.runtime
             .cancel(id, clock())
             .map_err(ScheduleFailure::runtime)?;
         // Queued ID уже удалён: чужой fetch остаётся в общем select, где доступны
         // приоритетные Stop/Shutdown. Только собственная active/review работа ждёт ack.
+        let mut failure = None;
         if self.runtime.cancellation_pending(id) {
             if let Some(event) = self
                 .runtime
@@ -360,9 +376,14 @@ impl DesktopSchedule {
                 .await
                 .map_err(ScheduleFailure::runtime)?
             {
-                if !matches!(event, SubscriptionScheduleEvent::Cancelled { id: current } if current == id)
-                {
-                    self.deferred = Some(event);
+                match event {
+                    SubscriptionScheduleEvent::AdmissionFailed { id: current, error }
+                        if current == id =>
+                    {
+                        failure = Some(ScheduleFailure::service(error))
+                    }
+                    SubscriptionScheduleEvent::Cancelled { id: current } if current == id => {}
+                    event => self.deferred = Some(event),
                 }
             }
             self.fetching = false;
@@ -371,13 +392,154 @@ impl DesktopSchedule {
             self.review = None;
         }
         self.generations.remove(&id);
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn actual_cancel_admission_failure_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let failure =
+            tokio::time::timeout(Duration::from_secs(2), owner.cancel(id, || Duration::ZERO))
+                .await
+                .unwrap()
+                .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerRepositoryCorrupt));
+        assert!(!owner.runtime.cancellation_pending(id));
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+        assert!(export.contains("scheduler_repository_corrupt"));
+        let mut stale: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        stale["scheduler_generation"] = serde_json::json!(owner.generation + 1);
+        assert!(crate::diagnostics::export_snapshot_v2(&stale.to_string()).is_none());
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_shutdown_admission_failure_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-shutdown-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let failure = tokio::time::timeout(Duration::from_secs(2), owner.shutdown(Duration::ZERO))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerRepositoryCorrupt));
+        assert!(!owner.runtime.cancellation_pending(id));
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+        assert!(export.contains("scheduler_repository_corrupt"));
+        let mut stale: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        stale["scheduler_generation"] = serde_json::json!(owner.generation + 1);
+        assert!(crate::diagnostics::export_snapshot_v2(&stale.to_string()).is_none());
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[tokio::test]
     async fn actual_persisted_corrupt_store_and_invalid_interval_context() {

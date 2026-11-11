@@ -18,10 +18,24 @@ use yonik_subscription::scheduler::{Error, Policy, Scheduler, Work};
 /// Не содержит URL, имён, тела ответа или диагностик транспорта.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SubscriptionScheduleEvent {
-    Review { id: i64 },
-    NotModified { id: i64 },
-    Failed { id: i64, error: SubscriptionError },
-    Cancelled { id: i64 },
+    Review {
+        id: i64,
+    },
+    NotModified {
+        id: i64,
+    },
+    Failed {
+        id: i64,
+        error: SubscriptionError,
+    },
+    Cancelled {
+        id: i64,
+    },
+    /// Ошибка допуска до fetch; ACK уже получен, результат fetch не публикуется.
+    AdmissionFailed {
+        id: i64,
+        error: SubscriptionError,
+    },
 }
 struct Active {
     service: SubscriptionService,
@@ -32,7 +46,7 @@ struct Active {
     decision: Option<BoxFuture<'static, Decision>>,
 }
 type Decision = (Result<Option<i64>, SubscriptionError>, bool);
-type Completion = (Work, Result<RefreshResult, SubscriptionError>, bool);
+type Completion = (Work, Result<RefreshResult, SubscriptionError>, bool, bool);
 
 pub struct SubscriptionScheduler {
     wall_clock: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -129,7 +143,7 @@ impl SubscriptionScheduler {
                 )
                 .await
                 {
-                    return (work, Err(error), false);
+                    return (work, Err(error), false, true);
                 }
                 let cancelled = receiver.clone();
                 let result = service
@@ -146,10 +160,10 @@ impl SubscriptionScheduler {
                     let failures = state.failures;
                     let delay = state.due.map(|due| due.as_secs());
                     if let Err(error) = persist(&service, work, failures, delay, wall()).await {
-                        return (work, Err(error), false);
+                        return (work, Err(error), false, false);
                     }
                 }
-                (work, result, true)
+                (work, result, true, false)
             }));
         }
         Ok(())
@@ -166,14 +180,14 @@ impl SubscriptionScheduler {
                 if let Some(decision) = active.decision.take() {
                     self.futures.push(Box::pin(async move {
                         let _ = decision.await;
-                        (work, Err(SubscriptionError::StaleUpdate), true)
+                        (work, Err(SubscriptionError::StaleUpdate), true, false)
                     }));
                 }
                 if let Some(pending) = active.review.take() {
                     let service = active.service.clone();
                     self.futures.push(Box::pin(async move {
                         service.discard_refresh(*pending).await;
-                        (work, Err(SubscriptionError::StaleUpdate), true)
+                        (work, Err(SubscriptionError::StaleUpdate), true, false)
                     }));
                 }
             }
@@ -191,7 +205,8 @@ impl SubscriptionScheduler {
         clock: impl Fn() -> Duration,
     ) -> Result<Option<SubscriptionScheduleEvent>, Error> {
         loop {
-            let Some((work, result, persisted)) = self.futures.next().await else {
+            let Some((work, result, persisted, admission_failed)) = self.futures.next().await
+            else {
                 return Ok(None);
             };
             let now = clock();
@@ -201,12 +216,23 @@ impl SubscriptionScheduler {
                     let service = active.service.clone();
                     self.futures.push(Box::pin(async move {
                         service.discard_refresh(*pending).await;
-                        (work, Err(SubscriptionError::StaleUpdate), true)
+                        (work, Err(SubscriptionError::StaleUpdate), true, false)
                     }));
                     continue;
                 }
                 self.active.remove(&work.id());
                 self.scheduler.complete(work, now, false)?;
+                if admission_failed {
+                    if let Err(error) = result {
+                        // Смена generation ожидаема при отмене; ошибка хранилища — нет.
+                        if error != SubscriptionError::StaleUpdate {
+                            return Ok(Some(SubscriptionScheduleEvent::AdmissionFailed {
+                                id: work.id(),
+                                error,
+                            }));
+                        }
+                    }
+                }
                 return Ok(Some(SubscriptionScheduleEvent::Cancelled { id: work.id() }));
             }
             let event = match result {
@@ -304,12 +330,24 @@ impl SubscriptionScheduler {
     }
     /// Завершение host: отменить и дождаться acknowledgement всех fetch.
     pub async fn shutdown(&mut self, now: Duration) -> Result<(), Error> {
+        self.shutdown_report(now).await.map(|_| ())
+    }
+    /// Полный drain с ACK до возврата ошибок допуска. Память ограничена capacity.
+    pub async fn shutdown_report(
+        &mut self,
+        now: Duration,
+    ) -> Result<Vec<SubscriptionError>, Error> {
         let ids: Vec<_> = self.scheduled.iter().copied().collect();
         for id in ids {
             self.cancel(id, now)?;
         }
-        while self.next_event(|| now).await?.is_some() {}
-        Ok(())
+        let mut failures = Vec::new();
+        while let Some(event) = self.next_event(|| now).await? {
+            if let SubscriptionScheduleEvent::AdmissionFailed { error, .. } = event {
+                failures.push(error);
+            }
+        }
+        Ok(failures)
     }
 }
 
