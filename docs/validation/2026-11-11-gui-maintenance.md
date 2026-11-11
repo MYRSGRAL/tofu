@@ -54,3 +54,22 @@ fsync сохраняет Storage/неопределённость результ
 Пользовательские БД и Secret Service не затрагивались. Полная P06 и аппаратный
 keyring/login-session gate не заявляются. PR остаётся draft для независимого
 review supervisor/cancellation и оставшейся системной приёмки.
+
+## Исправление ACK после независимого review
+
+Повтор Start активного request_id возвращает текущее состояние controller, включая
+Cancelling после отмены. Отказ другого ID не превращает активный запрос в
+терминальный. Startup failure и offline после ошибки reopen отключают maintenance
+и отвечают на каждый Start/Cancel с соответствующим request_id.
+
+Два поведенческих RED воспроизведены: startup matching ACK timeout и активный
+Start → ошибочный Failed. После исправления прошли 41 desktop lib, 39 backend
+(1 ignored), 3 maintenance contract tests и MSRV 1.85.1 all-target Clippy.
+Отдельный actual DesktopHost fixture подтверждает ошибку reopen после drain,
+maintenance_available=false, ACK следующего Start и Cancel и завершение только
+после явного Shutdown. Gated leaf подтверждает отсутствие Closed до release.
+Новый Qt/OS picker gate не запускался: формат ACK и QML не менялись.
+
+Evidence delta: `/home/myrs/projects/yonik/local/validation/pr107-ack/manifest.json`.
+Начальная ошибка компиляции тестовой UTF-8 byte literal сохранена отдельно в
+`red.log`; она не считается behavioral RED (`red-behavior.log`).

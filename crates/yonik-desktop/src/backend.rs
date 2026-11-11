@@ -2497,6 +2497,41 @@ async fn session(
     Ok(())
 }
 
+fn reject_unavailable_maintenance(state: &mut Snapshot, command: &Command, error: &'static str) {
+    state.maintenance_available = false;
+    if let Command::MaintenanceStart { request_id, .. }
+    | Command::MaintenanceCancel { request_id } = command
+    {
+        state.maintenance_ack = Some(maintenance::Ack {
+            request_id: *request_id,
+            phase: maintenance::Phase::Failed,
+            error: Some(error),
+        });
+    } else {
+        state.command_error(false, error);
+    }
+}
+
+async fn wait_startup_shutdown(
+    state: &mut Snapshot,
+    commands: &mut mpsc::Receiver<Envelope>,
+    priority: &mut watch::Receiver<Priority>,
+    callback: &Callback,
+) {
+    let mut commands_open = true;
+    while !priority.borrow_and_update().shutdown {
+        tokio::select! {
+            changed = priority.changed() => if changed.is_err() { break; },
+            command = commands.recv(), if commands_open => {
+                if let Some(command) = command {
+                    reject_unavailable_maintenance(state, &command.command, "startup");
+                    state.emit(callback);
+                } else { commands_open = false; }
+            }
+        }
+    }
+}
+
 async fn run(
     mut config: HostConfig,
     mut commands: mpsc::Receiver<Envelope>,
@@ -2526,11 +2561,7 @@ async fn run(
             state.error = Some("startup");
             state.connection_error = Some("startup");
             state.emit(&callback);
-            while !priority.borrow_and_update().shutdown {
-                if priority.changed().await.is_err() {
-                    break;
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
@@ -2550,14 +2581,7 @@ async fn run(
         Err(error) => {
             state.command_error(false, error.key());
             state.emit(&callback);
-            loop {
-                if priority.borrow_and_update().shutdown {
-                    break;
-                }
-                if priority.changed().await.is_err() {
-                    break;
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
@@ -3056,14 +3080,22 @@ async fn run(
                                 let action = *priority.borrow_and_update();
                                 quitting |= action.shutdown;
                                 cancellation.cancel();
-                                actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Cancelling, error: None });
+                                maintenance_controller.cancel(request_id);
+                                actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                 actor.emit();
                             }
                             result = &mut job => break result,
                             command = commands.recv(), if !quitting => {
                                 let Some(command) = command else { quitting = true; cancellation.cancel(); continue; };
                                 match command.command {
-                                    Command::MaintenanceCancel { request_id: id } if id == request_id => cancellation.cancel(),
+                                    Command::MaintenanceCancel { request_id: id } if id == request_id => {
+                                        cancellation.cancel();
+                                        maintenance_controller.cancel(request_id);
+                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                    }
+                                    Command::MaintenanceStart { request_id: id, .. } if id == request_id => {
+                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                    }
                                     Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
                                         actor.state.maintenance_ack = Some(maintenance::Ack { request_id: id, phase: maintenance::Phase::Failed, error: Some("busy") });
                                     }
@@ -3089,6 +3121,7 @@ async fn run(
                     if job_drained { maintenance_controller.drained(request_id, result); }
                     actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
                     actor.state.ready = online && !quitting;
+                    actor.state.maintenance_available = online && !quitting;
                     actor.state.busy = false;
                     actor.emit();
                     if !online {
@@ -3101,8 +3134,10 @@ async fn run(
                                     quitting = changed.is_err() || priority.borrow_and_update().shutdown;
                                 }
                                 command = commands.recv(), if commands_open => {
-                                    if command.is_none() { quitting = true; commands_open = false; }
-                                    actor.state.command_error(false, "busy"); actor.emit();
+                                    if let Some(command) = command {
+                                        reject_unavailable_maintenance(&mut actor.state, &command.command, "busy");
+                                        actor.emit();
+                                    } else { quitting = true; commands_open = false; }
                                 }
                             }
                         }
