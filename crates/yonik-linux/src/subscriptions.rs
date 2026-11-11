@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{Mutex, Semaphore, watch};
-use yonik_import::{ImportReport, import_bytes};
+use yonik_import::ImportReport;
 pub use yonik_subscription::scheduler::{
     Policy as SubscriptionPolicy, RetryState as SubscriptionRetryState,
 };
@@ -289,10 +289,12 @@ pub struct SubscriptionService {
     repository: EncryptedSubscriptionRepository,
     identity: Arc<()>,
     requests: Arc<Mutex<HashMap<i64, Request>>>,
+    source_updates: Arc<Mutex<()>>,
 }
 struct Request {
     serial: u64,
     cancellation: watch::Sender<bool>,
+    ack: Arc<Semaphore>,
 }
 pub enum RefreshResult {
     NotModified,
@@ -386,6 +388,7 @@ impl SubscriptionService {
             repository,
             identity: Arc::new(()),
             requests: Arc::new(Mutex::new(HashMap::new())),
+            source_updates: Arc::new(Mutex::new(())),
         }
     }
 
@@ -606,12 +609,13 @@ impl SubscriptionService {
     ) -> Result<i64, SubscriptionError> {
         let mut source = source;
         source.0.schedule = None;
-        let mut requests = self.requests.lock().await;
+        let _source_update = self.source_updates.lock().await;
         let generation = self
             .repository
             .change_source(id, generation, source.encode()?)
             .await?
             .generation;
+        let mut requests = self.requests.lock().await;
         if let Some(request) = requests.get_mut(&id) {
             request.cancellation.send_replace(true);
         }
@@ -619,7 +623,7 @@ impl SubscriptionService {
     }
 
     pub async fn rename_source(&self, id: i64, name: String) -> Result<(), SubscriptionError> {
-        let _requests = self.requests.lock().await;
+        let _source_update = self.source_updates.lock().await;
         let record = self
             .repository
             .source_record_by_id(id)
@@ -636,8 +640,9 @@ impl SubscriptionService {
     }
 
     pub async fn delete_source(&self, id: i64) -> Result<(), SubscriptionError> {
-        let mut requests = self.requests.lock().await;
+        let _source_update = self.source_updates.lock().await;
         self.repository.delete_source(id).await?;
+        let mut requests = self.requests.lock().await;
         if let Some(request) = requests.remove(&id) {
             request.cancellation.send_replace(true);
         }
@@ -675,7 +680,7 @@ impl SubscriptionService {
     }
 
     pub async fn set_source_hwid(&self, id: i64, enabled: bool) -> Result<(), SubscriptionError> {
-        let mut requests = self.requests.lock().await;
+        let _source_update = self.source_updates.lock().await;
         let record = self
             .repository
             .load(id)
@@ -693,6 +698,7 @@ impl SubscriptionService {
         self.repository
             .change_source(id, record.source.generation, source.encode()?)
             .await?;
+        let mut requests = self.requests.lock().await;
         if let Some(request) = requests.get_mut(&id) {
             request.cancellation.send_replace(true);
         }
@@ -700,29 +706,56 @@ impl SubscriptionService {
     }
 
     pub async fn cancel(&self, id: i64) -> bool {
-        let requests = self.requests.lock().await;
-        if let Some(request) = requests.get(&id) {
-            return !request.cancellation.send_replace(true);
-        }
-        false
+        let (requested, ack) = {
+            let requests = self.requests.lock().await;
+            let Some(request) = requests.get(&id) else {
+                return false;
+            };
+            (
+                !request.cancellation.send_replace(true),
+                request.ack.clone(),
+            )
+        };
+        // Worker владеет permit до завершения parse/rollback/COMMIT.
+        let _ack = ack.acquire().await;
+        requested
     }
 
     /// Возвращает исходный утверждённый snapshot без сети. Capability-check
     /// конкретного ядра обязателен отдельно перед активацией.
     pub async fn offline(&self, id: i64) -> Result<OfflineSnapshot, SubscriptionError> {
+        let (_sender, cancel) = crate::Cancellation::new();
+        self.offline_cancellable(id, cancel).await
+    }
+
+    pub async fn offline_cancellable(
+        &self,
+        id: i64,
+        mut cancel: crate::Cancellation,
+    ) -> Result<OfflineSnapshot, SubscriptionError> {
+        cancel.check().map_err(|_| cancelled())?;
         let record = self
             .repository
             .load(id)
             .await?
             .ok_or(SubscriptionError::NotFound)?;
         let snapshot = record.snapshot.ok_or(SubscriptionError::NoSnapshot)?;
-        let permit = IMPORT_GATE
-            .acquire()
-            .await
-            .map_err(|_| SubscriptionError::Worker)?;
+        let permit = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(cancelled()),
+            result = IMPORT_GATE.acquire() => result.map_err(|_| SubscriptionError::Worker)?,
+        };
         let report = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            import_bytes(snapshot.body.to_vec()).map_err(|_| SubscriptionError::CorruptSnapshot)
+            yonik_import::import_bytes_cancellable(snapshot.body.to_vec(), || {
+                cancel.check().is_ok()
+            })
+            .map_err(|error| match error {
+                yonik_import::CancellableImportError::Cancelled => cancelled(),
+                yonik_import::CancellableImportError::Import(_) => {
+                    SubscriptionError::CorruptSnapshot
+                }
+            })
         })
         .await
         .map_err(|_| SubscriptionError::Worker)??;
@@ -752,7 +785,7 @@ impl SubscriptionService {
         host: &dyn SubscriptionFetch,
         cancel: watch::Receiver<bool>,
     ) -> Result<RefreshResult, SubscriptionError> {
-        let mut requests = self.requests.lock().await;
+        let source_update = self.source_updates.lock().await;
         let record = self
             .repository
             .load(id)
@@ -767,16 +800,21 @@ impl SubscriptionService {
             })
             .map_err(|_| SubscriptionError::Exhausted)?;
         let (sender, mut superseded) = watch::channel(false);
+        let request_sender = sender.clone();
+        let ack = Arc::new(Semaphore::new(1));
+        let mut requests = self.requests.lock().await;
         if let Some(previous) = requests.insert(
             id,
             Request {
                 serial,
                 cancellation: sender,
+                ack: ack.clone(),
             },
         ) {
             previous.cancellation.send_replace(true);
         }
         drop(requests);
+        drop(source_update);
         let result = async {
         let data: SourceData = serde_json::from_slice(&record.source.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
@@ -812,12 +850,14 @@ impl SubscriptionService {
             FetchResponse::NotModified { validators } => {
                 let requests = self.requests.lock().await;
                 check_request(&requests, id, serial)?;
+                drop(requests);
+                let permit = ack.clone().acquire_owned().await.map_err(|_| SubscriptionError::Worker)?;
                 let snapshot = record.snapshot.ok_or(SubscriptionError::CorruptSnapshot)?;
                 if snapshot.source_generation != record.source.generation {
                     return Err(SubscriptionError::CorruptSnapshot);
                 }
                 self.repository
-                    .commit_snapshot(
+                    .commit_snapshot_ack(
                         id,
                         record.source.generation,
                         revision,
@@ -826,13 +866,11 @@ impl SubscriptionService {
                             metadata: snapshot.metadata.to_vec(),
                             validators: Some(encode_validators(&validators)?),
                         },
+                        crate::Cancellation::from_receiver(superseded.clone()).with_other(parse_cancel.clone()),
+                        Some(permit),
                     )
-                    .await?;
-                requests
-                    .get(&id)
-                    .ok_or(SubscriptionError::StaleUpdate)?
-                    .cancellation
-                    .send_replace(true);
+                    .await.map_err(commit_error)?;
+                request_sender.send_replace(true);
                 return Ok(RefreshResult::NotModified);
             }
             FetchResponse::Modified { body, validators } => {
@@ -841,7 +879,7 @@ impl SubscriptionService {
         };
         // Сохраняем operation (включая JoinHandle blocking-import) до acknowledgement.
         // Отмена сигнала запрещает публикацию, но не отсоединяет уже начатый parser.
-        let operation = stage_body(body);
+        let operation = stage_body(body, crate::Cancellation::from_receiver(superseded.clone()).with_other(parse_cancel.clone()), ack.clone());
         tokio::pin!(operation);
         let (controller, staged) = tokio::select! {
             biased;
@@ -850,11 +888,13 @@ impl SubscriptionService {
                 return Err(SubscriptionError::Fetch(FetchError::Cancelled));
             },
             _ = watch_cancelled(&mut parse_cancel) => {
+                request_sender.send_replace(true);
                 let _ = operation.await;
                 return Err(SubscriptionError::Fetch(FetchError::Cancelled));
             },
             result = &mut operation => result?,
         };
+        check_request(&*self.requests.lock().await, id, serial)?;
         Ok(RefreshResult::Pending(Box::new(PendingRefresh {
             service: self.identity.clone(),
             request: serial,
@@ -902,16 +942,29 @@ impl SubscriptionService {
         if !Arc::ptr_eq(&self.identity, &pending.service) {
             return Err(SubscriptionError::ForeignApproval);
         }
-        let mut requests = self.requests.lock().await;
-        check_request(&requests, pending.id, pending.request)?;
+        let (cancel, ack) = {
+            let requests = self.requests.lock().await;
+            check_request(&requests, pending.id, pending.request)?;
+            let request = requests
+                .get(&pending.id)
+                .ok_or(SubscriptionError::StaleUpdate)?;
+            (
+                crate::Cancellation::from_receiver(request.cancellation.subscribe()),
+                request.ack.clone(),
+            )
+        };
+        let permit = ack
+            .acquire_owned()
+            .await
+            .map_err(|_| SubscriptionError::Worker)?;
         let report = approved.report();
         let metadata = serde_json::to_vec(&serde_json::json!({ "version": 1,
             "accepted": report.servers.len(), "rejected": report.issues.len(),
             "native_json": report.native_json.is_some() }))
         .map_err(|_| SubscriptionError::CorruptSnapshot)?;
-        let revision = self
+        let result = self
             .repository
-            .commit_snapshot(
+            .commit_snapshot_ack(
                 pending.id,
                 pending.generation,
                 pending.revision,
@@ -920,19 +973,35 @@ impl SubscriptionService {
                     metadata,
                     validators: Some(pending.validators),
                 },
+                cancel,
+                Some(permit),
             )
-            .await?;
-        requests
+            .await
+            .map_err(commit_error);
+        let mut requests = self.requests.lock().await;
+        if requests
             .get(&pending.id)
-            .ok_or(SubscriptionError::StaleUpdate)?
-            .cancellation
-            .send_replace(true);
-        requests.remove(&pending.id);
+            .is_some_and(|r| r.serial == pending.request)
+        {
+            requests.remove(&pending.id);
+        }
+        drop(requests);
+        let revision = result?;
         pending
             .controller
             .commit(approved)
             .map_err(SubscriptionError::Import)?;
         Ok(revision)
+    }
+}
+
+fn cancelled() -> SubscriptionError {
+    SubscriptionError::Fetch(FetchError::Cancelled)
+}
+fn commit_error(error: crate::SnapshotCommitError) -> SubscriptionError {
+    match error {
+        crate::SnapshotCommitError::Cancelled => cancelled(),
+        crate::SnapshotCommitError::Repository(error) => error.into(),
     }
 }
 
@@ -955,13 +1024,23 @@ async fn watch_cancelled(receiver: &mut watch::Receiver<bool>) {
     }
 }
 
-async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), SubscriptionError> {
+async fn stage_body(
+    body: Vec<u8>,
+    mut cancel: crate::Cancellation,
+    ack: Arc<Semaphore>,
+) -> Result<(Subscription, StagedUpdate), SubscriptionError> {
     // Permit остаётся внутри blocking-задачи даже при отмене ожидающего future.
-    let permit = IMPORT_GATE
-        .acquire()
+    let ack = ack
+        .acquire_owned()
         .await
         .map_err(|_| SubscriptionError::Worker)?;
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return Err(cancelled()),
+        result = IMPORT_GATE.acquire() => result.map_err(|_| SubscriptionError::Worker)?,
+    };
     tokio::task::spawn_blocking(move || {
+        let _ack = ack;
         let _permit = permit;
         #[cfg(test)]
         scheduler_tests::hold_parser(&body);
@@ -972,8 +1051,13 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
             Subscription::new(NonZeroU64::new(next).ok_or(SubscriptionError::Exhausted)?);
         let ticket = controller.begin().map_err(SubscriptionError::Import)?;
         let staged = controller
-            .stage(ticket, body)
-            .map_err(SubscriptionError::Import)?;
+            .stage_cancellable(ticket, body, || cancel.check().is_ok())
+            .map_err(|error| match error {
+                yonik_subscription::CancellableStageError::Cancelled => cancelled(),
+                yonik_subscription::CancellableStageError::Stage(error) => {
+                    SubscriptionError::Import(error)
+                }
+            })?;
         Ok((controller, staged))
     })
     .await
@@ -983,3 +1067,7 @@ async fn stage_body(body: Vec<u8>) -> Result<(Subscription, StagedUpdate), Subsc
 #[cfg(test)]
 #[path = "subscription_scheduler_tests.rs"]
 mod scheduler_tests;
+
+#[cfg(test)]
+#[path = "subscription_cancellation_tests.rs"]
+mod cancellation_tests;

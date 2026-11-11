@@ -168,6 +168,7 @@ fn valid(p: &Preferences) -> bool {
             .is_ok()
 }
 
+/// Проверка тем же API, которое выполняет Proxy fetch; сетевых обращений нет.
 pub(crate) fn valid_proxy_fetch_dns(address: std::net::SocketAddr) -> bool {
     yonik_linux::FetchHost::new(std::time::Duration::from_secs(30))
         .and_then(|host| host.with_socks_endpoint(std::net::SocketAddr::from(([127, 0, 0, 1], 1))))
@@ -202,6 +203,17 @@ mod tests {
         let reopened: super::Preferences =
             serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
         assert_eq!(reopened.proxy_fetch_dns, p.proxy_fetch_dns);
+    }
+
+    #[test]
+    fn legacy_preferences_default_to_no_proxy_dns() {
+        let mut json = serde_json::to_value(super::Preferences::default()).expect("JSON");
+        json.as_object_mut()
+            .expect("объект")
+            .remove("proxy_fetch_dns");
+        let legacy: super::Preferences = serde_json::from_value(json).expect("версия 1");
+        assert!(legacy.proxy_fetch_dns.is_none());
+        assert!(super::valid(&legacy));
     }
 
     #[test]

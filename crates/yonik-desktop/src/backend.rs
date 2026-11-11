@@ -4,6 +4,8 @@
 mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
+#[path = "logs.rs"]
+mod logs;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
@@ -110,6 +112,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    LogsRead {
+        after: String,
+        source: logs::Source,
+        request_id: String,
+    },
     RoutingExplain {
         expected_revision: i64,
         request_id: u64,
@@ -221,6 +228,9 @@ enum Command {
         expected_status: u16,
     },
     ResetProbeTarget,
+    SetProxyFetchDns {
+        upstream: String,
+    },
     CheckTcp,
     CheckBatch,
     CancelBatch,
@@ -483,11 +493,15 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsRead {
+            after, request_id, ..
+        } => logs::valid_number(after) && logs::valid_number(request_id),
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
         Command::BatchPage { offset } => *offset <= 10_000,
         Command::SourcePage { offset } => *offset <= 40_000,
         Command::ReviewPage { offset } => *offset <= 160_000,
         Command::SetProbeTarget { url, .. } => text(url, 2048),
+        Command::SetProxyFetchDns { upstream } => text(upstream, 128),
         Command::SelectSource { id }
         | Command::Favorite { id, .. }
         | Command::DeleteSource { id }
@@ -621,6 +635,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
     routing_catalog: serde_json::Value,
@@ -669,6 +684,7 @@ struct Snapshot {
     can_stop: bool,
     active_name: Option<String>,
     active_engine: Option<EngineChoice>,
+    proxy_fetch_dns: Option<SocketAddr>,
     probe_custom: bool,
     probe_persistent: bool,
     probe_expected_status: u16,
@@ -687,6 +703,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            logs: logs::Page::default(),
             routing_diagnostics: crate::editor::Draft::default().diagnostics(),
             routing_explanation: serde_json::Value::Null,
             routing: crate::editor::Draft::default(),
@@ -735,6 +752,7 @@ impl Snapshot {
             can_stop: false,
             active_name: None,
             active_engine: None,
+            proxy_fetch_dns: None,
             probe_custom: false,
             probe_persistent: true,
             probe_expected_status: 204,
@@ -873,6 +891,7 @@ async fn open(
 }
 
 struct Actor {
+    event_log: yonik_linux::event_log::EventLog,
     routing_repository: EncryptedSubscriptionRepository,
     routing_revision: Option<i64>,
     preferences: Preferences,
@@ -1178,6 +1197,19 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::LogsRead {
+                after,
+                source,
+                request_id,
+            } => {
+                self.state.logs = logs::Page::read(
+                    &self.event_log,
+                    after.parse().map_err(|_| DesktopError("invalid_input"))?,
+                    source,
+                    request_id,
+                );
+                Ok(())
+            }
             Command::RoutingExplain {
                 expected_revision,
                 request_id,
@@ -1425,6 +1457,28 @@ impl Actor {
                 self.save_preferences(preferences)?;
                 self.state.subscription_interval_seconds = interval_seconds;
                 self.state.subscription_background = background;
+                Ok(())
+            }
+            Command::SetProxyFetchDns { upstream } => {
+                // Смена конфигурации допускается после отзыва активной сессии.
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                let address = if upstream.is_empty() {
+                    None
+                } else {
+                    let address = upstream
+                        .parse::<SocketAddr>()
+                        .map_err(|_| DesktopError("invalid_input"))?;
+                    if !crate::preferences::valid_proxy_fetch_dns(address) {
+                        return Err(DesktopError("invalid_input"));
+                    }
+                    Some(address)
+                };
+                let mut preferences = self.preferences.clone();
+                preferences.proxy_fetch_dns = address;
+                self.save_preferences(preferences)?;
+                self.state.proxy_fetch_dns = address;
                 Ok(())
             }
             Command::SetLanguage { language } => {
@@ -1734,6 +1788,7 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            event_log: yonik_linux::event_log::EventLog::new(),
             routing_repository,
             routing_revision: Some(0),
             preferences_store,
@@ -2109,13 +2164,15 @@ type ProxyLease = Option<(u64, SocketAddr)>;
 /// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
 struct DesktopFetch {
     lease: ProxyLease,
+    proxy_fetch_dns: Option<SocketAddr>,
     current: watch::Receiver<ProxyLease>,
     proxy_used: AtomicBool,
 }
 impl DesktopFetch {
-    fn new(current: &watch::Sender<ProxyLease>) -> Arc<Self> {
+    fn new(current: &watch::Sender<ProxyLease>, proxy_fetch_dns: Option<SocketAddr>) -> Arc<Self> {
         Arc::new(Self {
             lease: *current.borrow(),
+            proxy_fetch_dns,
             current: current.subscribe(),
             proxy_used: AtomicBool::new(false),
         })
@@ -2152,6 +2209,9 @@ impl yonik_linux::SubscriptionFetch for DesktopFetch {
                 return Err(FetchError::UnsupportedPeerVerification);
             };
             host = host.with_socks_endpoint(endpoint)?;
+            if let Some(upstream) = self.proxy_fetch_dns {
+                host = host.with_proxy_dns(upstream)?;
+            }
             let mut current = self.current.clone();
             tokio::select! {
                 biased;
@@ -2245,10 +2305,14 @@ async fn session(
     engine: Engine,
     target: ProbeTarget,
     mut cancel: Cancellation,
-    updates: mpsc::Sender<SessionUpdate>,
+    updates: (
+        mpsc::Sender<SessionUpdate>,
+        yonik_linux::event_log::EventLog,
+    ),
     mut network: Option<NetworkWatch>,
 ) -> std::result::Result<(), LocalSession> {
-    let Ok(mut session) = LocalSession::new() else {
+    let (updates, event_log) = updates;
+    let Ok(session) = LocalSession::new() else {
         let _ = updates
             .send(SessionUpdate {
                 status: "Error",
@@ -2259,6 +2323,7 @@ async fn session(
             .await;
         return Ok(());
     };
+    let mut session = session.with_event_log(event_log);
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -2488,6 +2553,7 @@ async fn run(
     state.language = preferences.language.clone();
     state.subscription_interval_seconds = preferences.subscription_interval_seconds;
     state.subscription_background = preferences.subscription_background;
+    state.proxy_fetch_dns = preferences.proxy_fetch_dns;
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
     state.probe_expected_status = preferences.probe_status;
@@ -2498,6 +2564,7 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        event_log: yonik_linux::event_log::EventLog::new(),
         routing_repository,
         routing_revision: Some(0),
         preferences_store,
@@ -2588,7 +2655,7 @@ async fn run(
     let (proxy_session, _) = watch::channel::<ProxyLease>(None);
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
-    let mut schedule_host = DesktopFetch::new(&proxy_session);
+    let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
     loop {
         scheduled.interval =
             Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
@@ -2651,7 +2718,7 @@ async fn run(
                 }
                 scheduled = replacement;
             }
-            schedule_host = DesktopFetch::new(&proxy_session);
+            schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
         }
         let allowed = !quitting
             && refreshing.is_none()
@@ -2802,7 +2869,7 @@ async fn run(
             } => {
                 // На границе окна сначала closing ACK в начале следующей итерации.
                 if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
-                    schedule_host = DesktopFetch::new(&proxy_session);
+                    schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
                     let host = &schedule_host;
                     scheduled.open_window(origin.elapsed());
                     let policy = scheduled.policy();
@@ -2935,6 +3002,10 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
+                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                        actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
+                        actor.emit();
+                    }
                     continue;
                 }
                 let source_operation = envelope.command.is_source_operation();
@@ -3048,7 +3119,7 @@ async fn run(
                             match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -3061,7 +3132,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else {
                             match actor.command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -3071,7 +3142,7 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
@@ -3118,7 +3189,7 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -3247,7 +3318,9 @@ async fn run(
         true
     };
     actor.selected = None;
-    let closed = actor.service.close().await.is_ok() && provider_closed && network_closed;
+    let service_closed = actor.service.close().await.is_ok();
+    let routing_closed = actor.routing_repository.close().await.is_ok();
+    let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
@@ -3292,6 +3365,7 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                event_log: yonik_linux::event_log::EventLog::new(),
                 routing_repository,
                 routing_revision: Some(0),
                 preferences_store,
@@ -3456,13 +3530,36 @@ mod proxy_session_tests {
     use yonik_linux::{Source, SubscriptionFetch};
 
     #[tokio::test]
+    async fn domain_proxy_without_config_fails_before_socks_lookup() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let endpoint = listener.local_addr().expect("endpoint");
+        let (session, _) = watch::channel(Some((1, endpoint)));
+        let host = DesktopFetch::new(&session, None);
+        let (_sender, cancel) = watch::channel(false);
+        let source = Source::local("http://subscription.example/sub").expect("source");
+        assert_eq!(
+            host.fetch(&source, FetchRoute::Proxy, None, cancel)
+                .await
+                .unwrap_err(),
+            FetchError::ProxyDnsRequired
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn reconnect_same_endpoint_revokes_pinned_generation_before_network() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener");
         let endpoint = listener.local_addr().expect("endpoint");
         let (session, _) = watch::channel(Some((1, endpoint)));
-        let host = DesktopFetch::new(&session);
+        let host = DesktopFetch::new(&session, None);
         session.send_replace(Some((2, endpoint)));
         let (_sender, cancel) = watch::channel(false);
         let source = Source::local("http://127.0.0.1:1/sub").expect("source");
@@ -3486,7 +3583,7 @@ mod proxy_session_tests {
             .expect("listener");
         let endpoint = listener.local_addr().expect("endpoint");
         let (session, _) = watch::channel(Some((1, endpoint)));
-        let host = DesktopFetch::new(&session);
+        let host = DesktopFetch::new(&session, None);
         let (_sender, cancel) = watch::channel(false);
         let source = Source::local("http://127.0.0.1:1/sub").expect("source");
         let revoke = async {

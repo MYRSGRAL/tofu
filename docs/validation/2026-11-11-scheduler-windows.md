@@ -57,3 +57,9 @@ red-window.log, red-manual.log. QML успешно разобран qmlformat; G
 P2: прежняя replacement-ветка копировала только policy/visible, теряя настройки и монотонный next_window. Две unit-регрессии воспроизвели RED: потерю барьера после закрытого окна и потерю настроек/срока текущего окна. Новый DesktopSchedule::replacement переносит interval и настройку runtime, background_enabled, неизменные window_until/next_window, policy и visibility. Смена lease не продлевает общее окно и не позволяет открыть следующее раньше интервала. Новый runtime загружает актуальное persisted schedule после shutdown ACK старого.
 
 GREEN Rust1.85.1: 34 library + 36 backend, один прежний ignored; pinned Clippy all-targets desktop/linux/subscription и fmt PASS. Это unit/direct-call regression replacement-метода и проверка production branch связи, не новый реальный Proxy lease traffic gate. Ранее сохранённый private-bus acceptance не переписывался. Evidence `/home/myrs/projects/yonik/local/validation/pr102-window-replacement/`; manifest записан после проверок.
+
+### Combined main 82d5fe7
+
+Объединение сохраняет обе настройки: интервал/фон и Proxy DNS. Сохранены оба command handler, их legacy tests, initial snapshot fields и window deadline guard. Создание DesktopFetch захватывает текущий proxy_fetch_dns внутри разрешённого окна. Main включает close-boundary fix и LogsRead/System/UI, эти принятые изменения повторно полностью не проверялись.
+
+Combined Rust1.85.1: 37 library + 41 backend PASS, один ignored; pinned all-targets Clippy desktop/linux/subscription, fmt и translations 234/96 PASS. Файлы green.log/clippy.log отражают последний combined run; старый RED двух window tests сохранён отдельно.

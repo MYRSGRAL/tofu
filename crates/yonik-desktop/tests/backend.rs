@@ -17,6 +17,9 @@ use std::{
 };
 use yonik_desktop::{DesktopHost, HostConfig};
 
+#[path = "support/harness_diagnostics.rs"]
+mod harness_diagnostics;
+
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 #[test]
@@ -75,6 +78,7 @@ pub(crate) struct Harness {
     pub(crate) host: DesktopHost,
     receiver: mpsc::Receiver<String>,
     snapshots: Vec<String>,
+    diagnostic: harness_diagnostics::Trace,
 }
 impl Harness {
     pub(crate) fn new(config: HostConfig) -> Self {
@@ -84,6 +88,7 @@ impl Harness {
         config: HostConfig,
         hook: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
+        let diagnostic = harness_diagnostics::Trace::new();
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
             let _ = sender.send(value.clone());
@@ -94,16 +99,21 @@ impl Harness {
             host,
             receiver,
             snapshots: Vec::new(),
+            diagnostic,
         }
     }
+    #[track_caller]
     pub(crate) fn wait(&mut self, predicate: impl Fn(&Value) -> bool) -> Value {
+        let caller = std::panic::Location::caller();
+        let started = Instant::now();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = self
                 .receiver
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("snapshot до deadline");
+                .unwrap_or_else(|error| self.diagnostic.fail(error, caller, started.elapsed()));
             let value: Value = serde_json::from_str(&snapshot).expect("JSON DTO");
+            self.diagnostic.snapshot(&value);
             self.snapshots.push(snapshot);
             if predicate(&value) {
                 return value;
@@ -111,12 +121,16 @@ impl Harness {
         }
     }
     pub(crate) fn send(&self, command: Value) {
+        self.diagnostic.command(&command);
         self.host.dispatch(&command.to_string()).expect("команда");
     }
+    #[track_caller]
     pub(crate) fn close(&mut self) {
+        self.diagnostic.command(&json!({"command":"shutdown"}));
         self.host.shutdown();
         self.wait(|value| value["closed"] == true);
         assert!(self.host.wait_closed(Duration::from_secs(2)));
+        self.diagnostic.closed();
     }
 }
 
@@ -1345,9 +1359,24 @@ fn preferences_reopen_applies_engine_port_probe_and_language() {
         first.send(command);
         first.wait(|v| v[field] == expected);
     }
+    first.send(json!({"command":"set_proxy_fetch_dns","upstream":"127.0.0.1:5353"}));
+    first.wait(|v| v["proxy_fetch_dns"] == "127.0.0.1:5353");
+    for invalid in [
+        "resolver.example:53",
+        "https://127.0.0.1:53",
+        "127.0.0.1:0",
+        "0.0.0.0:53",
+        "224.0.0.1:53",
+        "[fe80::1%3]:53",
+    ] {
+        first.send(json!({"command":"set_proxy_fetch_dns","upstream":invalid}));
+        let state = first.wait(|v| v["error"] == "invalid_input");
+        assert_eq!(state["proxy_fetch_dns"], "127.0.0.1:5353");
+    }
     first.close();
     let mut second = Harness::new(directory.config());
     let state = second.wait(|v| v["ready"] == true);
+    assert_eq!(state["proxy_fetch_dns"], "127.0.0.1:5353");
     assert_eq!(state["engine"], "sing-box");
     assert_eq!(state["port"], 18889);
     assert_eq!(state["probe_expected_status"], 200);
@@ -1732,9 +1761,23 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
     app.wait(|v| v["selected_profile"].is_i64());
     app.send(json!({"command":"set_probe_target","url":probe,"expected_status":204}));
     app.wait(|v| v["probe_custom"] == true);
+    if let Ok(upstream) = std::env::var("YONIK_PROXY_FETCH_DNS") {
+        app.send(json!({"command":"set_proxy_fetch_dns","upstream":upstream}));
+        app.wait(|v| v["proxy_fetch_dns"] == upstream);
+    }
     app.send(json!({"command":"connect"}));
     app.wait(|v| v["status"] == "Connected");
-    app.send(json!({"command":"add_source","name":"Proxy","url":url,"local_exception":true,"route":"proxy"}));
+    if let Ok(upstream) = std::env::var("YONIK_PROXY_FETCH_DNS") {
+        app.send(json!({"command":"set_proxy_fetch_dns","upstream":"127.0.0.1:1"}));
+        let unchanged = app.wait(|v| v["error"] == "busy");
+        assert_eq!(unchanged["proxy_fetch_dns"], upstream);
+    }
+    let proxy_url = if std::env::var("YONIK_PROXY_FETCH_DNS").is_ok() {
+        url.replace("127.0.0.1", "subscription.example")
+    } else {
+        url.clone()
+    };
+    app.send(json!({"command":"add_source","name":"Proxy","url":proxy_url,"local_exception":true,"route":"proxy"}));
     let proxy = app.wait(|v| v["source_name"] == "Proxy");
     let proxy_id = proxy["source_id"].clone();
     app.send(json!({"command":"refresh"}));
@@ -1780,6 +1823,56 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
     assert!(stopped["pending"].is_null());
     app.close();
     server.join().expect("HTTP fixture");
+}
+
+#[test]
+fn logs_explicit_page_is_safe_and_stop_remains_available() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"engine", "request_id":"1"}));
+    let page = app.wait(|v| v["logs"]["request_id"] == "1");
+    assert_eq!(page["logs"]["status"], "empty");
+    assert_eq!(page["logs"]["events"].as_array().unwrap().len(), 0);
+    assert!(
+        page["logs"]["export"]
+            .as_str()
+            .unwrap()
+            .starts_with("yonik-events-v1")
+    );
+    assert!(app.host.dispatch(r#"{"command":"logs_read","after":"https://SECRET","source":"app","request_id":"2"}"#).is_err());
+    app.send(json!({"command":"stop"}));
+    app.close();
+}
+
+#[test]
+fn stop_cancels_queued_logs_without_waiting_for_a_page() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let first_ready = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == true && first_ready.fetch_add(1, Ordering::Relaxed) == 0 {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let _ = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"1"}));
+    app.send(json!({"command":"stop"}));
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["logs"]["status"] == "cancelled");
+    assert_eq!(cancelled["logs"]["request_id"], "1");
+    assert!(cancelled["logs"]["export"].is_null());
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"2"}));
+    app.wait(|v| v["logs"]["request_id"] == "2");
+    app.close();
 }
 
 #[test]
@@ -1869,4 +1962,37 @@ fn ручной_fetch_резервирует_настроенный_интерв
             assert_eq!(state.due_wall.unwrap() - state.recorded_wall, 172800);
             service.close().await.unwrap();
         });
+}
+
+#[test]
+fn closed_snapshot_has_released_last_database_handle() {
+    let directory = Directory::new();
+    let (entered, receiver) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let resume = Mutex::new(resume);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        if serde_json::from_str::<Value>(snapshot).unwrap()["closed"] == true {
+            entered.send(()).unwrap();
+            resume
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap();
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.host.shutdown();
+    receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    let wal = directory.0.join("subscriptions.sqlite-wal");
+    let remaining_wal = fs::symlink_metadata(&wal).ok();
+    release.send(()).unwrap();
+    assert!(app.host.wait_closed(Duration::from_secs(2)));
+    assert!(
+        remaining_wal.is_none(),
+        "closed опубликован до закрытия последнего DB handle: wal ino/nlink/mode={:?}",
+        remaining_wal.map(|m| {
+            use std::os::unix::fs::MetadataExt;
+            (m.ino(), m.nlink(), m.mode())
+        })
+    );
 }
