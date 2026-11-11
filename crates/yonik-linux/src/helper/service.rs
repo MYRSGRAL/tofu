@@ -101,6 +101,8 @@ pub struct SystemProfileRequest {
     pub server: yonik_import::ServerIntent,
     pub engine: yonik_engine::Engine,
     pub kill_switch: bool,
+    pub policy: Option<yonik_engine::policy_wire::SystemPolicy>,
+    pub(crate) peer: Option<Arc<crate::attribution::PeerProcess>>,
 }
 impl std::fmt::Debug for SystemProfileRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -180,6 +182,18 @@ struct ProfilePrepareRequest<'a> {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PolicyProfilePrepareRequest<'a> {
+    version: u32,
+    mode: String,
+    engine: ProfileEngine,
+    kill_switch: bool,
+    #[serde(borrow)]
+    server: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    policy: &'a serde_json::value::RawValue,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ApplyRequest {
     version: u32,
     handle: [u8; 32],
@@ -238,10 +252,35 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                     }
                     Ok(Request::Prepare(dto.allow_lan))
                 }
-                "system_profile" => {
-                    let dto: ProfilePrepareRequest<'_> =
-                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
-                    if dto.version != 1 || dto.mode != "system_profile" {
+                "system_profile" | "system_profile_policy" => {
+                    let (dto, policy) = if route.mode == "system_profile_policy" {
+                        if !yonik_engine::policy_wire::bounded_depth(json, 5)
+                            || !json.trim_start().starts_with('{')
+                        {
+                            return Err(ServiceError::InvalidRequest);
+                        }
+                        let dto: PolicyProfilePrepareRequest<'_> =
+                            serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                        let policy =
+                            yonik_engine::policy_wire::SystemPolicy::parse(dto.policy.get())
+                                .map_err(|_| ServiceError::InvalidRequest)?;
+                        (
+                            ProfilePrepareRequest {
+                                version: dto.version,
+                                mode: dto.mode,
+                                engine: dto.engine,
+                                kill_switch: dto.kill_switch,
+                                server: dto.server,
+                            },
+                            Some(policy),
+                        )
+                    } else {
+                        let dto: ProfilePrepareRequest<'_> =
+                            serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                        (dto, None)
+                    };
+                    let dto: ProfilePrepareRequest<'_> = dto;
+                    if dto.version != 1 || dto.mode != route.mode {
                         return Err(ServiceError::InvalidRequest);
                     }
                     let server = yonik_import::ServerIntent::parse_json(dto.server.get()).map_err(
@@ -258,6 +297,8 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                         server,
                         engine,
                         kill_switch: dto.kill_switch,
+                        policy,
+                        peer: None,
                     })))
                 }
                 _ => Err(ServiceError::Unsupported),
@@ -416,13 +457,29 @@ async fn dispatch<H: ProtectionHost>(
                 .await?;
             serde_json::json!({"version":1,"handle":handle.as_bytes()})
         }
-        Request::PrepareProfile(request) => {
+        Request::PrepareProfile(mut request) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
                     let mut host = host.try_lock().map_err(|_| {
                         let _ = busy_at("prepare_outer_host");
                         PreparedError::Capacity
                     })?;
+                    if request
+                        .policy
+                        .as_ref()
+                        .is_some_and(|policy| policy.requires_attribution())
+                    {
+                        let pid = tokio::time::timeout(
+                            Duration::from_secs(1),
+                            broker.authorizer().peer_pid(&sender, uid),
+                        )
+                        .await
+                        .map_err(|_| PreparedError::Unsupported)??;
+                        request.peer = Some(Arc::new(
+                            crate::attribution::PeerProcess::capture(pid, uid)
+                                .map_err(|_| PreparedError::Unsupported)?,
+                        ));
+                    }
                     host.prepare_profile(uid, *request, cancel.clone())
                         .await
                         .map_err(as_prepared)

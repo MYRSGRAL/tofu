@@ -336,6 +336,8 @@ pub(super) struct SessionArtifact {
     uid: u32,
     worker_uid: u32,
     kill_switch: bool,
+    attribution_required: bool,
+    peer: Option<Arc<crate::attribution::PeerProcess>>,
     endpoint: IpAddr,
     port: u16,
     protocol: crate::TransportProtocol,
@@ -509,6 +511,16 @@ impl Backend {
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }
+        let attribution_required = request
+            .policy
+            .as_ref()
+            .is_some_and(|policy| policy.requires_attribution());
+        if attribution_required {
+            let admission_uid = worker_uid().map_err(|_| ServiceError::Unsupported)?;
+            crate::attribution::preflight(true, request.peer.as_deref(), admission_uid)
+                .await
+                .map_err(|_| ServiceError::Unsupported)?;
+        }
         let server = request
             .server
             .into_server()
@@ -541,13 +553,29 @@ impl Backend {
             .map_err(unavailable)?
             .port();
         let port = NonZeroU16::new(port).ok_or(ServiceError::Unavailable)?;
-        let config = yonik_engine::compile_system(
-            &server,
-            request.engine,
-            port,
-            &plan.compiler_tun().map_err(unavailable)?,
-        )
-        .map_err(|_| ServiceError::Unsupported)?;
+        let config = if let Some(policy) = request.policy.as_ref() {
+            let probe =
+                TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).map_err(unavailable)?;
+            let probe_port = NonZeroU16::new(probe.local_addr().map_err(unavailable)?.port())
+                .ok_or(ServiceError::Unavailable)?;
+            yonik_engine::compile_system_policy(
+                &server,
+                request.engine,
+                port,
+                probe_port,
+                policy.policy(),
+                &plan.compiler_tun().map_err(unavailable)?,
+            )
+            .map_err(|_| ServiceError::Unsupported)?
+        } else {
+            yonik_engine::compile_system(
+                &server,
+                request.engine,
+                port,
+                &plan.compiler_tun().map_err(unavailable)?,
+            )
+            .map_err(|_| ServiceError::Unsupported)?
+        };
         if self.registry.is_none() {
             self.registry = Some(TrustedRegistry::system().map_err(unavailable)?);
         }
@@ -624,6 +652,8 @@ impl Backend {
             uid,
             worker_uid,
             kill_switch: request.kill_switch,
+            attribution_required,
+            peer: request.peer,
             endpoint,
             port: server.endpoint().port(),
             protocol,
@@ -643,6 +673,13 @@ impl Backend {
         stamp: NetworkStamp,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
+        crate::attribution::preflight(
+            artifact.attribution_required,
+            artifact.peer.as_deref(),
+            artifact.worker_uid,
+        )
+        .await
+        .map_err(|_| ServiceError::Unsupported)?;
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }

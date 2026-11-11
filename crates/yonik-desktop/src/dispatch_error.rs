@@ -30,7 +30,7 @@ pub fn snapshot(current: &str, request: &str, message: &str) -> String {
                 && id.bytes().all(|byte| byte.is_ascii_digit())
                 && id.parse::<u64>().is_ok()
         }) {
-            if command["command"] == "logs_read" {
+            if matches!(command["command"].as_str(), Some("logs_read" | "logs_save")) {
                 snapshot.insert(
                     "logs".into(),
                     json!({
