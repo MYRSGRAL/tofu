@@ -8,13 +8,28 @@ ColumnLayout {
     objectName: "presetPanel"
     required property var snapshot
     required property string language
+    required property var routing
+    required property var routingRevision
+    property double request: Date.now() * 1024
+    property double pendingRequest: 0
+    property string feedback: ""
+    onSnapshotChanged: {
+        if (snapshot.ack && snapshot.ack.request_id === pendingRequest) {
+            feedback = snapshot.ack.error || tr("Готово", "Done")
+            pendingRequest = 0
+        }
+    }
+    function feedbackText(key) {
+        return ({"Application witness required": tr("Нет данных о приложении для решения", "Application witness missing"), "DNS witness required": tr("Для решения нужны реальные DNS-данные", "Real DNS witness required"), "Evaluation rejected": tr("Ввод отклонён evaluator", "Evaluator rejected input"), busy: tr("Задание или хранилище занято", "Job or storage busy"), storage: tr("Хранилище недоступно", "Storage unavailable"), integrity: tr("Нарушена целостность snapshot", "Snapshot integrity failure"), fetch: tr("Не удалось загрузить списки выбранным путём", "Could not fetch lists over the selected route"), cancelled: tr("Отменено", "Cancelled"), invalid_ip: tr("Введите корректный IP-адрес или домен", "Enter a valid IP address or domain"), invalid_input: tr("Проверьте поля источника", "Check source fields"), engine_config: tr("Политика не прошла проверку ядра", "Engine policy validation failed"), engine_missing: tr("Доверенное ядро недоступно", "Trusted engine unavailable"), profile_required: tr("Выберите профиль для проверки", "Select a profile to validate"), routing_stale: tr("Черновик изменился, повторите действие", "Draft changed, retry the operation"), durability_unknown: tr("Snapshot опубликован, долговечность записи не подтверждена", "Snapshot published, durability unconfirmed")})[key] || key
+    }
+    function nextRequest() { request += 1; pendingRequest = request; feedback = ""; return request }
     signal command(var payload)
     function tr(ru, en) { return language === "ru" ? ru : en }
     Label { text: "ru-direct"; font.bold: true }
     Label {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
-        text: panel.snapshot.current ? panel.tr("Текущая версия: ", "Current version: ") + panel.snapshot.current.version + " · " + panel.snapshot.current.checked_at_unix : panel.tr("Нет проверенного snapshot", "No verified snapshot")
+        text: panel.snapshot.current ? panel.tr("Текущая версия: ", "Current version: ") + panel.snapshot.current.version + " · " + new Date(panel.snapshot.current.checked_at_unix * 1000).toLocaleString(Qt.locale(panel.language)) : panel.tr("Нет проверенного snapshot", "No verified snapshot")
     }
     Label {
         visible: !!panel.snapshot.previous
@@ -22,32 +37,94 @@ ColumnLayout {
     }
     Label {
         visible: panel.snapshot.current_error || panel.snapshot.previous_error
-        text: panel.tr("Ошибка целостности snapshot", "Snapshot integrity error")
+        text: panel.tr("Текущая или резервная версия недоступна. Проверьте статус операции.", "Current or previous snapshot unavailable. Check operation status.")
     }
+    CheckBox {
+        objectName: "presetActivate"
+        text: panel.tr("Использовать ru-direct в черновике", "Use ru-direct in draft")
+        checked: !!panel.routing.ru_direct && panel.routing.ru_direct.enabled
+        enabled: !panel.snapshot.busy && panel.pendingRequest === 0 && (!!panel.snapshot.current || checked)
+        onClicked: panel.command({command: "preset_activate", enabled: checked, expected_revision: panel.routingRevision, request_id: panel.nextRequest()})
+    }
+    Button {
+        text: panel.tr("Использовать текущую версию", "Use current version")
+        enabled: !!panel.snapshot.current && !panel.snapshot.busy && panel.pendingRequest === 0
+        onClicked: panel.command({command: "preset_activate", enabled: true, expected_revision: panel.routingRevision, request_id: panel.nextRequest()})
+    }
+    CheckBox { objectName: "presetConfigure"; id: configure; text: panel.tr("Настроить источник", "Configure source") }
+    ColumnLayout {
+        visible: configure.checked
+        Layout.fillWidth: true
+        TextField { objectName: "presetVersion"; id: version; placeholderText: panel.tr("Общая версия выпуска", "Shared release version"); maximumLength: 128; Layout.fillWidth: true }
+        TextField { objectName: "presetDomainsURL"; id: domains; placeholderText: panel.tr("URL доменного списка", "Domain list URL"); maximumLength: 8192; Layout.fillWidth: true }
+        TextField { objectName: "presetDomainHash"; id: domainHash; placeholderText: panel.tr("SHA256 доменного списка", "Domain list SHA256"); maximumLength: 64; Layout.fillWidth: true }
+        TextField { objectName: "presetIpsURL"; id: ips; placeholderText: panel.tr("URL списка CIDR", "CIDR list URL"); maximumLength: 8192; Layout.fillWidth: true }
+        TextField { objectName: "presetIpHash"; id: ipHash; placeholderText: panel.tr("SHA256 списка CIDR", "CIDR list SHA256"); maximumLength: 64; Layout.fillWidth: true }
+        ComboBox { objectName: "presetFetchRoute"; id: fetchRoute; model: ["Proxy", "Direct"] }
+        CheckBox { objectName: "presetLocal"; id: local; text: panel.tr("Явно разрешить локальный HTTP/LAN источник", "Explicitly allow local HTTP/LAN source") }
+        Button {
+            objectName: "presetUpdateButton"
+        text: panel.tr("Обновить snapshot", "Update snapshot")
+            enabled: !panel.snapshot.busy && panel.pendingRequest === 0
+            onClicked: {
+                const revision = version.text
+                panel.command({command: "preset_update", request_id: panel.nextRequest(), route: fetchRoute.currentIndex === 0 ? "proxy" : "direct", local_exception: local.checked,
+                    metadata: {source_id: "ru-direct", version: revision, format: "plain-domain-cidr-v1", enabled: false, checked_at_unix: Math.floor(Date.now() / 1000),
+                        domains: {url: domains.text, revision: revision, sha256: domainHash.text}, ips: {url: ips.text, revision: revision, sha256: ipHash.text}}})
+                domains.clear(); ips.clear()
+            }
+        }
+    }
+    Button {
+        objectName: "presetCancelButton"
+        text: panel.tr("Отменить обновление", "Cancel update")
+        visible: panel.snapshot.busy
+        onClicked: panel.command({command: "preset_cancel", request_id: panel.snapshot.active_request_id})
+    }
+    Button {
+        objectName: "presetValidateButton"
+        text: panel.tr("Проверить ядро и Host", "Validate engine and Host")
+        enabled: !panel.snapshot.busy && panel.pendingRequest === 0
+        onClicked: panel.command({command: "preset_validate", expected_revision: panel.routingRevision, request_id: panel.nextRequest()})
+    }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        visible: !!panel.snapshot.compiler_error || !!panel.snapshot.operation_error
+        text: panel.snapshot.compiler_error || ({invalid_ip: panel.tr("Введите корректный IP-адрес или домен", "Enter a valid IP address or domain"), storage: panel.tr("Хранилище недоступно", "Storage unavailable"), busy: panel.tr("Хранилище занято", "Storage busy"), integrity: panel.tr("Нарушена целостность snapshot", "Snapshot integrity failure")})[panel.snapshot.operation_error] || ""
+    }
+    Label {
+        visible: panel.snapshot.host_validated === true
+        text: panel.tr("Config-check Host пройден; native TUN не проверен", "Host config-check passed; native TUN not tested")
+    }
+    Label { objectName: "presetFeedback"; text: panel.feedbackText(panel.feedback); visible: !!text }
     RowLayout {
         Button { objectName: "presetStatusButton"; text: panel.tr("Проверить версии", "Check versions"); onClicked: panel.command({command: "preset_status"}) }
-        Button { objectName: "presetRollbackButton"; text: panel.tr("Откатить", "Roll back"); enabled: !!panel.snapshot.previous; onClicked: panel.command({command: "preset_rollback"}) }
+        Button { objectName: "presetRollbackButton"; text: panel.tr("Откатить", "Roll back"); enabled: !!panel.snapshot.previous && !panel.snapshot.busy; onClicked: panel.command({command: "preset_rollback", request_id: panel.nextRequest()}) }
     }
     TextField {
         id: target
+        objectName: "presetTarget"
         Layout.fillWidth: true
-        placeholderText: panel.tr("IP для проверки решения", "IP for decision check")
-        maximumLength: 45
+        placeholderText: panel.tr("IP или домен для проверки решения", "IP or domain for decision check")
+        maximumLength: 253
     }
     Button {
+        objectName: "presetPrepareButton"
         text: panel.tr("Проверить модель Policy", "Check Policy model")
-        enabled: !!panel.snapshot.current
-        onClicked: panel.command({command: "preset_prepare", target: target.text})
+        enabled: !!panel.snapshot.current && !panel.snapshot.busy
+        onClicked: panel.command({command: "preset_prepare", target: target.text, request_id: panel.nextRequest()})
     }
     Label {
+        objectName: "presetDecision"
         visible: panel.snapshot.prepared === true
         Layout.fillWidth: true
         wrapMode: Text.Wrap
-        text: (panel.snapshot.decision || "") + " · " + panel.tr("Решение evaluator. Проверка ядром и Host Apply не выполнена.", "Evaluator decision. Engine validation and Host Apply have not run.")
+        text: (!panel.routing.ru_direct ? panel.tr("Предпросмотр неактивированного snapshot. ", "Preview of inactive snapshot. ") : panel.tr("Модель сохранённого черновика. ", "Saved draft model. ")) + panel.feedbackText(panel.snapshot.decision || "") + " · " + panel.tr("Решение evaluator. Проверка ядром и Host Apply не выполнена.", "Evaluator decision. Engine validation and Host Apply have not run.")
     }
     Label {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
-        text: panel.tr("Активация недоступна: требуется preset в Draft и проверка Apply. system_tun=false. Подготовка не меняет сеть.", "Activation unavailable: preset in Draft and Apply validation required. system_tun=false. Preparation does not change the network.")
+        text: panel.tr("Активация сохраняется в черновике. Production system_tun=false: сеть не меняется. Обновление snapshot требует отдельной активации новой версии.", "Activation is saved in the draft. Production system_tun=false: network is unchanged. Updated snapshots require separate activation of the new version.")
     }
 }

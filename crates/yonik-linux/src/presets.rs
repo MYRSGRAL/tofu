@@ -58,6 +58,8 @@ pub enum PublishOutcome {
 
 pub struct Store {
     root: PathBuf,
+    #[cfg(any(test, feature = "test-support"))]
+    before_publish: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 impl Store {
     /// Каталог должен принадлежать приложению; существующий небезопасный каталог отвергается.
@@ -73,9 +75,17 @@ impl Store {
         }
         let store = Self {
             root: root.to_owned(),
+            #[cfg(any(test, feature = "test-support"))]
+            before_publish: None,
         };
         store.read_index()?;
         Ok(store)
+    }
+    /// Только собственный стенд: пауза после записи staging index, до rename.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_before_publish(mut self, hook: std::sync::Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.before_publish = Some(hook);
+        self
     }
     pub fn active(&self) -> Result<Option<(Metadata, Candidate)>, Error> {
         self.read_index()?
@@ -87,6 +97,17 @@ impl Store {
                 })
             })
             .transpose()
+    }
+    /// Opaque content ID; это не путь и не native JSON.
+    pub fn active_id(&self) -> Result<Option<String>, Error> {
+        let id = self.read_index()?.active;
+        if let Some(id) = &id {
+            self.load(id)?;
+        }
+        Ok(id)
+    }
+    pub fn candidate(&self, id: &str) -> Result<Candidate, Error> {
+        validate(&self.load(id)?)
     }
     /// Резервная версия читается независимо от здоровья active.
     pub fn previous(&self) -> Result<Option<(Metadata, Candidate)>, Error> {
@@ -131,7 +152,10 @@ impl Store {
         if *cancel.borrow() || cancel.has_changed().is_err() {
             return Err(Error::Fetch);
         }
-        self.install(metadata, domains, ips)
+        self.install_admitted(metadata, domains, ips, || {
+            !*cancel.borrow() && cancel.has_changed().is_ok()
+        })?
+        .ok_or(Error::Fetch)
     }
     pub fn install(
         &self,
@@ -139,6 +163,18 @@ impl Store {
         domains: Vec<u8>,
         ips: Vec<u8>,
     ) -> Result<PublishOutcome, Error> {
+        self.install_admitted(metadata, domains, ips, || true)?
+            .ok_or(Error::Storage)
+    }
+    /// Admission вызывается под writer lock после staging, непосредственно перед
+    /// rename index. false сохраняет current/previous; после true исход определяется I/O.
+    pub fn install_admitted(
+        &self,
+        metadata: Metadata,
+        domains: Vec<u8>,
+        ips: Vec<u8>,
+        admit: impl FnOnce() -> bool,
+    ) -> Result<Option<PublishOutcome>, Error> {
         let snapshot = Snapshot {
             metadata,
             domains,
@@ -146,6 +182,15 @@ impl Store {
         };
         validate(&snapshot)?;
         let _lock = self.lock()?;
+        // Ограничение каталога, включая осиротевшие immutable snapshots.
+        if fs::read_dir(&self.root)
+            .map_err(|_| Error::Storage)?
+            .take(66)
+            .count()
+            >= 66
+        {
+            return Err(Error::Storage);
+        }
         let bytes = serde_json::to_vec(&snapshot).map_err(|_| Error::Invalid)?;
         let id = hash(&bytes);
         let target = self.root.join(&id);
@@ -170,14 +215,17 @@ impl Store {
             .map_err(|_| Error::Storage)?;
         let old = self.read_index()?;
         if old.active.as_ref() == Some(&id) {
-            return Ok(PublishOutcome::Durable);
+            return Ok(admit().then_some(PublishOutcome::Durable));
         }
-        self.publish(&Index {
-            active: Some(id),
-            previous: self
-                .healthy_pointer(old.active)
-                .or_else(|| self.healthy_pointer(old.previous)),
-        })
+        self.publish_admitted(
+            &Index {
+                active: Some(id),
+                previous: self
+                    .healthy_pointer(old.active)
+                    .or_else(|| self.healthy_pointer(old.previous)),
+            },
+            admit,
+        )
     }
     pub fn rollback(&self) -> Result<PublishOutcome, Error> {
         let _lock = self.lock()?;
@@ -206,6 +254,10 @@ impl Store {
         Ok(snapshot)
     }
     fn read_index(&self) -> Result<Index, Error> {
+        let root = fs::symlink_metadata(&self.root).map_err(|_| Error::Storage)?;
+        if !root.is_dir() || root.permissions().mode() & 0o077 != 0 {
+            return Err(Error::Storage);
+        }
         let path = self.root.join("index");
         if !path.try_exists().map_err(|_| Error::Storage)? {
             return Ok(Index::default());
@@ -226,6 +278,13 @@ impl Store {
         Ok(file)
     }
     fn publish(&self, index: &Index) -> Result<PublishOutcome, Error> {
+        self.publish_admitted(index, || true)?.ok_or(Error::Storage)
+    }
+    fn publish_admitted(
+        &self,
+        index: &Index,
+        admit: impl FnOnce() -> bool,
+    ) -> Result<Option<PublishOutcome>, Error> {
         let mut random = [0u8; 16];
         getrandom::getrandom(&mut random).map_err(|_| Error::Storage)?;
         let staging = self.root.join(format!("stage-{}", hash(&random)));
@@ -234,14 +293,21 @@ impl Store {
                 &staging,
                 &serde_json::to_vec(index).map_err(|_| Error::Invalid)?,
             )?;
+            #[cfg(any(test, feature = "test-support"))]
+            if let Some(hook) = &self.before_publish {
+                hook();
+            }
+            if !admit() {
+                return Ok(None);
+            }
             fs::rename(&staging, self.root.join("index")).map_err(|_| Error::Storage)?;
-            Ok(
+            Ok(Some(
                 if File::open(&self.root).and_then(|f| f.sync_all()).is_ok() {
                     PublishOutcome::Durable
                 } else {
                     PublishOutcome::PublishedDurabilityUnknown
                 },
-            )
+            ))
         })();
         if staging.exists() {
             let _ = fs::remove_file(staging);
@@ -249,7 +315,7 @@ impl Store {
         result
     }
 }
-fn validate_metadata(m: &Metadata) -> Result<(), Error> {
+pub fn validate_metadata(m: &Metadata) -> Result<(), Error> {
     if !valid_token(&m.source_id)
         || !valid_token(&m.version)
         || m.format != "plain-domain-cidr-v1"

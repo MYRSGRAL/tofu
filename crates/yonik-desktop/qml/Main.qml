@@ -282,8 +282,12 @@ ApplicationWindow {
             keyring_locked: ["Хранилище секретов заблокировано. Разблокируйте системный кошелёк и повторите запуск.", "Secret storage is locked. Unlock the system wallet and restart."],
             keyring_missing: ["Системное хранилище секретов недоступно.", "System secret storage is unavailable."],
             storage: ["Ошибка локального хранилища. Проверьте доступ к данным приложения.", "Local storage error. Check access to application data."],
+            logs_save_failed: ["Не удалось сохранить страницу журнала. Проверьте выбранный путь.", "Could not save the log page. Check the selected path."],
+            logs_save_durability_unknown: ["Страница журнала опубликована, но надёжность записи не подтверждена.", "The log page was published, but write durability is unconfirmed."],
+            catalog: ["Не удалось прочитать каталог приложений.", "Could not read the application catalog."],
             preferences_write: ["Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.", "Could not save settings. The change was not applied. Check preferences.json in the data directory."],
             invalid_input: ["Проверьте введённые данные и адрес подписки.", "Check the input and subscription URL."],
+            invalid_ip: ["Проверьте IP-адрес или домен.", "Check the IP address or domain."],
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
             source_in_use: ["Сначала отключите прокси, затем удалите подписку.", "Disconnect the proxy before deleting this subscription."],
             refresh_required: ["Загрузка уже завершилась. Проверьте список серверов.", "Loading has already finished. Check the server list."],
@@ -305,7 +309,7 @@ ApplicationWindow {
             system_timeout: ["Время ожидания helper истекло. Исход неизвестен.", "Helper timed out. Outcome unknown."],
             system_unavailable: ["Helper недоступен. Проверьте состояние сети.", "Helper unavailable. Check network state."],
             engine_config: ["Профиль несовместим с выбранным ядром. Проверьте параметры подключения.", "The profile is incompatible with the selected engine. Check connection settings."],
-            engine_failed: ["Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.", "Could not start the proxy engine. Check the profile and engine installation."],
+            engine_failed: ["Прокси-ядро не запущено или завершилось с ошибкой. Проверьте профиль и наличие ядра.", "The proxy engine is not running or exited with an error. Check the profile and engine installation."],
             probe_target_invalid: ["Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.", "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299."],
             check_http_status: ["Сайт проверки вернул неожиданный HTTP-статус. Редирект не считается успехом.", "The check endpoint returned an unexpected HTTP status. Redirects are not successful."],
             check_tls: ["Не удалось проверить TLS сайта проверки.", "TLS verification failed for the check endpoint."],
@@ -318,6 +322,8 @@ ApplicationWindow {
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
         const editorMessages = {
+            action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
+            format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
             routing_stale: ["Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.", "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one."],
             routing_ack_identity: ["Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.", "Save response did not match the rule. Input is preserved; check the draft."],
             routing_storage: ["Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.", "Draft not saved: damaged database or conflict. Original preserved; restart the application."],
@@ -328,7 +334,7 @@ ApplicationWindow {
             limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
         }
         const pair = messages[key] || editorMessages[key]
-        return pair ? tr(pair[0], pair[1]) : tr("Операция не выполнена. Проверьте настройки и повторите попытку.", "Operation failed. Check the settings and try again.")
+        return pair ? tr(pair[0], pair[1]) : tr("Категория ошибки отсутствует в каталоге сообщений.", "The error category is missing from the message catalog.")
     }
 
     DesktopBridge {
@@ -866,6 +872,8 @@ ApplicationWindow {
                 PresetPanel {
                     Layout.fillWidth: true
                     snapshot: window.state.presets || ({})
+                    routing: window.state.routing || ({})
+                    routingRevision: window.state.routing_revision
                     language: window.language
                     onCommand: payload => window.send(payload)
                 }

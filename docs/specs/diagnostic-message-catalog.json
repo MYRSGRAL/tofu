@@ -1,5 +1,5 @@
 {
-  "catalog_version": 1,
+  "catalog_version": 3,
   "schema_version": 1,
   "messages": [
     {
@@ -55,6 +55,14 @@
       "message_key": "invalid_input",
       "ru": "Проверьте введённые данные и адрес подписки.",
       "en": "Check the input and subscription URL.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "INVALID_IP",
+      "message_key": "invalid_ip",
+      "ru": "Проверьте IP-адрес или домен.",
+      "en": "Check the IP address or domain.",
       "stage": "operation",
       "retryable": false
     },
@@ -229,8 +237,8 @@
     {
       "code": "ENGINE_FAILED",
       "message_key": "engine_failed",
-      "ru": "Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.",
-      "en": "Could not start the proxy engine. Check the profile and engine installation.",
+      "ru": "Прокси-ядро не запущено или завершилось с ошибкой. Проверьте профиль и наличие ядра.",
+      "en": "The proxy engine is not running or exited with an error. Check the profile and engine installation.",
       "stage": "operation",
       "retryable": false
     },
@@ -591,6 +599,38 @@
       "message_key": "catalog",
       "ru": "Не удалось прочитать каталог приложений.",
       "en": "Could not read the application catalog.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ACTION",
+      "message_key": "action",
+      "ru": "Недопустимое действие правила маршрутизации.",
+      "en": "Invalid routing rule action.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "FORMAT",
+      "message_key": "format",
+      "ru": "Некорректный формат черновика маршрутизации.",
+      "en": "Invalid routing draft format.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "LOGS_SAVE_FAILED",
+      "message_key": "logs_save_failed",
+      "ru": "Не удалось сохранить страницу журнала. Проверьте выбранный путь.",
+      "en": "Could not save the log page. Check the selected path.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "LOGS_SAVE_DURABILITY_UNKNOWN",
+      "message_key": "logs_save_durability_unknown",
+      "ru": "Страница журнала опубликована, но надёжность записи не подтверждена.",
+      "en": "The log page was published, but write durability is unconfirmed.",
       "stage": "operation",
       "retryable": false
     }
