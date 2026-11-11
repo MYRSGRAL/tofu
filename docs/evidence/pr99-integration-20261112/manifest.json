@@ -1,0 +1,33 @@
+{
+  "source_head": "f974f4938c67ced5d235caae495af64f48cea973",
+  "parent": "f9a58fbdaf8bede810907dad9759bace0610b65f",
+  "main": "97daece04e963086d870ce215ff812758e50911e",
+  "physical_acceptance": false,
+  "source_sha256": {
+    "tools/ui_benchmark.py": "727ae13c8f5bb11e0966a4fb57fa26ca2f9dd23803a668a8b9869750b1b057db",
+    "tools/resource_counters.py": "a86987de0c809805d985e4b81883bf6bea1060971f031e537e6a040dad8ad4ca",
+    "tools/tests/test_ui_benchmark.py": "1601b54998ea0f2e528d675558edbccc97f5d1760fac4a5b43bc874eb06c7f62",
+    "tools/tests/test_resource_counters.py": "c56f63661fa2f9ffb9a6413bf4adec406a21743f70684ec4bd702426ddfa4ba7",
+    "tools/tests/test_ui_comparison_controls.py": "970d5322111c78f2383c3f5a4d9d09f173e11208ec1d35ca59219c013a5fd19b",
+    "bench/ui/check-offscreen.py": "c8e8f13e7073082ef4450eaa1ac0dc028f8c619c27fc645abb027034377de222",
+    "bench/ui/model/src/lib.rs": "dd0fecfb25803aada2ddfb351e5cf7ccd24b516a2ea7c89856bb7010c369addb",
+    "Cargo.lock": "092bcc6b03e4af984988cce478969c1ec0ac4908ad5a29b0c62172bc17da8ab6",
+    "bench/ui/Cargo.lock": "aed1e31ff1e82271e416c439278c9984c3371ec38729b64a076060cc4b6a6ce9"
+  },
+  "evidence_sha256": {
+    "python.log": "5a0dc4e46f0db779858eb214f8209a71000a65a2f82d76a7d32edee22bed1544",
+    "fmt85.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy85.log": "87dd348280d751a4097d66bceb255ab0ebb7fbaa6a030b27a363a5fbbdfa7b30",
+    "no-physical-dryproof.json": "4a1f0c144bb041ffdb6648c683cebc01d8a398c31dc96d8985301cdd1801d74e",
+    "counters.log": "e586fc0f3bb2a05f4c80f07d1b4c6171e830592f6c7aaf70d4af3b0aa3ebd072",
+    "python-clean-env.log": "ce9d0ad688eb40467d896e096f8c9408e95658c34b784ec01457ca1b008fd1e3",
+    "python-fixed.log": "6e22c481cbd5d0ac7b8fe07cfcfbcb9408bb5fbc185e23f0d6484fd01ea0f73d",
+    "python-final.log": "063901758839bb8b7cf15546c05cc82e38a91aeb0cd951107f15da552b4df4f2",
+    "fmt-model.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy-model.log": "71b08ca283e24ff8e968a85a7d4354d88f2141693483b3bd3f1a0dc8d7351c53",
+    "model.log": "af726b9a2e0747d8bef471ddf57fa6527ac44adb2b0dd7bc95e6a3a4ddcc0c29",
+    "ruff.log": "f3248628f03b3d0a928e68546110a114be245447916bd8f99798f084731918b4",
+    "clean.log": "1034a9e4f5116897a86ddb83aa88a566981301372f1bf43c2f95352374e5c081"
+  },
+  "cleanup": "cargo clean PASS; external refs absent; task root removed"
+}
