@@ -108,6 +108,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    RoutingExplain {
+        expected_revision: i64,
+        request_id: u64,
+        target: String,
+    },
     RoutingCatalog {
         processes: bool,
         query: String,
@@ -224,7 +229,8 @@ enum Command {
 impl Command {
     fn routing_request_id(&self) -> Option<u64> {
         match self {
-            Self::EditRouting { request_id, .. }
+            Self::RoutingExplain { request_id, .. }
+            | Self::EditRouting { request_id, .. }
             | Self::RoutingOrder { request_id, .. }
             | Self::RoutingDefault { request_id, .. }
             | Self::RoutingDelete { request_id, .. } => Some(*request_id),
@@ -598,6 +604,8 @@ struct Snapshot {
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
     routing_catalog: serde_json::Value,
+    routing_diagnostics: serde_json::Value,
+    routing_explanation: serde_json::Value,
     routing: crate::editor::Draft,
     language: String,
     preferences_warning: bool,
@@ -652,6 +660,8 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            routing_diagnostics: crate::editor::Draft::default().diagnostics(),
+            routing_explanation: serde_json::Value::Null,
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
             routing_ack: None,
@@ -861,6 +871,8 @@ impl Actor {
             })?;
         self.routing_revision = Some(revision);
         self.state.routing_revision = Some(revision);
+        self.state.routing_diagnostics = candidate.diagnostics();
+        self.state.routing_explanation = serde_json::Value::Null;
         self.state.routing = candidate;
         Ok(())
     }
@@ -922,6 +934,15 @@ impl Actor {
             self.save_routing(candidate).await
         }
         .await;
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.key() == "routing_stale")
+        {
+            self.state.routing_diagnostics =
+                serde_json::json!({"incomplete":true,"stale":true,"warnings":[]});
+            self.state.routing_explanation = serde_json::Value::Null;
+        }
         self.state.routing_ack = Some(RoutingAck {
             request_id,
             saved_id: if result.is_ok() { saved_id } else { None },
@@ -1116,6 +1137,29 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::RoutingExplain {
+                expected_revision,
+                request_id,
+                target,
+            } => {
+                let result = if self.routing_revision == Some(expected_revision) {
+                    self.state.routing.explain(&target).map_err(DesktopError)
+                } else {
+                    Err(DesktopError("routing_stale"))
+                };
+                self.state.routing_explanation = match &result {
+                    Ok(value) => {
+                        serde_json::json!({"revision":expected_revision,"request_id":request_id,"result":value})
+                    }
+                    Err(_) => serde_json::Value::Null,
+                };
+                self.state.routing_ack = Some(RoutingAck {
+                    request_id,
+                    saved_id: None,
+                    error: result.as_ref().err().map(|e| e.key()),
+                });
+                result.map(|_| ())
+            }
             Command::RoutingCatalog {
                 processes,
                 query,
@@ -2390,6 +2434,7 @@ async fn run(
             actor.state.error = Some("routing_storage");
         }
     }
+    actor.state.routing_diagnostics = actor.state.routing.diagnostics();
     actor.state.routing_revision = actor.routing_revision;
     if let Err(error) = actor.reload().await {
         actor.state.command_error(true, error.key());
@@ -3037,6 +3082,23 @@ mod routing_regressions {
     }
     fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
         serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
+    }
+    #[tokio::test]
+    async fn explanation_ack_and_diagnostics_follow_revision() {
+        let (mut actor, lock, path) = fixture().await;
+        send(&mut actor, put(1, 0, 1, true)).await.expect("первое");
+        send(&mut actor, put(2, 1, 2, true)).await.expect("второе");
+        assert_eq!(actor.state.routing_diagnostics["warnings"][0]["rule_id"], 2);
+        send(&mut actor, serde_json::json!({"command":"routing_explain","expected_revision":2,"request_id":3,"target":"192.0.2.1"})).await.expect("расчёт");
+        assert_eq!(actor.state.routing_explanation["revision"], 2);
+        assert_eq!(actor.state.routing_ack.as_ref().expect("ACK").request_id, 3);
+        assert_eq!(send(&mut actor, serde_json::json!({"command":"routing_explain","expected_revision":1,"request_id":4,"target":"192.0.2.1"})).await.expect_err("stale").key(), "routing_stale");
+        assert!(actor.state.routing_explanation.is_null());
+        assert_eq!(actor.state.routing_ack.as_ref().expect("ACK").request_id, 4);
+        assert_eq!(actor.routing_revision, Some(2));
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка fixture");
     }
     #[tokio::test]
     async fn stale_order_and_partial_order_cannot_delete_queued_add() {

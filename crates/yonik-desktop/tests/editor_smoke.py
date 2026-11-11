@@ -29,6 +29,7 @@ def main() -> None:
         ],
     }
     edited = {**expected, "rules": [{**expected["rules"][0], "domains": ["example.net"]}]}
+    final_draft = {**edited, "rules": [{**edited["rules"][0], "id": 2, "enabled": False, "executables": ["/fixture/app"]}, edited["rules"][0]]}
     oversized = "a" * 2000
     acknowledged = {"routingEditor": {"selectedId": 1}, "window": {"routingPending": False}}
     with tempfile.TemporaryDirectory(prefix="yonik-editor-smoke-") as temporary:
@@ -55,7 +56,22 @@ def main() -> None:
                 ui("click", "routingSaveRule"),
                 ui("click", "routingModeButton", when={"routing_revision": 5, "routing": edited}, expect=acknowledged, capture="simple.png"),
                 ui("click", "routingModeButton", capture="advanced.png"),
-                {"when": {"routing": edited, "routing_revision": 5}, "command": {"command": "shutdown"}},
+                ui("text", "routingExplainTarget", value="example.org"),
+                ui("click", "routingExplainButton"),
+                ui("text", "routingExplainTarget", value="192.0.2.1", when={"routing_explanation": {"revision": 5, "request_id": 8, "result": {"status": "unknown", "reason": "dns_witness_missing"}}}),
+                ui("click", "routingExplainButton"),
+
+                ui("click", "routingDuplicate1", when={"routing_explanation": {"revision": 5, "request_id": 9, "result": {"status": "fixture", "action": "Proxy", "origin": "Default"}}}),
+                ui("click", "routingSaveRule"),
+                ui("click", "routingUp2", when={"routing_revision": 6}),
+                ui("key", "routingModeButton", key="Tab", when={"routing_revision": 7}),
+                ui("click", "routingEdit2"),
+                ui("click", "routingModeButton"),
+                ui("text", "routingExecutable", value="/fixture/app", expect={"routingEditor": {"selectedId": 2}}),
+                ui("click", "routingEnabled"),
+                ui("click", "routingSaveRule"),
+                {"when": {"routing_revision": 8, "routing": final_draft, "routing_diagnostics": {"incomplete": False, "warnings": []}}, "command": {"command": "shutdown"}},
+
             ],
             output,
             "1",

@@ -37,6 +37,79 @@ fn action(value: &str) -> Result<Action, &'static str> {
     }
 }
 impl Draft {
+    /// Ограниченный отчёт без исходных селекторов и персональных данных.
+    pub fn diagnostics(&self) -> serde_json::Value {
+        use yonik_domain::policy_diagnostics::{Limits, WarningKind, diagnose};
+        match self
+            .policy()
+            .ok()
+            .and_then(|p| diagnose(&p, Limits::default()).ok())
+        {
+            Some(report) => serde_json::json!({"incomplete": report.truncated,
+                "warnings": report.warnings.iter().map(|w| serde_json::json!({
+                    "rule_id": w.rule_id, "earlier": format!("{:?}", w.earlier),
+                    "kind": match w.kind { WarningKind::Shadowed => "shadowed", WarningKind::PotentialOverlap => "potential_overlap" }
+                })).collect::<Vec<_>>()}),
+            None => {
+                serde_json::json!({"incomplete": true, "warnings": [], "error": "diagnostics_input"})
+            }
+        }
+    }
+    /// Синтетический ввод, не наблюдение потока. DNS и приложение не выдумываются.
+    pub fn explain(&self, target: &str) -> Result<serde_json::Value, &'static str> {
+        use yonik_domain::{
+            Destination, DestinationFlow, Evaluation, EvaluationContext, Resolution,
+        };
+        if target.len() > 253 {
+            return Err("limit");
+        }
+        let policy = self.policy()?;
+        if policy
+            .user_rules
+            .iter()
+            .any(|r| r.enabled && !r.conditions.executables.is_empty())
+        {
+            return Ok(
+                serde_json::json!({"status":"unknown", "reason":"application_witness_missing"}),
+            );
+        }
+        let name;
+        let destination = match target.parse() {
+            Ok(address) => Destination::Ip {
+                address,
+                name: None,
+            },
+            Err(_) => {
+                name = target.parse::<DomainName>().map_err(|_| "domain")?;
+                Destination::Name {
+                    name: &name,
+                    resolution: Resolution::Missing,
+                }
+            }
+        };
+        Ok(
+            match policy.evaluate_destination(
+                &DestinationFlow {
+                    executable: None,
+                    destination,
+                },
+                &EvaluationContext::default(),
+            ) {
+                Evaluation::Decided { .. } if target.parse::<std::net::IpAddr>().is_err() => {
+                    serde_json::json!({"status":"unknown", "reason":"dns_witness_missing"})
+                }
+                Evaluation::Decided { decision, .. } => {
+                    serde_json::json!({"status":"fixture", "action":format!("{:?}", decision.action), "origin":format!("{:?}", decision.origin)})
+                }
+                Evaluation::NeedResolution(_) => {
+                    serde_json::json!({"status":"unknown", "reason":"dns_missing"})
+                }
+                Evaluation::Rejected(_) => {
+                    serde_json::json!({"status":"unknown", "reason":"evaluation_rejected"})
+                }
+            },
+        )
+    }
     pub fn json(&self) -> String {
         serde_json::to_string(self).expect("DTO без fallible полей")
     }
