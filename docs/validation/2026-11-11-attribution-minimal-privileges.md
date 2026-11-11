@@ -1,5 +1,10 @@
 # Executable attribution: admission и отрицательное multiUID доказательство
 
+Fresh follow-up cddfa1c с existing adapter: [production gate](2026-11-11-production-existing-adapter.md).
+Он отдельно подтверждает четыре cases на exact source; старый final FAIL ниже не изменён.
+Там же исправлена причинная атрибуция worker FD fix: source memfd реально mode0777,
+а прежний mode0600 control был условным, не доказательством причины production failure.
+
 База: `95e88474c0b4a18797dc28fa873a4b6b3adf2fa4`. Добавлен отдельный
 `system_profile_policy`, legacy `system_profile` не принимает policy и сохраняет
 прежнюю компиляцию. Положительный FR20 этим изменением **не закрыт**.
@@ -114,7 +119,7 @@ Readlink exe/ReadDir fd. NET_ADMIN не предоставляет ptrace read a
    добавлены. Путь с privileged broker потребует отдельного решения о правах;
    текущий helper с NET_ADMIN не является таким broker.
 
-## Sing-box: stdin defect и неверный выбор adapter в fixture
+## Sing-box: условный stdin control и неверный выбор adapter в fixture
 
 Actual differential proof `stdin-negative-proof.log`: root-owned sealed memfd с
 `{}` и mode0600 не может быть повторно открыт sing-box через `/dev/stdin` от
