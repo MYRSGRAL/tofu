@@ -1,4 +1,4 @@
-"""Закреплённая сборка sing-box с DNS provenance, pin и внешним владением TUN."""
+"""Закреплённые сборки sing-box и Xray без изменения зарегистрированных pins."""
 
 from __future__ import annotations
 
@@ -32,6 +32,9 @@ EXTRA_PATCHES = (
         "external_tun_configuration",
     ),
 )
+XRAY_URL = "https://github.com/XTLS/Xray-core.git"
+XRAY_TAG = "v26.10.31"
+XRAY_COMMIT = "a4a3dff5b20c2faae567b742c172c7b95e75c083"
 LOG = logging.getLogger("yonik.native_adapter")
 COMMAND_TIMEOUT = 180
 BUILD_TIMEOUT = 900
@@ -41,10 +44,27 @@ class BuildError(RuntimeError):
     """Сборка остановлена; оставленные исходники и логи требуют проверки."""
 
 
-def build_arguments(binary: Path, tags: list[str]) -> list[str]:
+def build_arguments(
+    binary: Path, tags: list[str], engine: str = "sing-box"
+) -> list[str]:
+    if engine == "xray":
+        return [
+            "go",
+            "build",
+            "-p=1",
+            "-mod=readonly",
+            "-trimpath",
+            "-buildvcs=false",
+            "-o",
+            str(binary),
+            "./main",
+        ]
+    if engine != "sing-box":
+        raise BuildError("Неизвестное ядро")
     return [
         "go",
         "build",
+        "-p=1",
         "-mod=readonly",
         "-trimpath",
         "-buildvcs=false",
@@ -100,6 +120,7 @@ class Runner:
             GOENV="off",
             GOWORK="off",
             CGO_ENABLED="0",
+            GOMAXPROCS="1",
             GIT_CONFIG_NOSYSTEM="1",
             GIT_CONFIG_GLOBAL=os.devnull,
             GIT_TERMINAL_PROMPT="0",
@@ -168,16 +189,18 @@ class Runner:
         return stdout.read_text(errors="replace")
 
 
-def build(root: Path, output: Path, patch: Path) -> Path:
+def build(root: Path, output: Path, patch: Path, engine: str = "sing-box") -> Path:
     """Собрать один раз; повторный запуск не сбрасывает частичные результаты."""
+    if engine not in {"sing-box", "xray"}:
+        raise BuildError("Неизвестное ядро")
     root = root.resolve()
     output = output.resolve()
     patch = patch.resolve(strict=True)
-    if sha256(patch) != sha256(DEFAULT_PATCH):
+    if engine == "sing-box" and sha256(patch) != sha256(DEFAULT_PATCH):
         raise BuildError("Требуется канонический strict_complete_dns patch")
     if output.is_relative_to(root) or output.is_relative_to(TRANSIENT):
         raise BuildError("--output-dir должен быть вне transient/build root")
-    if any((output / name).exists() for name in ("sing-box", "manifest.json")):
+    if any((output / name).exists() for name in (engine, "manifest.json")):
         raise BuildError(
             "В --output-dir уже есть binary/manifest; перезапись запрещена"
         )
@@ -187,14 +210,22 @@ def build(root: Path, output: Path, patch: Path) -> Path:
     descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_SH)
-        return build_locked(root, output, patch)
+        return build_locked(root, output, patch, engine)
     finally:
         os.close(descriptor)
 
 
-def build_locked(root: Path, output: Path, patch: Path) -> Path:
+def build_locked(
+    root: Path, output: Path, patch: Path, engine: str = "sing-box"
+) -> Path:
+    source_url, source_tag, source_commit = (
+        (XRAY_URL, XRAY_TAG, XRAY_COMMIT)
+        if engine == "xray"
+        else (SOURCE_URL, SOURCE_TAG, SOURCE_COMMIT)
+    )
+    source_version = source_tag.removeprefix("v")
     runner = Runner(root)
-    source = root / "build-source-sing-box"
+    source = root / f"build-source-{engine}"
     if source.is_symlink():
         raise BuildError(f"Исходник не должен быть symlink: {source}")
     if not source.exists():
@@ -204,24 +235,26 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
                 "clone",
                 "--depth=1",
                 "--branch",
-                SOURCE_TAG,
+                source_tag,
                 "--",
-                SOURCE_URL,
+                source_url,
                 str(source),
             ],
             root,
         )
     head = runner.run(["git", "rev-parse", "HEAD"], source).strip()
-    tag = runner.run(["git", "rev-parse", f"{SOURCE_TAG}^{{commit}}"], source).strip()
-    if head != SOURCE_COMMIT or tag != SOURCE_COMMIT:
-        raise BuildError(f"Неверный HEAD/tag: ожидался {SOURCE_COMMIT}, HEAD={head}")
+    tag = runner.run(["git", "rev-parse", f"{source_tag}^{{commit}}"], source).strip()
+    if head != source_commit or tag != source_commit:
+        raise BuildError(f"Неверный HEAD/tag: ожидался {source_commit}, HEAD={head}")
     dirty = runner.run(
         ["git", "status", "--porcelain", "--untracked-files=all", "--ignored"], source
     )
     if dirty.strip():
         raise BuildError(f"Исходник должен быть чистым: {source}")
     modules = {name: sha256(source / name) for name in ("go.mod", "go.sum")}
-    patches = [(patch, "strict_complete_dns"), *EXTRA_PATCHES]
+    patches = (
+        [(patch, "strict_complete_dns"), *EXTRA_PATCHES] if engine == "sing-box" else []
+    )
     patch_records = []
     for index, (path, feature) in enumerate(patches):
         path = path.resolve(strict=True)
@@ -239,18 +272,44 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
                 "feature": feature,
             }
         )
-    raw_tags = (source / "release/DEFAULT_BUILD_TAGS_OTHERS").read_text().strip()
-    tags = re.split(r"[,\s]+", raw_tags)
-    if not raw_tags or any(not re.fullmatch(r"[A-Za-z0-9_]+", tag) for tag in tags):
+    raw_tags = (
+        (source / "release/DEFAULT_BUILD_TAGS_OTHERS").read_text().strip()
+        if engine == "sing-box"
+        else ""
+    )
+    tags = re.split(r"[,\s]+", raw_tags) if raw_tags else []
+    if engine == "sing-box" and (
+        not raw_tags or any(not re.fullmatch(r"[A-Za-z0-9_]+", tag) for tag in tags)
+    ):
         raise BuildError("Некорректные upstream build tags")
     go_version = runner.run(["go", "version"], source).strip()
     go_env = json.loads(
         runner.run(["go", "env", "-json", "GOOS", "GOARCH", "GOEXPERIMENT"], source)
     )
-    binary = root / "build-native-adapter-sing-box"
+    binary = root / f"build-native-adapter-{engine}"
     if binary.exists() or binary.is_symlink():
         raise BuildError(f"Обнаружен предыдущий бинарник: {binary}")
-    args = build_arguments(binary, tags)
+    args = build_arguments(binary, tags, engine)
+    prebuild = {
+        "builder_sha256": sha256(Path(__file__)),
+        "engine": engine,
+        "source_url": source_url,
+        "source_tag": source_tag,
+        "source_commit": head,
+        "patches": patch_records,
+        "module_sha256": modules,
+        "go_version": go_version,
+        "go_env": go_env,
+        "build_args": args,
+        "build_environment": {
+            key: runner.env[key]
+            for key in ("GOTOOLCHAIN", "GOENV", "GOWORK", "CGO_ENABLED", "GOMAXPROCS")
+        },
+        "native_protocol": None,
+    }
+    (runner.logs / "prebuild.json").write_text(
+        json.dumps(prebuild, ensure_ascii=False, indent=2) + "\n"
+    )
     try:
         runner.run(args, source)
     finally:
@@ -264,22 +323,28 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
     if not binary.is_file() or binary.is_symlink():
         raise BuildError("Go не создал ожидаемый бинарник")
     version = runner.run([str(binary), "version"], source).splitlines()
-    if not version or version[0].strip() != f"sing-box version {SOURCE_VERSION}":
-        raise BuildError("Бинарник не подтверждает закреплённую версию sing-box")
+    if not version or (
+        version[0].strip() != f"sing-box version {source_version}"
+        if engine == "sing-box"
+        else not version[0].startswith(f"Xray {source_version} (")
+    ):
+        raise BuildError("Бинарник не подтверждает закреплённую версию ядра")
     manifest = {
-        "engine": "sing-box",
-        "engine_version": SOURCE_VERSION,
-        "source_url": SOURCE_URL,
-        "source_tag": SOURCE_TAG,
+        "prebuild_sha256": sha256(runner.logs / "prebuild.json"),
+        "native_protocol": None,
+        "engine": engine,
+        "engine_version": source_version,
+        "source_url": source_url,
+        "source_tag": source_tag,
         "source_commit": head,
-        "patch_sha256": patch_records[0]["sha256"],
+        "patch_sha256": patch_records[0]["sha256"] if patch_records else None,
         "patches": patch_records,
         "binary_sha256": sha256(binary),
         "go_version": go_version,
         "go_env": go_env,
         "build_environment": {
             key: runner.env[key]
-            for key in ("GOTOOLCHAIN", "GOENV", "GOWORK", "CGO_ENABLED")
+            for key in ("GOTOOLCHAIN", "GOENV", "GOWORK", "CGO_ENABLED", "GOMAXPROCS")
         },
         "build_tags": tags,
         "build_args": args,
@@ -290,7 +355,7 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
         "bit_reproducibility_verified": False,
     }
     output.mkdir(parents=True, exist_ok=True)
-    destination = output / "sing-box"
+    destination = output / engine
     with binary.open("rb") as incoming, destination.open("xb") as outgoing:
         shutil.copyfileobj(incoming, outgoing)
     destination.chmod(0o755)
@@ -304,6 +369,7 @@ def build_locked(root: Path, output: Path, patch: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--engine", choices=("sing-box", "xray"), default="sing-box")
     parser.add_argument("--build-root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--patch", type=Path, default=DEFAULT_PATCH)
@@ -315,7 +381,9 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, terminate)
     try:
-        manifest = build(options.build_root, options.output_dir, options.patch)
+        manifest = build(
+            options.build_root, options.output_dir, options.patch, options.engine
+        )
     except (BuildError, OSError, ValueError) as error:
         LOG.error("Сборка остановлена: %s", error)
         return 1

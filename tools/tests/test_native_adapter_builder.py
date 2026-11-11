@@ -77,6 +77,10 @@ class BuilderTests(unittest.TestCase):
         if argv[:2] == ["go", "env"]:
             return json.dumps({"GOOS": "linux", "GOARCH": "amd64", "GOEXPERIMENT": ""})
         if argv[:2] == ["go", "build"]:
+            prebuild = json.loads((runner.logs / "prebuild.json").read_text())
+            self.assertEqual(prebuild["build_args"], argv)
+            self.assertEqual(prebuild["build_environment"]["GOMAXPROCS"], "1")
+            self.assertIsNone(prebuild["native_protocol"])
             if self.fail_go:
                 raise builder.BuildError("Go завершился с ошибкой")
             if self.modify_module:
@@ -96,6 +100,40 @@ class BuilderTests(unittest.TestCase):
             ),
         ):
             return builder.build(self.root, self.output, self.patch_file)
+
+    def test_xray_build_is_pinned_and_claims_no_unimplemented_features(self) -> None:
+        self.source = self.root / "build-source-xray"
+        self.source.mkdir()
+        (self.source / "go.mod").write_text("module github.com/xtls/xray-core\n")
+        (self.source / "go.sum").write_text("fixture\n")
+        self.head = builder.XRAY_COMMIT
+        original = self.fake_run
+
+        def run(runner: builder.Runner, argv: list[str], cwd: Path) -> str:
+            if argv[:2] == ["git", "rev-parse"]:
+                original(runner, ["git", "status"], cwd)
+                return builder.XRAY_COMMIT + "\n"
+            if len(argv) == 2 and argv[1] == "version":
+                return "Xray 26.10.31 (Xray, Penetrates Everything.) fixture\n"
+            return original(runner, argv, cwd)
+
+        with patch.object(builder.Runner, "run", autospec=True, side_effect=run):
+            result = builder.build(self.root, self.output, self.patch_file, "xray")
+        manifest = json.loads(result.read_text())
+        self.assertEqual(manifest["source_commit"], builder.XRAY_COMMIT)
+        self.assertEqual(manifest["adapter_features"], {})
+        self.assertEqual(manifest["patches"], [])
+        self.assertIsNone(manifest["patch_sha256"])
+        self.assertTrue((self.output / "xray").is_file())
+        command = next(argv for argv in self.commands if argv[:2] == ["go", "build"])
+        self.assertIn("-p=1", command)
+        self.assertEqual(command[-1], "./main")
+        self.assertFalse(any(argv[:2] == ["git", "apply"] for argv in self.commands))
+
+    def test_unknown_engine_is_rejected_before_commands(self) -> None:
+        with self.assertRaises(builder.BuildError):
+            builder.build(self.root, self.output, self.patch_file, "other")
+        self.assertFalse(self.commands)
 
     def test_unknown_patch_cannot_claim_strict_complete_feature(self) -> None:
         self.patch_file.write_text("unrelated README-only patch")
