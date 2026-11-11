@@ -1,5 +1,5 @@
 {
-  "catalog_version": 1,
+  "catalog_version": 2,
   "schema_version": 1,
   "messages": [
     {
@@ -591,6 +591,22 @@
       "message_key": "catalog",
       "ru": "Не удалось прочитать каталог приложений.",
       "en": "Could not read the application catalog.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "ACTION",
+      "message_key": "action",
+      "ru": "Недопустимое действие правила маршрутизации.",
+      "en": "Invalid routing rule action.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "FORMAT",
+      "message_key": "format",
+      "ru": "Некорректный формат черновика маршрутизации.",
+      "en": "Invalid routing draft format.",
       "stage": "operation",
       "retryable": false
     }
