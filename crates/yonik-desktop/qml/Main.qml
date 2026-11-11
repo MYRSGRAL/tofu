@@ -924,6 +924,13 @@ ApplicationWindow {
                     PlainLabel { text: window.tr("Локальный SOCKS5", "Local SOCKS5") }
                     HelpButton { explanation: window.tr("Настройте прокси в нужном приложении. Системный VPN, TUN, DNS/Fake-IP и kill switch пока недоступны: трафик всей системы не перенаправляется.", "Configure the proxy in your application. System VPN, TUN, DNS/Fake-IP and kill switch are unavailable: system-wide traffic is not redirected.") }
                 }
+                PlainLabel { text: window.tr("DNS для обновлений через Proxy", "DNS for Proxy updates") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Укажите IP:порт или [IPv6]:порт DNS-over-TCP сервера. Он используется через активное SOCKS-подключение только для обновлений подписок в режиме Proxy. Пустое значение запрещает DNS для доменных адресов. Настройки DNS ОС и ядра не меняются. Изменение доступно после отключения.", "Enter IP:port or [IPv6]:port of a DNS-over-TCP server. Subscription updates in Proxy mode use it through the active SOCKS connection. Empty disables domain DNS. OS and core DNS settings are unchanged. Disconnect before editing.") }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField { id: proxyFetchDns; objectName: "proxyFetchDns"; Layout.fillWidth: true; maximumLength: 128; text: window.state.proxy_fetch_dns || ""; enabled: window.editable && !window.state.can_stop; Accessible.name: window.tr("DNS обновлений Proxy", "Proxy update DNS") }
+                    ActionButton { objectName: "saveProxyFetchDns"; text: window.tr("Сохранить", "Save"); enabled: window.editable && !window.state.can_stop; onClicked: window.send({command: "set_proxy_fetch_dns", upstream: proxyFetchDns.text}) }
+                }
                 PlainLabel { text: window.tr("Адрес прокси", "Proxy address") }
                 RowLayout {
                     Layout.fillWidth: true
