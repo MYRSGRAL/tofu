@@ -121,6 +121,9 @@ class BuilderTests(unittest.TestCase):
             result = builder.build(self.root, self.output, self.patch_file, "xray")
         manifest = json.loads(result.read_text())
         self.assertEqual(manifest["source_commit"], builder.XRAY_COMMIT)
+        self.assertEqual(
+            manifest["prebuild_sha256"], builder.sha256(self.output / "prebuild.json")
+        )
         self.assertEqual(manifest["adapter_features"], {})
         self.assertEqual(manifest["patches"], [])
         self.assertIsNone(manifest["patch_sha256"])

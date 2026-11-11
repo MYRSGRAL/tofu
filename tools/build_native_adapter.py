@@ -200,7 +200,9 @@ def build(root: Path, output: Path, patch: Path, engine: str = "sing-box") -> Pa
         raise BuildError("Требуется канонический strict_complete_dns patch")
     if output.is_relative_to(root) or output.is_relative_to(TRANSIENT):
         raise BuildError("--output-dir должен быть вне transient/build root")
-    if any((output / name).exists() for name in (engine, "manifest.json")):
+    if any(
+        (output / name).exists() for name in (engine, "manifest.json", "prebuild.json")
+    ):
         raise BuildError(
             "В --output-dir уже есть binary/manifest; перезапись запрещена"
         )
@@ -361,6 +363,8 @@ def build_locked(
     destination.chmod(0o755)
     if sha256(destination) != manifest["binary_sha256"]:
         raise BuildError("SHA256 опубликованного бинарника не совпал")
+    with (output / "prebuild.json").open("xb") as stream:
+        stream.write((runner.logs / "prebuild.json").read_bytes())
     manifest_path = output / "manifest.json"
     with manifest_path.open("x") as stream:
         stream.write(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
