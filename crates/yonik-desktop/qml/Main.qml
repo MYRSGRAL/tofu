@@ -140,7 +140,9 @@ ApplicationWindow {
             if (next && Object.keys(next).length === 0) return
             if (next && typeof next.error === "string" && !Array.isArray(next.sources) && !Array.isArray(next.profiles)) {
                 if (commandContext === "routing") completeRouting({request_id: routingRequestId, error: next.error, saved_id: null})
-                state = Object.assign({}, state, commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error})
+                const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
+                if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
+                state = Object.assign({}, state, update)
                 parseError = ""
                 return
             }
@@ -1025,6 +1027,7 @@ ApplicationWindow {
             objectName: "diagnosticsScroll"
             ColumnLayout {
                 width: diagnosticsScroll.availableWidth; spacing: 14
+                LogsView { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en"; response: window.state.logs || null }
                 DiagnosticsExport { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en" }
                 PlainLabel { Layout.fillWidth: true; visible: !!window.connectionError || !!window.parseError; color: "#e6bc83"; text: window.parseError || (window.connectionError ? window.errorText(window.connectionError) : "") }
                     Rectangle {

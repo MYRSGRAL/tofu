@@ -9,6 +9,7 @@
 pub mod firewall;
 pub mod nft;
 mod policy_state;
+pub mod private_bindings;
 mod session_state;
 mod storage;
 pub mod tun;
