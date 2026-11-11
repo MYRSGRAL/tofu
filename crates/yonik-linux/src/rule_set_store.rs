@@ -484,12 +484,23 @@ impl EncryptedRuleSetStore {
     /// Категории не пересекаются: active/quarantine имеет приоритет перед current.
     pub fn reservations(&self) -> io::Result<PhysicalReservations> {
         let leases = self.inner.leases.lock().map_err(|_| bad())?;
-        let active: std::collections::HashSet<_> =
-            leases.values().flatten().map(Descriptor::name).collect();
-        let current: std::collections::HashSet<_> =
-            self.state.current.iter().map(Descriptor::name).collect();
-        let previous: std::collections::HashSet<_> =
-            self.state.previous.iter().map(Descriptor::name).collect();
+        let active: std::collections::HashSet<_> = leases
+            .values()
+            .flatten()
+            .flat_map(|d| [d.name(), canonical_store::source_name(d)])
+            .collect();
+        let current: std::collections::HashSet<_> = self
+            .state
+            .current
+            .iter()
+            .flat_map(|d| [d.name(), canonical_store::source_name(d)])
+            .collect();
+        let previous: std::collections::HashSet<_> = self
+            .state
+            .previous
+            .iter()
+            .flat_map(|d| [d.name(), canonical_store::source_name(d)])
+            .collect();
         let mut result = PhysicalReservations::default();
         let mut count = 0;
         for entry in std::fs::read_dir(format!("/proc/self/fd/{}", self.inner.root.as_raw_fd()))? {
@@ -672,6 +683,10 @@ mod idempotency_tests {
     }
 }
 
+#[path = "canonical_store.rs"]
+mod canonical_store;
+
+pub use canonical_store::CanonicalSources;
 #[cfg(test)]
 mod inventory_boundary_tests {
     use super::*;

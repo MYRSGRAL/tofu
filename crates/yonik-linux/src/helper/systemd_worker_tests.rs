@@ -660,3 +660,30 @@ async fn copy_reservation_survives_cancel_and_populated_cgroup_until_empty() {
         .unwrap();
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn private_asset_mount_requires_bounded_controlled_tmpfs_options() {
+    let mut p = Properties::new();
+    for options in [
+        "rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=128",
+        "size=67108864,mode=01777,nr_inodes=128,noexec,nodev,nosuid,rw",
+    ] {
+        p.insert(
+            "TemporaryFileSystem".into(),
+            value(vec![("/dev/shm".to_owned(), options.to_owned())]),
+        );
+        assert!(validate_private_assets(&p).is_ok());
+    }
+    for options in [
+        "rw,nosuid,nodev,noexec,mode=1777",
+        "rw,nosuid,nodev,noexec,mode=1777,size=128M,nr_inodes=128",
+        "rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=129",
+        "rw,nosuid,nodev,exec,mode=1777,size=64M,nr_inodes=128",
+    ] {
+        p.insert(
+            "TemporaryFileSystem".into(),
+            value(vec![("/dev/shm".to_owned(), options.to_owned())]),
+        );
+        assert!(validate_private_assets(&p).is_err());
+    }
+}
