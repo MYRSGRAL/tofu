@@ -799,7 +799,7 @@ ApplicationWindow {
             sendCommand: function(command) { window.send(command) }
             errorText: function(key) { return window.errorText(key) }
             english: window.language === "en"
-            available: window.state.maintenance_available === true
+            available: window.state.maintenance_available === true && window.editable
             revision: window.state.revision || 0
             response: window.state.maintenance_ack || null
         }

@@ -86,6 +86,7 @@ ColumnLayout {
         onAccepted: {
             root.sourcePath = root.localPath(selectedFile)
             if (root.sourcePath) destination.open()
+            else root.feedback = root.errorText("invalid_input")
         }
     }
     FileDialog {
@@ -95,7 +96,8 @@ ColumnLayout {
         fileMode: FileDialog.SaveFile
         onAccepted: {
             root.destinationPath = root.localPath(selectedFile)
-            root.submit()
+            if (root.destinationPath) root.submit()
+            else root.feedback = root.errorText("invalid_input")
         }
     }
 }

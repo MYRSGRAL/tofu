@@ -44,3 +44,43 @@ async fn lease_reopens_authoritative_repository_after_handles_close() {
     }
     fs::remove_dir(directory).expect("очистка каталога fixture");
 }
+
+#[tokio::test]
+async fn cancelled_copy_preserves_source_and_does_not_publish() {
+    let directory =
+        std::env::temp_dir().join(format!("yonik-maintenance-cancel-{}", std::process::id()));
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .expect("fixture");
+    let path = directory.join("source.sqlite");
+    let destination = directory.join("new.sqlite");
+    let repository = EncryptedSubscriptionRepository::open(path.clone(), Zeroizing::new([47; 32]))
+        .await
+        .expect("БД");
+    let access = repository.maintenance_access().await.expect("lease");
+    repository.close().await.expect("закрытие");
+    let before = fs::read(&path).expect("исходник");
+    let control = yonik_linux::MaintenanceControl::default();
+    control.cancel();
+    assert_eq!(
+        access.copy_closed(None, destination.clone(), control).await,
+        Err(yonik_linux::MaintenanceError::Cancelled)
+    );
+    assert!(!destination.exists());
+    assert_eq!(fs::read(&path).expect("исходник"), before);
+    let control = yonik_linux::MaintenanceControl::default();
+    assert_eq!(
+        access
+            .copy_closed(None, destination.clone(), control.clone())
+            .await,
+        Ok(())
+    );
+    control.cancel();
+    assert!(destination.exists());
+    drop(access);
+    for entry in fs::read_dir(&directory).expect("fixture") {
+        fs::remove_file(entry.expect("файл").path()).expect("очистка");
+    }
+    fs::remove_dir(directory).expect("очистка");
+}

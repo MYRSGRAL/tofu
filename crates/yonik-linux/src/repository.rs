@@ -2,7 +2,7 @@
 
 mod backup;
 mod maintenance;
-pub use maintenance::MaintenanceAccess;
+pub use maintenance::{MaintenanceAccess, MaintenanceControl, MaintenanceError};
 mod batch_targets;
 #[cfg(test)]
 mod cancellation_tests;
