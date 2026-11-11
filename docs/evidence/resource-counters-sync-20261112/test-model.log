@@ -1,0 +1,34 @@
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.19
+   Compiling serde_json v1.0.154
+   Compiling serde v1.0.229
+   Compiling ui-bench-model v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-478b7d20-733c6cc0175ca8eb/bench/ui/model)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.96s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/pr108-sync-20261112/target/debug/deps/ui_bench_model-d83f3e85c241e698)
+
+running 8 tests
+test tests::hash_known_row_and_mutation ... ok
+test tests::report_contains_core_fields_and_propagates_io_errors ... ok
+{"event":"error","error":"invalid_input"}
+{"event":"error","error":"invalid_input"}
+{"event":"error","error":"invalid_input"}
+{"event":"error","error":"invalid_input"}
+test tests::favorite_filter_hash_and_selection_stay_consistent ... ok
+test tests::input_is_bounded_and_rejects_invalid_commands ... ok
+test tests::quit_cancels_actor_without_stdin_join ... ok
+test tests::search_casefold_and_sort_preserve_ids ... ok
+test tests::deterministic_dataset_and_page_boundaries ... ok
+{"event":"error","error":"invalid_input"}
+{"event":"error","error":"invalid_input"}
+test tests::dataset_limit_and_invalid_input_end_actor ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+   Doc-tests ui_bench_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

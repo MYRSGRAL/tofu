@@ -1,0 +1,13 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling syn v3.0.10
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling serde_derive v1.0.229
+    Checking itoa v1.0.19
+    Checking memchr v2.8.3
+    Checking ui-bench-model v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-478b7d20-733c6cc0175ca8eb/bench/ui/model)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.37s
