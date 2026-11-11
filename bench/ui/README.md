@@ -16,8 +16,9 @@ CXX-Qt нужен совместимый linker: lld/gold/mold вместо GNU 
 ```sh
 mkdir -p /var/tmp/codex-myrs/transient/yonik-ui-comparison
 flock -s /var/tmp/codex-myrs/transient/yonik-ui-comparison \
+  /home/myrs/projects/yonik/local/orchestration/with-rust-slot \
   env CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/yonik-ui-comparison/target \
-  CARGO_BUILD_JOBS=2 cargo +1.97.0 build --manifest-path bench/ui/Cargo.toml \
+  CARGO_BUILD_JOBS=1 cargo +1.97.0 build --manifest-path bench/ui/Cargo.toml \
   --release --bins --locked
 ```
 
@@ -36,3 +37,25 @@ fractional HiDPI, clipboard, tray и connected-idle с engine baseline.
 
 Варианты внешнего вида независимо от toolkit находятся в
 [design/ui-variants.html](../../design/ui-variants.html).
+
+## Воспроизводимый запуск
+
+`check-offscreen.py --artifacts /каталог --output /новый/каталог` проверяет хеши
+бинарников из manifest.json и тот же JSONL-сценарий на 1000/10000 строках через
+независимый oracle драйвера. Desktop display исключён из окружения дочерних
+процессов. Qt использует software/offscreen; GTK — headless, если он поддержан
+системной библиотекой. Slint сохраняет выбранный winit/OpenGL backend. Отказ
+backend — сохранённый blocker, а не успешная проверка. Idle и ресурсные
+сравнения эта команда не выполняет.
+
+`bash bench/ui/run-comparison.sh /каталог/артефактов /новый/каталог/результатов`
+проверяет ScreenSaver и SHA-256, затем запускает кандидатов последовательно:
+три повтора × два размера × три toolkit. Каждый прогон ограничен GNU timeout
+2100 секундами, после TERM даётся 10 секунд на cleanup. Общее верхнее время
+18 × 2110 секунд (около 10 ч 33 мин), обычные idle-фазы занимают около 9 часов.
+Ошибка останавливает серию; частичные результаты не перезаписываются.
+Нужна активная разблокированная Wayland-сессия и корректный XDG_SESSION_ID;
+команда не меняет блокировку, suspend или профиль питания. При автоблокировке
+драйвер прервёт visible idle. Три повтора — повторные process startup, без
+обещания холодного файлового кеша. Это только стоимость synthetic UI процесса,
+без controller/tray/engine baseline и аппаратной энергии, не закрытие G-POWER.
