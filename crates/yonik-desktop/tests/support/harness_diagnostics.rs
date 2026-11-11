@@ -20,6 +20,7 @@ struct State {
     command: Value,
     snapshot: Value,
     received: u64,
+    startup_phase: Option<String>,
 }
 fn project(value: &Value) -> Value {
     let mut result = serde_json::Map::new();
@@ -120,6 +121,10 @@ impl Trace {
             state: Mutex::new(State::default()),
         }
     }
+    #[cfg(feature = "startup-diagnostics")]
+    pub(super) fn startup(&self, phase: yonik_desktop::StartupPhase) {
+        self.state.lock().unwrap().startup_phase = Some(format!("{phase:?}"));
+    }
     pub(super) fn snapshot(&self, value: &Value) {
         let mut state = self.state.lock().unwrap();
         state.snapshot = project(value);
@@ -172,7 +177,7 @@ impl Trace {
         let state = self.state.lock().unwrap();
         let diagnostic = json!({"event":"yonik_harness_wait_failed", "pid":std::process::id(), "harness":self.id,
             "wait_file":caller.file(),"wait_line":caller.line(), "wait_column":caller.column(), "elapsed_ms":elapsed.as_millis(),
-            "receive_error":format!("{error:?}"), "received":state.received,"last_command":state.command,"last_snapshot":state.snapshot});
+            "startup_phase":state.startup_phase, "receive_error":format!("{error:?}"), "received":state.received,"last_command":state.command,"last_snapshot":state.snapshot});
         panic!("snapshot до deadline: {diagnostic}");
     }
 }
@@ -191,6 +196,8 @@ fn diagnostic_excludes_private_snapshot_and_command_fields() {
 #[test]
 fn timeout_reports_wait_site_and_safe_last_state() {
     let trace = Trace::new();
+    #[cfg(feature = "startup-diagnostics")]
+    trace.startup(yonik_desktop::StartupPhase::RepositoryOpen);
     trace.snapshot(
         &json!({"ready":false,"busy":false,"error":"storage","source_name":"CANARY_PRIVATE"}),
     );
@@ -208,6 +215,8 @@ fn timeout_reports_wait_site_and_safe_last_state() {
     assert!(text.contains("last_snapshot"));
     assert!(text.contains("storage"));
     assert!(text.contains("wait_line"));
+    #[cfg(feature = "startup-diagnostics")]
+    assert!(text.contains("RepositoryOpen"));
     assert!(text.contains("add_source"));
     assert!(!text.contains("CANARY_PRIVATE"));
 }

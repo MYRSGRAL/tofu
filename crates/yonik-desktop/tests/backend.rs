@@ -78,7 +78,7 @@ pub(crate) struct Harness {
     pub(crate) host: DesktopHost,
     receiver: mpsc::Receiver<String>,
     snapshots: Vec<String>,
-    diagnostic: harness_diagnostics::Trace,
+    diagnostic: Arc<harness_diagnostics::Trace>,
 }
 impl Harness {
     pub(crate) fn new(config: HostConfig) -> Self {
@@ -88,7 +88,12 @@ impl Harness {
         config: HostConfig,
         hook: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
-        let diagnostic = harness_diagnostics::Trace::new();
+        let diagnostic = std::sync::Arc::new(harness_diagnostics::Trace::new());
+        #[cfg(feature = "startup-diagnostics")]
+        let config = {
+            let trace = diagnostic.clone();
+            config.with_startup_observer(move |phase| trace.startup(phase))
+        };
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
             let _ = sender.send(value.clone());
