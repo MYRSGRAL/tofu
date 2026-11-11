@@ -83,3 +83,6 @@ pub mod system_client;
 
 #[cfg(target_os = "linux")]
 pub mod event_log;
+
+#[cfg(target_os = "linux")]
+pub mod rule_set_custody;
