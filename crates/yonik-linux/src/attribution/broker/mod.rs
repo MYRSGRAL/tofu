@@ -12,12 +12,18 @@ use std::{
         fd::{AsRawFd, OwnedFd},
         unix::fs::MetadataExt,
     },
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 mod kernel;
 
 pub const FRAME_BYTES: usize = 136;
+const CACHE_ENTRIES: usize = 64;
+const MAX_SOCKET_BUFFER: usize = 256 * 1024;
 pub const DEADLINE: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +34,11 @@ pub enum Unavailable {
     Timeout,
     Malformed,
     Revoked,
+    Cancelled,
+    ReceiveOverflow,
+    AmbiguousSocket,
+    WorkerViewUnavailable,
+    Disconnected,
 }
 #[derive(Debug)]
 pub enum Lookup {
@@ -38,6 +49,8 @@ pub enum Lookup {
 #[derive(Debug)]
 pub struct OwnerSnapshot {
     socket_inode: u64,
+    task_id: u32,
+    task_start: u64,
     socket_fd: u32,
     pub pidfd: OwnedFd,
     pub executable_fd: fs::File,
@@ -116,6 +129,12 @@ impl Process {
         p.validate()?;
         Ok(p)
     }
+    fn accept_credentials(&self, c: rustix::net::UCred) -> Result<(), Unavailable> {
+        if c.pid.as_raw_pid() as u32 != self.pid || c.uid.as_raw() != self.uid {
+            return Err(Unavailable::Authority);
+        }
+        Ok(())
+    }
     fn validate(&self) -> Result<(), Unavailable> {
         let info = bounded(&format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))?;
         let pid = info.lines().find_map(|s| {
@@ -136,6 +155,65 @@ impl Process {
     }
 }
 
+fn receive_frame(
+    socket: &OwnedFd,
+) -> Result<([u8; FRAME_BYTES + 1], rustix::net::UCred), Unavailable> {
+    if rustix::net::sockopt::socket_type(socket).map_err(|_| Unavailable::Authority)?
+        != rustix::net::SocketType::SEQPACKET
+        || rustix::net::sockopt::socket_domain(socket).map_err(|_| Unavailable::Authority)?
+            != rustix::net::AddressFamily::UNIX
+    {
+        return Err(Unavailable::Authority);
+    }
+    if rustix::net::sockopt::socket_recv_buffer_size(socket).map_err(|_| Unavailable::Coverage)?
+        > MAX_SOCKET_BUFFER
+        || rustix::net::sockopt::socket_send_buffer_size(socket)
+            .map_err(|_| Unavailable::Coverage)?
+            > MAX_SOCKET_BUFFER
+    {
+        return Err(Unavailable::Limit);
+    }
+    if !rustix::net::sockopt::socket_passcred(socket).map_err(|_| Unavailable::Authority)? {
+        return Err(Unavailable::Authority);
+    }
+    let mut bytes = [0; FRAME_BYTES + 1];
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmCredentials(1), ScmRights(1))];
+    let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+    let msg = recvmsg(
+        socket,
+        &mut [IoSliceMut::new(&mut bytes)],
+        &mut ancillary,
+        RecvFlags::CMSG_CLOEXEC | RecvFlags::DONTWAIT,
+    )
+    .map_err(|e| {
+        if e == rustix::io::Errno::AGAIN {
+            Unavailable::Timeout
+        } else {
+            Unavailable::Coverage
+        }
+    })?;
+    let mut credentials = None;
+    for message in ancillary.drain() {
+        match message {
+            RecvAncillaryMessage::ScmCredentials(c) if credentials.is_none() => {
+                credentials = Some(c)
+            }
+            _ => return Err(Unavailable::Malformed),
+        }
+    }
+    if msg.bytes == 0 {
+        return Err(Unavailable::Disconnected);
+    }
+    if msg
+        .flags
+        .intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC)
+        || msg.bytes != FRAME_BYTES
+    {
+        return Err(Unavailable::Malformed);
+    }
+    Ok((bytes, credentials.ok_or(Unavailable::Authority)?))
+}
+
 /// Не Deserialize: worker PID и UID никогда не берутся из запроса.
 pub struct TrustedContext {
     worker: Process,
@@ -144,6 +222,7 @@ pub struct TrustedContext {
     nonce: [u8; 32],
     digest: [u8; 32],
     revoked: bool,
+    cancelled: Arc<AtomicBool>,
 }
 impl TrustedContext {
     pub fn from_host(
@@ -158,16 +237,35 @@ impl TrustedContext {
             return Err(Unavailable::Authority);
         }
         Ok(Self {
-            worker: Process::capture(worker_pid, worker_uid)?,
+            worker: Process::capture(worker_pid, worker_uid).map_err(|e| {
+                if e == Unavailable::Coverage {
+                    Unavailable::WorkerViewUnavailable
+                } else {
+                    e
+                }
+            })?,
             target_uid,
             epoch,
             nonce,
             digest,
             revoked: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
         })
     }
     pub fn revoke(&mut self) {
         self.revoked = true;
+    }
+}
+
+/// Отмена доступна другому потоку, необратима для текущего epoch.
+#[derive(Clone)]
+pub struct Cancellation(Arc<AtomicBool>);
+impl Cancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -205,67 +303,52 @@ impl Broker {
             last_cold: None,
         })
     }
+    pub fn cancellation(&self) -> Cancellation {
+        Cancellation(Arc::clone(&self.context.cancelled))
+    }
     pub fn revoke(&mut self) {
         self.context.revoke();
+        self.context.cancelled.store(true, Ordering::Release);
         self.cache.clear();
     }
     /// Ровно один bounded receive, без очереди задач и background scans.
     /// SO_PASSCRED включается до передачи endpoint отправителю.
-    pub fn receive(&self, socket: &OwnedFd) -> Result<Flow, Unavailable> {
+    pub fn receive(&mut self, socket: &OwnedFd) -> Result<Flow, Unavailable> {
+        let result = self.receive_inner(socket);
+        if let Err(reason) = result {
+            if reason != Unavailable::Timeout {
+                self.cache.clear();
+            }
+            if matches!(
+                reason,
+                Unavailable::Authority | Unavailable::Coverage | Unavailable::WorkerViewUnavailable
+            ) {
+                self.revoke();
+            }
+        }
+        result
+    }
+    fn receive_inner(&mut self, socket: &OwnedFd) -> Result<Flow, Unavailable> {
         if self.context.revoked {
             return Err(Unavailable::Revoked);
         }
-        self.context.worker.validate()?;
-        if rustix::net::sockopt::socket_type(socket).map_err(|_| Unavailable::Authority)?
-            != rustix::net::SocketType::SEQPACKET
-            || rustix::net::sockopt::socket_domain(socket).map_err(|_| Unavailable::Authority)?
-                != rustix::net::AddressFamily::UNIX
-        {
-            return Err(Unavailable::Authority);
-        }
-        if !rustix::net::sockopt::socket_passcred(socket).map_err(|_| Unavailable::Authority)? {
-            return Err(Unavailable::Authority);
-        }
-        let mut bytes = [0; FRAME_BYTES + 1];
-        let mut space =
-            [MaybeUninit::uninit(); rustix::cmsg_space!(ScmCredentials(1), ScmRights(1))];
-        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
-        let msg = recvmsg(
-            socket,
-            &mut [IoSliceMut::new(&mut bytes)],
-            &mut ancillary,
-            RecvFlags::CMSG_CLOEXEC | RecvFlags::DONTWAIT,
-        )
-        .map_err(|e| {
-            if e == rustix::io::Errno::AGAIN {
-                Unavailable::Timeout
-            } else {
-                Unavailable::Coverage
-            }
-        })?;
-        let mut credentials = None;
-        for message in ancillary.drain() {
-            match message {
-                RecvAncillaryMessage::ScmCredentials(c) if credentials.is_none() => {
-                    credentials = Some(c)
-                }
-                _ => return Err(Unavailable::Malformed),
-            }
-        }
-        if msg
-            .flags
-            .intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC)
-            || msg.bytes != FRAME_BYTES
-        {
-            return Err(Unavailable::Malformed);
-        }
-        let c = credentials.ok_or(Unavailable::Authority)?;
-        if c.pid.as_raw_pid() as u32 != self.context.worker.pid
-            || c.uid.as_raw() != self.context.worker.uid
-        {
-            return Err(Unavailable::Authority);
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
         }
         self.context.worker.validate()?;
+        let (bytes, c) = match receive_frame(socket) {
+            Ok(frame) => frame,
+            Err(Unavailable::Disconnected) => {
+                self.revoke();
+                return Err(Unavailable::Disconnected);
+            }
+            Err(error) => return Err(error),
+        };
+        self.context.worker.accept_credentials(c)?;
+        self.context.worker.validate()?;
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
         self.decode(&bytes[..FRAME_BYTES])
     }
     fn decode(&self, b: &[u8]) -> Result<Flow, Unavailable> {
@@ -311,8 +394,23 @@ impl Broker {
     }
     /// Проверенный snapshot интервала lookup; не identity при рождении socket.
     pub fn lookup(&mut self, flow: Flow) -> Lookup {
+        let result = self.lookup_inner(flow);
+        if self.context.cancelled.load(Ordering::Acquire) && !self.context.revoked {
+            self.cache.clear();
+            return Lookup::MechanismUnavailable(Unavailable::Cancelled);
+        }
+        if matches!(result, Lookup::MechanismUnavailable(_)) {
+            self.cache.clear();
+        }
+        result
+    }
+    fn lookup_inner(&mut self, flow: Flow) -> Lookup {
         if self.context.revoked {
             return Lookup::MechanismUnavailable(Unavailable::Revoked);
+        }
+        if self.context.cancelled.load(Ordering::Acquire) {
+            self.cache.clear();
+            return Lookup::MechanismUnavailable(Unavailable::Cancelled);
         }
         self.cache
             .retain(|(_, s)| s.observed_from.elapsed() < DEADLINE);
@@ -335,12 +433,18 @@ impl Broker {
                 Ok(saved) => saved,
                 Err(reason) => return Lookup::MechanismUnavailable(reason),
             };
-            if self.cache.len() == 64 {
+            if self.cache.len() == CACHE_ENTRIES {
                 self.cache.pop_front();
             }
             self.cache.push_back((flow, saved));
         }
         result
+    }
+}
+
+impl Drop for Broker {
+    fn drop(&mut self) {
+        self.context.cancelled.store(true, Ordering::Release);
     }
 }
 
@@ -367,3 +471,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "receiver_tests.rs"]
+mod receiver_tests;

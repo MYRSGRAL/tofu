@@ -77,7 +77,7 @@ fn credentials_epoch_revoke_and_malformed() {
     ));
     let death_context =
         TrustedContext::from_host(child.id(), uid, uid, 7, [1; 32], [2; 32]).unwrap();
-    let death_broker = Broker::new(death_context).unwrap();
+    let mut death_broker = Broker::new(death_context).unwrap();
     child.kill().unwrap();
     child.wait().unwrap();
     assert!(matches!(
