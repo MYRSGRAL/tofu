@@ -3,6 +3,33 @@ use super::*;
 
 const BACKUP_LIMIT: u64 = 256 * 1024 * 1024;
 
+/// Единственный владелец flock; унаследованный дубликат не продлевает операцию.
+struct BackupDirectoryLock(fs::File);
+
+impl std::ops::Deref for BackupDirectoryLock {
+    type Target = fs::File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for BackupDirectoryLock {
+    fn drop(&mut self) {
+        loop {
+            match rustix::fs::flock(&self.0, rustix::fs::FlockOperation::Unlock) {
+                Ok(()) => break,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => {
+                    // Drop не возвращает ошибку: штатное закрытие File остаётся
+                    // fallback; CLOEXEC-дубликат ребёнка закроется при exec.
+                    break;
+                }
+            }
+        }
+    }
+}
+
 impl EncryptedSubscriptionRepository {
     /// Вызывается после закрытия всех handles. Возвращает Conflict при занятой БД.
     /// Копия содержит исходные ciphertext, домены и версию; ключ в неё не входит.
@@ -34,7 +61,17 @@ impl EncryptedSubscriptionRepository {
     }
 }
 
+#[cfg(test)]
 fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
+    validate_controlled(connection, key, &MaintenanceControl::default())
+}
+
+fn validate_controlled(
+    connection: &Connection,
+    key: &[u8; 32],
+    control: &MaintenanceControl,
+) -> Result<()> {
+    control.connection(connection)?;
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(storage)?;
@@ -72,6 +109,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
     let mut rows = stmt.query([]).map_err(storage)?;
     let mut count = 0;
     while let Some(r) = rows.next().map_err(storage)? {
+        control.check()?;
         count += 1;
         if count > SOURCE_LIMIT {
             return Err(RepositoryError::Corrupt);
@@ -88,6 +126,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
         .map_err(storage)?;
     let mut rows = stmt.query([]).map_err(storage)?;
     while let Some(r) = rows.next().map_err(storage)? {
+        control.check()?;
         let source = r.get(0).map_err(storage)?;
         let generation = r.get(1).map_err(storage)?;
         let revision = r.get(2).map_err(storage)?;
@@ -103,6 +142,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
         let mut stmt = connection.prepare("SELECT p.id,p.source_id,p.fingerprint,p.generation,p.revision,p.ordinal,p.present,p.payload,s.source_generation,s.revision FROM profiles p LEFT JOIN snapshots s ON s.source_id=p.source_id").map_err(storage)?;
         let mut rows = stmt.query([]).map_err(storage)?;
         while let Some(r) = rows.next().map_err(storage)? {
+            control.check()?;
             let row = ProfileRow {
                 id: r.get(0).map_err(storage)?,
                 source: r.get(1).map_err(storage)?,
@@ -127,6 +167,7 @@ fn validate(connection: &Connection, key: &[u8; 32]) -> Result<()> {
             .map_err(|_| RepositoryError::Corrupt)?;
         let mut rows = stmt.query([]).map_err(storage)?;
         while let Some(row) = rows.next().map_err(storage)? {
+            control.check()?;
             let revision = row.get(0).map_err(storage)?;
             let raw = bounded_blob(row, 1, 262144 + 40).map_err(storage)?;
             decrypt(key, &id, 8, 0, 0, revision, &raw, 262144)?;
@@ -266,6 +307,16 @@ fn checkpoint(name: &str) -> Result<()> {
 }
 
 fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> {
+    copy_controlled(source, destination, key, &MaintenanceControl::default())
+}
+
+pub(super) fn copy_controlled(
+    source: &Path,
+    destination: &Path,
+    key: &[u8; 32],
+    control: &MaintenanceControl,
+) -> Result<()> {
+    control.check()?;
     let parent = destination.parent().ok_or(RepositoryError::UnsafePath)?;
     if !destination.is_absolute()
         || parent
@@ -285,6 +336,9 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     )
     .map_err(|_| RepositoryError::Conflict)?;
+    let directory = BackupDirectoryLock(directory);
+    #[cfg(test)]
+    fault_tests::directory_locked(&directory)?;
     let meta = fs::symlink_metadata(source).map_err(|_| RepositoryError::UnsafePath)?;
     if meta.len() == 0 || meta.len() > BACKUP_LIMIT {
         return Err(RepositoryError::InvalidInput);
@@ -312,14 +366,30 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(storage)?;
+    let _connection_scope = control.interrupt_scope();
+    control.connection(&connection)?;
     connection
         .busy_timeout(std::time::Duration::ZERO)
         .map_err(storage)?;
     connection
-        .execute_batch(
-            "PRAGMA trusted_schema=OFF; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;",
-        )
+        .execute_batch("PRAGMA trusted_schema=OFF; PRAGMA locking_mode=EXCLUSIVE;")
         .map_err(|_| RepositoryError::Conflict)?;
+    for attempt in 0..5 {
+        control.check()?;
+        match connection.execute_batch("BEGIN EXCLUSIVE; COMMIT;") {
+            Ok(()) => break,
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if attempt < 4
+                    && matches!(
+                        error.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => return Err(RepositoryError::Conflict),
+        }
+    }
     let pages: u64 = connection
         .query_row("PRAGMA page_count", [], |r| r.get(0))
         .map_err(storage)?;
@@ -332,7 +402,7 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
     {
         return Err(RepositoryError::InvalidInput);
     }
-    validate(&connection, key)?;
+    validate_controlled(&connection, key, control)?;
     reject_private_namespace(parent, key)?;
     reject_private_namespace(source.parent().ok_or(RepositoryError::UnsafePath)?, key)?;
     recover_staging(parent, key)?;
@@ -355,6 +425,7 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
     let namespace = create_namespace(parent, key)?;
     let stage = namespace.join("candidate");
     let result = (|| {
+        control.check()?;
         checkpoint("before-vacuum")?;
         // VACUUM INTO доступен без rusqlite backup feature; копирует ciphertext.
         connection
@@ -369,10 +440,12 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(storage)?;
+        let candidate_scope = control.interrupt_scope();
         candidate
             .execute_batch("PRAGMA trusted_schema=OFF")
             .map_err(storage)?;
-        validate(&candidate, key)?;
+        validate_controlled(&candidate, key, control)?;
+        drop(candidate_scope);
         drop(candidate);
         checkpoint("after-validation")?;
         let file = OpenOptions::new()
@@ -386,17 +459,20 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         file.sync_all().map_err(|_| RepositoryError::Storage)?;
         // hard_link публикует атомарно и никогда не заменяет существующий файл.
         checkpoint("link")?;
-        fs::hard_link(&stage, destination).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                RepositoryError::Conflict
-            } else {
-                RepositoryError::Storage
-            }
+        control.publish(|| {
+            fs::hard_link(&stage, destination).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    RepositoryError::Conflict
+                } else {
+                    RepositoryError::Storage
+                }
+            })
         })?;
         checkpoint("after-publication")?;
         Ok(())
     })();
     let cleanup = remove_owned_namespace(parent, &namespace, key);
+    control.cleanup_result(&cleanup);
     result?;
     cleanup?;
     // Ошибка здесь означает неопределённую durability уже опубликованного файла.

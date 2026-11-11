@@ -1,0 +1,106 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Dialogs
+
+ColumnLayout {
+    id: root
+    required property var sendCommand
+    required property var errorText
+    property bool english: false
+    property bool available: false
+    property int revision: 0
+    property var response: null
+    required property var nextRequestId
+    property double pending: 0
+    property string operation: "backup"
+    property string sourcePath: ""
+    property string destinationPath: ""
+    property string feedback: ""
+    readonly property bool busy: pending !== 0
+    function tr(ru, en) { return english ? en : ru }
+    function localPath(url) {
+        const value = url.toString()
+        if (!value.startsWith("file:///")) return ""
+        try { return decodeURIComponent(value.slice(7)) } catch (_) { return "" }
+    }
+    function submit() {
+        if (busy || !available) return
+        if ((operation === "restore" && !sourcePath) || !destinationPath) return
+        pending = nextRequestId()
+        feedback = tr("Подготовка копии…", "Preparing copy…")
+        if (operation === "restore") {
+            sendCommand({command: "maintenance_start", request_id: pending,
+                operation: operation, source: sourcePath, destination: destinationPath, revision: revision})
+        } else {
+            sendCommand({command: "maintenance_start", request_id: pending,
+                operation: operation, destination: destinationPath, revision: revision})
+        }
+    }
+    onResponseChanged: {
+        if (!response || response.request_id !== pending) return
+        if (response.phase === "complete" || response.phase === "failed") {
+            pending = 0
+            feedback = response.error ? errorText(response.error)
+                : tr("Зашифрованная копия сохранена в выбранный новый файл.", "Encrypted copy saved to the selected new file.")
+        } else if (response.phase === "cancelling") {
+            feedback = tr("Отмена: ожидается освобождение файлов.", "Cancelling: waiting for files to be released.")
+        }
+    }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        text: root.tr("Данные копии зашифрованы существующим ключом системного кошелька. Для восстановления нужен тот же ключ. Восстановление создаёт новый файл и не переключает текущую базу.", "Backup data is encrypted with the existing system wallet key. Restoring requires the same key. Restore creates a new file and does not switch the current database.")
+    }
+    Button {
+        objectName: "maintenanceBackup"
+        text: root.tr("Создать резервную копию…", "Create backup…")
+        enabled: root.available && !root.busy
+        onClicked: { root.operation = "backup"; destination.open() }
+    }
+    Button {
+        objectName: "maintenanceRestore"
+        text: root.tr("Восстановить в новый файл…", "Restore to a new file…")
+        enabled: root.available && !root.busy
+        onClicked: { root.operation = "restore"; source.open() }
+    }
+    Button {
+        objectName: "maintenanceCancel"
+        visible: root.busy
+        text: root.tr("Отменить", "Cancel")
+        onClicked: root.sendCommand({command: "maintenance_cancel", request_id: root.pending})
+    }
+    Label {
+        objectName: "maintenanceFeedback"
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        text: root.feedback
+    }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        text: root.tr("При ошибке записи проверьте выбранный файл: копия могла быть опубликована до ошибки синхронизации. Существующий файл никогда не заменяется.", "After a write error, check the selected file: the copy may have been published before a synchronization error. Existing files are never replaced.")
+    }
+    FileDialog {
+        id: source
+        objectName: "maintenanceSourceDialog"
+        title: root.tr("Выберите зашифрованную копию", "Select encrypted backup")
+        fileMode: FileDialog.OpenFile
+        onAccepted: {
+            root.sourcePath = root.localPath(selectedFile)
+            if (root.sourcePath) destination.open()
+            else root.feedback = root.errorText("invalid_input")
+        }
+    }
+    FileDialog {
+        id: destination
+        objectName: "maintenanceDestinationDialog"
+        title: root.tr("Новый файл в приватном каталоге (0700)", "New file in a private directory (0700)")
+        fileMode: FileDialog.SaveFile
+        onAccepted: {
+            root.destinationPath = root.localPath(selectedFile)
+            if (root.destinationPath) root.submit()
+            else root.feedback = root.errorText("invalid_input")
+        }
+    }
+}

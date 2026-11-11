@@ -153,6 +153,15 @@ impl Policy {
         flow: &DestinationFlow<'_>,
         context: &EvaluationContext<'_>,
     ) -> Evaluation {
+        self.evaluate_with_resources(flow, context, &crate::resources::EmptyResources)
+    }
+
+    pub fn evaluate_with_resources(
+        &self,
+        flow: &DestinationFlow<'_>,
+        context: &EvaluationContext<'_>,
+        resources: &impl crate::ResourceConditions,
+    ) -> Evaluation {
         let literal;
         let (name, resolution) = match &flow.destination {
             Destination::Ip { address, name } => {
@@ -273,19 +282,24 @@ impl Policy {
             (&self.preset_rules, RuleOrigin::Preset),
         ] {
             for rule in rules {
+                let resource_rule = match origin(rule.id) {
+                    RuleOrigin::User(id) => crate::ResourceRule::User(id),
+                    _ => crate::ResourceRule::Preset(rule.id),
+                };
                 let condition = &rule.conditions;
                 if !rule.enabled || !condition.matches_source(flow.executable) {
                     continue;
                 }
-                if !condition.domains.is_empty()
+                if (!condition.domains.is_empty() || resources.has_domains(resource_rule))
                     && !name.is_some_and(|name| {
                         condition.domains.iter().any(|domain| domain.matches(name))
+                            || resources.matches_domain(resource_rule, name)
                     })
                 {
                     continue;
                 }
                 let mut matches = true;
-                if !condition.destinations.is_empty() {
+                if !condition.destinations.is_empty() || resources.has_cidrs(resource_rule) {
                     let addresses = match facts.get(context) {
                         Ok(addresses) => addresses,
                         Err(result) => return result,
@@ -294,7 +308,9 @@ impl Policy {
                         addresses
                             .iter()
                             .any(|address| cidr.contains(address.to_canonical()))
-                    });
+                    }) || addresses
+                        .iter()
+                        .any(|address| resources.matches_ip(resource_rule, address.to_canonical()));
                 }
                 if matches {
                     return decided(rule.action.into(), origin(rule.id), None);

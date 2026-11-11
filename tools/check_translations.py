@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -15,6 +16,27 @@ TOKEN = re.compile(
     r'\s+|//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|'
     r"'(?:\\.|[^'\\])*'|[A-Za-z_$][\w$]*|\d+|[^\s]"
 )
+# Внешние зависимости и воспроизводимые результаты не являются исходниками проекта.
+EXCLUDED = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "vendor",
+        "third_party",
+        "target",
+        "build",
+        "dist",
+        "generated",
+        "__pycache__",
+        ".cache",
+    }
+)
+MAX_ENTRIES = 20_000
+MAX_QML_FILES = 512
+MAX_SOURCE_BYTES = 2 * 1024 * 1024
+IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*\Z")
 PLACEHOLDER = re.compile(r"%L?\d+|%n|\$\{[^{}]+\}|(?<!\{)\{[^{}]*\}(?!\})")
 
 
@@ -24,11 +46,59 @@ class CatalogError(ValueError):
 
 def tokens(source: str) -> list[str]:
     """Убирает комментарии, сохраняя строки как неделимые токены."""
-    return [
-        match.group()
-        for match in TOKEN.finditer(source)
-        if not match.group().isspace() and not match.group().startswith(("//", "/*"))
-    ]
+    result: list[str] = []
+    for match in TOKEN.finditer(source):
+        token = match.group()
+        if token.isspace() or token.startswith(("//", "/*")):
+            continue
+        if token in {'"', "'", "`"} or (
+            token == "/" and source[match.start() : match.start() + 2] == "/*"
+        ):
+            raise CatalogError(
+                "Незакрытая строка/комментарий или неподдерживаемый template literal"
+            )
+        result.append(token)
+    return result
+
+
+def qml_inventory(root: Path) -> list[Path]:
+    """Ограниченный стабильный обход исходников без перехода по symlink."""
+    if root.is_symlink():
+        raise CatalogError("Корень проекта не должен быть symlink")
+    paths: list[Path] = []
+    visited = 0
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            children = []
+            for entry in entries:
+                visited += 1
+                if visited > MAX_ENTRIES:
+                    raise CatalogError(
+                        "Превышен лимит inventory; проверка не завершена"
+                    )
+                if entry.is_symlink() or entry.name in EXCLUDED:
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    children.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False) and entry.name.endswith(
+                    ".qml"
+                ):
+                    paths.append(Path(entry.path))
+                    if len(paths) > MAX_QML_FILES:
+                        raise CatalogError("Превышен лимит QML; проверка не завершена")
+            pending.extend(sorted(children, reverse=True))
+    return sorted(paths)
+
+
+def read_source(path: Path) -> str:
+    """Читает ограниченный объём; усечение никогда не считается успехом."""
+    with path.open("rb") as stream:
+        data = stream.read(MAX_SOURCE_BYTES + 1)
+    if len(data) > MAX_SOURCE_BYTES:
+        raise CatalogError(f"{path}: превышен лимит размера исходника")
+    return data.decode("utf-8")
 
 
 def literal(token: str) -> str:
@@ -74,6 +144,8 @@ def check_source(source: str, require_catalog: bool = True) -> tuple[int, int]:
                 if ts[index].startswith("'"):
                     raise CatalogError(f"{name}: ключ в неподдерживаемых кавычках")
                 key = literal(ts[index]) if ts[index].startswith('"') else ts[index]
+                if not IDENTIFIER.fullmatch(key):
+                    raise CatalogError(f"{name}: недопустимый ключ {key}")
                 if key in seen:
                     raise CatalogError(f"{name}: повторный ключ {key}")
                 seen.add(key)
@@ -121,6 +193,109 @@ def check_source(source: str, require_catalog: bool = True) -> tuple[int, int]:
     return inline, keys
 
 
+# Только существующие UI-участки P11. Это лексический gate, не JS/QML parser.
+SCOPED_UI = (
+    ('SettingsRow { objectName: "settingsScheduleButton"', "\n"),
+    (
+        '                SmallLabel { objectName: "routingDiagnosticsScope"',
+        '                RowLayout {\n                    objectName: "routingDefaultRow"',
+    ),
+    ("        id: schedulePanel", "        id: appearancePanel"),
+)
+SCOPED_ROUTING_ELEMENTS = frozenset(
+    {
+        "routingDiagnosticsScope",
+        "routingDiagnosticsIncomplete",
+        "routingExplainTarget",
+        "routingExplainButton",
+        "routingExplanation",
+    }
+)
+# Технические objectName, enum/command IDs, разделители и цвет. Пользовательские
+# предложения вне tr запрещены на обоих языках, включая только латинские строки.
+SCOPED_TECHNICAL = frozenset(
+    {
+        "settingsScheduleButton",
+        "↻",
+        "schedule",
+        "routingDiagnosticsScope",
+        "routingDiagnosticsIncomplete",
+        "#",
+        " ← ",
+        "shadowed",
+        "routingExplainTarget",
+        "routingExplainButton",
+        "routing_explain",
+        "routingExplanation",
+        "",
+        "fixture",
+        " · ",
+        "application_witness_missing",
+        "dns_witness_missing",
+        "dns_missing",
+        "evaluation_rejected",
+        "subscriptionInterval",
+        "set_subscription_schedule",
+        "subscriptionBackground",
+        "preferences_write",
+        "#e6bc83",
+    }
+)
+
+
+def check_scoped_ui(source: str) -> int:
+    """Проверяет все литералы в трёх ограниченных contiguous участках Main."""
+    count = 0
+    for start, end in SCOPED_UI:
+        if source.count(start) != 1:
+            raise CatalogError(f"P11: граница отсутствует или неоднозначна: {start}")
+        if end != "\n" and source.count(end) != 1:
+            raise CatalogError(f"P11: конечная граница неоднозначна: {end}")
+        offset = source.index(start)
+        stop = source.find(end, offset + len(start))
+        if stop < 0:
+            raise CatalogError(f"P11: конечная граница отсутствует: {end}")
+        ts = tokens(source[offset:stop])
+        if "routingDiagnosticsScope" in start:
+            # Граница должна следовать за целыми sibling-элементами, а не
+            # обрезать обязательный элемент после его objectName.
+            depth = 0
+            for token in ts:
+                if token == "{":
+                    depth += 1
+                elif token == "}":
+                    depth -= 1
+                    if depth < 0:
+                        raise CatalogError("P11: граница пересекает QML-элемент")
+            if depth:
+                raise CatalogError("P11: граница обрезает QML-элемент")
+            names = [
+                literal(ts[i + 2])
+                for i in range(len(ts) - 2)
+                if ts[i : i + 2] == ["objectName", ":"]
+                and ts[i + 2].startswith(('"', "'"))
+            ]
+            if any(names.count(name) != 1 for name in SCOPED_ROUTING_ELEMENTS):
+                raise CatalogError("P11: обязательные элементы Routing вышли из scope")
+        index = 0
+        while index < len(ts):
+            if ts[index : index + 2] == ["tr", "("]:
+                if ts[index + 3 : index + 4] != [","] or ts[index + 5 : index + 6] != [
+                    ")"
+                ]:
+                    raise CatalogError("P11: разрешены только literal tr-пары")
+                validate_pair("P11", literal(ts[index + 2]), literal(ts[index + 4]))
+                count += 1
+                index += 6
+                continue
+            if ts[index].startswith(('"', "'")):
+                value = literal(ts[index])
+                if value not in SCOPED_TECHNICAL:
+                    raise CatalogError(f"P11: UI-литерал вне tr: {value}")
+            index += 1
+    return count
+
+
 def check_cpp_source(source: str) -> int:
     """Проверяет существующие QStringLiteral-пары tray, не пользовательские имена."""
     pattern = re.compile(
@@ -140,23 +315,28 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args()
     try:
-        inline, keys = check_source((args.root / CATALOG).read_text(encoding="utf-8"))
-        for path in sorted((args.root / CATALOG.parent).glob("*.qml")):
-            if path == args.root / CATALOG:
-                continue
-            pairs, entries = check_source(
-                path.read_text(encoding="utf-8"), path.name == "Main.qml"
-            )
+        paths = qml_inventory(args.root)
+        if args.root / CATALOG not in paths:
+            raise CatalogError("Основной каталог отсутствует в inventory")
+        check_scoped_ui(read_source(args.root / CATALOG))
+        inline = keys = 0
+        for path in paths:
+            try:
+                pairs, entries = check_source(
+                    read_source(path), path == args.root / CATALOG
+                )
+            except CatalogError as error:
+                raise CatalogError(f"{path.relative_to(args.root)}: {error}") from error
             inline += pairs
             keys += entries
         check_cpp_source(
-            (args.root / "crates/yonik-desktop/src/application.cpp").read_text(
-                encoding="utf-8"
-            )
+            read_source(args.root / "crates/yonik-desktop/src/application.cpp")
         )
     except (OSError, ValueError, IndexError) as error:
         parser.exit(1, f"Ошибка переводов: {error}\n")
-    print(f"RU/EN: проверено {inline} inline-пар и {keys} ключей карт")
+    print(
+        f"RU/EN: проверено {inline} inline-пар и {keys} ключей карт; QML: {len(paths)}"
+    )
     return 0
 
 
