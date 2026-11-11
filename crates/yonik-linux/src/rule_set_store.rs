@@ -88,6 +88,23 @@ struct Inner {
     key: Zeroizing<[u8; 32]>,
     leases: Mutex<HashMap<u64, Vec<Descriptor>>>,
 }
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Последний Arc завершает custody, даже если fork ещё держит CLOEXEC-копию OFD.
+        // RuntimeLease удерживает этот Arc до собственного освобождения.
+        loop {
+            match fs::flock(&self.root, fs::FlockOperation::Unlock) {
+                Ok(()) => break,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => {
+                    // Как в managed_network::storage::LockedDirectory: Drop не
+                    // возвращает ошибки; File закроется, копия fork — при exec.
+                    break;
+                }
+            }
+        }
+    }
+}
 pub struct EncryptedRuleSetStore {
     inner: Arc<Inner>,
     state: State,
@@ -700,6 +717,24 @@ mod inventory_boundary_tests {
         )
         .expect("ref");
         (reference, body)
+    }
+    #[test]
+    fn last_store_owner_releases_lock_despite_inherited_description() {
+        let directory = Directory::new();
+        let store = directory.open();
+        // try_clone сохраняет тот же OFD, как fork до закрытия CLOEXEC при exec.
+        let inherited = store.inner.root.try_clone().expect("унаследованный OFD");
+        let custody = store.inner.clone();
+        drop(store);
+        assert!(
+            EncryptedRuleSetStore::open(File::open(&directory.0).expect("каталог"), [29; 32])
+                .is_err()
+        );
+        drop(custody);
+        let reopened = directory.open();
+        assert!(inherited.metadata().is_ok());
+        drop(reopened);
+        drop(inherited);
     }
     #[test]
     fn inventory_file_capacity_refuses_129th_and_reopens_every_accepted_write() {
