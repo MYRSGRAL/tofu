@@ -26,8 +26,22 @@ def main() -> None:
             binary,
             root,
             [
+                ui("click", "settingsButton", when={"ready": True}),
+                ui("click", "settingsConnectionButton"),
+                ui("text", "proxyFetchDns", value="127.0.0.1:5353"),
+                ui("click", "saveProxyFetchDns"),
+                ui(
+                    "text",
+                    "proxyFetchDns",
+                    value="resolver.example:53",
+                    when={"proxy_fetch_dns": "127.0.0.1:5353"},
+                ),
+                ui("click", "saveProxyFetchDns"),
                 {
-                    "when": {"ready": True},
+                    "when": {
+                        "error": "invalid_input",
+                        "proxy_fetch_dns": "127.0.0.1:5353",
+                    },
                     "command": {"command": "set_engine", "engine": "sing-box"},
                 },
                 {
@@ -42,7 +56,12 @@ def main() -> None:
                     "when": {"probe_expected_status": 200},
                     "command": {"command": "set_language", "language": "en"},
                 },
-                ui("click", "settingsButton", expect={"window": {"language": "en"}}),
+                ui(
+                    "key",
+                    "homeButton",
+                    key="Tab",
+                    expect={"window": {"language": "en"}},
+                ),
                 {"when": {}, "command": {"command": "shutdown"}},
             ],
             first,
@@ -64,6 +83,7 @@ def main() -> None:
                     "settingsButton",
                     when={
                         "ready": True,
+                        "proxy_fetch_dns": "127.0.0.1:5353",
                         "engine": "sing-box",
                         "probe_custom": True,
                         "probe_expected_status": 200,
@@ -76,6 +96,7 @@ def main() -> None:
             "1",
         )
         settings = json.loads((root / "data" / "preferences.json").read_text())
+        assert settings["proxy_fetch_dns"] == "127.0.0.1:5353"
         assert settings["language"] == "en"
         assert settings["engine"] == "sing-box"
         assert settings["probe_url"] == "https://example.com/check"
@@ -83,7 +104,13 @@ def main() -> None:
             json.dumps(
                 {
                     "launches": 2,
-                    "restored": ["engine", "probe_url", "probe_status", "language"],
+                    "restored": [
+                        "engine",
+                        "probe_url",
+                        "probe_status",
+                        "language",
+                        "proxy_fetch_dns",
+                    ],
                 }
             )
             + "\n"

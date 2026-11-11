@@ -59,7 +59,7 @@ impl IpPrefix {
         }
         Ok(Self { address, length })
     }
-    fn contains(self, address: IpAddr) -> bool {
+    pub(super) fn contains(self, address: IpAddr) -> bool {
         match (self.address, address) {
             (IpAddr::V4(prefix), IpAddr::V4(address)) => {
                 u32::from(prefix) == u32::from(address) & (u32::MAX << (32 - self.length))
@@ -80,13 +80,56 @@ impl IpPrefix {
 pub struct PrivateRoute {
     prefix: IpPrefix,
     vpn_ifindex: Option<NonZeroU32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vpn_ifname: Option<InterfaceName>,
 }
 impl PrivateRoute {
     pub fn new(prefix: IpPrefix, vpn_ifindex: Option<u32>) -> Result<Self, PolicyError> {
         Ok(Self {
             prefix,
             vpn_ifindex: vpn_ifindex.map(interface).transpose()?,
+            vpn_ifname: None,
         })
+    }
+    /// Только имя из проверенного link snapshot; само имя не доказывает владение.
+    pub fn bound(
+        prefix: IpPrefix,
+        ifindex: u32,
+        verified_ifname: &str,
+    ) -> Result<Self, PolicyError> {
+        Ok(Self {
+            prefix,
+            vpn_ifindex: Some(interface(ifindex)?),
+            vpn_ifname: Some(InterfaceName::try_from(verified_ifname.to_owned())?),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+struct InterfaceName([u8; 16]);
+impl TryFrom<String> for InterfaceName {
+    type Error = PolicyError;
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        if name.is_empty()
+            || name.len() > 15
+            || matches!(name.as_str(), "." | "..")
+            || name
+                .bytes()
+                .any(|b| b == 0 || b == b'/' || b == b':' || b.is_ascii_whitespace())
+        {
+            return Err(PolicyError::Interface);
+        }
+        let mut bytes = [0; 16];
+        bytes[..name.len()].copy_from_slice(name.as_bytes());
+        Ok(Self(bytes))
+    }
+}
+impl From<InterfaceName> for String {
+    fn from(name: InterfaceName) -> String {
+        let end = name.0.iter().position(|b| *b == 0).unwrap_or(16);
+        // Конструктор принимает только UTF-8 строку и не изменяет её байты.
+        String::from_utf8(name.0[..end].to_vec()).expect("Проверенное имя link")
     }
 }
 
@@ -188,7 +231,9 @@ impl PublicBlockPolicy {
         }
         private_routes.sort_unstable();
         if private_routes.windows(2).any(|pair| {
-            pair[0].prefix == pair[1].prefix && pair[0].vpn_ifindex != pair[1].vpn_ifindex
+            pair[0].prefix == pair[1].prefix
+                && (pair[0].vpn_ifindex != pair[1].vpn_ifindex
+                    || pair[0].vpn_ifname != pair[1].vpn_ifname)
         }) {
             return Err(PolicyError::ConflictingPrivateRoute);
         }
@@ -298,14 +343,15 @@ impl PublicBlockPolicy {
         }
         for route in &self.private_routes {
             if let Some(ifindex) = route.vpn_ifindex {
-                commands.push(rule(
-                    table_name,
-                    vec![
-                        destination(route.prefix.address, route.prefix.expression()),
-                        meta("oif", json!(ifindex.get())),
-                        json!({"accept": null}),
-                    ],
-                ));
+                let mut expr = vec![
+                    destination(route.prefix.address, route.prefix.expression()),
+                    meta("oif", json!(ifindex.get())),
+                ];
+                if let Some(name) = route.vpn_ifname {
+                    expr.push(meta("oifname", json!(String::from(name))));
+                }
+                expr.push(json!({"accept": null}));
+                commands.push(rule(table_name, expr));
             }
             // Терминальная блокировка не даёт широкой LAN/TUN обойти назначенный VPN.
             commands.push(rule(
@@ -353,11 +399,20 @@ impl TryFrom<IpPrefixDto> for IpPrefix {
 struct PrivateRouteDto {
     prefix: IpPrefix,
     vpn_ifindex: Option<u32>,
+    #[serde(default)]
+    vpn_ifname: Option<InterfaceName>,
 }
 impl TryFrom<PrivateRouteDto> for PrivateRoute {
     type Error = PolicyError;
     fn try_from(value: PrivateRouteDto) -> Result<Self, Self::Error> {
-        Self::new(value.prefix, value.vpn_ifindex)
+        match value.vpn_ifname {
+            Some(name) => Self::bound(
+                value.prefix,
+                value.vpn_ifindex.ok_or(PolicyError::Interface)?,
+                &String::from(name),
+            ),
+            None => Self::new(value.prefix, value.vpn_ifindex),
+        }
     }
 }
 #[derive(Deserialize)]
@@ -477,6 +532,62 @@ mod tests {
             11,
         )
         .expect("Тестовый endpoint")
+    }
+    #[test]
+    fn bound_identity_is_additive_and_legacy_codec_stays_canonical() {
+        let legacy = PrivateRoute::new(prefix("10.42.1.0", 24), Some(27)).unwrap();
+        let old = json!({"prefix":{"address":"10.42.1.0","length":24},"vpn_ifindex":27});
+        assert_eq!(serde_json::to_value(legacy).unwrap(), old);
+        assert_eq!(
+            serde_json::from_value::<PrivateRoute>(old.clone()).unwrap(),
+            legacy
+        );
+        let bound = PrivateRoute::bound(prefix("10.42.1.0", 24), 27, "vpn").unwrap();
+        let rules = policy(vec![bound], vec![], vec![]).commands("owned");
+        assert_eq!(
+            rules[2]["add"]["rule"]["expr"][3],
+            meta("oifname", json!("vpn"))
+        );
+        assert_eq!(
+            serde_json::from_value::<PrivateRoute>(serde_json::to_value(bound).unwrap()).unwrap(),
+            bound
+        );
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "has space",
+            "has:colon",
+            "has/slash",
+            "0123456789012345",
+            "nul\0name",
+        ] {
+            assert!(PrivateRoute::bound(prefix("10.42.1.0", 24), 27, invalid).is_err());
+        }
+        let quoted = PrivateRoute::bound(prefix("10.42.1.0", 24), 27, "v\"pn").unwrap();
+        assert_eq!(
+            serde_json::to_value(quoted).unwrap()["vpn_ifname"],
+            json!("v\"pn")
+        );
+        let mut invalid = old;
+        invalid["vpn_ifname"] = json!("vpn");
+        invalid["vpn_ifindex"] = Value::Null;
+        assert!(serde_json::from_value::<PrivateRoute>(invalid).is_err());
+        let legacy_policy = policy(vec![legacy], vec![], vec![]);
+        let restored: PublicBlockPolicy =
+            serde_json::from_value(serde_json::to_value(&legacy_policy).unwrap()).unwrap();
+        assert_eq!(restored.digest(), legacy_policy.digest());
+        assert_eq!(
+            legacy_policy.digest(),
+            [
+                55, 195, 79, 50, 98, 85, 84, 40, 210, 111, 52, 177, 3, 169, 43, 98, 57, 147, 117,
+                53, 153, 22, 234, 163, 239, 221, 207, 250, 172, 213, 186, 176
+            ]
+        );
+        assert_ne!(
+            legacy_policy.digest(),
+            policy(vec![bound], vec![], vec![]).digest()
+        );
     }
     #[test]
     fn policy_codec_validates_every_nested_constructor_and_unknown_field() {

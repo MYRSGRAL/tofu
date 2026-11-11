@@ -56,8 +56,20 @@ def main() -> None:
                             YONIK_PROXY_PROFILE=f"vless://{UUID}@127.0.0.1:{port}#Fixture",
                             YONIK_PROXY_PROBE_URL=f"https://127.0.0.1:{https.server_port}/",
                         )
+                        resolver_guard = (
+                            [
+                                sys.executable,
+                                str(
+                                    Path(__file__).resolve().parents[2]
+                                    / "yonik-linux/tests/subscription_proxy_dns.py"
+                                ),
+                            ]
+                            if os.environ.get("YONIK_PROXY_ZERO_SYSTEM_DNS") == "1"
+                            else []
+                        )
                         subprocess.run(
                             [
+                                *resolver_guard,
                                 str(binary),
                                 "native_session_proxy_manual_and_scheduled_refresh",
                                 "--ignored",

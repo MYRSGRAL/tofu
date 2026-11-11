@@ -30,8 +30,11 @@ impl SystemSession {
             state: State::Unknown,
         }
     }
+    pub fn owner_lost(&self) -> bool {
+        self.client.owner_lost()
+    }
     pub fn snapshot(&self) -> State {
-        if self.client.owner_lost() {
+        if self.owner_lost() {
             State::Unknown
         } else {
             self.state
