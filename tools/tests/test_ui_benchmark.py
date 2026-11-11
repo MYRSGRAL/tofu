@@ -109,6 +109,151 @@ class ChildTests(unittest.TestCase):
         self.children.append(child)
         return child
 
+    def test_exit_observation_keeps_leader_until_last_group_signal(self) -> None:
+        for operation in ("alive", "ack", "send", "finish"):
+            with self.subTest(operation=operation):
+                child = self.spawn("pass")
+                deadline = time.monotonic() + 2
+                while (
+                    os.waitid(
+                        os.P_PID,
+                        child.process.pid,
+                        os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                    )
+                    is None
+                ):
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.005)
+                signals = []
+                original = os.killpg
+
+                def guarded_signal(pid: int, number: int) -> None:
+                    # Oracle не посылает сигнал, если PID уже освобождён.
+                    self.assertIsNone(child.process.returncode, "signal after reap")
+                    held = os.waitid(
+                        os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+                    )
+                    self.assertIsNotNone(held)
+                    signals.append(number)
+                    original(pid, number)
+
+                with patch.object(bench.os, "killpg", side_effect=guarded_signal):
+                    try:
+                        if operation == "send":
+                            child.send(dict(op="quit"), 0.1)
+                        elif operation in ("ack", "finish"):
+                            getattr(child, operation)(0.1)
+                        else:
+                            child.alive()
+                    except bench.BenchmarkError:
+                        pass
+                    child.close()
+                    child.close()
+                self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+                self.assertEqual(child.process.returncode, 0)
+
+    def test_external_reap_forbids_numeric_group_signals(self) -> None:
+        child = self.spawn("pass")
+        child.process.wait(timeout=2)
+        with (
+            patch.object(bench.os, "killpg") as killpg,
+            self.assertRaisesRegex(bench.BenchmarkError, "reservation"),
+        ):
+            child.close()
+        killpg.assert_not_called()
+        child.close()
+
+    def test_signal_oracle_rejects_reaped_leader_without_real_signal(self) -> None:
+        child = self.spawn("pass")
+        child.close()
+
+        # Отрицательный контроль: только mock, без killpg освобождённого PID.
+        def oracle(pid: int, number: int) -> None:
+            self.assertIsNone(child.process.returncode, "signal after reap")
+
+        with (
+            patch.object(bench.os, "killpg", side_effect=oracle),
+            self.assertRaisesRegex(AssertionError, "signal after reap"),
+        ):
+            bench.os.killpg(child.process.pid, signal.SIGKILL)
+
+    def test_cleanup_on_timeout_cancel_and_exception_keeps_pid_reserved(self) -> None:
+        for failure in ("timeout", "cancel", "exception"):
+            with self.subTest(failure=failure):
+                child = self.spawn(
+                    "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                    'print("{}",flush=True)\ntime.sleep(30)'
+                )
+                child.ack(2)
+                original = os.killpg
+                signals = []
+
+                def guarded_signal(pid: int, number: int) -> None:
+                    self.assertIsNone(child.process.returncode)
+                    # ECHILD здесь означает, что reservation уже потеряна.
+                    os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    signals.append(number)
+                    original(pid, number)
+
+                with patch.object(bench.os, "killpg", side_effect=guarded_signal):
+                    if failure == "timeout":
+                        with self.assertRaises(bench.BenchmarkError):
+                            child.ack(0.01)
+                        child.close()
+                    else:
+                        error = (
+                            KeyboardInterrupt if failure == "cancel" else RuntimeError
+                        )
+                        original_sleep = time.sleep
+                        interrupted = False
+
+                        def interrupt_once(seconds: float) -> None:
+                            nonlocal interrupted
+                            if not interrupted:
+                                interrupted = True
+                                raise error("cleanup")
+                            original_sleep(seconds)
+
+                        with (
+                            patch.object(
+                                bench.time, "sleep", side_effect=interrupt_once
+                            ),
+                            self.assertRaises(error),
+                        ):
+                            child.close()
+                    child.close()
+                self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+                self.assertEqual(child.process.returncode, -signal.SIGKILL)
+
+    def test_group_cleanup_kills_term_ignoring_descendant_after_leader_exit(
+        self,
+    ) -> None:
+        marker = self.root / "descendant.pid"
+        child = self.spawn(
+            "import os,signal,time,pathlib\n"
+            "pid=os.fork()\n"
+            "if pid == 0:\n"
+            " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+            f" pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+            " time.sleep(30)\n"
+            "else:\n"
+            f" while not pathlib.Path({str(marker)!r}).exists(): time.sleep(.005)\n"
+        )
+        deadline = time.monotonic() + 2
+        while not marker.exists():
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.005)
+        descendant = int(marker.read_text())
+        child.finish(0.1)
+        child.close()
+        deadline = time.monotonic() + 2
+        while True:
+            stat = Path(f"/proc/{descendant}/stat")
+            if not stat.exists() or stat.read_text().split(") ")[1].startswith("Z"):
+                break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.005)
+
     def test_fake_child_waits_for_command_and_real_ack(self) -> None:
         child = self.spawn(
             'import json,sys,time\nfor line in sys.stdin:\n command=json.loads(line)\n time.sleep(.05)\n print(json.dumps({"event":"frame","id":command["id"]}),flush=True)'
@@ -320,11 +465,6 @@ class ChildTests(unittest.TestCase):
             if driver.poll() is None:
                 driver.kill()
                 driver.wait(timeout=3)
-            if pid is not None:
-                try:
-                    os.killpg(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
 
     def test_signal_in_spawn_window_is_deferred_until_child_is_owned(self) -> None:
         fake = self.root / "spawn-window-child"
