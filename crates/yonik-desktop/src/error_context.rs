@@ -16,6 +16,8 @@ pub enum Slot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    SchedulerInitialize,
+    SchedulerAdmission,
     Startup,
     StorageOpen,
     EngineStart,
@@ -35,6 +37,13 @@ pub enum Stage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cause {
+    SchedulerInitializeInvalidLimits,
+    SchedulerInitializeExhausted,
+    SchedulerInvalidLimits,
+    SchedulerFull,
+    SchedulerDuplicate,
+    SchedulerExhausted,
+    SchedulerStale,
     DataDirectoryRelative,
     DataDirectoryCreate,
     DataDirectoryMetadata,
@@ -135,16 +144,29 @@ impl Cause {
             }
             Stage::LogsRead => slot == Slot::LogsRead,
             Stage::LogsSave => slot == Slot::LogsSave,
+            Stage::SchedulerAdmission => matches!(slot, Slot::Error | Slot::Source),
+            Stage::SchedulerInitialize => matches!(slot, Slot::Error | Slot::Source),
             Stage::StorageWrite => matches!(slot, Slot::Error | Slot::Connection | Slot::Source),
             Stage::RoutingSave => matches!(slot, Slot::Error | Slot::Connection | Slot::RoutingAck),
             _ => matches!(slot, Slot::Error | Slot::Connection),
         }
     }
     pub fn needs_generation(self) -> bool {
-        !matches!(self.identity().2, Stage::Startup | Stage::StorageOpen)
+        !matches!(
+            self.identity().2,
+            Stage::Startup | Stage::StorageOpen | Stage::SchedulerInitialize
+        )
     }
     fn identity(self) -> (&'static str, &'static str, Stage) {
         match self {
+            Self::SchedulerInitializeInvalidLimits | Self::SchedulerInitializeExhausted => {
+                ("STARTUP", "startup", Stage::SchedulerInitialize)
+            }
+            Self::SchedulerInvalidLimits
+            | Self::SchedulerFull
+            | Self::SchedulerDuplicate
+            | Self::SchedulerExhausted
+            | Self::SchedulerStale => ("STORAGE", "storage", Stage::SchedulerAdmission),
             Self::RepositoryOpenInvalidInput => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsafePath => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsupportedVersion => ("STORAGE", "storage", Stage::StorageOpen),

@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::watch;
+pub use yonik_subscription::scheduler::Error as SubscriptionSchedulerError;
 use yonik_subscription::scheduler::{Error, Policy, Scheduler, Work};
 
 /// Не содержит URL, имён, тела ответа или диагностик транспорта.

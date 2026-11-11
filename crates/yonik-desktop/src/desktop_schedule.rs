@@ -1,4 +1,36 @@
-use super::{DesktopError, Result};
+use super::DesktopError;
+use crate::diagnostics::context::Cause;
+use yonik_linux::SubscriptionSchedulerError;
+
+#[derive(Debug)]
+pub(super) struct ScheduleFailure {
+    pub error: DesktopError,
+    pub cause: Option<Cause>,
+}
+impl ScheduleFailure {
+    pub fn key(&self) -> &'static str {
+        self.error.key()
+    }
+    pub fn runtime(error: SubscriptionSchedulerError) -> Self {
+        let cause = match error {
+            SubscriptionSchedulerError::InvalidLimits => Cause::SchedulerInvalidLimits,
+            SubscriptionSchedulerError::Full => Cause::SchedulerFull,
+            SubscriptionSchedulerError::Duplicate => Cause::SchedulerDuplicate,
+            SubscriptionSchedulerError::Exhausted => Cause::SchedulerExhausted,
+            SubscriptionSchedulerError::Stale => Cause::SchedulerStale,
+        };
+        Self {
+            error: DesktopError("storage"),
+            cause: Some(cause),
+        }
+    }
+}
+impl From<DesktopError> for ScheduleFailure {
+    fn from(error: DesktopError) -> Self {
+        Self { error, cause: None }
+    }
+}
+type ScheduleResult<T> = std::result::Result<T, ScheduleFailure>;
 use std::{
     collections::BTreeMap,
     num::NonZeroU64,
@@ -14,6 +46,7 @@ const BACKGROUND_WINDOW_DURATION: Duration = Duration::from_secs(60);
 /// Один bounded владелец; один fetch/review исключает очередь скрытых отчётов.
 pub(super) struct DesktopSchedule {
     pub runtime: SubscriptionScheduler,
+    pub generation: u64,
     pub interval: Duration,
     pub background_enabled: bool,
     pub window_until: Option<Duration>,
@@ -26,7 +59,7 @@ pub(super) struct DesktopSchedule {
     pub deferred: Option<SubscriptionScheduleEvent>,
 }
 impl DesktopSchedule {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> ScheduleResult<Self> {
         static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
         let identity = NEXT_OWNER
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -34,10 +67,26 @@ impl DesktopSchedule {
             })
             .ok()
             .and_then(NonZeroU64::new)
-            .ok_or(DesktopError("startup"))?;
+            .ok_or(ScheduleFailure {
+                error: DesktopError("startup"),
+                cause: Some(Cause::SchedulerInitializeExhausted),
+            })?;
+        Self::with_limits(identity, 20_000)
+    }
+    fn with_limits(identity: NonZeroU64, capacity: usize) -> ScheduleResult<Self> {
         Ok(Self {
-            runtime: SubscriptionScheduler::new(identity, 20_000, 1)
-                .map_err(|_| DesktopError("startup"))?,
+            generation: identity.get(),
+            runtime: SubscriptionScheduler::new(identity, capacity, 1).map_err(|error| {
+                ScheduleFailure {
+                    error: DesktopError("startup"),
+                    cause: match error {
+                        SubscriptionSchedulerError::InvalidLimits => {
+                            Some(Cause::SchedulerInitializeInvalidLimits)
+                        }
+                        _ => None,
+                    },
+                }
+            })?,
             generations: BTreeMap::new(),
             interval: Duration::from_secs(86400),
             background_enabled: false,
@@ -50,7 +99,7 @@ impl DesktopSchedule {
             deferred: None,
         })
     }
-    pub fn replacement(&self) -> Result<Self> {
+    pub fn replacement(&self) -> ScheduleResult<Self> {
         let mut replacement = Self::new()?;
         replacement.policy = self.policy;
         replacement.visible = self.visible;
@@ -102,7 +151,7 @@ impl DesktopSchedule {
         &mut self,
         service: &SubscriptionService,
         now: Duration,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         self.window_until = None;
         // Готовый review не отменяется. Остальные записи возвращаются из persisted
         // due после ACK; резервирование перед fetch предотвращает restart loop.
@@ -114,7 +163,11 @@ impl DesktopSchedule {
         }
         self.load(service, now).await
     }
-    pub async fn load(&mut self, service: &SubscriptionService, now: Duration) -> Result<()> {
+    pub async fn load(
+        &mut self,
+        service: &SubscriptionService,
+        now: Duration,
+    ) -> ScheduleResult<()> {
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -126,7 +179,7 @@ impl DesktopSchedule {
         service: &SubscriptionService,
         now: Duration,
         wall: u64,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         let mut offset = 0;
         loop {
             let page = service
@@ -190,7 +243,7 @@ impl DesktopSchedule {
                                 failures: state.map_or(0, |state| state.failures),
                             },
                         )
-                        .map_err(|_| DesktopError("storage"))?;
+                        .map_err(ScheduleFailure::runtime)?;
                     entry.insert(generation);
                 }
             }
@@ -207,7 +260,7 @@ impl DesktopSchedule {
         service: &SubscriptionService,
         id: i64,
         now: Duration,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         if let Some(token) = service
             .schedule_metadata(id)
             .await
@@ -252,16 +305,16 @@ impl DesktopSchedule {
                             failures: state.map_or(0, |state| state.failures),
                         },
                     )
-                    .map_err(|_| DesktopError("storage"))?;
+                    .map_err(ScheduleFailure::runtime)?;
                 entry.insert(generation);
             }
         }
         Ok(())
     }
-    pub async fn cancel(&mut self, id: i64, clock: impl Fn() -> Duration) -> Result<()> {
+    pub async fn cancel(&mut self, id: i64, clock: impl Fn() -> Duration) -> ScheduleResult<()> {
         self.runtime
             .cancel(id, clock())
-            .map_err(|_| DesktopError("storage"))?;
+            .map_err(ScheduleFailure::runtime)?;
         // Queued ID уже удалён: чужой fetch остаётся в общем select, где доступны
         // приоритетные Stop/Shutdown. Только собственная active/review работа ждёт ack.
         if self.runtime.cancellation_pending(id) {
@@ -269,7 +322,7 @@ impl DesktopSchedule {
                 .runtime
                 .next_event(clock)
                 .await
-                .map_err(|_| DesktopError("storage"))?
+                .map_err(ScheduleFailure::runtime)?
             {
                 if !matches!(event, SubscriptionScheduleEvent::Cancelled { id: current } if current == id)
                 {
@@ -289,6 +342,122 @@ impl DesktopSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn actual_restore_full_exports_only_current_generation() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-scheduler-full-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        for name in ["Первый", "Второй"] {
+            service
+                .add(
+                    yonik_linux::SubscriptionSource::new(
+                        name.into(),
+                        "http://127.0.0.1:9/sub".into(),
+                        true,
+                        yonik_linux::FetchRoute::Direct,
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        let mut owner = DesktopSchedule::with_limits(NonZeroU64::new(77).unwrap(), 1).unwrap();
+        let failure = owner
+            .load_at(&service, Duration::ZERO, 100)
+            .await
+            .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerFull));
+        assert_eq!(failure.key(), "storage");
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).expect("actual producer V2");
+        let value: serde_json::Value = serde_json::from_str(&export).unwrap();
+        for error in value["errors"].as_array().unwrap() {
+            assert_eq!(error["reason"], "scheduler_full");
+            assert_eq!(error["generation"], "77");
+            assert_eq!(error["params"], serde_json::json!({}));
+        }
+        assert_eq!(value["errors"].as_array().unwrap().len(), 2);
+        if let Ok(directory) = std::env::var("YONIK_SCHEDULER_EVIDENCE") {
+            std::fs::write(
+                std::path::Path::new(&directory).join("actual-scheduler-full.json"),
+                &export,
+            )
+            .unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join("actual-scheduler-snapshot.json"),
+                &raw,
+            )
+            .unwrap();
+        }
+        let mut sibling: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        sibling["scheduler_generation"] = serde_json::json!(78);
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        sibling["scheduler_generation"] = serde_json::json!(77);
+        sibling["error_contexts"][0]["slot"] = serde_json::json!("routing_ack");
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        let catalog: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../docs/specs/diagnostic-message-catalog.json"
+        ))
+        .unwrap();
+        let message = catalog["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["message_key"] == "storage")
+            .unwrap();
+        assert!(!message["ru"].as_str().unwrap().is_empty());
+        assert!(!message["en"].as_str().unwrap().is_empty());
+        state.command_error(true, "storage");
+        state.emit(&callback);
+        assert!(crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap()).is_none());
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn actual_initialize_invalid_limits_has_closed_context() {
+        let failure = match DesktopSchedule::with_limits(NonZeroU64::new(88).unwrap(), 0) {
+            Err(failure) => failure,
+            Ok(_) => panic!("нулевой лимит принят"),
+        };
+        assert_eq!(failure.cause, Some(Cause::SchedulerInitializeInvalidLimits));
+        assert_eq!(failure.key(), "startup");
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, None);
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let export = crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap())
+            .expect("initialize V2");
+        let value: serde_json::Value = serde_json::from_str(&export).unwrap();
+        for error in value["errors"].as_array().unwrap() {
+            assert_eq!(error["stage"], "scheduler_initialize");
+            assert_eq!(error["reason"], "scheduler_initialize_invalid_limits");
+            assert!(error["generation"].is_null());
+        }
+    }
 
     #[tokio::test]
     async fn startup_восстанавливает_due_и_нормализует_rollback() {

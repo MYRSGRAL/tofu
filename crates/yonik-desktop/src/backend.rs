@@ -739,6 +739,7 @@ struct Snapshot {
     error_contexts: Contexts,
     error_generation: u64,
     helper_generation: Option<u64>,
+    scheduler_generation: Option<u64>,
     routing_generation: u64,
     maintenance_generation: u64,
     logs_generation: u64,
@@ -822,6 +823,7 @@ impl Snapshot {
             error_contexts: Contexts::default(),
             error_generation: 0,
             helper_generation: None,
+            scheduler_generation: None,
             routing_generation: 0,
             maintenance_generation: 0,
             logs_generation: 0,
@@ -938,6 +940,20 @@ impl Snapshot {
             failure.cause,
             None,
         );
+    }
+    fn schedule_error(
+        &mut self,
+        failure: desktop_schedule::ScheduleFailure,
+        generation: Option<u64>,
+    ) {
+        self.command_error(true, failure.key());
+        self.scheduler_generation = generation;
+        if let Some(cause) = failure.cause {
+            self.error_contexts
+                .set_generation(Slot::Error, cause, generation);
+            self.error_contexts
+                .set_generation(Slot::Source, cause, generation);
+        }
     }
     fn session_error(&mut self, cause: Cause, generation: u64) {
         self.contextual_error(false, ContextFailure::new(cause));
@@ -2602,7 +2618,7 @@ async fn reconcile_manual_schedule(
     identity: SubscriptionIdentity,
     clock: impl Fn() -> Duration,
     storage_failed: bool,
-) -> Result<()> {
+) -> std::result::Result<(), desktop_schedule::ScheduleFailure> {
     if service
         .schedule_generation(identity.id)
         .await
@@ -3193,7 +3209,7 @@ async fn run(
     let mut scheduled = match DesktopSchedule::new() {
         Ok(owner) => owner,
         Err(error) => {
-            actor.state.command_error(true, error.key());
+            actor.state.schedule_error(error, None);
             actor.state.ready = false;
             actor.state.closed = actor
                 .service
@@ -3211,7 +3227,9 @@ async fn run(
     scheduled.visible = *subscription_visible.borrow_and_update();
     let mut schedule_loaded = false;
     if let Err(error) = scheduled.load(actor.service(), origin.elapsed()).await {
-        actor.state.command_error(true, error.key());
+        actor
+            .state
+            .schedule_error(error, Some(scheduled.generation));
         actor.emit();
     } else {
         schedule_loaded = true;
@@ -3238,7 +3256,9 @@ async fn run(
                     || policy.battery_saver))
         {
             if let Err(error) = scheduled.close_window(actor.service(), now).await {
-                actor.state.command_error(true, error.key());
+                actor
+                    .state
+                    .schedule_error(error, Some(scheduled.generation));
             }
         }
         if let Some(observer) = &config.schedule_observer {
@@ -3274,13 +3294,19 @@ async fn run(
             if scheduled.review.is_some() {
                 actor.state.pending = None;
             }
-            if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
-                actor.state.command_error(true, "storage");
+            if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await {
+                actor.state.schedule_error(
+                    desktop_schedule::ScheduleFailure::runtime(error),
+                    Some(scheduled.generation),
+                );
             }
             if let Ok(mut replacement) = scheduled.replacement() {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
-                    actor.state.command_error(true, error.key());
+                    actor
+                        .state
+                        .schedule_error(error, Some(replacement.generation));
                 }
+                actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
             }
             schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
@@ -3315,15 +3341,16 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
+                if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await { actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
                     let policy = scheduled.policy;
                     let visible = scheduled.visible;
                     if let Ok(mut replacement) = DesktopSchedule::new() {
                         replacement.policy = policy; replacement.visible = visible;
-                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.command_error(true, error.key()); }
-                        scheduled = replacement;
+                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
+                        actor.state.scheduler_generation = Some(replacement.generation);
+                scheduled = replacement;
                     }
                 }
                 actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Connection); actor.state.connection_error = None;
@@ -3425,7 +3452,7 @@ async fn run(
                     }
                     Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.command_error(true, map_subscription(error).key()),
                     Ok(_) => {},
-                    Err(_) => actor.state.command_error(true, "storage"),
+                    Err(error) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)),
                 }
                 actor.emit();
             }
@@ -3443,7 +3470,7 @@ async fn run(
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
-                        Err(_) => actor.state.command_error(true, "storage"),
+                        Err(error) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)),
                     }
                 }
             }
@@ -3556,7 +3583,7 @@ async fn run(
                     let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 actor.emit();
             }
@@ -3711,11 +3738,11 @@ async fn run(
                 if let Some(id) = cancel_id {
                     let cancelled_review = scheduled.review == Some(id);
                     if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
-                        actor.state.command_error(true, error.key()); actor.emit(); continue;
+                        actor.state.schedule_error(error, Some(scheduled.generation)); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
                         if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
-                            actor.state.command_error(true, error.key());
+                            actor.state.schedule_error(error, Some(scheduled.generation));
                         } else { actor.state.command_error(true, "busy"); }
                         actor.emit(); continue;
                     }
@@ -3893,12 +3920,12 @@ async fn run(
                 };
                 if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
                         if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
-                            actor.state.command_error(true, error.key());
+                            actor.state.schedule_error(error, Some(scheduled.generation));
                         }
                     }
                 }
@@ -3999,8 +4026,11 @@ async fn run(
             break;
         }
     }
-    if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
-        actor.state.command_error(true, "storage");
+    if let Err(error) = scheduled.runtime.shutdown(origin.elapsed()).await {
+        actor.state.schedule_error(
+            desktop_schedule::ScheduleFailure::runtime(error),
+            Some(scheduled.generation),
+        );
     }
     // Отмена с acknowledgement: Drop может отложить zbus cleanup до следующего poll.
     provider_stop.send_replace(true);
