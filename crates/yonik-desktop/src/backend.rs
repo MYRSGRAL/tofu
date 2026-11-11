@@ -169,6 +169,13 @@ enum Command {
         source: logs::Source,
         request_id: String,
     },
+    RoutingApply {
+        expected_revision: i64,
+        request_id: u64,
+        source_generation: i64,
+        snapshot_revision: i64,
+        selected_profile_id: i64,
+    },
     RoutingExplain {
         expected_revision: i64,
         request_id: u64,
@@ -313,7 +320,8 @@ enum Command {
 impl Command {
     fn routing_request_id(&self) -> Option<u64> {
         match self {
-            Self::RoutingExplain { request_id, .. }
+            Self::RoutingApply { request_id, .. }
+            | Self::RoutingExplain { request_id, .. }
             | Self::EditRouting { request_id, .. }
             | Self::RoutingOrder { request_id, .. }
             | Self::RoutingDefault { request_id, .. }
@@ -794,6 +802,7 @@ struct Snapshot {
     preferences_durability_warning: bool,
     build_id: &'static str,
     source_hwid_enabled: bool,
+    source_generation: Option<i64>,
     ready: bool,
     busy: bool,
     error: Option<&'static str>,
@@ -816,6 +825,7 @@ struct Snapshot {
     can_unlock: bool,
     system_recovery_pending: bool,
     system_busy: bool,
+    system_tun_available: bool,
     status: &'static str,
     selected_profile: Option<i64>,
     selected_name: Option<String>,
@@ -873,6 +883,7 @@ impl Snapshot {
             preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
             source_hwid_enabled: false,
+            source_generation: None,
             ready: false,
             busy: false,
             error: None,
@@ -895,6 +906,7 @@ impl Snapshot {
             can_unlock: false,
             system_recovery_pending: false,
             system_busy: false,
+            system_tun_available: false,
             status: "Disconnected",
             selected_profile: None,
             selected_name: None,
@@ -1213,6 +1225,53 @@ impl Actor {
             .expect("online dispatch требует repository slot")
     }
 
+    async fn check_routing_apply(&self, command: &Command) -> Result<()> {
+        let Command::RoutingApply {
+            expected_revision,
+            request_id,
+            source_generation,
+            snapshot_revision,
+            selected_profile_id,
+        } = command
+        else {
+            return Ok(());
+        };
+        if *request_id == 0 || *request_id > 9_007_199_254_740_991 {
+            return Err(DesktopError("invalid_input"));
+        }
+        if self.routing_revision != Some(*expected_revision)
+            || self.state.source_generation != Some(*source_generation)
+            || self.state.revision != *snapshot_revision
+            || self.state.selected_profile != Some(*selected_profile_id)
+        {
+            return Err(DesktopError("routing_stale"));
+        }
+        let source = self
+            .state
+            .source_id
+            .ok_or(DesktopError("profile_required"))?;
+        if self
+            .service()
+            .schedule_generation(source)
+            .await
+            .map_err(map_subscription)?
+            != Some(*source_generation)
+        {
+            return Err(DesktopError("routing_stale"));
+        }
+        Ok(())
+    }
+
+    fn current_inline_policy(&self) -> Result<(yonik_linux::system_policy::InlinePolicy, i64)> {
+        let revision = self
+            .routing_revision
+            .ok_or(DesktopError("routing_storage"))?;
+        let policy = self.state.routing.policy().map_err(DesktopError)?;
+        let inline = inline_policy_conversion::inline_policy(&policy)
+            .map_err(|_| DesktopError("system_unsupported"))?;
+        Ok((inline, revision))
+    }
+
     async fn save_routing(
         &mut self,
         candidate: crate::editor::Draft,
@@ -1498,6 +1557,7 @@ impl Actor {
         Ok(())
     }
     async fn page(&mut self) -> Result<()> {
+        self.state.source_generation = None;
         self.state.profiles.clear();
         self.state.total = 0;
         self.state.revision = 0;
@@ -1506,6 +1566,11 @@ impl Actor {
         let Some(id) = self.state.source_id else {
             return Ok(());
         };
+        self.state.source_generation = self
+            .service()
+            .schedule_generation(id)
+            .await
+            .map_err(map_subscription)?;
         let summary = self
             .service()
             .source_summary(id)
@@ -3432,11 +3497,20 @@ async fn run(
                 if let Some(flight) = system_flight.take() {
                     // После долгого State recovery-действия получают окно до следующего poll.
                     system_poll.reset();
+                    if let Some(request_id) = flight.request_id {
+                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                    }
                     let stale = (flight.connecting && system_stop) || flight.generation != control.generation.load(Ordering::SeqCst)
-                        || (flight.connecting && flight.revision != system_revision(&actor));
+                        || (flight.connecting && (flight.revision != system_revision(&actor) || flight.routing_revision.is_some_and(|revision| actor.routing_revision != Some(revision) || flight.source_generation != actor.state.source_generation)));
                     match result {
                         Ok((session, result)) => {
+                            actor.state.system_tun_available = session.as_ref().is_some_and(SystemSession::system_tun_available);
                             system_session = session;
+                            if !stale {
+                                if let Some(request_id) = flight.request_id {
+                                    actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: result.as_ref().err().map(|e| system_error(*e)) });
+                                }
+                            }
                             if stale {
                                 system_stop |= flight.mutating || system_active;
                                 actor.state.system_state = "Unknown";
@@ -3538,6 +3612,11 @@ async fn run(
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
             }
             _ = network_changed(&mut network) => {
+                actor.state.system_tun_available = false;
+                if let Some(flight) = system_flight.as_ref().filter(|f| f.connecting) {
+                    flight.cancel.send_replace(true);
+                    system_stop = true;
+                }
                 let current = network.as_ref().map(NetworkWatch::current);
                 actor.network = network.clone();
                 apply_network_event(&mut actor.state, current, &control);
@@ -3777,6 +3856,14 @@ async fn run(
                     if quitting { break; }
                     continue;
                 }
+                let apply_request = match &envelope.command { Command::RoutingApply { request_id, .. } => Some(*request_id), _ => None };
+                // Отмена до первого await редактирования исключает отправку Apply после принятия edit.
+                if matches!(&envelope.command, Command::EditRouting { .. } | Command::RoutingOrder { .. } | Command::RoutingDefault { .. } | Command::RoutingDelete { .. } | Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Refresh | Command::Reload | Command::ApproveRefresh | Command::SetSourceHwid { .. } | Command::DeleteSource { .. }) {
+                    if let Some(flight) = system_flight.as_ref().filter(|f| f.connecting) {
+                        flight.cancel.send_replace(true);
+                        system_stop = true;
+                    }
+                }
 
                 let source_change = match &envelope.command {
                     Command::SourceChange { request_id, id, .. } => Some((*request_id, *id)),
@@ -3785,7 +3872,6 @@ async fn run(
                 if let Some((request_id, id)) = source_change {
                     actor.state.source_change_ack = Some(SourceChangeAck { request_id, id, generation: None, error: Some("cancelled") });
                     // Все сигналы до первого await; результаты отменённой работы не публикуются.
-                    // При интеграции Flight fences этот вариант входит в общий pre-edit predicate.
                     if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                     if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                     if let Some(batch) = batch_running.as_mut() { batch.stop(); }
@@ -3967,19 +4053,24 @@ async fn run(
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
-                    Command::Connect if actor.state.connection_mode == ConnectionMode::System => {
-                        if actor.state.can_stop || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
+                    command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
+                        let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
+                        if let Err(error) = actor.check_routing_apply(&command).await { Err(error) }
+                        else if actor.state.can_stop || (request_id.is_some() && actor.state.system_recovery_pending) || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
                         else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
                         else if let Some(profile) = actor.selected.as_ref() {
-                            match yonik_import::ServerIntent::from_server(&profile.server) {
-                                Ok(server) => {
-                                    system_flight = Some(Flight::start(system_session.take(), Operation::Connect(Box::new(server), actor.state.engine.engine()), system_revision(&actor), envelope.generation));
+                            match yonik_import::ServerIntent::from_server(&profile.server).map_err(|_| DesktopError("engine_config")).and_then(|server| actor.current_inline_policy().map(|(policy, revision)| (server, policy, revision))) {
+                                Ok((server, policy, routing_revision)) => {
+                                    system_flight = Some(Flight::start(system_session.take(), Operation::PolicyConnect(Box::new(server), actor.state.engine.engine(), Box::new(policy), routing_revision), system_revision(&actor), envelope.generation));
+                                    if let Some(flight) = &mut system_flight { flight.request_id = request_id; flight.source_generation = actor.state.source_generation; }
+                                    actor.state.system_tun_available = false;
+                                    actor.state.routing_ack = None;
                                     actor.state.can_stop = true; system_active = true;
                                     actor.state.active_name = Some(profile.profile.name.clone());
                                     actor.state.active_engine = Some(actor.state.engine);
                                     actor.state.system_state = "Unknown"; actor.state.status = "Preparing"; Ok(())
                                 }
-                                Err(_) => Err(DesktopError("engine_config")),
+                                Err(error) => Err(error),
                             }
                         } else { Err(DesktopError("profile_required")) }
                     }
@@ -4026,6 +4117,9 @@ async fn run(
                             actor.state.command_error(true, error.key());
                         }
                     }
+                }
+                if let (Some(request_id), Err(error)) = (apply_request, &outcome) {
+                    actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some(error.key()) });
                 }
 
                 if source_change.is_some() {
@@ -4092,10 +4186,13 @@ async fn run(
             actor.state.tcp_result = None;
             actor.emit();
         }
-        if system_flight
-            .as_ref()
-            .is_some_and(|flight| flight.connecting && flight.revision != system_revision(&actor))
-        {
+        if system_flight.as_ref().is_some_and(|flight| {
+            flight.connecting
+                && (flight.revision != system_revision(&actor)
+                    || flight
+                        .routing_revision
+                        .is_some_and(|revision| actor.routing_revision != Some(revision)))
+        }) {
             if let Some(flight) = &system_flight {
                 flight.cancel.send_replace(true);
             }
@@ -4236,6 +4333,37 @@ mod routing_regressions {
     fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
         serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
     }
+    #[tokio::test]
+    async fn inline_capture_берёт_текущий_сохранённый_черновик() {
+        let (mut actor, lock, path) = fixture().await;
+        send(&mut actor, put(17, 0, 1, true))
+            .await
+            .expect("сохранение");
+        let (first, revision) = actor.current_inline_policy().expect("capture");
+        assert_eq!(revision, 1);
+        assert_eq!(first.policy().policy().user_rules[0].id, 17);
+        send(&mut actor, serde_json::json!({"command":"routing_default", "expected_revision":1, "request_id":2, "action":"block"})).await.expect("изменение");
+        let (current, revision) = actor.current_inline_policy().expect("capture после edit");
+        assert_eq!(revision, 2);
+        assert_eq!(
+            current.policy().policy().default_action,
+            yonik_domain::Action::Block
+        );
+        assert_eq!(
+            first.policy().policy().default_action,
+            yonik_domain::Action::Proxy
+        );
+        let stored = actor
+            .routing_repository()
+            .routing_draft()
+            .await
+            .expect("encrypted draft");
+        assert_eq!(stored.expect("сохранённый draft").0, revision);
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("собственная fixture");
+    }
+
     #[tokio::test]
     async fn explanation_ack_and_diagnostics_follow_revision() {
         let (mut actor, lock, path) = fixture().await;
@@ -4501,7 +4629,12 @@ fn system_error(error: ClientError) -> &'static str {
 
 /// Одна ограниченная операция. Владение session возвращается даже после отмены RPC.
 pub(crate) enum Operation {
-    Connect(Box<yonik_import::ServerIntent>, Engine),
+    PolicyConnect(
+        Box<yonik_import::ServerIntent>,
+        Engine,
+        Box<yonik_linux::system_policy::InlinePolicy>,
+        i64,
+    ),
     Stop,
     Unlock,
     State,
@@ -4514,6 +4647,9 @@ pub(crate) struct Flight {
     )>,
     pub generation: u64,
     pub revision: ProfileRevision,
+    pub routing_revision: Option<i64>,
+    pub request_id: Option<u64>,
+    pub source_generation: Option<i64>,
     pub connecting: bool,
     pub mutating: bool,
 }
@@ -4524,7 +4660,11 @@ impl Flight {
         revision: ProfileRevision,
         generation: u64,
     ) -> Self {
-        let connecting = matches!(operation, Operation::Connect(..));
+        let connecting = matches!(operation, Operation::PolicyConnect(..));
+        let routing_revision = match &operation {
+            Operation::PolicyConnect(_, _, _, revision) => Some(*revision),
+            _ => None,
+        };
         let mutating = !matches!(operation, Operation::State);
         let (cancel, cancellation) = Cancellation::new();
         let task = tokio::spawn(async move {
@@ -4538,13 +4678,13 @@ impl Flight {
             };
             session.revise(revision);
             let result = match operation {
-                Operation::Connect(server, engine) => {
+                Operation::PolicyConnect(server, engine, policy, _) => {
                     match session
-                        .prepare(
+                        .prepare_policy(
                             revision,
                             &server,
                             engine,
-                            true,
+                            &policy,
                             deadline,
                             cancellation.clone(),
                         )
@@ -4565,6 +4705,9 @@ impl Flight {
             task,
             generation,
             revision,
+            routing_revision,
+            request_id: None,
+            source_generation: None,
             connecting,
             mutating,
         }
@@ -4616,6 +4759,188 @@ mod system_recovery_tests {
 #[cfg(test)]
 #[path = "maintenance_command_tests.rs"]
 mod maintenance_command_tests;
+
+mod inline_policy_conversion {
+    use yonik_linux::system_client::ClientError;
+
+    use serde::Serialize;
+    use yonik_domain::{Action, DomainPattern, Policy, Rule};
+    use yonik_engine::policy_wire::SystemPolicy;
+    use yonik_linux::system_policy::InlinePolicy;
+    pub(crate) fn inline_policy(policy: &Policy) -> Result<InlinePolicy, ClientError> {
+        #[derive(Serialize)]
+        struct WireRule<'a> {
+            id: u64,
+            enabled: bool,
+            action: &'static str,
+            domain: Vec<&'a str>,
+            domain_suffix: Vec<&'a str>,
+            ip_cidr: Vec<String>,
+            executable_paths: &'a [String],
+        }
+        fn action(value: Action) -> &'static str {
+            match value {
+                Action::Direct => "direct",
+                Action::Proxy => "proxy",
+                Action::Block => "block",
+            }
+        }
+        fn rule(value: &Rule) -> WireRule<'_> {
+            let mut domain = Vec::new();
+            let mut domain_suffix = Vec::new();
+            for pattern in &value.conditions.domains {
+                match pattern {
+                    DomainPattern::Exact(name) => domain.push(name.as_str()),
+                    DomainPattern::Suffix(name) => domain_suffix.push(name.as_str()),
+                }
+            }
+            WireRule {
+                id: value.id,
+                enabled: value.enabled,
+                action: action(value.action),
+                domain,
+                domain_suffix,
+                ip_cidr: value
+                    .conditions
+                    .destinations
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+                executable_paths: &value.conditions.executables,
+            }
+        }
+        #[derive(Serialize)]
+        struct Network {
+            cidr: String,
+            vpn: u64,
+            available: bool,
+        }
+        #[derive(Serialize)]
+        struct Domain<'a> {
+            suffix: &'a str,
+            vpn: u64,
+            available: bool,
+        }
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            version: u32,
+            default_action: &'static str,
+            user_rules: Vec<WireRule<'a>>,
+            preset_rules: Vec<WireRule<'a>>,
+            lan: Vec<String>,
+            private_networks: Vec<Network>,
+            private_domains: Vec<Domain<'a>>,
+        }
+        // Закрытый wire умеет только suffix приватного домена: exact нельзя расширять.
+        if policy
+            .private_domains
+            .iter()
+            .any(|d| matches!(d.domain, DomainPattern::Exact(_)))
+        {
+            return Err(ClientError::Unsupported);
+        }
+        let wire = Wire {
+            version: 1,
+            default_action: action(policy.default_action),
+            user_rules: policy.user_rules.iter().map(rule).collect(),
+            preset_rules: policy.preset_rules.iter().map(rule).collect(),
+            lan: policy.lan.iter().map(ToString::to_string).collect(),
+            private_networks: policy
+                .private_networks
+                .iter()
+                .map(|n| Network {
+                    cidr: n.network.to_string(),
+                    vpn: n.vpn.get(),
+                    available: n.available,
+                })
+                .collect(),
+            private_domains: policy
+                .private_domains
+                .iter()
+                .map(|d| Domain {
+                    suffix: d.domain.name().as_str(),
+                    vpn: d.vpn.get(),
+                    available: d.available,
+                })
+                .collect(),
+        };
+        let text = serde_json::to_string(&wire).map_err(|_| ClientError::InvalidRequest)?;
+        SystemPolicy::parse(&text)
+            .map(InlinePolicy::new)
+            .map_err(|_| ClientError::InvalidRequest)
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use yonik_domain::{Conditions, PrivateDomain, VpnId};
+
+        #[test]
+        fn сохраняет_порядок_условия_и_действие() {
+            let policy = Policy {
+                user_rules: vec![Rule {
+                    id: 7,
+                    enabled: true,
+                    action: Action::Block,
+                    conditions: Conditions {
+                        executables: vec!["/usr/bin/browser".into()],
+                        destinations: vec!["192.0.2.0/24".parse().unwrap()],
+                        domains: vec![DomainPattern::Suffix("example.org".parse().unwrap())],
+                    },
+                }],
+                ..Policy::default()
+            };
+            let wire = inline_policy(&policy).unwrap();
+            let restored = wire.policy().policy();
+            assert_eq!(restored.user_rules[0].id, 7);
+            assert_eq!(restored.user_rules[0].action, Action::Block);
+            assert_eq!(
+                restored.user_rules[0].conditions.executables,
+                policy.user_rules[0].conditions.executables
+            );
+            assert_eq!(
+                restored.user_rules[0].conditions.domains,
+                policy.user_rules[0].conditions.domains
+            );
+            assert_eq!(
+                restored.user_rules[0].conditions.destinations,
+                policy.user_rules[0].conditions.destinations
+            );
+        }
+        #[test]
+        fn не_расширяет_exact_приватного_домена() {
+            let policy = Policy {
+                private_domains: vec![PrivateDomain {
+                    domain: DomainPattern::Exact("example.org".parse().unwrap()),
+                    vpn: VpnId::new(1).unwrap(),
+                    available: true,
+                }],
+                ..Policy::default()
+            };
+            assert!(matches!(
+                inline_policy(&policy),
+                Err(ClientError::Unsupported)
+            ));
+        }
+        #[test]
+        fn не_обрезает_превышение_бюджета() {
+            let policy = Policy {
+                user_rules: (1..=129)
+                    .map(|id| Rule {
+                        id,
+                        enabled: true,
+                        action: Action::Proxy,
+                        conditions: Conditions::default(),
+                    })
+                    .collect(),
+                ..Policy::default()
+            };
+            assert!(matches!(
+                inline_policy(&policy),
+                Err(ClientError::InvalidRequest)
+            ));
+        }
+    }
+}
 
 #[cfg(test)]
 mod error_context_tests {
