@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import socket
 import subprocess
 import tempfile
@@ -17,6 +18,34 @@ from desktop_smoke import Fixture, free_port, step
 from desktop_ui_smoke import execute
 from engine_compile import UUID
 from engine_host import peer
+
+
+def wait_exit(process: subprocess.Popen, timeout: float) -> int:
+    """Дождаться выхода без reap: PID лидера защищает идентификатор группы."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if result is not None:
+            return (
+                result.si_status
+                if result.si_code == os.CLD_EXITED
+                else -result.si_status
+            )
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(0.02)
+
+
+def stop_group(process: subprocess.Popen) -> None:
+    """Завершить всю собственную группу до освобождения PID её лидера."""
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        wait_exit(process, 3)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=3)
 
 
 def run(binary: Path, output: Path) -> None:
@@ -65,7 +94,8 @@ def active(binary: Path, engines: Path, output: Path) -> None:
     from gi.repository import GLib
 
     DBusGMainLoop(set_as_default=True)
-    bus = dbus.SessionBus()
+    bus = dbus.SessionBus(private=True)
+    bus.set_exit_on_disconnect(False)
     name = dbus.service.BusName("org.kde.StatusNotifierWatcher", bus)
     registered: list[str] = []
 
@@ -86,7 +116,7 @@ def active(binary: Path, engines: Path, output: Path) -> None:
 
     watcher = Watcher(bus, "/StatusNotifierWatcher")
     loop = GLib.MainLoop()
-    thread = threading.Thread(target=loop.run)
+    thread = threading.Thread(target=loop.run, daemon=True)
     thread.start()
     try:
         with tempfile.TemporaryDirectory(prefix="yt-") as temporary:
@@ -130,17 +160,28 @@ def active(binary: Path, engines: Path, output: Path) -> None:
                     url="https://127.0.0.1:1/",
                     expected_status=204,
                 ),
-                step({"selected_profile": 1, "probe_custom": True}, "connect"),
+                {
+                    "when": {"selected_profile": 1, "probe_custom": True},
+                    "ui": {"action": "menuConnect"},
+                },
                 {
                     "when": {"can_stop": True, "status": "Limited"},
                     "ui": {"action": "close"},
                 },
                 {
+                    "when": {"can_stop": True, "tray_available": True},
+                    "ui_when": {"window": {"visible": True}},
+                    "ui": {"action": "close"},
+                },
+                {
                     "when": {"can_stop": True},
                     "ui_when": {"window": {"visible": True}},
-                    "ui": {"action": "click", "object": "mainConnectButton"},
+                    "ui": {"action": "menuDisconnect"},
                 },
-                step({"status": "Disconnected", "can_stop": False}, "connect"),
+                {
+                    "when": {"status": "Disconnected", "can_stop": False},
+                    "ui": {"action": "menuConnect"},
+                },
                 {
                     "when": {"status": "Limited", "can_stop": True},
                     "ui": {"action": "quit"},
@@ -171,11 +212,12 @@ def active(binary: Path, engines: Path, output: Path) -> None:
                         command
                         + ["--smoke-script", str(script), "--smoke-trace", str(trace)],
                         stderr=(output / "stderr.log").open("wb"),
+                        start_new_session=True,
                     )
                     try:
                         deadline = time.monotonic() + 35
                         hidden = False
-                        while time.monotonic() < deadline and process.poll() is None:
+                        while time.monotonic() < deadline:
                             events = (
                                 [
                                     json.loads(line)
@@ -218,6 +260,32 @@ def active(binary: Path, engines: Path, output: Path) -> None:
                                     check=True,
                                     stdout=subprocess.DEVNULL,
                                 )
+                                # Исчезновение владельца и новый владелец на private bus.
+                                registrations_before = len(registered)
+                                owner_before = bus.get_unique_name()
+                                bus.release_name("org.kde.StatusNotifierWatcher")
+                                watcher.remove_from_connection()
+                                del name
+                                bus.close()
+                                time.sleep(0.3)
+                                bus = dbus.SessionBus(private=True)
+                                bus.set_exit_on_disconnect(False)
+                                name = dbus.service.BusName(
+                                    "org.kde.StatusNotifierWatcher", bus
+                                )
+                                if bus.get_unique_name() == owner_before:
+                                    raise RuntimeError(
+                                        "Watcher не сменил D-Bus владельца"
+                                    )
+                                watcher = Watcher(bus, "/StatusNotifierWatcher")
+                                registration_deadline = time.monotonic() + 3
+                                while (
+                                    len(registered) <= registrations_before
+                                    and time.monotonic() < registration_deadline
+                                ):
+                                    time.sleep(0.05)
+                                if len(registered) <= registrations_before:
+                                    raise RuntimeError("Нет повторной регистрации SNI")
                                 subprocess.run(
                                     command,
                                     check=True,
@@ -227,8 +295,8 @@ def active(binary: Path, engines: Path, output: Path) -> None:
                                 )
                                 break
                             time.sleep(0.05)
-                        code = process.wait(timeout=8)
-                        if not hidden or len(registered) != 1 or code != 0:
+                        code = wait_exit(process, 8)
+                        if not hidden or len(registered) < 2 or code != 0:
                             raise RuntimeError(
                                 f"Active tray: hidden={hidden}, registered={bool(registered)}, exit={code}"
                             )
@@ -253,28 +321,30 @@ def active(binary: Path, engines: Path, output: Path) -> None:
                                 {
                                     "hidden_traffic": True,
                                     "relaunch": True,
+                                    "watcher_restart": True,
+                                    "menu_connect_disconnect": True,
                                     "stop_quit": True,
                                     "registered": len(registered),
                                 }
                             )
                         )
                     finally:
-                        if process.poll() is None:
-                            process.terminate()
-                            try:
-                                process.wait(timeout=3)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait(timeout=3)
+                        stop_group(process)
             finally:
                 server.shutdown()
                 server.server_close()
                 http.join(timeout=3)
     finally:
-        watcher.remove_from_connection()
-        loop.quit()
-        thread.join(timeout=3)
-        del name
+        try:
+            watcher.remove_from_connection()
+        finally:
+            try:
+                loop.quit()
+            finally:
+                thread.join(timeout=3)
+                del name
+                if thread.is_alive():
+                    raise RuntimeError("GLib thread не завершился за 3 секунды")
 
 
 def main() -> int:
