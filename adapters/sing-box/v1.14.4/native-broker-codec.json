@@ -5,7 +5,7 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "f9ee6ed890f6bd0b11ba41efa4e6ba5baa2b2095488e6f4a229a5a0e217a53c9",
+  "patch_sha256": "3e63a4c458c905744bf4cedc6cbe567324d4bb39518a2413b14129d81c945c42",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
@@ -14,7 +14,7 @@
     "frozen-vectors.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216",
     "bootstrap_linux.go": "70b989f474fe79739e898fd37eae62a922680efed8302cd33400dc3d2fbef139",
     "bootstrap_linux_test.go": "b6f0b01e824737449928a9f2fac4153d8a5d2dbc93f54ce2d30bfab77718d575",
-    "routing.go": "e04769ea985e6bc28fe2e675dea2376deae757e64ea29a468d8c13f73cf9c559",
+    "routing.go": "d74c38f8521d01d271e8b19d7356bbc76bef6f111426e6a8c75d10945643ee9b",
     "routing_test.go": "e69f550bbf0e4d1868bd5f9cb53af3c77ec74b92f4af84a5f0919b85cd50e388",
     "export_test.go": "b734e69f4e62fab734c3021577d778e33c2bb19171501317b004545ba8550771",
     "callsite_test.go": "0fcbd407ee47aa9f6958d5b7dde3fca9d27dce523656d1ae6972466dd246ed5f",
@@ -22,7 +22,8 @@
     "closed_tun_linux_test.go": "ffaba7cf72f3c007bf43de50bd0659de1d62b52e30ebe7707acc240024058cb7",
     "tun_callsite_test.go": "2d9027155354a7c4874eb1a4f3cfcea90fa6f61da0cdc01782a90c4797fd4099",
     "socket_callsite_test.go": "d4d7e5133d4867bf055b31c59965b9673705d346f617469e0631f37a240fc826",
-    "socket.go": "10f40e22fdce8b80dec18ea60ee024bfd1311cda037e6d68d4eb97b1b8ec1778"
+    "socket.go": "10f40e22fdce8b80dec18ea60ee024bfd1311cda037e6d68d4eb97b1b8ec1778",
+    "dns_callsite_test.go": "b52f8581e82dd81d199cb5c03372bf047317eda2cbf6e2198b4cd290d5a9edb2"
   },
   "native_protocol": null,
   "adapter_features": {},
@@ -30,13 +31,14 @@
   "runtime_hooks_connected": false,
   "routing_entry_guard_connected": true,
   "callsite_files_sha256": {
-    "route/route.go": "bc3cbc8f9dd241f6168d2753c60fae0e981faaac4efb16fa37d9cde01c882f3d",
+    "route/route.go": "cb69c9af6342d4911ec629c2aa87c4e794599d6ecd0b5820fda747e0c1878d65",
     "protocol/tun/inbound.go": "27f99612c9aa41e7d0a6dabb04c81de6a9f25def6ba866aed580384475442498",
     "common/dialer/default.go": "199bd48ade66cc45705b62b522763e8b2fc9bc085b96415e0b2fd6756eaee792",
     "common/dialer/tfo.go": "5133e7d574956234fd583080b807672ef6e7921ba34d08d43cb53a1c71138603",
     "common/dialer/resolution_pin.go": "ec9f7c5e4b25b3b27315924e580f112cacf4887d196c9aee013c46352e6a508c",
     "common/dialer/resolution_pin_test.go": "fa93f4e637f076ff6d894a36d8e0c67ee76ee517bddbf307f5f3d4aad8a559f0",
-    "common/dialer/socket_guard.go": "8d4bb7eb4a9e7b11f2ea2f04a03ff4a5492c571242ad735007d35a77bb05ef60"
+    "common/dialer/socket_guard.go": "8d4bb7eb4a9e7b11f2ea2f04a03ff4a5492c571242ad735007d35a77bb05ef60",
+    "dns/router.go": "408c47a8588baf6a5a34b0451f7a01c8f21f89e4d7b673cd22c91bc7106980a0"
   },
   "owned_tun_constructor_connected": true
 }

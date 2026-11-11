@@ -3118,3 +3118,445 @@ index 0000000..661c5d0
 +		})
 +	}
 +}
+diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
+new file mode 100644
+index 0000000..1df27bb
+--- /dev/null
++++ b/common/yonikbroker/dns_callsite_test.go
+@@ -0,0 +1,268 @@
++package nativehooks_test
++
++import (
++	"context"
++	M "github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
++	C "github.com/sagernet/sing-box/constant"
++	D "github.com/sagernet/sing-box/dns"
++	"github.com/sagernet/sing-box/log"
++	"github.com/sagernet/sing-box/option"
++	"net"
++	"net/netip"
++	"sync/atomic"
++	"testing"
++)
++
++type guardedDNS struct {
++	adapter.DNSTransport
++	entered chan struct{}
++	release chan struct{}
++	calls   atomic.Int32
++}
++
++func (d *guardedDNS) Tag() string  { return "private" }
++func (d *guardedDNS) Type() string { return "udp" }
++func (d *guardedDNS) Exchange(ctx context.Context, q *M.Msg) (*M.Msg, error) {
++	d.calls.Add(1)
++	if d.entered != nil {
++		d.entered <- struct{}{}
++		<-d.release
++	}
++	ip := netip.MustParseAddr("127.0.0.1")
++	if q.Question[0].Qtype == M.TypeAAAA {
++		ip = netip.IPv6Loopback()
++	}
++	return D.FixedResponse(q.Id, q.Question[0], []netip.Addr{ip}, 300), nil
++}
++func (d *guardedDNS) ExchangeAsync(ctx context.Context, q *M.Msg, cb func(*M.Msg, error)) {
++	go func() { cb(d.Exchange(ctx, q)) }()
++}
++
++func TestActualDNSAwaitAuthority(t *testing.T) {
++	for _, strategy := range []C.DomainStrategy{C.DomainStrategyIPv4Only, C.DomainStrategyIPv6Only} {
++		for _, mode := range []string{"known", "unknown", "unavailable", "stale", "revoke", "cancel"} {
++			t.Run(string(rune('4'+strategy))+mode, func(t *testing.T) {
++				ctx, change, _ := H.ClosedSocketFixture(t)
++				ctx, cancel := context.WithCancel(ctx)
++				defer cancel()
++				r, err := D.NewRouter(context.Background(), log.NewNOPFactory(), option.DNSOptions{})
++				if err != nil {
++					t.Fatal(err)
++				}
++				d := &guardedDNS{entered: make(chan struct{}, 2), release: make(chan struct{})}
++				done := make(chan error, 1)
++				go func() {
++					ips, e := r.Lookup(ctx, "private.example", adapter.DNSQueryOptions{Transport: d, Strategy: strategy})
++					if e == nil && len(ips) == 0 {
++						e = H.ErrDenied
++					}
++					done <- e
++				}()
++				<-d.entered
++				if mode == "cancel" {
++					cancel()
++				} else {
++					change(mode)
++				}
++				close(d.release)
++				err = <-done
++				if (err == nil) != (mode == "known") {
++					t.Fatalf("mode=%s err=%v", mode, err)
++				}
++				if mode != "known" && H.DNSGuard(ctx) == nil {
++					t.Fatal("revoked marker bypass")
++				}
++			})
++		}
++	}
++}
++
++// Один cache хранит только DNS данные; authority каждого waiter проверяется отдельно.
++func TestActualDNSCacheAndConcurrentFlows(t *testing.T) {
++	r, err := D.NewRouter(context.Background(), log.NewNOPFactory(), option.DNSOptions{})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if e := r.Start(adapter.StartStateStart, new(adapter.Scope)); e != nil {
++		t.Fatal(e)
++	}
++	d := &guardedDNS{}
++	opts := adapter.DNSQueryOptions{Transport: d, Strategy: C.DomainStrategyIPv4Only}
++	a, _, _ := H.ClosedSocketFixture(t)
++	if ips, e := r.Lookup(a, "cache.example", opts); e != nil || len(ips) != 1 {
++		t.Fatal(ips, e)
++	}
++	count := d.calls.Load()
++	b, change, _ := H.ClosedSocketFixture(t)
++	change("unknown")
++	if ips, e := r.Lookup(b, "cache.example", opts); e == nil || len(ips) != 0 {
++		t.Fatal("cache authority reused", ips, e)
++	}
++	c, _, _ := H.ClosedSocketFixture(t)
++	if ips, e := r.Lookup(c, "cache.example", opts); e != nil || len(ips) != 1 || d.calls.Load() != count {
++		t.Fatal("known cache", ips, e, d.calls.Load())
++	}
++	// Два независимых flow ждут один вопрос одновременно; revoke одного не закрывает второй.
++	d = &guardedDNS{entered: make(chan struct{}, 2), release: make(chan struct{})}
++	opts.Transport = d
++	first, changeFirst, _ := H.ClosedSocketFixture(t)
++	second, _, _ := H.ClosedSocketFixture(t)
++	results := make(chan struct {
++		bad bool
++		err error
++	}, 2)
++	for i, ctx := range []context.Context{first, second} {
++		go func(bad bool, ctx context.Context) {
++			_, e := r.Lookup(ctx, "shared.example", opts)
++			results <- struct {
++				bad bool
++				err error
++			}{bad, e}
++		}(i == 0, ctx)
++	}
++	<-d.entered
++	// Client может объединять запросы: release не зависит от количества transport awaits.
++	changeFirst("stale")
++	close(d.release)
++	for range 2 {
++		got := <-results
++		if (got.err != nil) != got.bad {
++			t.Fatalf("flow=%v err=%v", got.bad, got.err)
++		}
++	}
++	if d.calls.Load() != 1 {
++		t.Fatalf("coalesced transport calls=%d", d.calls.Load())
++	}
++	// Обычный caller с методом FlowContext не получает mandatory marker автоматически.
++	if _, e := r.Lookup(legacyDNSContext{context.Background()}, "cache.example", opts); e != nil {
++		t.Fatal(e)
++	}
++}
++
++// Реальный приватный resolver: только случайный loopback порт, без host DNS.
++type loopbackDNS struct {
++	adapter.DNSTransport
++	address, network string
++}
++
++func (d *loopbackDNS) Tag() string  { return "loopback-private" }
++func (d *loopbackDNS) Type() string { return d.network }
++func (d *loopbackDNS) Exchange(ctx context.Context, q *M.Msg) (*M.Msg, error) {
++	c := M.Client{Net: d.network}
++	r, _, e := c.ExchangeContext(ctx, q, d.address)
++	return r, e
++}
++func TestActualPrivateResolverLoopback(t *testing.T) {
++	for _, network := range []string{"tcp", "udp"} {
++		for _, mode := range []string{"known", "unknown", "unavailable", "stale", "revoke", "cancel"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				entered := make(chan struct{}, 2)
++				release := make(chan struct{})
++				handler := M.HandlerFunc(func(w M.ResponseWriter, q *M.Msg) {
++					entered <- struct{}{}
++					<-release
++					ip := netip.MustParseAddr("127.0.0.1")
++					if q.Question[0].Qtype == M.TypeAAAA {
++						ip = netip.IPv6Loopback()
++					}
++					_ = w.WriteMsg(D.FixedResponse(q.Id, q.Question[0], []netip.Addr{ip}, 300))
++				})
++				server := &M.Server{Handler: handler}
++				var address string
++				if network == "tcp" {
++					l, e := net.Listen("tcp4", "127.0.0.1:0")
++					if e != nil {
++						t.Fatal(e)
++					}
++					server.Listener = l
++					address = l.Addr().String()
++				} else {
++					l, e := net.ListenPacket("udp4", "127.0.0.1:0")
++					if e != nil {
++						t.Fatal(e)
++					}
++					server.PacketConn = l
++					address = l.LocalAddr().String()
++				}
++				ready := make(chan struct{})
++				server.NotifyStartedFunc = func() { close(ready) }
++				done := make(chan error, 1)
++				go func() { done <- server.ActivateAndServe() }()
++				<-ready
++				defer func() {
++					_ = server.Shutdown()
++					if e := <-done; e != nil {
++						t.Error(e)
++					}
++				}()
++				r, e := D.NewRouter(context.Background(), log.NewNOPFactory(), option.DNSOptions{})
++				if e != nil {
++					t.Fatal(e)
++				}
++				ctx, change, _ := H.ClosedSocketFixture(t)
++				ctx, cancel := context.WithCancel(ctx)
++				defer cancel()
++				result := make(chan error, 1)
++				go func() {
++					ips, e := r.Lookup(ctx, "private.example", adapter.DNSQueryOptions{Transport: &loopbackDNS{address: address, network: network}, StrictComplete: true})
++					if e == nil && len(ips) != 2 {
++						e = H.ErrDenied
++					}
++					result <- e
++				}()
++				<-entered
++				if mode == "cancel" {
++					cancel()
++				} else {
++					change(mode)
++				}
++				close(release)
++				if e := <-result; (e == nil) != (mode == "known") {
++					t.Fatalf("mode=%s err=%v", mode, e)
++				}
++			})
++		}
++	}
++}
++
++type legacyDNSContext struct{ context.Context }
++
++func (c legacyDNSContext) FlowContext() context.Context { return c.Context }
++
++func TestActualAsyncDNSPublication(t *testing.T) {
++	for _, qtype := range []uint16{M.TypeA, M.TypeAAAA} {
++		for _, mode := range []string{"known", "unknown", "cancel", "stale"} {
++			t.Run(mode+string(rune(qtype)), func(t *testing.T) {
++				ctx, change, _ := H.ClosedSocketFixture(t)
++				ctx, cancel := context.WithCancel(ctx)
++				defer cancel()
++				r, e := D.NewRouter(context.Background(), log.NewNOPFactory(), option.DNSOptions{})
++				if e != nil {
++					t.Fatal(e)
++				}
++				d := &guardedDNS{entered: make(chan struct{}, 1), release: make(chan struct{})}
++				q := new(M.Msg)
++				q.SetQuestion("async.example.", qtype)
++				done := make(chan error, 1)
++				r.ExchangeAsync(ctx, q, adapter.DNSQueryOptions{Transport: d}, func(reply *M.Msg, e error) {
++					if e != nil && reply != nil {
++						t.Error("denied reply published")
++					}
++					done <- e
++				})
++				<-d.entered
++				if mode == "cancel" {
++					cancel()
++				} else {
++					change(mode)
++				}
++				close(d.release)
++				if e := <-done; (e == nil) != (mode == "known") {
++					t.Fatalf("mode=%s err=%v", mode, e)
++				}
++			})
++		}
++	}
++}
+diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
+index 964da67..cb7a5bc 100644
+--- a/common/yonikbroker/routing.go
++++ b/common/yonikbroker/routing.go
+@@ -98,3 +98,12 @@ func (c *routingConsumer) lookupAuthenticated(ctx context.Context, flow Flow) (E
+ 	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
+ 	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
+ }
++
++// DNSGuard сохраняет обязательность после revoke: закрытый marker остаётся в context.
++// Обычные native DNS callers без handoff сохраняют штатную семантику.
++func DNSGuard(ctx context.Context) error {
++	if ctx.Value(routingKey{}) == nil {
++		return nil
++	}
++	return guardEntry(ctx, AfterDNS)
++}
+diff --git a/dns/router.go b/dns/router.go
+index 3ac2d07..701c399 100644
+--- a/dns/router.go
++++ b/dns/router.go
+@@ -11,6 +11,7 @@ import (
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+ 	"github.com/sagernet/sing-box/common/taskmonitor"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/experimental/deprecated"
+ 	"github.com/sagernet/sing-box/log"
+@@ -1007,7 +1008,18 @@ func (r *Router) lookupWithRules(ctx context.Context, rules []adapter.DNSRule, d
+ 	return r.lookupRules(ctx, rules, domain, options, nil)
+ }
+ 
+-func (r *Router) lookupRules(ctx context.Context, rules []adapter.DNSRule, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) ([]netip.Addr, error) {
++func (r *Router) lookupRules(ctx context.Context, rules []adapter.DNSRule, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) (addressesResult []netip.Addr, resultErr error) {
++	if err := H.DNSGuard(ctx); err != nil {
++		return nil, err
++	}
++	defer func() {
++		if err := H.DNSGuard(ctx); err != nil {
++			addressesResult, resultErr = nil, err
++			if proofResult != nil {
++				*proofResult = adapter.DNSLookupResult{}
++			}
++		}
++	}()
+ 	strategy := r.resolveLookupStrategy(options)
+ 	lookupOptions := options
+ 	if strategy != C.DomainStrategyAsIS {
+@@ -1219,7 +1231,15 @@ func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeCon
+ 	}
+ }
+ 
+-func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions) (*mDNS.Msg, error) {
++func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions) (responseResult *mDNS.Msg, resultErr error) {
++	if err := H.DNSGuard(ctx); err != nil {
++		return nil, err
++	}
++	defer func() {
++		if err := H.DNSGuard(ctx); err != nil {
++			responseResult, resultErr = nil, err
++		}
++	}()
+ 	exchangeCtx, earlyResponse, err := r.prepareExchange(ctx, message)
+ 	if exchangeCtx == nil {
+ 		return earlyResponse, err
+@@ -1241,11 +1261,27 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	if guardErr := H.DNSGuard(ctx); guardErr != nil {
++		return nil, guardErr
++	}
+ 	r.recordReverseMapping(message, response, transport)
+ 	return response, nil
+ }
+ 
+ func (r *Router) ExchangeAsync(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions, callback func(response *mDNS.Msg, err error)) {
++	if err := H.DNSGuard(ctx); err != nil {
++		callback(nil, err)
++		return
++	}
++	callerContext := ctx
++	callerCallback := callback
++	callback = func(response *mDNS.Msg, err error) {
++		if guardErr := H.DNSGuard(callerContext); guardErr != nil {
++			callerCallback(nil, guardErr)
++			return
++		}
++		callerCallback(response, err)
++	}
+ 	exchangeCtx, earlyResponse, err := r.prepareExchange(ctx, message)
+ 	if exchangeCtx == nil {
+ 		callback(earlyResponse, err)
+@@ -1255,21 +1291,25 @@ func (r *Router) ExchangeAsync(ctx context.Context, message *mDNS.Msg, options a
+ 	if options.Transport != nil {
+ 		transport := options.Transport
+ 		r.client.ExchangeAsync(ctx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, exchangeErr error) {
+-			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
++			r.finishExchangeAsync(ctx, message, transport, response, exchangeErr, callback)
+ 		})
+ 	} else if !exchangeCtx.legacyDNSMode {
+ 		r.exchangeWithRulesAsync(ctx, exchangeCtx.rules, message, options, true, func(result exchangeWithRulesResult) {
+-			r.finishExchangeAsync(message, result.transport, result.response, result.err, callback)
++			r.finishExchangeAsync(ctx, message, result.transport, result.response, result.err, callback)
+ 		})
+ 	} else {
+ 		go func() {
+ 			response, transport, exchangeErr := r.exchangeLegacy(ctx, exchangeCtx, message, options)
+-			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
++			r.finishExchangeAsync(ctx, message, transport, response, exchangeErr, callback)
+ 		}()
+ 	}
+ }
+ 
+-func (r *Router) finishExchangeAsync(message *mDNS.Msg, transport adapter.DNSTransport, response *mDNS.Msg, err error, callback func(response *mDNS.Msg, err error)) {
++func (r *Router) finishExchangeAsync(ctx context.Context, message *mDNS.Msg, transport adapter.DNSTransport, response *mDNS.Msg, err error, callback func(response *mDNS.Msg, err error)) {
++	if guardErr := H.DNSGuard(ctx); guardErr != nil {
++		callback(nil, guardErr)
++		return
++	}
+ 	if err != nil {
+ 		callback(nil, err)
+ 		return
+@@ -1282,7 +1322,18 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 	return r.lookup(ctx, domain, options, nil)
+ }
+ 
+-func (r *Router) lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) ([]netip.Addr, error) {
++func (r *Router) lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions, proofResult *adapter.DNSLookupResult) (addressesResult []netip.Addr, resultErr error) {
++	if err := H.DNSGuard(ctx); err != nil {
++		return nil, err
++	}
++	defer func() {
++		if err := H.DNSGuard(ctx); err != nil {
++			addressesResult, resultErr = nil, err
++			if proofResult != nil {
++				*proofResult = adapter.DNSLookupResult{}
++			}
++		}
++	}()
+ 	r.rulesAccess.RLock()
+ 	if r.closing {
+ 		r.rulesAccess.RUnlock()
+diff --git a/route/route.go b/route/route.go
+index c7bce0a..e6d7db9 100644
+--- a/route/route.go
++++ b/route/route.go
+@@ -1008,6 +1008,9 @@ func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundCon
+ 			if err != nil {
+ 				return err
+ 			}
++			if err := nativehooks.DNSGuard(ctx); err != nil {
++				return err
++			}
+ 			metadata.ResolutionPin = pin
+ 			addresses = append([]netip.Addr(nil), result.Addresses...)
+ 		} else {
+@@ -1020,6 +1023,9 @@ func (r *Router) actionResolve(ctx context.Context, metadata *adapter.InboundCon
+ 				return err
+ 			}
+ 		}
++		if err := nativehooks.DNSGuard(ctx); err != nil {
++			return err
++		}
+ 		metadata.DestinationAddresses = addresses
+ 		r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
+ 	}
