@@ -211,7 +211,7 @@ pub fn run() {
                 Err(rustix::io::Errno::SRCH)
             );
             println!("P2 orphan timeout: GREEN");
-            let (success, path, _) = supervised("--worker", Duration::from_secs(45));
+            let (success, path, _) = supervised("--worker", Duration::from_secs(120));
             assert!(success, "сквозная приёмка");
             assert!(!path.exists());
             println!("P2 barrier и dependency-free Rust provider: GREEN");
@@ -223,7 +223,10 @@ pub fn run() {
 struct Observations(mpsc::Receiver<(SubscriptionPolicy, bool)>);
 impl Observations {
     fn wait(&self, expected: SubscriptionPolicy) {
-        let deadline = Instant::now() + Duration::from_secs(8);
+        self.wait_for(expected, Duration::from_secs(8));
+    }
+    fn wait_for(&self, expected: SubscriptionPolicy, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         loop {
             let (policy, loaded) = self
                 .0
@@ -462,13 +465,89 @@ fn worker() {
     blocked();
     reopened.close();
     assert!(clients_closed(&runtime, &provider));
+    сделать_overdue(&dir);
+    let (mut background, background_obs) = start(&dir);
+    background_obs.wait(expected(true, false, false, false));
+    background.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    let mut window = expected(true, false, false, false);
+    window.background_window = true;
+    background_obs.wait(window); // Применённая policy, schedule loaded, реальный DesktopHost.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut held = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("{e}"),
+        }
+    };
+    held.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let mut request = [0; 4096];
+    assert!(held.read(&mut request).unwrap() > 0);
+    background.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":false}));
+    background_obs.wait(expected(true, false, false, false)); // После closing ACK.
+    assert_eq!(
+        held.read(&mut request).unwrap(),
+        0,
+        "held socket закрыт к ACK"
+    );
+    background.close();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.0.join("preferences.json")).unwrap()).unwrap();
+    assert_eq!(saved["subscription_interval_seconds"], 172800);
+    bounded(&runtime, async {
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            dir.0.join("subscriptions.sqlite"),
+            zeroize::Zeroizing::new([77; 32]),
+        )
+        .await
+        .unwrap();
+        let service = yonik_linux::SubscriptionService::new(repo);
+        let state = service
+            .schedule_metadata_page(0)
+            .await
+            .unwrap()
+            .remove(0)
+            .state
+            .unwrap();
+        assert_eq!(state.due_wall.unwrap() - state.recorded_wall, 172800);
+        service.close().await.unwrap();
+    });
+    let (mut restart, restart_obs) = start(&dir);
+    restart_obs.wait(expected(true, false, false, false));
+    restart.close();
+    сделать_overdue(&dir);
+    let (mut expiry, expiry_obs) = start(&dir);
+    expiry_obs.wait(expected(true, false, false, false));
+    let opened = Instant::now();
+    expiry.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    expiry_obs.wait(window);
+    let review = serve_review(&listener, &mut expiry, 1);
+    expiry_obs.wait_for(expected(true, false, false, false), Duration::from_secs(70)); // Реальное истечение 60 секунд при удержанном review.
+    assert!(opened.elapsed() >= Duration::from_secs(60));
+    assert!(opened.elapsed() < Duration::from_secs(70));
+    expiry.send(json!({"command":"review_page", "offset":0}));
+    let retained = expiry.wait(|v| !v["pending"].is_null());
+    assert_eq!(retained["pending"], review["pending"]);
+    expiry.send(json!({"command":"discard_refresh"}));
+    expiry.wait(|v| v["pending"].is_null());
+    expiry.close();
+    println!(
+        "Фоновое окно: hidden fetch, policy barrier, closing ACK, persisted 48h/restart: GREEN"
+    );
     drop(provider);
     bus.kill().unwrap();
     bus.wait().unwrap();
     stop.send(()).unwrap();
     driver_thread.join().unwrap();
 }
-fn accept_review(listener: &TcpListener, app: &mut Harness, previous_total: u64) {
+fn serve_review(
+    listener: &TcpListener,
+    app: &mut Harness,
+    previous_total: u64,
+) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(12);
     let mut stream = loop {
         match listener.accept() {
@@ -496,6 +575,10 @@ fn accept_review(listener: &TcpListener, app: &mut Harness, previous_total: u64)
     drop(stream);
     let review = app.wait(|v| !v["pending"].is_null());
     assert_eq!(review["total"], previous_total);
+    review
+}
+fn accept_review(listener: &TcpListener, app: &mut Harness, previous_total: u64) {
+    serve_review(listener, app, previous_total);
     app.send(json!({"command":"approve_refresh"}));
     app.wait(|v| v["pending"].is_null() && v["total"] == 1);
 }

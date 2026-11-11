@@ -11,6 +11,17 @@ pub const MAX_EVENTS: usize = 2_000;
 pub const MAX_PAGE: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventContext {
+    pub session_id: u64,
+    pub generation: u64,
+}
+#[derive(Debug)]
+pub struct ScopedPage {
+    pub page: LogPage,
+    pub contexts: Vec<Option<EventContext>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventSource {
     App,
     Engine,
@@ -21,6 +32,7 @@ pub enum EventCode {
     ProcessSpawned,
     StopRequested,
     CleanupConfirmed,
+    CleanupFailed,
     ProcessExited,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,15 +58,17 @@ pub struct LogPage {
 }
 struct Ring {
     events: VecDeque<LogEvent>,
+    contexts: VecDeque<Option<EventContext>>,
     next: u64,
     evicted: u64,
 }
 struct Shared {
     ring: Mutex<Ring>,
     rejected: AtomicU64,
+    next_session: AtomicU64,
 }
 #[derive(Clone)]
-pub struct EventLog(Arc<Shared>);
+pub struct EventLog(Arc<Shared>, Option<EventContext>);
 impl Default for EventLog {
     fn default() -> Self {
         Self::new()
@@ -62,13 +76,43 @@ impl Default for EventLog {
 }
 impl EventLog {
     pub fn new() -> Self {
-        Self(Arc::new(Shared {
-            ring: Mutex::new(Ring {
-                events: VecDeque::with_capacity(MAX_EVENTS),
-                next: 1,
-                evicted: 0,
+        Self(
+            Arc::new(Shared {
+                ring: Mutex::new(Ring {
+                    events: VecDeque::with_capacity(MAX_EVENTS),
+                    contexts: VecDeque::with_capacity(MAX_EVENTS),
+                    next: 1,
+                    evicted: 0,
+                }),
+                rejected: AtomicU64::new(0),
+                next_session: AtomicU64::new(1),
             }),
-            rejected: AtomicU64::new(0),
+            None,
+        )
+    }
+    /// Отдельный immutable handle: поздний callback сохраняет исходный контекст.
+    pub fn with_context(&self, context: EventContext) -> Self {
+        Self(Arc::clone(&self.0), Some(context))
+    }
+    pub fn with_generation(&self, generation: u64) -> Self {
+        Self(
+            Arc::clone(&self.0),
+            self.1.map(|context| EventContext {
+                generation,
+                ..context
+            }),
+        )
+    }
+    /// Новый LocalSession получает отдельный ID; generation уточняется его Token.
+    pub fn session_scope(&self) -> Option<Self> {
+        let id = self
+            .0
+            .next_session
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .ok()?;
+        Some(self.with_context(EventContext {
+            session_id: id,
+            generation: 1,
         }))
     }
     /// Producer никогда не ждёт consumer. Переполнение счётчиков насыщается.
@@ -90,9 +134,11 @@ impl EventLog {
         ring.next += 1;
         if ring.events.len() == MAX_EVENTS {
             ring.events.pop_front();
+            ring.contexts.pop_front();
             ring.evicted = ring.evicted.saturating_add(1);
         }
         ring.events.push_back(event);
+        ring.contexts.push_back(self.1);
     }
     pub(crate) fn reject(&self) {
         let _ = self
@@ -109,6 +155,10 @@ impl EventLog {
     /// Не более 2000 просмотренных записей и 256 результатов на запрос.
     /// Busy возвращает None; caller повторяет по явному запросу, без polling.
     pub fn read(&self, after: u64, filter: LogFilter, limit: usize) -> Option<LogPage> {
+        self.read_scoped(after, filter, limit)
+            .map(|scoped| scoped.page)
+    }
+    pub fn read_scoped(&self, after: u64, filter: LogFilter, limit: usize) -> Option<ScopedPage> {
         let ring = match self.0.ring.try_lock() {
             Ok(ring) => ring,
             Err(TryLockError::WouldBlock | TryLockError::Poisoned(_)) => return None,
@@ -121,21 +171,28 @@ impl EventLog {
             rejected: self.0.rejected.load(Ordering::Relaxed),
             missed: oldest.saturating_sub(after.saturating_add(1)),
         };
+        let mut contexts = Vec::with_capacity(limit.min(MAX_PAGE));
         if limit == 0 {
-            return Some(page);
+            return Some(ScopedPage { page, contexts });
         }
-        for event in ring.events.iter().filter(|e| e.id > after) {
+        for (event, context) in ring
+            .events
+            .iter()
+            .zip(&ring.contexts)
+            .filter(|(e, _)| e.id > after)
+        {
             page.cursor = event.id;
             if filter.source.is_none_or(|s| s == event.source)
                 && filter.code.is_none_or(|c| c == event.code)
             {
                 page.events.push(*event);
+                contexts.push(*context);
                 if page.events.len() == limit.min(MAX_PAGE) {
                     break;
                 }
             }
         }
-        Some(page)
+        Some(ScopedPage { page, contexts })
     }
 }
 impl LogPage {
@@ -209,5 +266,65 @@ mod boundary_tests {
         let page = log.read(u64::MAX, LogFilter::default(), 1).expect("page");
         assert!(page.events.is_empty());
         assert_eq!(page.rejected, 1);
+    }
+}
+
+impl ScopedPage {
+    pub fn export(&self) -> String {
+        use std::fmt::Write;
+        let mut text = self.page.export();
+        for (event, context) in self.page.events.iter().zip(&self.contexts).take(MAX_PAGE) {
+            if let Some(context) = context {
+                let _ = writeln!(
+                    text,
+                    "context event={} session={} generation={}",
+                    event.id, context.session_id, context.generation
+                );
+            }
+        }
+        text
+    }
+}
+#[cfg(feature = "test-support")]
+impl EventLog {
+    pub fn test_fill(&self) {
+        for _ in 0..MAX_EVENTS + 5 {
+            self.record(EventSource::App, EventCode::StartRequested, None);
+        }
+    }
+    pub fn test_busy(
+        &self,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) {
+        if let Ok(_guard) = self.0.ring.lock() {
+            self.record(EventSource::App, EventCode::StopRequested, None);
+            let _ = entered.send(());
+            let _ = release.recv_timeout(std::time::Duration::from_secs(30));
+        }
+    }
+}
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+    #[test]
+    fn late_callback_keeps_original_context_and_legacy_read_works() {
+        let log = EventLog::new();
+        let old = log.session_scope().expect("scope").with_generation(7);
+        let new = log.session_scope().expect("scope");
+        new.record(EventSource::App, EventCode::StartRequested, None);
+        old.record(EventSource::App, EventCode::CleanupConfirmed, None);
+        let page = log
+            .read_scoped(0, LogFilter::default(), MAX_PAGE)
+            .expect("page");
+        assert_eq!(page.contexts[0].expect("new").session_id, 2);
+        assert_eq!(page.contexts[1].expect("old").session_id, 1);
+        assert_eq!(page.contexts[1].expect("old").generation, 7);
+        assert_eq!(
+            log.read(0, LogFilter::default(), MAX_PAGE)
+                .expect("legacy")
+                .events,
+            page.page.events
+        );
     }
 }

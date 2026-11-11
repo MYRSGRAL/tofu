@@ -22,8 +22,8 @@ from pathlib import Path
 
 LOG = logging.getLogger(__name__)
 PRIMARY = "1B9A16984A4E8CB448712D2AE0B78BF4326C6F8F"
-IMAGE = "Arch-Linux-x86_64-cloudimg.qcow2"
-URL = "https://mirror.pkgbuild.com/images/latest/"
+IMAGE = "Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2"
+BASE = Path("/home/myrs/projects/yonik/local/validation/vm-base")
 SLOT = "/home/myrs/projects/yonik/local/orchestration/with-rust-slot"
 
 
@@ -44,12 +44,141 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def archive_manifest(packages: tuple[Path, Path], evidence: Path) -> None:
+    """До VM effects фиксирует настоящие архивы и ELF; не перепаковывает их."""
+    if any(
+        (evidence / name).exists()
+        for name in ("versioned-inputs.json", "versioned-run.json")
+    ):
+        raise ValueError(
+            "Evidence уже использован; FAIL/PASS run нельзя перезаписывать"
+        )
+    rows = []
+    for path, expected, revision in zip(
+        packages,
+        (
+            "e53cb758ca1b9a2167a80c90ca50b1ab5eb4f6b67c5c8ec01c2bf0ccb856e8b0",
+            "a10f0840737b2ababc572fbd432335abfd5c232c59ec0493aa0483d749abafcc",
+        ),
+        (
+            "eec7a56b6b03f2b022a87682f9097ce78b61fa0b",
+            "6cf65a4cf9760a7df68b8eee10f012770b38604d",
+        ),
+        strict=True,
+    ):
+        actual = digest(path)
+        if actual != expected:
+            raise ValueError(f"Не совпал принятый checksum: {path}")
+        files = {}
+        for member in (
+            ".PKGINFO",
+            ".BUILDINFO",
+            "usr/bin/yonik-desktop",
+            "usr/lib/yonik/yonik-helper",
+            "usr/lib/yonik/yonik-worker",
+        ):
+            data = subprocess.check_output(["bsdtar", "-xOf", str(path), member])
+            if member.startswith("usr/") and not data.startswith(b"\x7fELF"):
+                raise ValueError("В архиве ожидался ELF")
+            files[member] = {
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "bytes": len(data),
+            }
+            if member.startswith("."):
+                files[member]["text"] = data.decode()
+        rows.append(
+            {
+                "path": str(path),
+                "sha256": actual,
+                "source_revision": revision,
+                "accepted_source_archive_sha256": {
+                    "eec7a56b6b03f2b022a87682f9097ce78b61fa0b": "71e9c347ffc363da062b42b0c5ffc6ccb0a97b0988202ce21391dd1c2553a1d3",
+                    "6cf65a4cf9760a7df68b8eee10f012770b38604d": "5a3d3d3b4a418d5208436934c3a7f1032d23fc83444d1948060d3c802087f665",
+                }[revision],
+                "members": files,
+            }
+        )
+    (evidence / "versioned-inputs.json").write_text(
+        json.dumps(
+            {
+                "archives": rows,
+                "rust_build": False,
+                "provenance": "Принятые historical #78 / checkpoint #119; archive ELF hashes не являются новым source→ELF proof",
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+    (evidence / "versioned-run.json").write_text(
+        json.dumps({"status": "PLANNED", "effects_started": False})
+    )
+
+
+def versioned_lifecycle(
+    ssh: list[str],
+    packages: tuple[Path, Path],
+    repo: Path,
+    evidence: Path,
+    production_custody: bool = False,
+) -> None:
+    """Продолжает после reboot только с принятыми готовыми пакетами."""
+    for path, name in zip(packages, ("old", "new"), strict=True):
+        with path.open("rb") as stream:
+            subprocess.run(
+                ssh + [f"cat > /home/builder/{name}.pkg.tar.zst"],
+                stdin=stream,
+                check=True,
+            )
+    fixture = (
+        "arch_production_custody.py"
+        if production_custody
+        else "arch_versioned_package.py"
+    )
+    with (repo / "tools" / fixture).open("rb") as stream:
+        subprocess.run(
+            ssh + ["cat > /home/builder/versioned.py"], stdin=stream, check=True
+        )
+    if production_custody:
+        with (repo / "tools/arch_production_route.py").open("rb") as stream:
+            subprocess.run(
+                ssh + ["cat > /home/builder/production-route.py"],
+                stdin=stream,
+                check=True,
+            )
+    result = "FAIL"
+    try:
+        run(ssh + ["python /home/builder/versioned.py"], evidence / "versioned.log")
+        result = "PASS"
+    finally:
+        with (evidence / "versioned-artifacts.tar").open("wb") as stream:
+            subprocess.run(
+                ssh
+                + [
+                    "tar -C /home/builder -cf - production-evidence versioned.py production-route.py"
+                    if production_custody
+                    else "tar -C /home/builder -cf - versioned-evidence versioned versioned.py"
+                ],
+                stdout=stream,
+                check=True,
+            )
+        (evidence / "versioned-run.json").write_text(
+            json.dumps({"status": result, "effects_started": True, "rust_build": False})
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-root", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--arch-public-key", type=Path, required=True)
+    parser.add_argument("--old-package", type=Path)
+    parser.add_argument("--new-package", type=Path)
+    parser.add_argument("--production-custody", action="store_true")
     args = parser.parse_args()
+    if bool(args.old_package) != bool(args.new_package):
+        parser.error("Для versioned lifecycle нужны оба архива")
+    if args.production_custody and not args.old_package:
+        parser.error("Production custody требует обоих готовых архивов")
     root = args.task_root.resolve()
     evidence = args.evidence.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -57,38 +186,78 @@ def main() -> None:
         raise ValueError("Нужен новый собственный transient task root")
     if evidence.is_relative_to(root):
         raise ValueError("Evidence должен находиться вне TTL")
-    root.mkdir(mode=0o700)
     evidence.mkdir(parents=True, exist_ok=True)
+    packages = None
+    if args.old_package:
+        packages = (args.old_package.resolve(), args.new_package.resolve())
+        archive_manifest(packages, evidence)
+    root.mkdir(mode=0o700)
     lock = os.open(root, os.O_RDONLY)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        execute(root, evidence, repo, args.arch_public_key)
+        base_lock = os.open(BASE, os.O_RDONLY)
+        try:
+            fcntl.flock(base_lock, fcntl.LOCK_SH)
+            with (BASE / "manifest.json").open() as manifest:
+                if (
+                    json.load(manifest)["sha256"]
+                    != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
+                ):
+                    raise ValueError("Изменён base manifest")
+            if packages:
+                (evidence / "versioned-run.json").write_text(
+                    json.dumps(
+                        {
+                            "status": "RUNNING",
+                            "effects_started": True,
+                            "task_root": str(root),
+                        }
+                    )
+                )
+            execute(
+                root,
+                evidence,
+                repo,
+                args.arch_public_key,
+                packages,
+                args.production_custody,
+            )
+        finally:
+            os.close(base_lock)
+    except Exception as error:
+        if packages:
+            (evidence / "versioned-run.json").write_text(
+                json.dumps(
+                    {
+                        "status": "FAIL",
+                        "effects_started": True,
+                        "task_root": str(root),
+                        "error": str(error),
+                    }
+                )
+            )
+        raise
     finally:
         os.close(lock)
 
 
-def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
+def execute(
+    root: Path,
+    evidence: Path,
+    repo: Path,
+    key: Path,
+    packages: tuple[Path, Path] | None = None,
+    production_custody: bool = False,
+) -> None:
     """Весь жизненный цикл одной VM под lock вызывающей функции."""
     vm = None
     ssh: list[str] = []
+    archive_success = False
     try:
+        # Cache удерживается shared BSD lock до завершения VM; запись запрещена.
         for suffix in ("", ".SHA256", ".sig"):
-            run(
-                [
-                    "curl",
-                    "-4",
-                    "-fL",
-                    "--connect-timeout",
-                    "20",
-                    "--max-time",
-                    "900",
-                    "--retry",
-                    "1",
-                    URL + IMAGE + suffix,
-                    "-o",
-                    str(root / (IMAGE + suffix)),
-                ]
-            )
+            if not (BASE / (IMAGE + suffix)).is_file():
+                raise ValueError("Неполный закреплённый base cache")
         gnupg = root / "gnupg"
         gnupg.mkdir(mode=0o700)
         run(["gpg", "--homedir", str(gnupg), "--import", str(key)])
@@ -99,8 +268,8 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 str(gnupg),
                 "--status-fd=1",
                 "--verify",
-                str(root / (IMAGE + ".sig")),
-                str(root / IMAGE),
+                str(BASE / (IMAGE + ".sig")),
+                str(BASE / IMAGE),
             ],
             evidence / "image-signature.log",
         )
@@ -110,10 +279,13 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
         ):
             raise ValueError("Подпись не принадлежит закреплённому primary Arch CI")
         run(["gpgconf", "--homedir", str(gnupg), "--kill", "gpg-agent"])
-        actual = digest(root / IMAGE)
-        if actual != (root / (IMAGE + ".SHA256")).read_text().split()[0]:
+        actual = digest(BASE / IMAGE)
+        if (
+            actual != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
+            or actual != (BASE / (IMAGE + ".SHA256")).read_text().split()[0]
+        ):
             raise ValueError("SHA256 образа не совпал")
-        info = json.loads(run(["qemu-img", "info", "--output=json", str(root / IMAGE)]))
+        info = json.loads(run(["qemu-img", "info", "--output=json", str(BASE / IMAGE)]))
         if (
             info["format"] != "qcow2"
             or info.get("backing-filename")
@@ -122,7 +294,14 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             raise ValueError("Внешние ссылки в официальном образе")
         (evidence / "image.json").write_text(
             json.dumps(
-                {"url": URL + IMAGE, "sha256": actual, "primary": PRIMARY}, indent=2
+                {
+                    "cache": str(BASE / IMAGE),
+                    "sha256": actual,
+                    "primary": PRIMARY,
+                    "public_key_sha256": digest(key),
+                    "signature_sha256": digest(BASE / (IMAGE + ".sig")),
+                },
+                indent=2,
             )
         )
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(root / "key")])
@@ -158,7 +337,7 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 "-F",
                 "qcow2",
                 "-b",
-                str(root / IMAGE),
+                str(BASE / IMAGE),
                 str(root / "disk.qcow2"),
                 "32G",
             ]
@@ -201,7 +380,6 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             f"user,id=n,hostfwd=tcp:127.0.0.1:{port}-:22",
             "-device",
             "virtio-net-pci,netdev=n",
-            "-no-reboot",
         ]
         (evidence / "qemu-command.json").write_text(json.dumps(command))
         with (root / "qemu.log").open("w") as output:
@@ -235,16 +413,54 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
         run(
             ssh
             + [
-                "set -e; pacman -Syu --noconfirm --needed base-devel clang pkgconf rustup qt6-base qt6-declarative qt6-svg sqlite dbus polkit nftables iproute2 python"
+                "set -e; pacman -Syu --noconfirm --needed qt6-base qt6-declarative qt6-svg sqlite dbus polkit nftables iproute2 python"
+                + ("" if packages else " base-devel clang pkgconf rustup")
+                + (
+                    " gnome-keyring xorg-server-xvfb xdotool imagemagick tesseract tesseract-data-eng tesseract-data-rus stalonetray"
+                    if production_custody
+                    else ""
+                )
             ],
             evidence / "dependencies.log",
         )
+        # После -Syu kernel и modules должны относиться к одной загрузке.
+        before_boot = run(ssh + ["cat /proc/sys/kernel/random/boot_id"]).strip()
+        before_kernel = run(ssh + ["uname -r"]).strip()
+        (evidence / "reboot-before.json").write_text(
+            json.dumps({"boot_id": before_boot, "kernel": before_kernel})
+        )
+        run(ssh + ["systemctl reboot"])
+        reboot_deadline = time.monotonic() + 240
+        while time.monotonic() < reboot_deadline:
+            time.sleep(5)
+            probe = subprocess.run(
+                ssh
+                + [
+                    "test -d /usr/lib/modules/$(uname -r) && cat /proc/sys/kernel/random/boot_id"
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0 and probe.stdout.strip() != before_boot:
+                break
+        else:
+            raise TimeoutError("Гость не загрузился с согласованными kernel/modules")
+        after_kernel = run(ssh + ["uname -r"]).strip()
+        (evidence / "reboot-after.json").write_text(
+            json.dumps({"boot_id": probe.stdout.strip(), "kernel": after_kernel})
+        )
+        if packages and after_kernel == before_kernel:
+            raise ValueError("Для этого gate требуется actual kernel change")
         run(
             ssh
             + [
                 "set -e; useradd -m builder; install -d -o builder -g builder /home/builder/input /home/builder/task; echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/yonik-build"
             ]
         )
+        if packages:
+            versioned_lifecycle(ssh, packages, repo, evidence, production_custody)
+            archive_success = True
+            return
         transfer = [
             "tar",
             "-C",
@@ -253,6 +469,11 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             str(root / "input.tar"),
             "packaging/arch/PKGBUILD",
             "tools/check_arch_package.py",
+            "tools/arch_package_lifecycle.sh",
+            "tools/compile_notices.py",
+            "tools/check_linux_notices.py",
+            "packaging/licenses",
+            "LICENSE",
             "tools/desktop_ui_smoke.py",
             "tools/desktop_smoke.py",
             "tools/engine_compile.py",
@@ -275,9 +496,15 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 stdin=stream,
                 check=True,
             )
+        run(
+            ssh
+            + [
+                "su - builder -s /bin/bash -c 'rustup toolchain install 1.85.1 --profile minimal'"
+            ],
+            evidence / "toolchain.log",
+        )
         guest = """set -euo pipefail
 cd /home/builder/input/packaging/arch
-rustup toolchain install 1.85.1 --profile minimal
 export RUSTUP_TOOLCHAIN=1.85.1 CARGO_TARGET_DIR=/home/builder/task/target CARGO_BUILD_JOBS=1
 cat > /home/builder/task/makepkg.conf <<'CONF'
 source /etc/makepkg.conf
@@ -316,17 +543,9 @@ pacman -Q
         run(
             ssh
             + [
-                "set -e; cd /home/builder/input/packaging/arch; sha256sum PKGBUILD yonik-*.tar.gz *.pkg.tar.zst; bsdtar -xOf *.pkg.tar.zst .BUILDINFO; strings /home/builder/task/target/release/yonik-desktop | grep -F '0.1.0+eec7a56b6b03f2b022a87682f9097ce78b61fa0b'"
+                "set -e; cd /home/builder/input/packaging/arch; sha256sum PKGBUILD yonik-*.tar.gz *.pkg.tar.zst /home/builder/task/target/release/yonik-desktop /home/builder/task/target/release/yonik-helper /home/builder/task/target/release/yonik-worker; bsdtar -xOf *.pkg.tar.zst .BUILDINFO; strings /home/builder/task/target/release/yonik-desktop | grep -F '0.1.0+6cf65a4cf9760a7df68b8eee10f012770b38604d'"
             ],
             evidence / "binary-provenance.log",
-        )
-        run(
-            [
-                SLOT,
-                *ssh,
-                "su - builder -s /bin/bash -c 'set -e; rustup component add --toolchain 1.85.1 clippy rustfmt; cd /home/builder/input/packaging/arch/src/yonik-*/; export CARGO_TARGET_DIR=/home/builder/task/target CARGO_BUILD_JOBS=1 YONIK_BUILD_ID=0.1.0+eec7a56b6b03f2b022a87682f9097ce78b61fa0b; cargo +1.85.1 fmt --all -- --check; flock -s /home/builder/task cargo +1.85.1 clippy --locked --release --workspace --all-targets -- -D warnings'",
-            ],
-            evidence / "rust-validation.log",
         )
         run(
             ssh
@@ -334,6 +553,11 @@ pacman -Q
                 'set -e; cd /home/builder/input; python tools/check_arch_package.py packaging/arch/*.pkg.tar.zst; pacman -U --noconfirm packaging/arch/*.pkg.tar.zst; pacman -Qkk yonik; if helper_state=$(systemctl is-active yonik-helper.service); then exit 1; else test $? = 3 && test "$helper_state" = inactive; fi'
             ],
             evidence / "install.log",
+        )
+        run(
+            ssh
+            + ["bash /home/builder/input/tools/arch_package_lifecycle.sh installed"],
+            evidence / "integration.log",
         )
         run(ssh + ["install -d -m700 -o builder -g builder /home/builder/smoke-home"])
         run(
@@ -352,6 +576,10 @@ pacman -Q
                 stdout=stream,
                 check=True,
             )
+        run(
+            ssh + ["bash /home/builder/input/tools/arch_package_lifecycle.sh cycles"],
+            evidence / "lifecycle.log",
+        )
         run(
             [
                 SLOT,
@@ -383,6 +611,12 @@ pacman -Q
                 ["gpgconf", "--homedir", str(root / "gnupg"), "--kill", "gpg-agent"],
                 check=False,
             )
+        if archive_success:
+            if vm is None or vm.returncode != 0:
+                raise RuntimeError(
+                    "VM завершилась нештатно; собственный overlay сохранён"
+                )
+            shutil.rmtree(root)
         # При ошибке диск сохраняется для диагностики; автоматическая очистка только после успеха.
     shutil.rmtree(root)
 
