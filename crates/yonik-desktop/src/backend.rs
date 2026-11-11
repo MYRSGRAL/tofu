@@ -112,6 +112,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    LogsSave {
+        page_request_id: String,
+        destination: String,
+        request_id: String,
+    },
     LogsRead {
         after: String,
         source: logs::Source,
@@ -489,6 +494,15 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsSave {
+            page_request_id,
+            destination,
+            request_id,
+        } => {
+            logs::valid_number(page_request_id)
+                && logs::valid_number(request_id)
+                && text(destination, 4096)
+        }
         Command::LogsRead {
             after, request_id, ..
         } => logs::valid_number(after) && logs::valid_number(request_id),
@@ -1183,6 +1197,19 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::LogsSave {
+                page_request_id,
+                destination,
+                request_id,
+            } => {
+                let status = logs::save(&self.state.logs, &page_request_id, &destination);
+                self.state.logs = logs::Page {
+                    request_id,
+                    status,
+                    ..Default::default()
+                };
+                Ok(())
+            }
             Command::LogsRead {
                 after,
                 source,
@@ -2911,7 +2938,7 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
-                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = envelope.command {
                         actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }

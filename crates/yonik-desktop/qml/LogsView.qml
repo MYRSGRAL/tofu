@@ -9,10 +9,13 @@ ColumnLayout {
     property var response: null
     property var page: null
     property string pending: ""
+    property bool saving: false
+    property string saveStatus: ""
     property int serial: 0
     property bool stale: true
     function tr(ru, en) { return root.english ? en : ru }
     function read(next) {
+        root.saving = false
         root.serial += 1
         root.pending = String(root.serial)
         root.stale = true
@@ -20,6 +23,12 @@ ColumnLayout {
     }
     onResponseChanged: {
         if (root.visible && root.pending !== "" && root.response && root.response.request_id === root.pending) {
+            if (root.saving) {
+                root.saveStatus = root.response.status
+                root.saving = false
+                root.pending = ""
+                return
+            }
             root.page = root.response
             root.pending = ""
             root.stale = root.page.status !== "ready" && root.page.status !== "empty"
@@ -66,6 +75,32 @@ ColumnLayout {
             textFormat: Text.PlainText
             text: modelData.id + " · " + (modelData.source === "app" ? root.tr("Приложение", "Application") : root.tr("Движок", "Engine")) + " · " + modelData.code + (modelData.value === null ? "" : " · " + modelData.value)
         }
+    }
+    TextField {
+        id: destination
+        objectName: "logsDestination"
+        Layout.fillWidth: true
+        placeholderText: root.tr("Абсолютный путь нового файла", "Absolute path of a new file")
+        maximumLength: 4096
+    }
+    Button {
+        objectName: "logsSave"
+        text: root.tr("Сохранить страницу", "Save page")
+        enabled: root.pending === "" && !root.stale && !!root.page && destination.text !== ""
+        onClicked: {
+            if (!root.visible || root.stale || root.pending !== "" || !root.page) return
+            root.serial += 1
+            root.pending = String(root.serial)
+            root.saving = true
+            root.saveStatus = ""
+            root.backend.dispatch(JSON.stringify({command: "logs_save", page_request_id: root.page.request_id, request_id: root.pending, destination: destination.text}))
+        }
+    }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        visible: root.saveStatus !== ""
+        text: root.saveStatus === "saved" ? root.tr("Страница сохранена", "Page saved") : root.saveStatus === "saved_durability_unknown" ? root.tr("Файл создан; долговечность записи не подтверждена", "File created; durability unconfirmed") : root.tr("Сохранение отклонено. Выберите новый файл и обновите страницу.", "Save refused. Choose a new file and refresh the page.")
     }
     TextEdit {
         id: exportText
