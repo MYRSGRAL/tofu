@@ -1,0 +1,46 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Allan McRae <allan@archlinux.org>
+# Contributor: Judd Vinet <jvinet@zeroflux.org>
+
+pkgname=expat
+pkgver=2.10.0
+pkgrel=1
+pkgdesc="An XML parser library"
+arch=(x86_64)
+url="https://libexpat.github.io/"
+_url="https://github.com/libexpat/libexpat"
+license=(MIT)
+depends=(glibc)
+makedepends=(
+  cmake
+  git
+)
+provides=(libexpat.so)
+source=($pkgname::git+$_url?signed#tag=R_${pkgver//./_})
+sha512sums=('13078e3a7e97a7c276926cb56dfa7c9c678dc66c9e8557607b350da9fcb45e10006c96624fda3c20df9d13ba332441134b36464450c672a0a5671068b73f8d4d')
+b2sums=('ad3b03449595c450b7814ae9c2f38991e1560fdf6fdd076585647fd0469657140902bad472eae0a3346d93122d718ce7bed0a36f2d393ee0a88e02bd5fd59fa8')
+validpgpkeys=(3176EF7DB2367F1FCA4F306B1F9B0E909AF37285) # Sebastian Pipping
+
+build() {
+  local cmake_options=(
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -S $pkgname/$pkgname
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+}
+
+check() {
+  ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $pkgname/$pkgname/COPYING -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 $pkgname/$pkgname/{AUTHORS,Changes,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+}

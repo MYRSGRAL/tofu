@@ -1,0 +1,72 @@
+{
+  "archive_sha256": "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214",
+  "entries": {
+    "geosite.dat": {
+      "sha256": "9ee94acb06e2f795831fb1589c0dc7af9242b0fb8d9196afd981b915b1097ed3",
+      "bytes": 7554929
+    },
+    "LICENSE": {
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "bytes": 16725
+    },
+    "README.md": {
+      "sha256": "0d098928cf19c756a8c956c0b5ca736b75f9eaff0765fd71c26a3dcb413a3dde",
+      "bytes": 12666
+    },
+    "geoip.dat": {
+      "sha256": "ce90dc02a81528109c99d769e1f8fe3071ded6b02a574f31e62d8f4eee312563",
+      "bytes": 3312784
+    },
+    "xray": {
+      "sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "bytes": 35151996
+    }
+  },
+  "preserved_elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+  "release_elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+  "elf_matches": true,
+  "source_proof": "не устанавливается сравнением publisher asset",
+  "schema": 1,
+  "repository": {
+    "full_name": "XTLS/Xray-core",
+    "id": 311315731,
+    "owner_login": "XTLS",
+    "owner_id": 71564206,
+    "identity": "HTTPS official GitHub namespace requested by user; не offline signing identity"
+  },
+  "release": {
+    "tag": "v26.10.31",
+    "id": 429959490,
+    "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.10.31",
+    "immutable": false
+  },
+  "asset": {
+    "id": 695486844,
+    "name": "Xray-linux-64.zip",
+    "size": 16692690,
+    "digest": "sha256:e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214",
+    "browser_download_url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip",
+    "created_at": "2026-10-31T13:40:19Z",
+    "updated_at": "2026-10-31T13:40:20Z"
+  },
+  "dgst_sha256": "ec4362a9737cafc92e637a41565c8509020e69ae13974e0f78a682992ee89a39",
+  "dgst_signed": false,
+  "signing_key_fingerprint": null,
+  "signature_assets": [],
+  "attestations": {
+    "elf_api": "HTTP 404; public attestation не получена",
+    "zip_api": "HTTP 404; public attestation не получена",
+    "cryptographically_verified": false,
+    "source_commit_verified_from_attestation": false
+  },
+  "tag_commit": "a4a3dff5b20c2faae567b742c172c7b95e75c083",
+  "publisher_assertion": "ELF совпадает с official release asset; tag association подтверждена API",
+  "reproducible_source_proof": false,
+  "texts": [
+    {
+      "source_path": "LICENSE in release ZIP",
+      "file": "texts/1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    }
+  ]
+}
