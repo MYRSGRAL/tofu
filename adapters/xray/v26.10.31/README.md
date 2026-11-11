@@ -71,5 +71,23 @@ Managed Lua DNS отклоняется: upstream script API не принима�
 `ResolvableContext`, controlled loopback exchanger и private query/reply.
 Для serial/parallel проверены Known success, cancel, Unknown и смена epoch
 между началом exchange и выпуском reply; отказные случаи дают downstream=0.
-Это покрывает этот routing leaf; freedom UDP resolver и второй core требуют
-отдельной реализации и приёмки. Production issuer остаётся закрытым.
+Обычный session context сохраняет legacy DNS; managed выбирается закрытым
+context key, который остаётся после cancel/revoke. Отсутствие optional API у
+managed caller завершает lookup отказом.
+
+Freedom TCP и UDP domain writer передают исходный flow context в optional API.
+После await проверяются свежий proof и отмена; managed ошибки не переходят к
+system resolver. Managed UDP не использует legacy cache, поэтому его размер
+не растёт от domain packets. Reader проверяет authority после socket read.
+Конструкторы получают context отдельного flow без global env authority.
+
+`TestFreedomDNSAfterReply` проверяет настоящий private DNS exchange и TCP/UDP
+loopback: Known positive, cancel, Unknown, epoch, revoke, Unavailable и stale.
+Отказные случаи дают downstream=0. `TestFreedomReaderAfterAwait` проверяет
+packet handoff после socket await. Отдельный legacy/missing-API тест проверяет
+закрытое поведение managed context после cancel/revoke. Exact upstream
+`TestIPOnDemand` и `TestIPIfNonMatchDomain` проходят.
+
+Полная матрица второго core и concurrent queries/coalescing остаются отдельным
+leaf. Параллельный `core.New` выявляет upstream global InitSystemDialer race;
+текущие тесты не меняют эту независимую реализацию. Production issuer закрыт.
