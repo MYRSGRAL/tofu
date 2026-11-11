@@ -1,4 +1,139 @@
 use yonik_desktop::editor::{Draft, RuleInput};
+
+#[test]
+fn составной_dto_сохраняет_таблицу_истинности_после_сериализации() {
+    use yonik_domain::{
+        Destination, DestinationFlow, Evaluation, EvaluationContext, Route, RuleOrigin,
+    };
+    let mut draft = Draft::default();
+    draft
+        .put(
+            RuleInput {
+                id: 41,
+                enabled: true,
+                executables: vec!["/fixture/one".into(), "/fixture/two".into()],
+                domains: vec!["EXAMPLE.ORG.".into(), "*.ПРИМЕР.РФ".into()],
+                destinations: vec!["192.0.2.1".into(), "2001:db8::/32".into()],
+                action: "block".into(),
+            },
+            false,
+        )
+        .expect("составной DTO");
+    let restored = Draft::parse(&draft.json()).expect("сохранённый DTO");
+    let policy = restored.policy().expect("общая политика");
+    // Oracle — полная таблица трёх независимых признаков, без вызова matcher.
+    for (source, source_matches) in [(Some("/fixture/two"), true), (None, false)] {
+        for (host, domain_matches) in [
+            ("example.org", true),
+            ("a.xn--e1afmkfd.xn--p1ai", true),
+            ("notexample.org", false),
+        ] {
+            let name = host.parse().expect("fixture domain");
+            for (address, network_matches) in [
+                ("192.0.2.1", true),
+                ("2001:db8::1", true),
+                ("192.0.2.2", false),
+            ] {
+                let result = policy.evaluate_destination(
+                    &DestinationFlow {
+                        executable: source,
+                        destination: Destination::Ip {
+                            address: address.parse().expect("fixture IP"),
+                            name: Some(&name),
+                        },
+                    },
+                    &EvaluationContext::default(),
+                );
+                let Evaluation::Decided { decision, .. } = result else {
+                    panic!("literal должен дать решение: {result:?}")
+                };
+                let expected = if source_matches && domain_matches && network_matches {
+                    (Route::Block, RuleOrigin::User(41))
+                } else {
+                    (Route::Proxy, RuleOrigin::Default)
+                };
+                assert_eq!(
+                    (decision.action, decision.origin),
+                    expected,
+                    "{source:?} {host} {address}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn обновление_id_сохраняет_порядок_и_решения_при_десятикратном_росте() {
+    use yonik_domain::{Flow, Route, RuleOrigin};
+    for count in [10_u64, 100] {
+        let mut draft = Draft {
+            default_action: "direct".into(),
+            ..Draft::default()
+        };
+        for id in 1..=count {
+            draft
+                .put(
+                    RuleInput {
+                        id,
+                        enabled: true,
+                        executables: vec![format!("/fixture/app{id}")],
+                        domains: vec![],
+                        destinations: vec!["192.0.2.1".into()],
+                        action: "block".into(),
+                    },
+                    false,
+                )
+                .expect("добавление");
+        }
+        // Последнее широкое правило делает потерю/перестановку ID наблюдаемой.
+        draft
+            .put(
+                RuleInput {
+                    id: count + 1,
+                    enabled: true,
+                    executables: vec![],
+                    domains: vec![],
+                    destinations: vec![],
+                    action: "proxy".into(),
+                },
+                true,
+            )
+            .expect("fallback");
+        let mut replacement = draft.rules[0].clone();
+        replacement.action = "direct".into();
+        draft.put(replacement, false).expect("обновление на месте");
+        let saved = draft.json();
+        let restored = Draft::parse(&saved).expect("чтение сохранённого DTO");
+        let policy = restored.policy().expect("преобразование");
+        assert_eq!(policy.default_action, yonik_domain::Action::Direct);
+        assert_eq!(
+            policy.user_rules.iter().map(|r| r.id).collect::<Vec<_>>(),
+            (1..=count + 1).collect::<Vec<_>>()
+        );
+        for id in 1..=count {
+            let path = format!("/fixture/app{id}");
+            for (address, expected, origin) in [
+                (
+                    "192.0.2.1",
+                    if id == 1 { Route::Direct } else { Route::Block },
+                    RuleOrigin::User(id),
+                ),
+                ("192.0.2.2", Route::Proxy, RuleOrigin::User(count + 1)),
+            ] {
+                let decision = policy.evaluate(&Flow {
+                    executable: Some(&path),
+                    destination: address.parse().expect("fixture IP"),
+                });
+                assert_eq!((decision.action, decision.origin), (expected, origin));
+            }
+        }
+        let mut invalid = draft.rules[0].clone();
+        invalid.destinations = vec!["192.0.2.1/24".into()];
+        assert!(draft.put(invalid, false).is_err());
+        assert_eq!(draft.json(), saved);
+        assert_eq!(restored.json(), saved);
+    }
+}
 #[test]
 fn compound_roundtrip_and_invalid_input_preserve_draft() {
     let mut draft = Draft::default();
