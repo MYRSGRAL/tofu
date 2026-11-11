@@ -3,17 +3,19 @@ use crate::{
     FatalError, Field, Issue, IssueCode, MAX_ENTRY_BYTES, MAX_RECORDS, ParsedServer, ReviewFlag,
     model::RecordError, uri,
 };
-use serde::de::{Deserialize, Deserializer, Error, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, Deserializer, Error, SeqAccess, Visitor};
 use serde_json::{Value, value::RawValue};
 use std::{collections::BTreeMap, fmt};
 
 type RawObject<'a> = BTreeMap<String, &'a RawValue>;
 type Parameters = Vec<(&'static str, String)>;
 struct Records<'a>(Vec<&'a RawValue>);
-impl<'de> Deserialize<'de> for Records<'de> {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct RecordsVisitor;
-        impl<'de> Visitor<'de> for RecordsVisitor {
+struct RecordsSeed<'a>(&'a crate::Checkpoint<'a>);
+impl<'de> DeserializeSeed<'de> for RecordsSeed<'_> {
+    type Value = Records<'de>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+        struct RecordsVisitor<'a>(&'a crate::Checkpoint<'a>);
+        impl<'de> Visitor<'de> for RecordsVisitor<'_> {
             type Value = Records<'de>;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("Ограниченный массив JSON")
@@ -21,6 +23,9 @@ impl<'de> Deserialize<'de> for Records<'de> {
             fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
                 let mut records = Vec::new();
                 while let Some(raw) = seq.next_element::<&'de RawValue>()? {
+                    self.0
+                        .check()
+                        .map_err(|_| S::Error::custom("Отмена импорта"))?;
                     if records.len() == MAX_RECORDS {
                         return Err(S::Error::custom("Лимит записей"));
                     }
@@ -29,11 +34,16 @@ impl<'de> Deserialize<'de> for Records<'de> {
                 Ok(Records(records))
             }
         }
-        d.deserialize_seq(RecordsVisitor)
+        d.deserialize_seq(RecordsVisitor(self.0))
     }
 }
-fn records(text: &str) -> Result<Records<'_>, FatalError> {
-    serde_json::from_str(text).map_err(|_| FatalError::TooManyRecords)
+fn records<'a>(
+    text: &'a str,
+    checkpoint: &crate::Checkpoint<'_>,
+) -> Result<Records<'a>, FatalError> {
+    RecordsSeed(checkpoint)
+        .deserialize(&mut serde_json::Deserializer::from_str(text))
+        .map_err(|_| FatalError::TooManyRecords)
 }
 fn issue(issues: &mut Vec<Issue>, index: usize, error: RecordError) {
     issues.push(Issue {
@@ -47,14 +57,16 @@ pub(crate) fn extract(
     content: &str,
     servers: &mut Vec<ParsedServer>,
     issues: &mut Vec<Issue>,
+    checkpoint: &crate::Checkpoint<'_>,
 ) -> Result<(), FatalError> {
     let roots = if content.trim_start().starts_with('[') {
-        records(content)?.0
+        records(content, checkpoint)?.0
     } else {
         vec![serde_json::from_str::<&RawValue>(content).map_err(|_| FatalError::InvalidJson)?]
     };
     let mut count = 0usize;
     for root in roots {
+        checkpoint.check()?;
         let Ok(config) = serde_json::from_str::<RawObject<'_>>(root.get()) else {
             continue;
         };
@@ -70,7 +82,8 @@ pub(crate) fn extract(
             .and_then(|r| serde_json::from_str::<String>(r.get()).ok())
             .unwrap_or_default();
         let name: String = name.chars().filter(|c| !c.is_control()).take(160).collect();
-        for raw in records(outbounds.get())?.0 {
+        for raw in records(outbounds.get(), checkpoint)?.0 {
+            checkpoint.check()?;
             count += 1;
             if count > MAX_RECORDS {
                 return Err(FatalError::TooManyRecords);

@@ -92,3 +92,99 @@ async fn encrypted_draft_roundtrip_and_cas() {
 fn pid_is_not_a_persistent_selector() {
     assert!(Draft::parse(r#"{"version":1,"default_action":"proxy","rules":[{"id":1,"enabled":true,"executables":[],"domains":[],"destinations":[],"action":"direct","pid":1234}]}"#).is_err());
 }
+
+#[test]
+fn bounded_diagnostics_keep_identity_and_disabled_semantics() {
+    let mut draft = Draft::default();
+    for id in 1..=3 {
+        draft
+            .put(
+                RuleInput {
+                    id,
+                    enabled: id != 3,
+                    executables: vec![],
+                    domains: vec!["example.org".into()],
+                    destinations: vec![],
+                    action: "direct".into(),
+                },
+                false,
+            )
+            .expect("правило");
+    }
+    let report = draft.diagnostics();
+    assert_eq!(report["warnings"][0]["rule_id"], 2);
+    assert_eq!(report["warnings"][0]["kind"], "shadowed");
+    assert_eq!(report["warnings"].as_array().expect("массив").len(), 1);
+    assert_eq!(report["incomplete"], false);
+    draft.rules[0].destinations = vec!["192.0.2.0/24".into()];
+    assert_eq!(
+        draft.diagnostics()["warnings"][0]["kind"],
+        "potential_overlap"
+    );
+    draft.rules[0].domains = (0..33).map(|i| format!("a{i}.example.org")).collect();
+    assert_eq!(draft.diagnostics()["incomplete"], true);
+    assert!(
+        draft.diagnostics()["warnings"]
+            .as_array()
+            .expect("массив")
+            .is_empty()
+    );
+}
+
+#[test]
+fn explanation_uses_evaluator_without_claiming_runtime_witness() {
+    let mut draft = Draft::default();
+    assert_eq!(draft.explain("192.0.2.1").expect("IP")["origin"], "Default");
+    assert_eq!(
+        draft.explain("example.org").expect("имя")["status"],
+        "unknown"
+    );
+    draft
+        .put(
+            RuleInput {
+                id: 7,
+                enabled: true,
+                executables: vec![],
+                domains: vec![],
+                destinations: vec!["192.0.2.0/24".into()],
+                action: "block".into(),
+            },
+            false,
+        )
+        .expect("правило");
+    let before = draft.json();
+    assert_eq!(draft.explain("192.0.2.1").expect("IP")["origin"], "User(7)");
+    assert_eq!(draft.explain("192.0.2.1").expect("IP")["action"], "Block");
+    assert!(draft.explain("bad domain").is_err());
+    assert_eq!(draft.json(), before);
+    draft.rules[0].executables.push("/fixture/app".into());
+    assert_eq!(
+        draft.explain("192.0.2.1").expect("нет атрибуции")["reason"],
+        "application_witness_missing"
+    );
+}
+
+#[test]
+fn truncated_report_is_explicit_and_preserves_policy() {
+    let mut draft = Draft::default();
+    for id in 1..=25 {
+        draft
+            .put(
+                RuleInput {
+                    id,
+                    enabled: true,
+                    executables: vec![],
+                    domains: vec![],
+                    destinations: vec![],
+                    action: "proxy".into(),
+                },
+                true,
+            )
+            .expect("широкое правило");
+    }
+    let before = draft.json();
+    let report = draft.diagnostics();
+    assert_eq!(report["incomplete"], true);
+    assert_eq!(report["warnings"].as_array().expect("массив").len(), 256);
+    assert_eq!(draft.json(), before);
+}

@@ -1,0 +1,9 @@
+{
+  "url": "https://mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
+  "sha256": "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003",
+  "bytes": 576697856,
+  "signing_primary": "1B9A16984A4E8CB448712D2AE0B78BF4326C6F8F",
+  "primary_readme_url": "https://raw.githubusercontent.com/archlinux/arch-boxes/master/README.md",
+  "primary_readme_sha256": "d653cf803ed35d08223eb285f49ac9456df750fe9f4bdbcd51f528a6c2497fa6",
+  "signature_log": "image-signature-official.log"
+}

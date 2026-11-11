@@ -1,0 +1,4 @@
+# Первичные тексты и рецепты сохраняются побайтно, включая CRLF и пробелы.
+texts/* -text -whitespace
+arch/texts/* -text -whitespace
+recipes/* -text -whitespace
