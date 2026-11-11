@@ -1,0 +1,23 @@
+.FF...
+======================================================================
+FAIL: test_all_timeouts_fail_main (test_perf_import_compile.MainAcceptanceTests.test_all_timeouts_fail_main)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/myrs/.t3/worktrees/yonik/t3-52a84d3a-be4397e1f25171c7/tools/tests/test_perf_import_compile.py", line 65, in test_all_timeouts_fail_main
+    with self.assertRaises(RuntimeError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_one_failed_normal_child_fails_main (test_perf_import_compile.MainAcceptanceTests.test_one_failed_normal_child_fails_main)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/myrs/.t3/worktrees/yonik/t3-52a84d3a-be4397e1f25171c7/tools/tests/test_perf_import_compile.py", line 76, in test_one_failed_normal_child_fails_main
+    with self.assertRaises(RuntimeError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.271s
+
+FAILED (failures=2)
