@@ -5,11 +5,26 @@ use super::{
 };
 use std::os::unix::fs::MetadataExt;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
 thread_local! { static ACTION: RefCell<String> = const { RefCell::new(String::new()) }; }
+thread_local! {
+    static RETAIN_DIRECTORY: Cell<bool> = const { Cell::new(false) };
+    static HELD_DIRECTORY: RefCell<Option<fs::File>> = const { RefCell::new(None) };
+}
+
+pub(super) fn directory_locked(directory: &fs::File) -> Result<()> {
+    if RETAIN_DIRECTORY.with(Cell::get) {
+        let duplicate = directory
+            .try_clone()
+            .map_err(|_| RepositoryError::Storage)?;
+        HELD_DIRECTORY.with(|slot| *slot.borrow_mut() = Some(duplicate));
+    }
+    Ok(())
+}
+
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn checkpoint(name: &str) -> Result<()> {
@@ -494,4 +509,39 @@ fn p1_public_api_cannot_write_or_read_inside_owned_namespace() {
     assert!(copy_closed(&stage, &f.0.join("target"), &[7; 32]).is_err());
     assert!(copy_closed(&f.0.join("source"), &namespace.join("public"), &[7; 32]).is_err());
     assert_eq!(fs::read(stage).unwrap(), before);
+}
+
+#[test]
+fn copy_return_releases_lock_with_inherited_description_alive() {
+    for failure in [true, false] {
+        let fixture = Fixture::new();
+        RETAIN_DIRECTORY.with(|flag| flag.set(true));
+        ACTION.with(|action| {
+            *action.borrow_mut() = if failure {
+                "fail:before-vacuum:5".to_owned()
+            } else {
+                String::new()
+            };
+        });
+        let first = copy_closed(
+            &fixture.0.join("source"),
+            &fixture.0.join("first"),
+            &[7; 32],
+        );
+        RETAIN_DIRECTORY.with(|flag| flag.set(false));
+        ACTION.with(|action| action.borrow_mut().clear());
+        if failure {
+            assert!(matches!(first, Err(RepositoryError::Storage)));
+        } else {
+            first.expect("первая копия");
+        }
+        // try_clone удерживает тот же OFD, как FD ребёнка между fork и exec.
+        let inherited = HELD_DIRECTORY
+            .with(|slot| slot.borrow_mut().take())
+            .expect("дубликат");
+        assert!(inherited.metadata().expect("живой FD").is_dir());
+        copy_closed(&fixture.0.join("source"), &fixture.0.join("next"), &[7; 32])
+            .expect("возврат копирования освобождает flock при живом дубликате");
+        drop(inherited);
+    }
 }
