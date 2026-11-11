@@ -1,0 +1,50 @@
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "server": "example.test",
+      "server_port": 443,
+      "uuid": "00112233-4455-6677-8899-aabbccddeeff",
+      "tls": {
+        "enabled": true,
+        "server_name": "example.test"
+      }
+    },
+    {
+      "type": "vmess",
+      "server": "example.test",
+      "server_port": 443,
+      "uuid": "00112233-4455-6677-8899-aabbccddeeff"
+    },
+    {
+      "type": "trojan",
+      "server": "example.test",
+      "server_port": 443,
+      "password": "test-password",
+      "tls": {
+        "enabled": true
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "server": "example.test",
+      "server_port": 443,
+      "method": "aes-128-gcm",
+      "password": "test-password"
+    },
+    {
+      "type": "http",
+      "server": "example.test",
+      "server_port": 443,
+      "username": "test-user",
+      "password": "test-password"
+    },
+    {
+      "type": "socks",
+      "server": "example.test",
+      "server_port": 443,
+      "username": "test-user",
+      "password": "test-password"
+    }
+  ]
+}

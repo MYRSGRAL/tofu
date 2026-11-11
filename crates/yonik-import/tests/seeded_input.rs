@@ -174,13 +174,9 @@ fn native_обоих_cores_сохраняется_при_обёртке_а_ду�
             let report = import_bytes(input.as_bytes().to_vec()).unwrap();
             assert_eq!(report.original().expose(), input);
             assert_eq!(report.native_json.as_ref().unwrap().expose(), *native);
-            if native.contains("protocol") {
-                assert_eq!(report.servers.len(), 1);
-                assert!(!report.servers[0].review_flags().is_empty());
-                assert!(ServerIntent::from_server(&report.servers[0]).is_err());
-            } else {
-                assert!(report.servers.is_empty());
-            }
+            assert_eq!(report.servers.len(), 1);
+            assert!(!report.servers[0].review_flags().is_empty());
+            assert!(ServerIntent::from_server(&report.servers[0]).is_err());
         }
         // Эквивалентные escaped keys не могут обойти проверку уникальности.
         let duplicate = native.replace("\"nested\":[1,2]", r#""nested":[1,2],"ne\u0073ted":3"#);
