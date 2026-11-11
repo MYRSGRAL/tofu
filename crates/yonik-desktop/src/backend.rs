@@ -138,6 +138,16 @@ enum Command {
     MaintenanceCancel {
         request_id: u64,
     },
+    #[cfg(feature = "test-support")]
+    #[serde(skip)]
+    LogsTest {
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    },
+    LogsSave {
+        page_request_id: String,
+        destination: String,
+        request_id: String,
+    },
     LogsRead {
         after: String,
         source: logs::Source,
@@ -241,6 +251,10 @@ enum Command {
     SelectProfile {
         id: i64,
         revision: i64,
+    },
+    SetSubscriptionSchedule {
+        interval_seconds: u32,
+        background: bool,
     },
     SetLanguage {
         language: String,
@@ -438,6 +452,19 @@ impl DesktopHost {
         self.control.subscription_policy.send_replace(policy);
         Ok(())
     }
+    #[cfg(feature = "test-support")]
+    pub fn test_event_log(
+        &self,
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    ) -> Result<()> {
+        self.commands
+            .try_send(Envelope {
+                command: Command::LogsTest { reply },
+                generation: self.control.generation.load(Ordering::SeqCst),
+                tcp_generation: *self.control.tcp_priority.borrow(),
+            })
+            .map_err(|_| DesktopError("busy"))
+    }
     pub fn dispatch(&self, request: &str) -> Result<()> {
         if request.len() > 16 * 1024 {
             return Err(DesktopError("invalid_input"));
@@ -546,6 +573,15 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsSave {
+            page_request_id,
+            destination,
+            request_id,
+        } => {
+            logs::valid_number(page_request_id)
+                && logs::valid_number(request_id)
+                && text(destination, 4096)
+        }
         Command::LogsRead {
             after, request_id, ..
         } => logs::valid_number(after) && logs::valid_number(request_id),
@@ -698,6 +734,8 @@ struct Snapshot {
     routing_explanation: serde_json::Value,
     routing: crate::editor::Draft,
     language: String,
+    subscription_interval_seconds: u32,
+    subscription_background: bool,
     preferences_warning: bool,
     preferences_durability_warning: bool,
     build_id: &'static str,
@@ -768,6 +806,8 @@ impl Snapshot {
             routing_ack: None,
             routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
+            subscription_interval_seconds: 86400,
+            subscription_background: false,
             preferences_warning: false,
             preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
@@ -948,6 +988,7 @@ async fn open(
 }
 
 struct Actor {
+    logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: Option<EncryptedSubscriptionRepository>,
     routing_revision: Option<i64>,
@@ -1174,6 +1215,12 @@ impl Actor {
             .reserve_manual_schedule(identity, wall)
             .await
             .map_err(map_subscription)?;
+        extend_schedule_interval(
+            &service,
+            identity,
+            Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
+        )
+        .await?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -1322,7 +1369,7 @@ impl Actor {
                 destination,
                 revision,
             } => {
-                // До исправления P1 в backup GC admission остаётся закрытым.
+                // Supervisor допускает job; обычный dispatch сохраняет matching refusal ACK.
                 let request = maintenance::Request {
                     request_id,
                     operation,
@@ -1350,6 +1397,29 @@ impl Actor {
                     phase: maintenance::Phase::Failed,
                     error: Some("busy"),
                 });
+                Ok(())
+            }
+            #[cfg(feature = "test-support")]
+            Command::LogsTest { reply } => {
+                let _ = reply.send(self.state.ephemeral.then(|| self.event_log.clone()));
+                Ok(())
+            }
+            Command::LogsSave {
+                page_request_id,
+                destination,
+                request_id,
+            } => {
+                let status = self.logs_save.start(
+                    &self.state.logs,
+                    &page_request_id,
+                    destination,
+                    request_id.clone(),
+                );
+                self.state.logs = logs::Page {
+                    request_id,
+                    status,
+                    ..Default::default()
+                };
                 Ok(())
             }
             Command::LogsRead {
@@ -1597,6 +1667,21 @@ impl Actor {
                 self.state.selected_profile = Some(id);
                 self.state.selected_name = Some(profile.profile.name.clone());
                 self.selected = Some(profile);
+                Ok(())
+            }
+            Command::SetSubscriptionSchedule {
+                interval_seconds,
+                background,
+            } => {
+                if interval_seconds < 86400 {
+                    return Err(DesktopError("invalid_input"));
+                }
+                let mut preferences = self.preferences.clone();
+                preferences.subscription_interval_seconds = interval_seconds;
+                preferences.subscription_background = background;
+                self.save_preferences(preferences)?;
+                self.state.subscription_interval_seconds = interval_seconds;
+                self.state.subscription_background = background;
                 Ok(())
             }
             Command::SetProxyFetchDns { upstream } => {
@@ -1929,6 +2014,7 @@ mod settings_tests {
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
             event_log: yonik_linux::event_log::EventLog::new(),
+            logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository: Some(routing_repository),
             routing_revision: Some(0),
             preferences_store,
@@ -2235,6 +2321,44 @@ impl From<ProbeResult> for HealthResultDto {
         }
     }
 }
+/// Сохраняет настроенный интервал поверх legacy reservation/completion, не меняя
+/// API ручного refresh. Retry due и новое поколение не перезаписываются.
+async fn extend_schedule_interval(
+    service: &SubscriptionService,
+    identity: SubscriptionIdentity,
+    interval: Duration,
+) -> Result<()> {
+    if interval <= Duration::from_secs(86400) {
+        return Ok(());
+    }
+    let Some(token) = service
+        .schedule_metadata(identity.id)
+        .await
+        .map_err(map_subscription)?
+    else {
+        return Err(DesktopError("storage"));
+    };
+    if token.generation != identity.generation {
+        return Err(DesktopError("storage"));
+    }
+    let Some(state) = token
+        .state
+        .filter(|state| state.due_wall == state.recorded_wall.checked_add(86400))
+    else {
+        return Ok(());
+    };
+    service
+        .persist_schedule(
+            token,
+            yonik_linux::ScheduleState {
+                due_wall: state.recorded_wall.checked_add(interval.as_secs()),
+                ..state
+            },
+        )
+        .await
+        .map_err(map_subscription)
+}
+
 /// Completion старого ресурса не отменяет очередь/review нового поколения.
 async fn reconcile_manual_schedule(
     scheduled: &mut DesktopSchedule,
@@ -2253,6 +2377,7 @@ async fn reconcile_manual_schedule(
     }
     scheduled.cancel(identity.id, &clock).await?;
     if !storage_failed {
+        extend_schedule_interval(service, identity, scheduled.interval).await?;
         scheduled.reload_id(service, identity.id, clock()).await?;
     }
     Ok(())
@@ -2581,6 +2706,58 @@ async fn session(
     Ok(())
 }
 
+fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'static str) {
+    state.maintenance_available = false;
+    if let Command::MaintenanceStart { request_id, .. }
+    | Command::MaintenanceCancel { request_id } = command
+    {
+        state.maintenance_ack = Some(maintenance::Ack {
+            request_id: *request_id,
+            phase: maintenance::Phase::Failed,
+            error: Some(error),
+        });
+    }
+    if let Some(request_id) = command.routing_request_id() {
+        state.routing_ack = Some(RoutingAck {
+            request_id,
+            saved_id: None,
+            error: Some(error),
+        });
+    }
+    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = command {
+        state.logs = logs::Page {
+            request_id: request_id.clone(),
+            status: if error == "busy" { "busy" } else { "error" },
+            ..Default::default()
+        };
+    }
+    #[cfg(feature = "test-support")]
+    if let Command::LogsTest { reply } = command {
+        let _sent = reply.send(None);
+    }
+    state.command_error(false, error);
+}
+
+async fn wait_startup_shutdown(
+    state: &mut Snapshot,
+    commands: &mut mpsc::Receiver<Envelope>,
+    priority: &mut watch::Receiver<Priority>,
+    callback: &Callback,
+) {
+    let mut commands_open = true;
+    while !priority.borrow_and_update().shutdown {
+        tokio::select! {
+            changed = priority.changed() => if changed.is_err() { break; },
+            command = commands.recv(), if commands_open => {
+                if let Some(command) = command {
+                    reject_unavailable_command(state, &command.command, "startup");
+                    state.emit(callback);
+                } else { commands_open = false; }
+            }
+        }
+    }
+}
+
 async fn run(
     mut config: HostConfig,
     mut commands: mpsc::Receiver<Envelope>,
@@ -2610,11 +2787,7 @@ async fn run(
             state.error = Some("startup");
             state.connection_error = Some("startup");
             state.emit(&callback);
-            while !priority.borrow_and_update().shutdown {
-                if priority.changed().await.is_err() {
-                    break;
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
@@ -2634,21 +2807,7 @@ async fn run(
         Err(error) => {
             state.command_error(false, error.key());
             state.emit(&callback);
-            loop {
-                if priority.borrow_and_update().shutdown {
-                    break;
-                }
-                tokio::select! {
-                    changed = priority.changed() => { if changed.is_err() { break; } }
-                    command = commands.recv() => {
-                        let Some(command) = command else { break; };
-                        if let Some(request_id) = command.command.routing_request_id() {
-                            state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("startup") });
-                            state.emit(&callback);
-                        }
-                    }
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
@@ -2671,6 +2830,8 @@ async fn run(
         state.port = port.get();
     }
     state.language = preferences.language.clone();
+    state.subscription_interval_seconds = preferences.subscription_interval_seconds;
+    state.subscription_background = preferences.subscription_background;
     state.proxy_fetch_dns = preferences.proxy_fetch_dns;
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
@@ -2684,6 +2845,7 @@ async fn run(
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
         event_log: yonik_linux::event_log::EventLog::new(),
+        logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository: Some(routing_repository),
         routing_revision: Some(0),
         preferences_store,
@@ -2783,6 +2945,25 @@ async fn run(
     let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
     let mut maintenance_controller = maintenance::Controller::default();
     loop {
+        scheduled.interval =
+            Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
+        scheduled.background_enabled = actor.preferences.subscription_background;
+        if scheduled.runtime.set_interval(scheduled.interval).is_err() {
+            actor.state.command_error(true, "invalid_input");
+        }
+        let now = origin.elapsed();
+        let policy = scheduled.policy();
+        if scheduled.window_until.is_some_and(|until| now >= until)
+            || (scheduled.window_until.is_some()
+                && (!scheduled.background_enabled
+                    || !policy.online
+                    || policy.metered
+                    || policy.battery_saver))
+        {
+            if let Err(error) = scheduled.close_window(actor.service(), now).await {
+                actor.state.command_error(true, error.key());
+            }
+        }
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
         }
@@ -2819,11 +3000,7 @@ async fn run(
             if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
                 actor.state.command_error(true, "storage");
             }
-            let policy = scheduled.policy;
-            let visible = scheduled.visible;
-            if let Ok(mut replacement) = DesktopSchedule::new() {
-                replacement.policy = policy;
-                replacement.visible = visible;
+            if let Ok(mut replacement) = scheduled.replacement() {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor.state.command_error(true, error.key());
                 }
@@ -2835,7 +3012,11 @@ async fn run(
             && refreshing.is_none()
             && actor.pending.is_none()
             && scheduled.review.is_none();
-        let deadline = if allowed { scheduled.deadline() } else { None };
+        let work_deadline = if allowed { scheduled.deadline() } else { None };
+        let deadline = work_deadline
+            .into_iter()
+            .chain(scheduled.window_until)
+            .min();
 
         tokio::select! {
             biased;
@@ -2983,9 +3164,11 @@ async fn run(
                     None => std::future::pending::<()>().await,
                 }
             } => {
-                {
+                // На границе окна сначала closing ACK в начале следующей итерации.
+                if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
                     schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
                     let host = &schedule_host;
+                    scheduled.open_window(origin.elapsed());
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
@@ -3111,6 +3294,14 @@ async fn run(
                 }
                 actor.emit();
             }
+            completion = actor.logs_save.complete(), if actor.logs_save.active() => {
+                if let Some((request_id, status)) = completion {
+                    if actor.state.logs.request_id == request_id && actor.state.logs.status == "saving" {
+                        actor.state.logs = logs::Page { request_id, status, ..Default::default() };
+                        actor.emit();
+                    }
+                }
+            }
             Some(update) = events.recv() => {
                 actor.update(update); actor.emit();
             }
@@ -3125,7 +3316,7 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
-                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = envelope.command {
                         actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }
@@ -3134,7 +3325,7 @@ async fn run(
                 if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
                     let live = config.data_dir.join("subscriptions.sqlite");
-                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() {
+                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
                         actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
                         actor.emit(); continue;
                     }
@@ -3161,21 +3352,26 @@ async fn run(
                                 let action = *priority.borrow_and_update();
                                 quitting |= action.shutdown;
                                 cancellation.cancel();
-                                actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Cancelling, error: None });
+                                maintenance_controller.cancel(request_id);
+                                actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                 actor.emit();
                             }
                             result = &mut job => break result,
                             command = commands.recv(), if !quitting => {
                                 let Some(command) = command else { quitting = true; cancellation.cancel(); continue; };
-                                if let Some(request_id) = command.command.routing_request_id() {
-                                    actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("busy") });
-                                }
-                                match command.command {
-                                    Command::MaintenanceCancel { request_id: id } if id == request_id => cancellation.cancel(),
-                                    Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
-                                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                match &command.command {
+                                    Command::MaintenanceCancel { request_id: id } if *id == request_id => {
+                                        cancellation.cancel();
+                                        maintenance_controller.cancel(request_id);
+                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                     }
-                                    _ => actor.state.command_error(false, "busy"),
+                                    Command::MaintenanceStart { request_id: id, .. } if *id == request_id => {
+                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                    }
+                                    Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
+                                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                    }
+                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy"),
                                 }
                                 actor.emit();
                             }
@@ -3197,6 +3393,7 @@ async fn run(
                     if job_drained { maintenance_controller.drained(request_id, result); }
                     actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
                     actor.state.ready = online && !quitting;
+                    actor.state.maintenance_available = online && !quitting;
                     actor.state.busy = false;
                     actor.emit();
                     if !online {
@@ -3209,11 +3406,10 @@ async fn run(
                                     quitting = changed.is_err() || priority.borrow_and_update().shutdown;
                                 }
                                 command = commands.recv(), if commands_open => {
-                                    if let Some(request_id) = command.as_ref().and_then(|e| e.command.routing_request_id()) {
-                                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("busy") });
-                                    }
-                                    if command.is_none() { quitting = true; commands_open = false; }
-                                    actor.state.command_error(false, "busy"); actor.emit();
+                                    if let Some(command) = command {
+                                        reject_unavailable_command(&mut actor.state, &command.command, "busy");
+                                        actor.emit();
+                                    } else { quitting = true; commands_open = false; }
                                 }
                             }
                         }
@@ -3521,6 +3717,7 @@ async fn run(
             actor.emit();
         }
         if quitting
+            && !actor.logs_save.active()
             && system_flight.is_none()
             && !system_stop
             && batch_running.is_none()
@@ -3607,6 +3804,7 @@ mod routing_regressions {
         (
             Actor {
                 event_log: yonik_linux::event_log::EventLog::new(),
+                logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository: Some(routing_repository),
                 routing_revision: Some(0),
                 preferences_store,

@@ -99,14 +99,14 @@ where
             ),
         >,
 {
+    let started = std::time::Instant::now();
     if let Some((_, sender, task, _, _)) = refresh {
         sender.send_replace(true);
         // Join — подтверждение освобождения service clone, включая commit ACK.
         let _result = task.await;
     }
     let schedule_closed = schedule.runtime.shutdown(now).await.is_ok();
-    let policy = schedule.policy;
-    let visible = schedule.visible;
+    let replacement = schedule.replacement();
     drop(schedule);
     let access = repository.maintenance_access().await;
     let service_closed = service.close().await.is_ok();
@@ -129,11 +129,11 @@ where
     match access.reopen().await {
         Ok(repository) => {
             let service = SubscriptionService::new(repository.clone());
-            match DesktopSchedule::new() {
+            match replacement {
                 Ok(mut schedule) => {
-                    schedule.policy = policy;
-                    schedule.visible = visible;
-                    let loaded = schedule.load(&service, now).await;
+                    let loaded = schedule
+                        .load(&service, now.saturating_add(started.elapsed()))
+                        .await;
                     Outcome {
                         drained: true,
                         handles: Some((service, repository, schedule)),
@@ -171,9 +171,11 @@ static TEST_GATE: Mutex<Option<TestGate>> = Mutex::new(None);
 #[cfg(test)]
 mod tests {
     use super::*;
+    static TEST_SERIAL: Mutex<()> = Mutex::new(());
 
     #[test]
     fn shutdown_is_responsive_while_leaf_is_gated_and_lock_survives_until_drain() {
+        let _serial = TEST_SERIAL.lock().expect("serial fixture");
         let directory =
             std::env::temp_dir().join(format!("yonik-maintenance-shutdown-{}", std::process::id()));
         fs::DirBuilder::new()
@@ -214,6 +216,43 @@ mod tests {
                 .await
                 .expect("leaf entered");
         });
+        struct ReleaseOnDrop(Arc<tokio::sync::Notify>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.0.notify_one();
+            }
+        }
+        let _release_on_failure = ReleaseOnDrop(release.clone());
+        host.dispatch(r#"{"command":"maintenance_cancel","request_id":2}"#)
+            .expect("чужой запрос");
+        loop {
+            let state = receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("busy ACK");
+            if state["maintenance_ack"]["request_id"] == 2 {
+                break;
+            }
+        }
+        for command in [
+            serde_json::json!({"command":"logs_read","after":"0","source":"all","request_id":"71"}),
+            serde_json::json!({"command":"logs_save","page_request_id":"71","destination":directory.join("report.json"),"request_id":"72"}),
+        ] {
+            host.dispatch(&command.to_string())
+                .expect("команда журнала");
+            let state = receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("logs ACK");
+            assert_eq!(state["logs"]["request_id"], command["request_id"]);
+            assert_eq!(state["logs"]["status"], "busy");
+            assert!(state["logs"]["export"].is_null());
+        }
+        host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":1,"operation":"backup","destination":destination,"revision":ready["revision"]}).to_string()).expect("повтор Start");
+        let repeated = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("повторный ACK");
+        assert_eq!(repeated["maintenance_ack"]["request_id"], 1);
+        assert_eq!(repeated["maintenance_ack"]["phase"], "draining");
+        assert!(repeated["maintenance_ack"]["error"].is_null());
         host.dispatch(r#"{"command":"stop"}"#)
             .expect("Stop admission");
         loop {
@@ -248,6 +287,100 @@ mod tests {
         fs::remove_dir(directory).expect("очистка fixture");
     }
 
+    #[test]
+    fn reopen_failure_disables_maintenance_and_matches_each_rejected_request() {
+        let _serial = TEST_SERIAL.lock().expect("serial fixture");
+        let directory =
+            std::env::temp_dir().join(format!("yonik-maintenance-reopen-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .expect("fixture");
+        let data = directory.join("data");
+        let destination = directory.join("new.sqlite");
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        *TEST_GATE.lock().expect("test gate") =
+            Some((destination.clone(), entered.clone(), release.clone()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let host = DesktopHost::start(
+            HostConfig::new(data.clone(), directory.join("engines")).with_ephemeral_key([68; 32]),
+            move |raw| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let _sent = sender.send(value);
+                }
+            },
+        )
+        .expect("host");
+        struct ReleaseOnDrop(Arc<tokio::sync::Notify>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.0.notify_one();
+            }
+        }
+        let _release_on_failure = ReleaseOnDrop(release.clone());
+        let ready = loop {
+            let state = receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("ready");
+            if state["ready"] == true {
+                break state;
+            }
+        };
+        host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":1,"operation":"backup","destination":destination,"revision":ready["revision"]}).to_string()).expect("Start");
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), entered.notified())
+                    .await
+                    .expect("leaf closed DB");
+            });
+        // Подтверждённо закрытая БД сохранена, а её путь становится недоступным для reopen.
+        let database = data.join("subscriptions.sqlite");
+        let held = data.join("held.sqlite");
+        fs::rename(&database, &held).expect("сохранить fixture DB");
+        fs::create_dir(&database).expect("reopen fault");
+        release.notify_one();
+        loop {
+            let state = receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("terminal ACK");
+            if state["maintenance_ack"]["phase"] == "failed" {
+                assert_eq!(state["maintenance_available"], false);
+                assert_eq!(state["ready"], false);
+                break;
+            }
+        }
+        for id in [2, 3] {
+            let command = if id == 2 {
+                serde_json::json!({"command":"maintenance_start","request_id":id,"operation":"backup","destination":destination,"revision":ready["revision"]})
+            } else {
+                serde_json::json!({"command":"maintenance_cancel","request_id":id})
+            };
+            host.dispatch(&command.to_string())
+                .expect("offline command");
+            let state = receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("matching offline ACK");
+            assert_eq!(state["maintenance_ack"]["request_id"], id);
+            assert_eq!(state["maintenance_ack"]["phase"], "failed");
+            assert_eq!(state["maintenance_ack"]["error"], "busy");
+        }
+        assert!(!host.wait_closed(Duration::from_millis(20)));
+        host.shutdown();
+        assert!(host.wait_closed(Duration::from_secs(5)));
+        drop(host);
+        *TEST_GATE.lock().expect("gate") = None;
+        fs::remove_dir(database).expect("очистка fault");
+        for entry in fs::read_dir(&data).expect("fixture") {
+            fs::remove_file(entry.expect("файл").path()).expect("очистка");
+        }
+        fs::remove_dir(data).expect("очистка data");
+        fs::remove_dir(directory).expect("очистка fixture");
+    }
+
     #[tokio::test]
     async fn fake_leaf_runs_after_real_handles_drain_and_reopens_after_release() {
         let directory =
@@ -262,7 +395,14 @@ mod tests {
                 .await
                 .expect("БД");
         let service = SubscriptionService::new(repository.clone());
-        let schedule = DesktopSchedule::new().expect("scheduler");
+        let mut schedule = DesktopSchedule::new().expect("scheduler");
+        schedule.interval = Duration::from_secs(172800);
+        schedule
+            .runtime
+            .set_interval(schedule.interval)
+            .expect("интервал");
+        schedule.background_enabled = true;
+        schedule.window_until = Some(Duration::from_secs(60));
         let request = maintenance::Request {
             request_id: 1,
             operation: maintenance::Operation::Backup,
@@ -303,6 +443,9 @@ mod tests {
         let outcome = task.await.expect("join");
         assert_eq!(outcome.result, Err("cancelled"));
         let (service, repository, mut schedule) = outcome.handles.expect("reopen после drain");
+        assert_eq!(schedule.interval, Duration::from_secs(172800));
+        assert!(schedule.background_enabled);
+        assert_eq!(schedule.window_until, Some(Duration::from_secs(60)));
         schedule
             .runtime
             .shutdown(Duration::ZERO)
