@@ -8,6 +8,9 @@ use std::{
 };
 
 const MAX_BYTES: usize = 4096;
+fn default_interval() -> u32 {
+    86400
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +21,12 @@ pub(crate) struct Preferences {
     pub probe_url: String,
     pub probe_status: u16,
     pub language: String,
+    #[serde(default)]
+    pub proxy_fetch_dns: Option<std::net::SocketAddr>,
+    #[serde(default = "default_interval")]
+    pub subscription_interval_seconds: u32,
+    #[serde(default)]
+    pub subscription_background: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -28,6 +37,9 @@ impl Default for Preferences {
             probe_url: super::backend::DEFAULT_PROBE_URL.into(),
             probe_status: 204,
             language: "ru".into(),
+            proxy_fetch_dns: None,
+            subscription_interval_seconds: default_interval(),
+            subscription_background: false,
         }
     }
 }
@@ -145,6 +157,8 @@ impl Store {
 }
 fn valid(p: &Preferences) -> bool {
     p.version == 1
+        && p.subscription_interval_seconds >= default_interval()
+        && p.proxy_fetch_dns.is_none_or(valid_proxy_fetch_dns)
         && matches!(p.engine.as_str(), "xray" | "sing-box")
         && matches!(p.language.as_str(), "ru" | "en")
         && p.probe_url.len() <= 2048
@@ -154,9 +168,42 @@ fn valid(p: &Preferences) -> bool {
             .is_ok()
 }
 
+pub(crate) fn valid_proxy_fetch_dns(address: std::net::SocketAddr) -> bool {
+    yonik_linux::FetchHost::new(std::time::Duration::from_secs(30))
+        .and_then(|host| host.with_socks_endpoint(std::net::SocketAddr::from(([127, 0, 0, 1], 1))))
+        .and_then(|host| host.with_proxy_dns(address))
+        .is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SaveOutcome, Store, fs};
+    #[test]
+    fn интервал_legacy_границы_и_proxy_dns() {
+        let preferences = super::Preferences::default();
+        let mut value = serde_json::to_value(&preferences).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("subscription_interval_seconds");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("subscription_background");
+        let legacy: super::Preferences = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.subscription_interval_seconds, 86400);
+        assert!(!legacy.subscription_background);
+        let mut p = legacy;
+        p.subscription_interval_seconds = 86399;
+        assert!(!super::valid(&p));
+        p.subscription_interval_seconds = u32::MAX;
+        assert!(super::valid(&p));
+        p.proxy_fetch_dns = Some("127.0.0.1:5300".parse().unwrap());
+        let reopened: super::Preferences =
+            serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
+        assert_eq!(reopened.proxy_fetch_dns, p.proxy_fetch_dns);
+    }
+
     #[test]
     fn directory_sync_failure_reports_publication_and_reopens_new_settings() {
         let dir =

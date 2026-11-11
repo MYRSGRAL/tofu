@@ -105,7 +105,7 @@ impl ScheduleState {
             || self.recorded_wall > i64::MAX as u64
             || self.due_wall.is_some_and(|due| {
                 due < self.recorded_wall
-                    || due - self.recorded_wall > 86400
+                    || due - self.recorded_wall > u32::MAX as u64
                     || due > i64::MAX as u64
             })
         {
@@ -121,7 +121,7 @@ impl ScheduleState {
         } else {
             self.due_wall.unwrap_or(wall).saturating_sub(wall)
         }
-        .min(86400);
+        .min(u32::MAX as u64);
         monotonic
             .checked_add(Duration::from_secs(remaining))
             .unwrap_or(monotonic)

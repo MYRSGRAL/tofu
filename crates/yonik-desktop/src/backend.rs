@@ -202,6 +202,10 @@ enum Command {
         id: i64,
         revision: i64,
     },
+    SetSubscriptionSchedule {
+        interval_seconds: u32,
+        background: bool,
+    },
     SetLanguage {
         language: String,
     },
@@ -624,6 +628,8 @@ struct Snapshot {
     routing_explanation: serde_json::Value,
     routing: crate::editor::Draft,
     language: String,
+    subscription_interval_seconds: u32,
+    subscription_background: bool,
     preferences_warning: bool,
     preferences_durability_warning: bool,
     build_id: &'static str,
@@ -688,6 +694,8 @@ impl Snapshot {
             routing_ack: None,
             routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
+            subscription_interval_seconds: 86400,
+            subscription_background: false,
             preferences_warning: false,
             preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
@@ -1030,6 +1038,12 @@ impl Actor {
             .reserve_manual_schedule(identity, wall)
             .await
             .map_err(map_subscription)?;
+        extend_schedule_interval(
+            &service,
+            identity,
+            Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
+        )
+        .await?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -1396,6 +1410,21 @@ impl Actor {
                 self.state.selected_profile = Some(id);
                 self.state.selected_name = Some(profile.profile.name.clone());
                 self.selected = Some(profile);
+                Ok(())
+            }
+            Command::SetSubscriptionSchedule {
+                interval_seconds,
+                background,
+            } => {
+                if interval_seconds < 86400 {
+                    return Err(DesktopError("invalid_input"));
+                }
+                let mut preferences = self.preferences.clone();
+                preferences.subscription_interval_seconds = interval_seconds;
+                preferences.subscription_background = background;
+                self.save_preferences(preferences)?;
+                self.state.subscription_interval_seconds = interval_seconds;
+                self.state.subscription_background = background;
                 Ok(())
             }
             Command::SetLanguage { language } => {
@@ -2005,6 +2034,44 @@ impl From<ProbeResult> for HealthResultDto {
         }
     }
 }
+/// Сохраняет настроенный интервал поверх legacy reservation/completion, не меняя
+/// API ручного refresh. Retry due и новое поколение не перезаписываются.
+async fn extend_schedule_interval(
+    service: &SubscriptionService,
+    identity: SubscriptionIdentity,
+    interval: Duration,
+) -> Result<()> {
+    if interval <= Duration::from_secs(86400) {
+        return Ok(());
+    }
+    let Some(token) = service
+        .schedule_metadata(identity.id)
+        .await
+        .map_err(map_subscription)?
+    else {
+        return Err(DesktopError("storage"));
+    };
+    if token.generation != identity.generation {
+        return Err(DesktopError("storage"));
+    }
+    let Some(state) = token
+        .state
+        .filter(|state| state.due_wall == state.recorded_wall.checked_add(86400))
+    else {
+        return Ok(());
+    };
+    service
+        .persist_schedule(
+            token,
+            yonik_linux::ScheduleState {
+                due_wall: state.recorded_wall.checked_add(interval.as_secs()),
+                ..state
+            },
+        )
+        .await
+        .map_err(map_subscription)
+}
+
 /// Completion старого ресурса не отменяет очередь/review нового поколения.
 async fn reconcile_manual_schedule(
     scheduled: &mut DesktopSchedule,
@@ -2023,6 +2090,7 @@ async fn reconcile_manual_schedule(
     }
     scheduled.cancel(identity.id, &clock).await?;
     if !storage_failed {
+        extend_schedule_interval(service, identity, scheduled.interval).await?;
         scheduled.reload_id(service, identity.id, clock()).await?;
     }
     Ok(())
@@ -2418,6 +2486,8 @@ async fn run(
         state.port = port.get();
     }
     state.language = preferences.language.clone();
+    state.subscription_interval_seconds = preferences.subscription_interval_seconds;
+    state.subscription_background = preferences.subscription_background;
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
     state.probe_expected_status = preferences.probe_status;
@@ -2520,6 +2590,25 @@ async fn run(
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
     let mut schedule_host = DesktopFetch::new(&proxy_session);
     loop {
+        scheduled.interval =
+            Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
+        scheduled.background_enabled = actor.preferences.subscription_background;
+        if scheduled.runtime.set_interval(scheduled.interval).is_err() {
+            actor.state.command_error(true, "invalid_input");
+        }
+        let now = origin.elapsed();
+        let policy = scheduled.policy();
+        if scheduled.window_until.is_some_and(|until| now >= until)
+            || (scheduled.window_until.is_some()
+                && (!scheduled.background_enabled
+                    || !policy.online
+                    || policy.metered
+                    || policy.battery_saver))
+        {
+            if let Err(error) = scheduled.close_window(&actor.service, now).await {
+                actor.state.command_error(true, error.key());
+            }
+        }
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
         }
@@ -2572,7 +2661,11 @@ async fn run(
             && refreshing.is_none()
             && actor.pending.is_none()
             && scheduled.review.is_none();
-        let deadline = if allowed { scheduled.deadline() } else { None };
+        let work_deadline = if allowed { scheduled.deadline() } else { None };
+        let deadline = work_deadline
+            .into_iter()
+            .chain(scheduled.window_until)
+            .min();
 
         tokio::select! {
             biased;
@@ -2711,9 +2804,11 @@ async fn run(
                     None => std::future::pending::<()>().await,
                 }
             } => {
-                {
+                // На границе окна сначала closing ACK в начале следующей итерации.
+                if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
                     schedule_host = DesktopFetch::new(&proxy_session);
                     let host = &schedule_host;
+                    scheduled.open_window(origin.elapsed());
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
                         Ok(()) => scheduled.fetching = true,

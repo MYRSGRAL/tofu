@@ -50,8 +50,12 @@ pub struct Work {
     serial: u64,
     id: i64,
     generation: i64,
+    interval: Duration,
 }
 impl Work {
+    pub fn interval(self) -> Duration {
+        self.interval
+    }
     pub fn id(self) -> i64 {
         self.id
     }
@@ -86,6 +90,7 @@ pub struct Scheduler {
     parallelism: usize,
     serial: u64,
     entries: BTreeMap<i64, Entry>,
+    interval: Duration,
 }
 impl Scheduler {
     pub const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -102,11 +107,22 @@ impl Scheduler {
             parallelism,
             serial: 0,
             entries: BTreeMap::new(),
+            interval: Self::INTERVAL,
         })
     }
 
-    /// `due` — первое разрешённое время; host восстанавливает его из метаданных.
-    /// Повторное добавление не меняет уже ожидающую/активную работу.
+    /// Настройка действует на новые работы, не сокращая сохранённые due.
+    pub fn set_interval(&mut self, interval: Duration) -> Result<(), Error> {
+        if !(Self::INTERVAL..=Duration::from_secs(u32::MAX as u64)).contains(&interval)
+            || interval.subsec_nanos() != 0
+        {
+            return Err(Error::InvalidLimits);
+        }
+        self.interval = interval;
+        Ok(())
+    }
+
+    /// `due` восстанавливается host из метаданных; существующая запись не меняется.
     pub fn schedule(&mut self, id: i64, generation: i64, due: Duration) -> Result<(), Error> {
         if self.entries.contains_key(&id) {
             return Err(Error::Duplicate);
@@ -201,6 +217,7 @@ impl Scheduler {
             serial,
             id,
             generation: entry.generation,
+            interval: self.interval,
         };
         self.serial = serial;
         entry.active = Some(work);
@@ -221,20 +238,30 @@ impl Scheduler {
             return Ok(());
         }
         entry.active = None;
-        let state = Self::completion_state(entry.failures, now, success);
+        let state =
+            Self::completion_state_with_interval(entry.failures, now, success, work.interval);
         entry.failures = state.failures;
         entry.due = state.due;
         Ok(())
     }
 
     pub fn completion_state(failures: u32, now: Duration, success: bool) -> RetryState {
+        Self::completion_state_with_interval(failures, now, success, Self::INTERVAL)
+    }
+
+    pub fn completion_state_with_interval(
+        failures: u32,
+        now: Duration,
+        success: bool,
+        interval: Duration,
+    ) -> RetryState {
         let failures = if success {
             0
         } else {
             failures.saturating_add(1).min(Self::MAX_FAILURES)
         };
         let delay = if success {
-            Some(Self::INTERVAL)
+            Some(interval)
         } else {
             (failures < Self::MAX_FAILURES).then(|| Self::retry_delay(failures))
         };
@@ -283,6 +310,26 @@ mod tests {
             ui_visible: true,
             ..Policy::default()
         }
+    }
+
+    #[test]
+    fn настраиваемый_интервал_и_границы() {
+        let mut s = scheduler();
+        assert_eq!(
+            s.set_interval(Duration::from_secs(86399)),
+            Err(Error::InvalidLimits)
+        );
+        s.set_interval(Duration::from_secs(172800)).unwrap();
+        s.schedule(1, 7, Duration::ZERO).unwrap();
+        let work = s.take_due(Duration::ZERO, allowed()).unwrap().unwrap();
+        assert_eq!(work.interval(), Duration::from_secs(172800));
+        s.set_interval(Duration::from_secs(259200)).unwrap();
+        s.complete(work, Duration::from_secs(3), true).unwrap();
+        assert_eq!(
+            s.snapshot(1).unwrap().due,
+            Some(Duration::from_secs(172803))
+        );
+        assert_eq!(s.set_interval(Duration::MAX), Err(Error::InvalidLimits));
     }
 
     #[test]
