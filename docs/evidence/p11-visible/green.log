@@ -1,0 +1,7 @@
+********* Start testing of qmltestrunner *********
+Config: Using QtTest library 6.11.2, Qt 6.11.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 16.2.1 20260810), cachyos unknown
+PASS   : qmltestrunner::P11Visible::initTestCase()
+PASS   : qmltestrunner::P11Visible::test_locales()
+PASS   : qmltestrunner::P11Visible::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 10ms
+********* Finished testing of qmltestrunner *********

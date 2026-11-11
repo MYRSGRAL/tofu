@@ -83,6 +83,15 @@ fn single_job_cancel_and_stop_join_before_terminal_ack() {
         observed
             .recv_timeout(Duration::from_secs(10))
             .expect("fetch entered");
+        host.dispatch(
+            &json!({"command":"maintenance_start","request_id":81,
+            "operation":"backup","destination":root.join("backup.sqlite"),"revision":0})
+            .to_string(),
+        )
+        .expect("maintenance admission");
+        let refused = wait(&|v| v["maintenance_ack"]["request_id"] == 81);
+        assert_eq!(refused["maintenance_ack"]["error"], "busy");
+        assert_eq!(refused["ready"], true);
         host.dispatch(&update(2).to_string())
             .expect("second update");
         let busy = wait(&|v| v["presets"]["ack"]["request_id"] == 2);
