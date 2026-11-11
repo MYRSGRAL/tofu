@@ -75,6 +75,10 @@ async fn verified_dns_lease_actual_route_epochs_and_unsupported_native_hooks() {
     let dns = DnsPolicy {
         mode: yonik_engine::private_dns::NativeDnsMode::Real,
         upstream: "127.0.0.1:1153".parse().unwrap(),
+        ipv4: true,
+        ipv6: false,
+        fake_exclusions: Vec::new(),
+        require_mapping_lease: false,
         listen_port: NonZeroU16::new(1054).unwrap(),
     };
     for engine in [Engine::Xray, Engine::SingBox] {
@@ -160,7 +164,7 @@ async fn verified_dns_lease_actual_route_epochs_and_unsupported_native_hooks() {
     for (engine, name) in [(Engine::Xray, "xray"), (Engine::SingBox, "sing-box")] {
         let fake_dns = DnsPolicy {
             mode: yonik_engine::private_dns::NativeDnsMode::FakeIp,
-            ..dns
+            ..dns.clone()
         };
         let config = yonik_engine::compile_native_dns(
             &source.servers[0],
