@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 
-def snapshot(only_pid: int | None = None) -> dict[str, dict[str, int]]:
+def snapshot(only_pid: int | None = None) -> dict[str, dict[str, int | str | None]]:
     rows = {}
     for path in Path("/proc").iterdir():
         if (
@@ -24,20 +24,32 @@ def snapshot(only_pid: int | None = None) -> dict[str, dict[str, int]]:
             continue
         try:
             stat = (path / "stat").read_text().rsplit(") ", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        # Zombie сохраняет identity, хотя smaps_rollup уже недоступен.
+        row: dict[str, int | str | None] = {
+            "state": stat[0],
+            "fd": None,
+            "threads": None,
+            "pss": None,
+            "private_dirty": None,
+        }
+        rows[f"{path.name}:{stat[19]}"] = row
+        try:
+            row["fd"] = len(list((path / "fd").iterdir()))
+            row["threads"] = len(list((path / "task").iterdir()))
             memory = dict(
                 line.split(":", 1)
                 for line in (path / "smaps_rollup").read_text().splitlines()
                 if ":" in line
             )
-            rows[f"{path.name}:{stat[19]}"] = {
-                "fd": len(list((path / "fd").iterdir())),
-                "threads": len(list((path / "task").iterdir())),
-                "pss": int(memory.get("Pss", "0").split()[0]) * 1024,
-                "private_dirty": int(memory.get("Private_Dirty", "0").split()[0])
-                * 1024,
-            }
+            row["pss"] = int(memory.get("Pss", "0").split()[0]) * 1024
+            row["private_dirty"] = (
+                int(memory.get("Private_Dirty", "0").split()[0]) * 1024
+            )
         except (FileNotFoundError, ProcessLookupError):
-            continue
+            # Недоступные метрики не означают отсутствие процесса.
+            pass
     return rows
 
 
@@ -103,7 +115,7 @@ def inside(args: argparse.Namespace) -> None:
         time.sleep(0.1)
         retained = remaining(snapshot(), baseline)
         if not retained or not any(
-            row["private_dirty"] >= 8 * 1024 * 1024 for row in retained.values()
+            (row["private_dirty"] or 0) >= 8 * 1024 * 1024 for row in retained.values()
         ):
             raise RuntimeError("Negative oracle пропустил собственный retainer")
         (args.output / "negative.json").write_text(

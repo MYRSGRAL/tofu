@@ -72,3 +72,22 @@ with-rust-slot, jobs=1, внешний target под flock собственно�
 `cargo +1.85.1 clippy --locked -p yonik-desktop --all-targets -- -D warnings`,
 `cargo +1.85.1 fmt --all -- --check`, Ruff format/check и 2 Python tests — PASS.
 Production hooks, новые зависимости, pins/capabilities/ABI не менялись.
+
+## Исправление terminal oracle после review
+
+Первоначальный oracle исключал процесс целиком, если чтение `smaps_rollup`
+завершалось `ProcessLookupError`. Это пропускало unreaped zombie; прежние пустые
+terminal snapshots сами по себе не доказывали отсутствие zombie.
+
+Теперь PID/starttime и состояние фиксируются сразу после чтения `stat`, независимо
+от доступности памяти. Недоступные метрики представлены `null`; строка процесса
+остаётся в terminal oracle. Regression создаёт собственный unreaped child,
+дожидается состояния `Z` без `poll`/`wait`, проверяет наличие identity, затем
+выполняет `wait` и проверяет исчезновение. RED и GREEN сохранены в `zombie-fix/`.
+
+Обновлённый oracle повторно прошёл bounded native campaign: **8/8 PASS**, все восемь
+terminal owned-group пусты; собственный memory/FD retainer обнаружен и освобождён.
+Raw evidence — `attempt-zombie-fix/`. Использован прежний retained Rust binary
+с подтверждённым SHA256; Rust source и оба core binary неизменны. Новая Rust-сборка
+не требовалась. Три Python regression tests и Ruff format/check прошли.
+Это уточняет компонентный cleanup proof; исключённые сценарии остаются открытыми.

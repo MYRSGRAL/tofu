@@ -4,11 +4,35 @@ import subprocess
 import sys
 import time
 import unittest
+from pathlib import Path
 
 from native_cancel_matrix import remaining, snapshot
 
 
 class OracleTest(unittest.TestCase):
+    def test_unreaped_zombie_remains_until_wait(self) -> None:
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            deadline = time.monotonic() + 5
+            while True:
+                stat = (
+                    Path(f"/proc/{child.pid}/stat")
+                    .read_text()
+                    .rsplit(") ", 1)[1]
+                    .split()
+                )
+                if stat[0] == "Z":
+                    break
+                if time.monotonic() >= deadline:
+                    self.fail("Собственный child не завершился до deadline")
+                time.sleep(0.01)
+            identity = f"{child.pid}:{stat[19]}"
+            self.assertIn(identity, snapshot(child.pid))
+        finally:
+            child.kill()
+            child.wait()
+        self.assertEqual(snapshot(child.pid), {})
+
     def test_starttime_reuse_is_new_identity(self) -> None:
         self.assertEqual(
             remaining({"10:200": {"fd": 1}}, {"10:100": {}}), {"10:200": {"fd": 1}}
