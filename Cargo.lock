@@ -2093,10 +2093,18 @@ dependencies = [
  "yonik-application",
  "yonik-engine",
  "yonik-import",
+ "yonik-nsfs",
  "yonik-subscription",
  "tokio",
  "zbus",
  "zeroize",
+]
+
+[[package]]
+name = "yonik-nsfs"
+version = "0.1.0"
+dependencies = [
+ "rustix",
 ]
 
 [[package]]

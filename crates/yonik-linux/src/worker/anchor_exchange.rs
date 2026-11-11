@@ -103,15 +103,23 @@ impl Challenge {
         {
             return Err(WorkerError::Peer);
         }
-        let mut identities = [(0, 0); 3];
-        for (fd, identity) in fds.iter().zip(&mut identities) {
-            if rustix::fs::fstatfs(fd)
+        for (fd, kind) in fds.iter().zip([
+            yonik_nsfs::NamespaceType::Net,
+            yonik_nsfs::NamespaceType::Pid,
+            yonik_nsfs::NamespaceType::Mount,
+        ]) {
+            if yonik_nsfs::namespace_type(fd).map_err(|_| WorkerError::Protocol)? != kind {
+                return Err(WorkerError::Protocol);
+            }
+            if rustix::fs::fcntl_getfl(fd)
                 .map_err(|_| WorkerError::Protocol)?
-                .f_type as i64
-                != 0x6e736673
+                .intersects(rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::RDWR)
             {
                 return Err(WorkerError::Protocol);
             }
+        }
+        let mut identities = [(0, 0); 3];
+        for (fd, identity) in fds.iter().zip(&mut identities) {
             let st = rustix::fs::fstat(fd).map_err(|_| WorkerError::Io)?;
             *identity = (st.st_dev, st.st_ino);
         }
@@ -140,13 +148,13 @@ impl Challenge {
     }
 }
 
-/// Только observation. Без NS_GET_NSTYPE и opaque unit/kernel proof нельзя
+/// Только observation. Даже с NS_GET_NSTYPE без opaque unit/kernel proof нельзя
 /// преобразовать в WorkerChannelAnchor. В этом объекте нет mount namespace FD.
 pub struct NamespaceObservation {
     custody: Arc<NamespaceCustody>,
     identities: NamespaceIdentity,
 }
-/// Opaque observation identity; не доказательство kernel namespace type.
+/// Opaque observation identity; не доказательство unit/kernel enforcement.
 #[derive(PartialEq, Eq)]
 pub struct NamespaceIdentity([(u64, u64); 3]);
 
@@ -470,6 +478,8 @@ mod tests {
         ];
         match attack {
             "generic-fd" => files[0] = File::open("/dev/null").unwrap(),
+            "swapped-types" => files.swap(0, 1),
+            "wrong-type" => files[2] = File::open("/proc/self/ns/uts").unwrap(),
             "duplicate-fd" => files[1] = File::open("/proc/self/ns/net").unwrap(),
             "extra-fd" => files.push(File::open("/dev/null").unwrap()),
             _ => (),
@@ -505,6 +515,8 @@ mod tests {
             "invocation",
             "generic-fd",
             "duplicate-fd",
+            "swapped-types",
+            "wrong-type",
             "extra-fd",
             "sender-pid",
             "sender-uid",
