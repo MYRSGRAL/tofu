@@ -194,12 +194,12 @@ impl EncryptedRuleSetStore {
             next_lease: 1,
             poisoned: false,
         };
-        store.reserve(0)?;
+        store.reserve(0, 0)?;
         Ok(store)
     }
-    fn reserve(&self, extra: u64) -> io::Result<()> {
+    fn reserve(&self, extra: u64, extra_files: usize) -> io::Result<()> {
         let mut bytes = extra;
-        let mut count = 0;
+        let mut count = extra_files;
         for entry in std::fs::read_dir(format!("/proc/self/fd/{}", self.inner.root.as_raw_fd()))? {
             count += 1;
             if count > 128 {
@@ -233,7 +233,7 @@ impl EncryptedRuleSetStore {
         match open(&self.inner.root, &d.name()) {
             Ok(_) => {
                 read_resource(&self.inner, &d)?;
-                self.reserve(0)?;
+                self.reserve(0, 0)?;
                 return Ok(());
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -242,7 +242,7 @@ impl EncryptedRuleSetStore {
         self.atomic_write(&d.name(), &ciphertext, false)
     }
     fn atomic_write(&self, name: &str, bytes: &[u8], replace: bool) -> io::Result<()> {
-        self.reserve(bytes.len() as u64)?;
+        self.reserve(bytes.len() as u64, 1)?;
         let mut random = [0u8; 8];
         getrandom::getrandom(&mut random).map_err(|_| bad())?;
         let staging = format!("stage-{:016x}", u64::from_le_bytes(random));
@@ -670,3 +670,103 @@ mod idempotency_tests {
 mod canonical_store;
 
 pub use canonical_store::CanonicalSources;
+#[cfg(test)]
+mod inventory_boundary_tests {
+    use super::*;
+    use std::os::unix::fs::DirBuilderExt;
+
+    struct Directory(std::path::PathBuf);
+    impl Directory {
+        fn new() -> Self {
+            let mut nonce = [0; 8];
+            getrandom::getrandom(&mut nonce).expect("nonce");
+            let path = std::env::temp_dir().join(format!(
+                "yonik-inventory-{}-{:016x}",
+                std::process::id(),
+                u64::from_le_bytes(nonce)
+            ));
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&path)
+                .expect("свой каталог");
+            Self(path)
+        }
+        fn open(&self) -> EncryptedRuleSetStore {
+            EncryptedRuleSetStore::open(File::open(&self.0).expect("каталог"), [29; 32])
+                .expect("reopen принятой операции")
+        }
+    }
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            if let Err(error) = std::fs::remove_dir_all(&self.0) {
+                // Не скрываем ошибку fixture, но не вызываем двойную панику при RED.
+                eprintln!("Не удалось убрать тестовый каталог: {error}");
+            }
+        }
+    }
+    fn resource(index: usize) -> (RuleSetRef, Vec<u8>) {
+        let body =
+            format!(r#"{{"version":3,"rules":[{{"domain":["s{index}.test"]}}]}}"#).into_bytes();
+        let reference = RuleSetRef::new(
+            Sha256::digest(&body).into(),
+            body.len() as u64,
+            1,
+            RuleSetFormat::SingSourceV3,
+        )
+        .expect("ref");
+        (reference, body)
+    }
+    #[test]
+    fn inventory_file_capacity_refuses_129th_and_reopens_every_accepted_write() {
+        let directory = Directory::new();
+        for index in 0..129 {
+            let mut store = directory.open();
+            let (reference, body) = resource(index);
+            let result = store.publish(&reference, &body);
+            if index == 128 {
+                assert!(
+                    result.is_err(),
+                    "129-й постоянный файл должен быть отклонён"
+                );
+            } else {
+                result.expect("публикация в пределах cap");
+            }
+            assert!(
+                store.reservations().is_ok(),
+                "успех не повреждает inventory"
+            );
+            drop(store);
+            drop(directory.open());
+        }
+        assert_eq!(
+            std::fs::read_dir(&directory.0).expect("inventory").count(),
+            128
+        );
+    }
+    #[test]
+    fn inventory_file_capacity_first_state_refusal_preserves_resources() {
+        let directory = Directory::new();
+        let mut store = directory.open();
+        let mut first = None;
+        for index in 0..128 {
+            let (reference, body) = resource(index);
+            store.publish(&reference, &body).expect("ресурс");
+            if index == 0 {
+                first = Some(reference);
+            }
+        }
+        assert!(
+            store.commit(0, &[first.expect("первый ref")]).is_err(),
+            "state не должен стать 129-м файлом"
+        );
+        assert!(!directory.0.join("state").exists());
+        assert_eq!(
+            std::fs::read_dir(&directory.0).expect("inventory").count(),
+            128
+        );
+        drop(store);
+        let reopened = directory.open();
+        assert_eq!(reopened.generation(), 0);
+        assert!(reopened.reservations().is_ok());
+    }
+}

@@ -178,12 +178,13 @@ impl EncryptedRuleSetStore {
                 if old.kind != kind || *body != source {
                     return Err(bad());
                 }
+                self.reserve(0, 0)?;
                 return Ok(());
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
-        self.reserve(source.len() as u64 + HEADER as u64 + 40)?;
+        self.reserve(source.len() as u64 + HEADER as u64 + 40, 1)?;
         let mut nonce = [0u8; 24];
         getrandom::getrandom(&mut nonce).map_err(|_| bad())?;
         let cipher = XChaCha20Poly1305::new((&*self.inner.key).into());
