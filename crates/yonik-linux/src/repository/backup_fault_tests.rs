@@ -41,9 +41,9 @@ pub(super) fn checkpoint(name: &str) -> Result<()> {
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with(".yonik-backup-")
+                .starts_with(super::NAMESPACE_PREFIX)
             {
-                let db = Connection::open(path).unwrap();
+                let db = Connection::open(path.join("candidate")).unwrap();
                 db.execute("UPDATE sources SET payload=zeroblob(length(payload))", [])
                     .unwrap();
             }
@@ -113,7 +113,7 @@ impl Fixture {
                 !entry
                     .file_name()
                     .to_string_lossy()
-                    .starts_with(".yonik-backup-")
+                    .starts_with(super::NAMESPACE_PREFIX)
             );
             if entry.file_type().unwrap().is_file() {
                 assert!(
@@ -193,10 +193,12 @@ fn child(f: &Fixture, action: &str) -> std::process::ExitStatus {
 #[test]
 fn crash_restart_matrix() {
     for point in [
+        "ownership-synced",
         "before-vacuum",
         "after-vacuum",
         "after-validation",
         "after-publication",
+        "cleanup-stage-unlinked",
         "directory-sync",
         "after-directory-sync",
     ] {
@@ -275,7 +277,7 @@ fn publication_race_never_overwrites() {
             e.unwrap()
                 .file_name()
                 .to_string_lossy()
-                .starts_with(".yonik-backup-")
+                .starts_with(super::NAMESPACE_PREFIX)
         }));
     }
 }
@@ -293,4 +295,203 @@ fn directory_lock_refuses_parallel_recovery() {
         Err(RepositoryError::Conflict)
     ));
     assert!(!f.0.join("target").exists());
+}
+
+const PUBLIC_PATTERN: &str = ".yonik-backup-0123456789abcdef0123456789abcdef";
+#[test]
+fn p1_pattern_named_source_survives() {
+    let f = Fixture::new();
+    let source = f.0.join(PUBLIC_PATTERN);
+    fs::rename(f.0.join("source"), &source).unwrap();
+    let before = fs::read(&source).unwrap();
+    let result = copy_closed(&source, &f.0.join("target"), &[7; 32]);
+    assert!(
+        fs::read(&source).is_ok_and(|bytes| bytes == before),
+        "source удалён recovery"
+    );
+    result.unwrap();
+}
+#[test]
+fn p1_pattern_named_existing_destination_survives() {
+    let f = Fixture::new();
+    let destination = f.0.join(PUBLIC_PATTERN);
+    copy_closed(&f.0.join("source"), &destination, &[7; 32]).unwrap();
+    let before = fs::read(&destination).unwrap();
+    let result = copy_closed(&f.0.join("source"), &destination, &[7; 32]);
+    assert!(
+        fs::read(&destination).is_ok_and(|bytes| bytes == before),
+        "destination удалён recovery"
+    );
+    assert!(matches!(result, Err(RepositoryError::Conflict)));
+}
+#[test]
+fn p1_pattern_named_unrelated_published_backup_survives() {
+    let f = Fixture::new();
+    let published = f.0.join(PUBLIC_PATTERN);
+    copy_closed(&f.0.join("source"), &published, &[7; 32]).unwrap();
+    let before = fs::read(&published).unwrap();
+    let result = copy_closed(&f.0.join("source"), &f.0.join("other-target"), &[7; 32]);
+    assert!(
+        fs::read(&published).is_ok_and(|bytes| bytes == before),
+        "посторонний опубликованный backup удалён recovery"
+    );
+    result.unwrap();
+}
+
+#[test]
+fn p1_ownership_record_rejects_forgery_and_links() {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, symlink};
+    for variant in [
+        "forged",
+        "partial",
+        "copied",
+        "marker-symlink",
+        "marker-hardlink",
+        "candidate-symlink",
+        "candidate-hardlink",
+    ] {
+        let f = Fixture::new();
+        let before = fs::read(f.0.join("source")).unwrap();
+        let namespace = super::create_namespace(&f.0, &[7; 32]).unwrap();
+        let marker = namespace.join(super::OWNER_FILE);
+        let stage = namespace.join("candidate");
+        match variant {
+            "forged" => fs::write(&marker, [0; 48]).unwrap(),
+            "partial" => fs::write(&marker, [0; 16]).unwrap(),
+            "copied" => {
+                let other = f.0.join(format!("{}copied", super::NAMESPACE_PREFIX));
+                fs::DirBuilder::new().mode(0o700).create(&other).unwrap();
+                fs::copy(&marker, other.join(super::OWNER_FILE)).unwrap();
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(other.join("candidate"))
+                    .unwrap();
+                assert!(super::remove_owned_namespace(&f.0, &other, &[7; 32]).is_err());
+                assert!(other.join("candidate").exists());
+                continue;
+            }
+            "marker-symlink" | "marker-hardlink" => {
+                fs::remove_file(&marker).unwrap();
+                if variant == "marker-symlink" {
+                    symlink(f.0.join("source"), &marker).unwrap();
+                } else {
+                    fs::hard_link(f.0.join("source"), &marker).unwrap();
+                }
+            }
+            "candidate-symlink" | "candidate-hardlink" => {
+                fs::remove_file(&stage).unwrap();
+                if variant == "candidate-symlink" {
+                    symlink(f.0.join("source"), &stage).unwrap();
+                } else {
+                    fs::hard_link(f.0.join("source"), &stage).unwrap();
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            super::remove_owned_namespace(&f.0, &namespace, &[7; 32]).is_err(),
+            "{variant}"
+        );
+        assert!(
+            fs::symlink_metadata(&stage).is_ok(),
+            "кандидат удалён при {variant}"
+        );
+        assert!(
+            fs::symlink_metadata(&marker).is_ok(),
+            "marker удалён при {variant}"
+        );
+        assert_eq!(fs::read(f.0.join("source")).unwrap(), before);
+    }
+}
+#[test]
+fn p1_failure_before_source_validation_preserves_all_artifacts() {
+    let f = Fixture::new();
+    let namespace = super::create_namespace(&f.0, &[7; 32]).unwrap();
+    let marker = fs::read(namespace.join(super::OWNER_FILE)).unwrap();
+    let source = fs::read(f.0.join("source")).unwrap();
+    let destination = f.0.join(PUBLIC_PATTERN);
+    fs::copy(f.0.join("source"), &destination).unwrap();
+    for input in [f.0.join("source"), f.0.join("missing")] {
+        assert!(copy_closed(&input, &destination, &[8; 32]).is_err());
+        assert_eq!(fs::read(namespace.join(super::OWNER_FILE)).unwrap(), marker);
+        assert!(namespace.join("candidate").exists());
+        assert_eq!(fs::read(&destination).unwrap(), source);
+        assert_eq!(fs::read(f.0.join("source")).unwrap(), source);
+    }
+}
+#[test]
+fn p1_legacy_unproven_files_and_namespace_survive() {
+    use std::os::unix::fs::DirBuilderExt;
+    let f = Fixture::new();
+    let legacy = f.0.join(PUBLIC_PATTERN);
+    fs::copy(f.0.join("source"), &legacy).unwrap();
+    let before = fs::read(&legacy).unwrap();
+    let unproven = f.0.join(format!("{}legacy", super::NAMESPACE_PREFIX));
+    fs::DirBuilder::new().mode(0o700).create(&unproven).unwrap();
+    fs::copy(&legacy, unproven.join("candidate")).unwrap();
+    copy_closed(&f.0.join("source"), &f.0.join("target"), &[7; 32]).unwrap();
+    assert_eq!(fs::read(&legacy).unwrap(), before);
+    assert_eq!(fs::read(unproven.join("candidate")).unwrap(), before);
+}
+#[test]
+fn p1_initialization_and_cleanup_crash_quarantine() {
+    use std::os::unix::process::ExitStatusExt;
+    for point in [
+        "namespace-created",
+        "candidate-created",
+        "marker-prefix",
+        "cleanup-marker-unlinked",
+    ] {
+        let f = Fixture::new();
+        let before = fs::read(f.0.join("source")).unwrap();
+        assert_eq!(child(&f, &format!("crash:{point}")).signal(), Some(9));
+        let namespace = fs::read_dir(&f.0)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(super::NAMESPACE_PREFIX)
+            })
+            .unwrap();
+        let entries_before: Vec<_> = fs::read_dir(&namespace)
+            .unwrap()
+            .map(|e| {
+                let p = e.unwrap().path();
+                (p.file_name().unwrap().to_owned(), fs::read(p).unwrap())
+            })
+            .collect();
+        let result = copy_closed(&f.0.join("source"), &f.0.join("target"), &[7; 32]);
+        if point == "marker-prefix" {
+            assert!(matches!(result, Err(RepositoryError::UnsafePath)));
+        } else {
+            assert!(result.is_ok() || matches!(result, Err(RepositoryError::Conflict)));
+        }
+        for (name, bytes) in entries_before {
+            assert_eq!(fs::read(namespace.join(name)).unwrap(), bytes);
+        }
+        assert!(namespace.exists(), "недоказанный namespace удалён");
+        assert_eq!(fs::read(f.0.join("source")).unwrap(), before);
+        if f.0.join("target").exists() {
+            let db =
+                Connection::open_with_flags(f.0.join("target"), OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .unwrap();
+            validate(&db, &[7; 32]).unwrap();
+            assert_eq!(fs::metadata(f.0.join("target")).unwrap().nlink(), 1);
+        }
+    }
+}
+#[test]
+fn p1_public_api_cannot_write_or_read_inside_owned_namespace() {
+    let f = Fixture::new();
+    let namespace = super::create_namespace(&f.0, &[7; 32]).unwrap();
+    let stage = namespace.join("candidate");
+    fs::copy(f.0.join("source"), &stage).unwrap();
+    let before = fs::read(&stage).unwrap();
+    assert!(copy_closed(&stage, &f.0.join("target"), &[7; 32]).is_err());
+    assert!(copy_closed(&f.0.join("source"), &namespace.join("public"), &[7; 32]).is_err());
+    assert_eq!(fs::read(stage).unwrap(), before);
 }
