@@ -769,6 +769,7 @@ ApplicationWindow {
                     SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
                     SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                     SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
+                    SettingsRow { objectName: "settingsScheduleButton"; text: "Обновления подписок"; description: "Интервал и фоновое окно"; symbol: "↻"; onClicked: window.settingsSection = "schedule" }
                     SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                     SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     Item { Layout.fillHeight: true }
@@ -780,6 +781,7 @@ ApplicationWindow {
                     visible: window.settingsSection !== ""
                     active: window.page === 2 && window.settingsSection !== ""
                     sourceComponent: window.settingsSection === "routing" ? routingPanel : window.settingsSection === "diagnostics" ? diagnosticsPanel
+                        : window.settingsSection === "schedule" ? schedulePanel
                         : window.settingsSection === "appearance" ? appearancePanel
                         : window.settingsSection === "about" ? aboutPanel : connectionPanel
                     onLoaded: if (item && !window.reducedMotion) panelEntrance.restart()
@@ -980,6 +982,32 @@ ApplicationWindow {
                 }
                 PlainLabel { Layout.fillWidth: true; visible: !!window.connectionError; color: "#e6bc83"; text: window.connectionError ? window.errorText(window.connectionError) : "" }
             }
+        }
+    }
+    Component {
+        id: schedulePanel
+        ColumnLayout {
+            spacing: 18
+            PlainLabel { text: "Обновления подписок"; font.pixelSize: 19; font.weight: Font.DemiBold }
+            PlainLabel { text: "Интервал в часах (не менее 24)" }
+            SpinBox {
+                id: scheduleHours
+                objectName: "subscriptionInterval"
+                from: 24; to: 1193046
+                value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
+                editable: true
+                onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
+                Accessible.name: "Интервал обновлений в часах"
+            }
+            CheckBox {
+                objectName: "subscriptionBackground"
+                text: "Разрешить обновления в фоне"
+                checked: window.state.subscription_background === true
+                onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
+            }
+            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения." }
+            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
+            Item { Layout.fillHeight: true }
         }
     }
     Component {

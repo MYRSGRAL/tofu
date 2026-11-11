@@ -1890,6 +1890,81 @@ fn явный_системный_режим_не_подменяется_local_so
 }
 
 #[test]
+fn настройки_расписания_сохраняются_и_отклоняют_короткий_интервал() {
+    let dir = Directory::new();
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(
+        json!({"command":"set_subscription_schedule", "interval_seconds":86399, "background":true}),
+    );
+    let rejected = app.wait(|v| v["connection_error"] == "invalid_input");
+    assert_eq!(rejected["subscription_interval_seconds"], 86400);
+    assert_eq!(rejected["subscription_background"], false);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    app.wait(|v| {
+        v["subscription_interval_seconds"] == 172800 && v["subscription_background"] == true
+    });
+    app.close();
+    let mut reopened = Harness::new(dir.config());
+    let state = reopened.wait(|v| v["ready"] == true);
+    assert_eq!(state["subscription_interval_seconds"], 172800);
+    assert_eq!(state["subscription_background"], true);
+    reopened.close();
+}
+
+#[test]
+fn ручной_fetch_резервирует_настроенный_интервал_до_запроса() {
+    let dir = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/held", listener.local_addr().unwrap());
+    let (entered, request) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        assert!(stream.read(&mut bytes).unwrap() > 0);
+        entered.send(()).unwrap();
+        assert_eq!(stream.read(&mut bytes).unwrap(), 0);
+    });
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":false}));
+    app.wait(|v| v["subscription_interval_seconds"] == 172800);
+    app.send(json!({"command":"add_source", "name":"Ручной", "url":url, "local_exception":true, "route":"direct"}));
+    let id = app.wait(|v| v["source_id"].is_i64())["source_id"]
+        .as_i64()
+        .unwrap();
+    app.send(json!({"command":"refresh"}));
+    request.recv_timeout(Duration::from_secs(5)).unwrap();
+    app.close();
+    server.join().unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+                dir.0.join("subscriptions.sqlite"),
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .unwrap();
+            let service = yonik_linux::SubscriptionService::new(repo);
+            let state = service
+                .schedule_metadata(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state
+                .unwrap();
+            assert_eq!(state.due_wall.unwrap() - state.recorded_wall, 172800);
+            service.close().await.unwrap();
+        });
+}
+
+#[test]
 fn closed_snapshot_has_released_last_database_handle() {
     let directory = Directory::new();
     let (entered, receiver) = mpsc::channel();
