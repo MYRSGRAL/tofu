@@ -1254,18 +1254,15 @@ impl Actor {
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::PresetStatus | Command::PresetRollback | Command::PresetPrepare { .. } => {
-                let controller = self
-                    .presets
-                    .as_ref()
-                    .ok_or(DesktopError("preset_storage"))?;
+                let controller = self.presets.as_ref().ok_or(DesktopError("storage"))?;
                 self.state.presets = match command {
                     Command::PresetRollback => controller.rollback(),
                     Command::PresetPrepare { target } => {
                         let destination =
-                            target.parse().map_err(|_| DesktopError("preset_invalid"))?;
+                            target.parse().map_err(|_| DesktopError("invalid_input"))?;
                         let policy = controller
                             .prepare(self.state.routing.policy().map_err(DesktopError)?)
-                            .map_err(|_| DesktopError("preset_invalid"))?;
+                            .map_err(|_| DesktopError("invalid_input"))?;
                         let mut status = controller.status();
                         status.prepared = true;
                         let decision = policy.evaluate(&yonik_domain::Flow {
@@ -1278,7 +1275,7 @@ impl Actor {
                     }
                     _ => Ok(controller.status()),
                 }
-                .map_err(|_| DesktopError("preset_invalid"))?;
+                .map_err(|_| DesktopError("invalid_input"))?;
                 Ok(())
             }
 
