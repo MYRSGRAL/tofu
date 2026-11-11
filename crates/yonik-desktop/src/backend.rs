@@ -1,8 +1,14 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
+#[path = "batch_diagnostics.rs"]
+mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
+#[path = "logs.rs"]
+mod logs;
 use crate::preferences::{Preferences, SaveOutcome, Store};
+use crate::system_session::{ProfileRevision, SystemSession};
+use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,6 +27,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use yonik_engine::Engine;
 use yonik_import::{Field, IssueCode, ReviewFlag};
+use yonik_linux::system_client::{ClientError, State as SystemState, SystemClient};
 use yonik_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, NetworkMonitor, NetworkSnapshot, NetworkStamp,
@@ -105,6 +112,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    LogsRead {
+        after: String,
+        source: logs::Source,
+        request_id: String,
+    },
+    RoutingExplain {
+        expected_revision: i64,
+        request_id: u64,
+        target: String,
+    },
     RoutingCatalog {
         processes: bool,
         query: String,
@@ -207,8 +224,21 @@ enum Command {
         expected_status: u16,
     },
     ResetProbeTarget,
+    SetProxyFetchDns {
+        upstream: String,
+    },
     CheckTcp,
+    CheckBatch,
+    CancelBatch,
+    BatchPage {
+        offset: usize,
+    },
     CancelTcp,
+    SetConnectionMode {
+        mode: ConnectionMode,
+    },
+    SystemState,
+    SystemUnlock,
     Connect,
     Stop,
     Shutdown,
@@ -216,7 +246,8 @@ enum Command {
 impl Command {
     fn routing_request_id(&self) -> Option<u64> {
         match self {
-            Self::EditRouting { request_id, .. }
+            Self::RoutingExplain { request_id, .. }
+            | Self::EditRouting { request_id, .. }
             | Self::RoutingOrder { request_id, .. }
             | Self::RoutingDefault { request_id, .. }
             | Self::RoutingDelete { request_id, .. } => Some(*request_id),
@@ -266,6 +297,13 @@ impl EngineChoice {
         }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ConnectionMode {
+    Local,
+    System,
+}
+
 struct Envelope {
     generation: u64,
     tcp_generation: u64,
@@ -378,12 +416,16 @@ impl DesktopHost {
                 | Command::Refresh
                 | Command::ApproveRefresh
                 | Command::DiscardRefresh
+                | Command::SystemState
+                | Command::SystemUnlock
                 | Command::Connect
                 | Command::Stop
                 | Command::Shutdown
                 | Command::ResetProbeTarget
                 | Command::ResetListenPort
                 | Command::CheckTcp
+                | Command::CheckBatch
+                | Command::CancelBatch
                 | Command::CancelTcp
         ) {
             let object: serde_json::Value =
@@ -406,7 +448,7 @@ impl DesktopHost {
                 self.control.interrupt(false);
                 Ok(())
             }
-            Command::CancelTcp => {
+            Command::CancelTcp | Command::CancelBatch => {
                 self.control.cancel_tcp();
                 Ok(())
             }
@@ -447,10 +489,15 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsRead {
+            after, request_id, ..
+        } => logs::valid_number(after) && logs::valid_number(request_id),
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
+        Command::BatchPage { offset } => *offset <= 10_000,
         Command::SourcePage { offset } => *offset <= 40_000,
         Command::ReviewPage { offset } => *offset <= 160_000,
         Command::SetProbeTarget { url, .. } => text(url, 2048),
+        Command::SetProxyFetchDns { upstream } => text(upstream, 128),
         Command::SelectSource { id }
         | Command::Favorite { id, .. }
         | Command::DeleteSource { id }
@@ -584,9 +631,12 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
     routing_catalog: serde_json::Value,
+    routing_diagnostics: serde_json::Value,
+    routing_explanation: serde_json::Value,
     routing: crate::editor::Draft,
     language: String,
     preferences_warning: bool,
@@ -610,6 +660,11 @@ struct Snapshot {
     total: usize,
     offset: usize,
     revision: i64,
+    connection_mode: ConnectionMode,
+    system_state: &'static str,
+    can_unlock: bool,
+    system_recovery_pending: bool,
+    system_busy: bool,
     status: &'static str,
     selected_profile: Option<i64>,
     selected_name: Option<String>,
@@ -623,10 +678,12 @@ struct Snapshot {
     can_stop: bool,
     active_name: Option<String>,
     active_engine: Option<EngineChoice>,
+    proxy_fetch_dns: Option<SocketAddr>,
     probe_custom: bool,
     probe_persistent: bool,
     probe_expected_status: u16,
     probe_result: Option<HealthResultDto>,
+    batch: BatchState,
     tcp_busy: bool,
     tcp_name: Option<String>,
     tcp_result: Option<TcpResultDto>,
@@ -640,6 +697,9 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            logs: logs::Page::default(),
+            routing_diagnostics: crate::editor::Draft::default().diagnostics(),
+            routing_explanation: serde_json::Value::Null,
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
             routing_ack: None,
@@ -666,6 +726,11 @@ impl Snapshot {
             total: 0,
             offset: 0,
             revision: 0,
+            connection_mode: ConnectionMode::Local,
+            system_state: "Unknown",
+            can_unlock: false,
+            system_recovery_pending: false,
+            system_busy: false,
             status: "Disconnected",
             selected_profile: None,
             selected_name: None,
@@ -679,10 +744,12 @@ impl Snapshot {
             can_stop: false,
             active_name: None,
             active_engine: None,
+            proxy_fetch_dns: None,
             probe_custom: false,
             probe_persistent: true,
             probe_expected_status: 204,
             probe_result: None,
+            batch: BatchState::default(),
             tcp_busy: false,
             tcp_name: None,
             tcp_result: None,
@@ -816,6 +883,7 @@ async fn open(
 }
 
 struct Actor {
+    event_log: yonik_linux::event_log::EventLog,
     routing_repository: EncryptedSubscriptionRepository,
     routing_revision: Option<i64>,
     preferences: Preferences,
@@ -848,6 +916,8 @@ impl Actor {
             })?;
         self.routing_revision = Some(revision);
         self.state.routing_revision = Some(revision);
+        self.state.routing_diagnostics = candidate.diagnostics();
+        self.state.routing_explanation = serde_json::Value::Null;
         self.state.routing = candidate;
         Ok(())
     }
@@ -909,6 +979,15 @@ impl Actor {
             self.save_routing(candidate).await
         }
         .await;
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.key() == "routing_stale")
+        {
+            self.state.routing_diagnostics =
+                serde_json::json!({"incomplete":true,"stale":true,"warnings":[]});
+            self.state.routing_explanation = serde_json::Value::Null;
+        }
         self.state.routing_ack = Some(RoutingAck {
             request_id,
             saved_id: if result.is_ok() { saved_id } else { None },
@@ -1008,6 +1087,7 @@ impl Actor {
     fn emit(&mut self) {
         self.state.can_connect = self.selected.is_some()
             && !self.state.can_stop
+            && !self.state.system_busy
             && !self.state.busy
             && self.state.pending.is_none();
         self.state.emit(&self.callback);
@@ -1103,6 +1183,42 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::LogsRead {
+                after,
+                source,
+                request_id,
+            } => {
+                self.state.logs = logs::Page::read(
+                    &self.event_log,
+                    after.parse().map_err(|_| DesktopError("invalid_input"))?,
+                    source,
+                    request_id,
+                );
+                Ok(())
+            }
+            Command::RoutingExplain {
+                expected_revision,
+                request_id,
+                target,
+            } => {
+                let result = if self.routing_revision == Some(expected_revision) {
+                    self.state.routing.explain(&target).map_err(DesktopError)
+                } else {
+                    Err(DesktopError("routing_stale"))
+                };
+                self.state.routing_explanation = match &result {
+                    Ok(value) => {
+                        serde_json::json!({"revision":expected_revision,"request_id":request_id,"result":value})
+                    }
+                    Err(_) => serde_json::Value::Null,
+                };
+                self.state.routing_ack = Some(RoutingAck {
+                    request_id,
+                    saved_id: None,
+                    error: result.as_ref().err().map(|e| e.key()),
+                });
+                result.map(|_| ())
+            }
             Command::RoutingCatalog {
                 processes,
                 query,
@@ -1312,6 +1428,28 @@ impl Actor {
                 self.state.selected_profile = Some(id);
                 self.state.selected_name = Some(profile.profile.name.clone());
                 self.selected = Some(profile);
+                Ok(())
+            }
+            Command::SetProxyFetchDns { upstream } => {
+                // Смена конфигурации допускается после отзыва активной сессии.
+                if self.state.can_stop {
+                    return Err(DesktopError("busy"));
+                }
+                let address = if upstream.is_empty() {
+                    None
+                } else {
+                    let address = upstream
+                        .parse::<SocketAddr>()
+                        .map_err(|_| DesktopError("invalid_input"))?;
+                    if !crate::preferences::valid_proxy_fetch_dns(address) {
+                        return Err(DesktopError("invalid_input"));
+                    }
+                    Some(address)
+                };
+                let mut preferences = self.preferences.clone();
+                preferences.proxy_fetch_dns = address;
+                self.save_preferences(preferences)?;
+                self.state.proxy_fetch_dns = address;
                 Ok(())
             }
             Command::SetLanguage { language } => {
@@ -1621,6 +1759,7 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            event_log: yonik_linux::event_log::EventLog::new(),
             routing_repository,
             routing_revision: Some(0),
             preferences_store,
@@ -1957,13 +2096,15 @@ type ProxyLease = Option<(u64, SocketAddr)>;
 /// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
 struct DesktopFetch {
     lease: ProxyLease,
+    proxy_fetch_dns: Option<SocketAddr>,
     current: watch::Receiver<ProxyLease>,
     proxy_used: AtomicBool,
 }
 impl DesktopFetch {
-    fn new(current: &watch::Sender<ProxyLease>) -> Arc<Self> {
+    fn new(current: &watch::Sender<ProxyLease>, proxy_fetch_dns: Option<SocketAddr>) -> Arc<Self> {
         Arc::new(Self {
             lease: *current.borrow(),
+            proxy_fetch_dns,
             current: current.subscribe(),
             proxy_used: AtomicBool::new(false),
         })
@@ -2000,6 +2141,9 @@ impl yonik_linux::SubscriptionFetch for DesktopFetch {
                 return Err(FetchError::UnsupportedPeerVerification);
             };
             host = host.with_socks_endpoint(endpoint)?;
+            if let Some(upstream) = self.proxy_fetch_dns {
+                host = host.with_proxy_dns(upstream)?;
+            }
             let mut current = self.current.clone();
             tokio::select! {
                 biased;
@@ -2024,7 +2168,7 @@ struct TcpKey {
     profile: i64,
     revision: i64,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct TcpResultDto {
     source_id: i64,
     profile_id: i64,
@@ -2093,10 +2237,14 @@ async fn session(
     engine: Engine,
     target: ProbeTarget,
     mut cancel: Cancellation,
-    updates: mpsc::Sender<SessionUpdate>,
+    updates: (
+        mpsc::Sender<SessionUpdate>,
+        yonik_linux::event_log::EventLog,
+    ),
     mut network: Option<NetworkWatch>,
 ) -> std::result::Result<(), LocalSession> {
-    let Ok(mut session) = LocalSession::new() else {
+    let (updates, event_log) = updates;
+    let Ok(session) = LocalSession::new() else {
         let _ = updates
             .send(SessionUpdate {
                 status: "Error",
@@ -2107,6 +2255,7 @@ async fn session(
             .await;
         return Ok(());
     };
+    let mut session = session.with_event_log(event_log);
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -2334,6 +2483,7 @@ async fn run(
         state.port = port.get();
     }
     state.language = preferences.language.clone();
+    state.proxy_fetch_dns = preferences.proxy_fetch_dns;
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
     state.probe_expected_status = preferences.probe_status;
@@ -2344,6 +2494,7 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        event_log: yonik_linux::event_log::EventLog::new(),
         routing_repository,
         routing_revision: Some(0),
         preferences_store,
@@ -2377,15 +2528,22 @@ async fn run(
             actor.state.error = Some("routing_storage");
         }
     }
+    actor.state.routing_diagnostics = actor.state.routing.diagnostics();
     actor.state.routing_revision = actor.routing_revision;
     if let Err(error) = actor.reload().await {
         actor.state.command_error(true, error.key());
     }
     actor.emit();
     let (updates, mut events) = mpsc::channel::<SessionUpdate>(16);
+    let mut system_session: Option<SystemSession> = None;
+    let mut system_flight: Option<Flight> = None;
+    let mut system_stop = false;
+    let mut system_active = false;
+    let mut system_poll = tokio::time::interval(Duration::from_secs(2));
     let mut running: Option<Running> = None;
     let mut failed_session: Option<LocalSession> = None;
     let mut refreshing: Option<RefreshTask> = None;
+    let mut batch_running: Option<BatchRunning> = None;
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
@@ -2427,7 +2585,7 @@ async fn run(
     let (proxy_session, _) = watch::channel::<ProxyLease>(None);
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
-    let mut schedule_host = DesktopFetch::new(&proxy_session);
+    let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
     loop {
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
@@ -2475,7 +2633,7 @@ async fn run(
                 }
                 scheduled = replacement;
             }
-            schedule_host = DesktopFetch::new(&proxy_session);
+            schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
         }
         let allowed = !quitting
             && refreshing.is_none()
@@ -2487,6 +2645,13 @@ async fn run(
             biased;
             changed = priority.changed() => {
                 if changed.is_err() { quitting = true; }
+                if actor.state.connection_mode == ConnectionMode::System && (system_active || system_flight.is_some()) {
+                    system_stop |= system_active || system_flight.as_ref().is_some_and(|flight| flight.mutating);
+                    actor.state.system_busy = true;
+                    actor.state.system_state = "Unknown";
+                    actor.state.status = "Unknown";
+                    if let Some(flight) = &system_flight { flight.cancel.send_replace(true); }
+                }
                 proxy_session.send_replace(None);
                 let action = *priority.borrow_and_update();
                 quitting |= action.shutdown;
@@ -2494,6 +2659,7 @@ async fn run(
                 // получить polling сети во время ожидания scheduler acknowledgement.
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
@@ -2510,15 +2676,64 @@ async fn run(
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
                 }
-                if running.is_none() && failed_session.is_none() {
+                if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() {
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
                 }
-                actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" };
+                if actor.state.connection_mode == ConnectionMode::Local { actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" }; }
                 actor.emit();
+            }
+            result = async { match system_flight.as_mut() {
+                Some(flight) => (&mut flight.task).await,
+                None => std::future::pending().await,
+            } } => {
+                if let Some(flight) = system_flight.take() {
+                    // После долгого State recovery-действия получают окно до следующего poll.
+                    system_poll.reset();
+                    let stale = (flight.connecting && system_stop) || flight.generation != control.generation.load(Ordering::SeqCst)
+                        || (flight.connecting && flight.revision != system_revision(&actor));
+                    match result {
+                        Ok((session, result)) => {
+                            system_session = session;
+                            if stale {
+                                system_stop |= flight.mutating || system_active;
+                                actor.state.system_state = "Unknown";
+                                actor.state.status = "Unknown";
+                            } else {
+                                if flight.connecting || (flight.mutating && result.is_err()) { system_active = !matches!(result, Err(ClientError::Unsupported | ClientError::Denied | ClientError::InvalidRequest | ClientError::Busy)); }
+                                if !flight.connecting && system_stop { system_active = !matches!(result, Ok(SystemState::NoManagedPolicy | SystemState::VerifiedRules | SystemState::RecoveryRequired)); system_stop = false; }
+                                match result {
+                                    Ok(state) => {
+                                        if state == SystemState::NoManagedPolicy { system_active = false; }
+                                        else if matches!(state, SystemState::TunnelStarting | SystemState::Unknown) { system_active = true; }
+                                        record_system(&mut actor.state, state)
+                                    },
+                                    Err(error) => {
+                                        record_system(&mut actor.state, SystemState::Unknown);
+                                        actor.state.command_error(false, system_error(error));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => { record_system(&mut actor.state, SystemState::Unknown); system_active = true; }
+                    }
+                    actor.state.system_busy = false;
+                    actor.state.can_stop = system_active || system_stop;
+                    if !actor.state.can_stop { actor.state.active_name = None; actor.state.active_engine = None; }
+                    actor.emit();
+                }
+            }
+            _ = system_poll.tick(), if actor.state.connection_mode == ConnectionMode::System && system_flight.is_none() && system_session.is_some() && !quitting => {
+                if system_session.as_ref().is_some_and(|session| session.snapshot() == SystemState::Unknown) {
+                    record_system(&mut actor.state, SystemState::Unknown); actor.emit();
+                }
+                let generation = control.generation.load(Ordering::SeqCst);
+                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation));
+                actor.state.system_busy = true; actor.emit();
             }
             _ = &mut provider => {},
             changed = system_policy.changed(), if provider_enabled => {
@@ -2564,7 +2779,7 @@ async fn run(
                 }
             } => {
                 {
-                    schedule_host = DesktopFetch::new(&proxy_session);
+                    schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
                     let host = &schedule_host;
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
@@ -2576,16 +2791,71 @@ async fn run(
             changed = tcp_priority.changed() => {
                 let _ = changed;
                 tcp_priority.borrow_and_update();
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
             }
             _ = network_changed(&mut network) => {
                 let current = network.as_ref().map(NetworkWatch::current);
                 actor.network = network.clone();
                 apply_network_event(&mut actor.state, current, &control);
+                if let Some(batch) = batch_running.as_mut() { batch.stop(); }
+                actor.state.batch.invalidate();
                 if let Some(tcp) = tcp_running.as_ref() {
                     if !network_matches(current, tcp.network_stamp) { tcp.cancel.send_replace(true); }
                 }
                 actor.emit();
+            }
+            result = async { batch_running.as_mut().expect("guard").next().await }, if batch_running.is_some() => {
+                match result {
+                    BatchPoll::Event(result) => {
+                if let Some(result) = result {
+                    let valid = batch_running.as_ref().is_some_and(|batch|
+                        batch.generation == control.generation.load(Ordering::SeqCst)
+                        && batch.tcp_generation == *control.tcp_priority.borrow()
+                        && network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                        && actor.state.batch.source_id == actor.state.source_id
+                        && actor.state.batch.revision == actor.state.revision);
+                    if !valid {
+                        let stale = batch_running.as_ref().is_some_and(|batch|
+                            !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                            || actor.state.batch.source_id != actor.state.source_id
+                            || actor.state.batch.revision != actor.state.revision);
+                        if let Some(batch) = batch_running.as_mut() { batch.stop(); }
+                        if stale { actor.state.batch.invalidate(); }
+                        else { actor.state.batch.cancelled = true; }
+                        actor.emit(); continue;
+                    }
+                    match result {
+                        BatchEvent::Prepared { total } => { actor.state.batch.total = total; actor.emit(); }
+                        BatchEvent::Result(row) => {
+                            actor.state.batch.accept(row);
+                            if actor.state.batch.completed % 32 == 0 { actor.emit(); }
+                        }
+                    }
+                } else if let Some(batch) = batch_running.as_mut() { batch.output_closed = true; }
+                    }
+                    BatchPoll::Finished(result) => {
+                // Producer завершён, включая ACK CPU prepare. Дочитываем bounded очередь.
+                let mut batch = batch_running.take().expect("guard");
+                let valid = !*batch.cancel.borrow() && !quitting
+                    && batch.generation == control.generation.load(Ordering::SeqCst)
+                    && batch.tcp_generation == *control.tcp_priority.borrow()
+                    && network_matches(network.as_ref().map(NetworkWatch::current),batch.stamp)
+                    && actor.state.batch.source_id == actor.state.source_id
+                    && actor.state.batch.revision == actor.state.revision;
+                if valid {
+                    while let Ok(event) = batch.receiver.try_recv() {
+                        match event {
+                            BatchEvent::Prepared { total } => actor.state.batch.total = total,
+                            BatchEvent::Result(row) => actor.state.batch.accept(row),
+                        }
+                    }
+                    match result { Ok(Err(error)) => actor.state.command_error(false,error.key()), Err(_) => actor.state.command_error(false,"tcp_failed"), _ => {} }
+                }
+                actor.state.batch.busy = false;
+                actor.emit();
+                    }
+                }
             }
             result = async { (&mut tcp_running.as_mut().expect("guard").task).await }, if tcp_running.is_some() => {
                 let mut tcp = tcp_running.take().expect("guard");
@@ -2641,6 +2911,10 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
+                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                        actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
+                        actor.emit();
+                    }
                     continue;
                 }
                 let source_operation = envelope.command.is_source_operation();
@@ -2672,8 +2946,17 @@ async fn run(
                     }
                     if cancelled_review { actor.state.pending = None; }
                 }
+                if matches!(&envelope.command, Command::RenameSource { .. } | Command::DeleteSource { .. } | Command::SetSourceHwid { .. } | Command::SelectSource { .. } | Command::Refresh | Command::ApproveRefresh | Command::ImportSource { .. } | Command::AddSource { .. }) {
+                    if let Some(batch) = batch_running.as_mut() { batch.stop(); }
+                    actor.state.batch.invalidate();
+                }
                 actor.state.begin_command(&envelope.command);
                 let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
+                if matches!(envelope.command, Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Reload | Command::ApproveRefresh) {
+                    if let Some(flight) = system_flight.as_ref().filter(|flight| flight.connecting) {
+                        flight.cancel.send_replace(true); system_stop = true;
+                    }
+                }
                 let outcome = match envelope.command {
                     Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
                     Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
@@ -2701,6 +2984,14 @@ async fn run(
                             }
                             _ => Err(DesktopError("refresh_required")),
                         }
+                    }
+                    Command::BatchPage { offset } => { actor.state.batch.page(offset); Ok(()) }
+                    Command::CheckBatch => {
+                        if batch_running.is_some() || actor.state.busy { Err(DesktopError("busy")) }
+                        else if envelope.generation != control.generation.load(Ordering::SeqCst) || envelope.tcp_generation != *control.tcp_priority.borrow() { Err(DesktopError("cancelled")) }
+                        else { match actor.start_batch(envelope.generation, envelope.tcp_generation) {
+                            Ok(batch) => { batch_running = Some(batch); Ok(()) }, Err(error) => Err(error)
+                        } }
                     }
                     Command::CheckTcp => {
                         if envelope.tcp_generation != *control.tcp_priority.borrow() {
@@ -2737,7 +3028,7 @@ async fn run(
                             match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -2750,7 +3041,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else {
                             match actor.command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -2760,10 +3051,38 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session); manual_host = Some(host.clone()); host }).await {
+                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
+                    }
+                    Command::SetConnectionMode { mode } => {
+                        if actor.state.can_stop || actor.state.system_recovery_pending || system_flight.is_some() || system_stop { Err(DesktopError("busy")) }
+                        else { actor.state.connection_mode = mode; actor.state.status = "Disconnected"; Ok(()) }
+                    }
+                    Command::SystemState | Command::SystemUnlock => {
+                        if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy")) }
+                        else {
+                            let operation = if matches!(envelope.command, Command::SystemUnlock) { Operation::Unlock } else { Operation::State };
+                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation));
+                            actor.state.status = "Unknown"; Ok(())
+                        }
+                    }
+                    Command::Connect if actor.state.connection_mode == ConnectionMode::System => {
+                        if actor.state.can_stop || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
+                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
+                        else if let Some(profile) = actor.selected.as_ref() {
+                            match yonik_import::ServerIntent::from_server(&profile.server) {
+                                Ok(server) => {
+                                    system_flight = Some(Flight::start(system_session.take(), Operation::Connect(Box::new(server), actor.state.engine.engine()), system_revision(&actor), envelope.generation));
+                                    actor.state.can_stop = true; system_active = true;
+                                    actor.state.active_name = Some(profile.profile.name.clone());
+                                    actor.state.active_engine = Some(actor.state.engine);
+                                    actor.state.system_state = "Unknown"; actor.state.status = "Preparing"; Ok(())
+                                }
+                                Err(_) => Err(DesktopError("engine_config")),
+                            }
+                        } else { Err(DesktopError("profile_required")) }
                     }
                     Command::Connect => {
                         if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
@@ -2779,7 +3098,7 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -2808,8 +3127,40 @@ async fn run(
                     }
                 }
                 if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }
+                actor.state.system_busy = system_flight.is_some();
                 actor.emit();
             }
+        }
+        if batch_running.as_ref().is_some_and(|batch| {
+            !batch.output_closed
+                && (batch.generation != control.generation.load(Ordering::SeqCst)
+                    || batch.tcp_generation != *control.tcp_priority.borrow()
+                    || !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                    || actor.state.batch.source_id != actor.state.source_id
+                    || actor.state.batch.revision != actor.state.revision)
+        }) {
+            let stale = batch_running.as_ref().is_some_and(|batch| {
+                !network_matches(network.as_ref().map(NetworkWatch::current), batch.stamp)
+                    || actor.state.batch.source_id != actor.state.source_id
+                    || actor.state.batch.revision != actor.state.revision
+            });
+            if let Some(batch) = batch_running.as_mut() {
+                batch.stop();
+            }
+            if stale {
+                actor.state.batch.invalidate();
+            } else {
+                actor.state.batch.cancelled = true;
+            }
+            actor.emit();
+        }
+        if !actor.state.batch.invalidated
+            && actor.state.batch.source_id.is_some()
+            && (actor.state.batch.source_id != actor.state.source_id
+                || actor.state.batch.revision != actor.state.revision)
+        {
+            actor.state.batch.invalidate();
+            actor.emit();
         }
         if let Some(tcp) = tcp_running.as_ref() {
             if actor.tcp_key() != Some(tcp.result.key()) {
@@ -2825,8 +3176,35 @@ async fn run(
             actor.state.tcp_result = None;
             actor.emit();
         }
-        if quitting && running.is_none() && refreshing.is_none() && tcp_running.is_none() {
-            if failed_session.is_some() {
+        if system_flight
+            .as_ref()
+            .is_some_and(|flight| flight.connecting && flight.revision != system_revision(&actor))
+        {
+            if let Some(flight) = &system_flight {
+                flight.cancel.send_replace(true);
+            }
+            system_stop = true;
+        }
+        if system_stop && system_flight.is_none() {
+            let generation = control.generation.load(Ordering::SeqCst);
+            system_flight = Some(Flight::start(
+                system_session.take(),
+                Operation::Stop,
+                system_revision(&actor),
+                generation,
+            ));
+            actor.state.system_busy = true;
+            actor.emit();
+        }
+        if quitting
+            && system_flight.is_none()
+            && !system_stop
+            && batch_running.is_none()
+            && running.is_none()
+            && refreshing.is_none()
+            && tcp_running.is_none()
+        {
+            if failed_session.is_some() || system_active {
                 quitting = false;
                 actor.state.command_error(false, "cleanup_failed");
                 actor.emit();
@@ -2849,7 +3227,9 @@ async fn run(
         true
     };
     actor.selected = None;
-    let closed = actor.service.close().await.is_ok() && provider_closed && network_closed;
+    let service_closed = actor.service.close().await.is_ok();
+    let routing_closed = actor.routing_repository.close().await.is_ok();
+    let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
@@ -2894,6 +3274,7 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                event_log: yonik_linux::event_log::EventLog::new(),
                 routing_repository,
                 routing_revision: Some(0),
                 preferences_store,
@@ -2918,6 +3299,23 @@ mod routing_regressions {
     }
     fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
         serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
+    }
+    #[tokio::test]
+    async fn explanation_ack_and_diagnostics_follow_revision() {
+        let (mut actor, lock, path) = fixture().await;
+        send(&mut actor, put(1, 0, 1, true)).await.expect("первое");
+        send(&mut actor, put(2, 1, 2, true)).await.expect("второе");
+        assert_eq!(actor.state.routing_diagnostics["warnings"][0]["rule_id"], 2);
+        send(&mut actor, serde_json::json!({"command":"routing_explain","expected_revision":2,"request_id":3,"target":"192.0.2.1"})).await.expect("расчёт");
+        assert_eq!(actor.state.routing_explanation["revision"], 2);
+        assert_eq!(actor.state.routing_ack.as_ref().expect("ACK").request_id, 3);
+        assert_eq!(send(&mut actor, serde_json::json!({"command":"routing_explain","expected_revision":1,"request_id":4,"target":"192.0.2.1"})).await.expect_err("stale").key(), "routing_stale");
+        assert!(actor.state.routing_explanation.is_null());
+        assert_eq!(actor.state.routing_ack.as_ref().expect("ACK").request_id, 4);
+        assert_eq!(actor.routing_revision, Some(2));
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка fixture");
     }
     #[tokio::test]
     async fn stale_order_and_partial_order_cannot_delete_queued_add() {
@@ -3041,13 +3439,36 @@ mod proxy_session_tests {
     use yonik_linux::{Source, SubscriptionFetch};
 
     #[tokio::test]
+    async fn domain_proxy_without_config_fails_before_socks_lookup() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let endpoint = listener.local_addr().expect("endpoint");
+        let (session, _) = watch::channel(Some((1, endpoint)));
+        let host = DesktopFetch::new(&session, None);
+        let (_sender, cancel) = watch::channel(false);
+        let source = Source::local("http://subscription.example/sub").expect("source");
+        assert_eq!(
+            host.fetch(&source, FetchRoute::Proxy, None, cancel)
+                .await
+                .unwrap_err(),
+            FetchError::ProxyDnsRequired
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn reconnect_same_endpoint_revokes_pinned_generation_before_network() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener");
         let endpoint = listener.local_addr().expect("endpoint");
         let (session, _) = watch::channel(Some((1, endpoint)));
-        let host = DesktopFetch::new(&session);
+        let host = DesktopFetch::new(&session, None);
         session.send_replace(Some((2, endpoint)));
         let (_sender, cancel) = watch::channel(false);
         let source = Source::local("http://127.0.0.1:1/sub").expect("source");
@@ -3071,7 +3492,7 @@ mod proxy_session_tests {
             .expect("listener");
         let endpoint = listener.local_addr().expect("endpoint");
         let (session, _) = watch::channel(Some((1, endpoint)));
-        let host = DesktopFetch::new(&session);
+        let host = DesktopFetch::new(&session, None);
         let (_sender, cancel) = watch::channel(false);
         let source = Source::local("http://127.0.0.1:1/sub").expect("source");
         let revoke = async {
@@ -3081,5 +3502,160 @@ mod proxy_session_tests {
         let (result, ()) =
             tokio::join!(host.fetch(&source, FetchRoute::Proxy, None, cancel), revoke);
         assert_eq!(result.unwrap_err(), FetchError::Cancelled);
+    }
+}
+
+fn system_revision(actor: &Actor) -> ProfileRevision {
+    ProfileRevision {
+        source: actor.state.source_id.unwrap_or_default() as u64,
+        profile: actor.state.selected_profile.unwrap_or_default() as u64,
+        generation: actor.state.revision as u64,
+    }
+}
+fn record_system(snapshot: &mut Snapshot, state: SystemState) {
+    let label = match state {
+        SystemState::Unknown => "Unknown",
+        SystemState::NoManagedPolicy => "NoManagedPolicy",
+        SystemState::TunnelStarting => "TunnelStarting",
+        SystemState::VerifiedRules => "VerifiedRules",
+        SystemState::RecoveryRequired => "RecoveryRequired",
+    };
+    snapshot.system_state = label;
+    snapshot.status = label;
+    // Unknown — потеря доказательства, а не доказательство отсутствия ресурсов.
+    match state {
+        SystemState::NoManagedPolicy => snapshot.system_recovery_pending = false,
+        SystemState::TunnelStarting
+        | SystemState::VerifiedRules
+        | SystemState::RecoveryRequired => {
+            snapshot.system_recovery_pending = true;
+        }
+        SystemState::Unknown => {}
+    }
+    snapshot.can_unlock = snapshot.system_recovery_pending;
+}
+fn system_error(error: ClientError) -> &'static str {
+    match error {
+        ClientError::Unsupported => "system_unsupported",
+        ClientError::Denied => "system_denied",
+        ClientError::Cancelled => "cancelled",
+        ClientError::Busy => "busy",
+        ClientError::OwnerLost => "system_owner_lost",
+        ClientError::Deadline | ClientError::Timeout => "system_timeout",
+        _ => "system_unavailable",
+    }
+}
+
+/// Одна ограниченная операция. Владение session возвращается даже после отмены RPC.
+pub(crate) enum Operation {
+    Connect(Box<yonik_import::ServerIntent>, Engine),
+    Stop,
+    Unlock,
+    State,
+}
+pub(crate) struct Flight {
+    pub cancel: tokio::sync::watch::Sender<bool>,
+    pub task: tokio::task::JoinHandle<(
+        Option<SystemSession>,
+        std::result::Result<SystemState, ClientError>,
+    )>,
+    pub generation: u64,
+    pub revision: ProfileRevision,
+    pub connecting: bool,
+    pub mutating: bool,
+}
+impl Flight {
+    pub fn start(
+        session: Option<SystemSession>,
+        operation: Operation,
+        revision: ProfileRevision,
+        generation: u64,
+    ) -> Self {
+        let connecting = matches!(operation, Operation::Connect(..));
+        let mutating = !matches!(operation, Operation::State);
+        let (cancel, cancellation) = Cancellation::new();
+        let task = tokio::spawn(async move {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut session = match session {
+                Some(session) if !session.owner_lost() => session,
+                _ => match SystemClient::system(deadline, cancellation.clone()).await {
+                    Ok(client) => SystemSession::new(client, revision),
+                    Err(error) => return (None, Err(error)),
+                },
+            };
+            session.revise(revision);
+            let result = match operation {
+                Operation::Connect(server, engine) => {
+                    match session
+                        .prepare(
+                            revision,
+                            &server,
+                            engine,
+                            true,
+                            deadline,
+                            cancellation.clone(),
+                        )
+                        .await
+                    {
+                        Ok(()) => session.apply(revision, deadline, cancellation).await,
+                        Err(error) => Err(error),
+                    }
+                }
+                Operation::Stop => session.stop(deadline, cancellation).await,
+                Operation::Unlock => session.unlock(deadline, cancellation).await,
+                Operation::State => session.state(deadline, cancellation).await,
+            };
+            (Some(session), result)
+        });
+        Self {
+            cancel,
+            task,
+            generation,
+            revision,
+            connecting,
+            mutating,
+        }
+    }
+}
+
+#[cfg(test)]
+mod system_recovery_tests {
+    use super::*;
+
+    #[test]
+    fn неопределённый_state_сохраняет_барьер_и_unlock() {
+        for retained in [
+            SystemState::VerifiedRules,
+            SystemState::RecoveryRequired,
+            SystemState::TunnelStarting,
+        ] {
+            let mut snapshot = Snapshot::new(true);
+            record_system(&mut snapshot, retained);
+            for error in [
+                ClientError::Timeout,
+                ClientError::Unavailable,
+                ClientError::OwnerLost,
+            ] {
+                record_system(&mut snapshot, SystemState::Unknown);
+                snapshot.command_error(false, system_error(error));
+                assert!(snapshot.system_recovery_pending);
+                assert!(snapshot.can_unlock);
+                assert_eq!(snapshot.system_state, "Unknown");
+            }
+        }
+    }
+
+    #[test]
+    fn подтверждённая_очистка_снимает_барьер() {
+        let mut snapshot = Snapshot::new(true);
+        record_system(&mut snapshot, SystemState::VerifiedRules);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(snapshot.system_recovery_pending);
+        // И State, и Unlock передают сюда только принятый typed ответ helper.
+        record_system(&mut snapshot, SystemState::NoManagedPolicy);
+        assert!(!snapshot.system_recovery_pending);
+        assert!(!snapshot.can_unlock);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(!snapshot.system_recovery_pending);
     }
 }

@@ -29,44 +29,62 @@ pub(crate) fn unique_object(text: &str) -> Result<BTreeMap<String, Value>, serde
 }
 
 /// Проверка всех ключей без построения дерева и без last-wins для credentials.
-pub(crate) fn validate_unique(text: &str) -> Result<(), serde_json::Error> {
-    struct Unique;
-    impl<'de> Deserialize<'de> for Unique {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct AnyVisitor;
-            impl<'de> Visitor<'de> for AnyVisitor {
-                type Value = Unique;
+pub(crate) fn validate_unique(
+    text: &str,
+    checkpoint: &crate::Checkpoint<'_>,
+) -> Result<(), serde_json::Error> {
+    use serde::de::DeserializeSeed;
+    #[derive(Clone, Copy)]
+    struct Unique<'a>(&'a crate::Checkpoint<'a>);
+    impl<'de> DeserializeSeed<'de> for Unique<'_> {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+            self.0
+                .check()
+                .map_err(|_| D::Error::custom("Отмена импорта"))?;
+            struct AnyVisitor<'a>(Unique<'a>);
+            impl<'de> Visitor<'de> for AnyVisitor<'_> {
+                type Value = ();
                 fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.write_str("JSON с уникальными ключами")
                 }
-                fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Unique, M::Error> {
+                fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<(), M::Error> {
                     let mut keys = std::collections::HashSet::new();
                     while let Some(key) = map.next_key::<String>()? {
+                        self.0
+                            .0
+                            .check()
+                            .map_err(|_| M::Error::custom("Отмена импорта"))?;
                         if !keys.insert(key) {
                             return Err(M::Error::custom("Повторяющееся поле JSON"));
                         }
-                        map.next_value::<Unique>()?;
+                        map.next_value_seed(self.0)?;
                     }
-                    Ok(Unique)
+                    Ok(())
                 }
                 fn visit_seq<S: serde::de::SeqAccess<'de>>(
                     self,
                     mut seq: S,
-                ) -> Result<Unique, S::Error> {
-                    while seq.next_element::<Unique>()?.is_some() {}
-                    Ok(Unique)
+                ) -> Result<(), S::Error> {
+                    while seq.next_element_seed(self.0)?.is_some() {}
+                    Ok(())
                 }
             }
             let raw = <&serde_json::value::RawValue>::deserialize(deserializer)?;
+            self.0
+                .check()
+                .map_err(|_| D::Error::custom("Отмена импорта"))?;
             if !raw.get().starts_with(['{', '[']) {
-                return Ok(Unique);
+                return Ok(());
             }
             // Числа и строки остаются RawValue: opaque JSON не ограничен f64.
             let mut nested = serde_json::Deserializer::from_str(raw.get());
             nested
-                .deserialize_any(AnyVisitor)
-                .map_err(|_| D::Error::custom("Повторяющееся поле JSON"))
+                .deserialize_any(AnyVisitor(self))
+                .map_err(D::Error::custom)
         }
     }
-    serde_json::from_str::<Unique>(text).map(|_| ())
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    Unique(checkpoint).deserialize(&mut deserializer)?;
+    deserializer.end()
 }

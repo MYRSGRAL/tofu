@@ -75,7 +75,12 @@ fn host(text: &str) -> Result<String, RecordError> {
         return Ok(address.to_string());
     }
     match Host::parse(text).map_err(|_| (IssueCode::InvalidHost, Field::Endpoint))? {
-        Host::Domain(name) if !name.is_empty() => Ok(name),
+        // Host::parse уже выполнил IDNA: считаем октеты ASCII label.
+        Host::Domain(name)
+            if !name.is_empty() && name.split('.').all(|label| label.len() <= 63) =>
+        {
+            Ok(name)
+        }
         Host::Ipv4(address) => Ok(address.to_string()),
         Host::Ipv6(address) => Ok(address.to_string()),
         _ => Err((IssueCode::InvalidHost, Field::Endpoint)),
@@ -334,6 +339,7 @@ fn legacy_ss(source: &str, body: &str) -> Result<ParsedServer, RecordError> {
     if !value.username().is_empty()
         || value.password().is_some()
         || value.query().is_some()
+        || value.fragment().is_some()
         || !value.path().is_empty()
     {
         return Err((IssueCode::MalformedUri, Field::Endpoint));

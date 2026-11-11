@@ -1,6 +1,12 @@
 //! Зашифрованное хранилище подписок. Ключ предоставляется вызывающей стороной.
 
 mod backup;
+mod batch_targets;
+#[cfg(test)]
+mod cancellation_tests;
+#[cfg(any(test, feature = "test-support"))]
+mod path_diagnostics;
+
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -47,6 +53,36 @@ impl std::fmt::Display for RepositoryError {
 impl std::error::Error for RepositoryError {}
 type Result<T> = std::result::Result<T, RepositoryError>;
 
+/// Отмена отделена от ошибок совместимого API хранилища.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotCommitError {
+    Cancelled,
+    Repository(RepositoryError),
+}
+impl std::fmt::Display for SnapshotCommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("Запись snapshot отменена"),
+            Self::Repository(error) => error.fmt(f),
+        }
+    }
+}
+impl std::error::Error for SnapshotCommitError {}
+
+impl From<RepositoryError> for SnapshotCommitError {
+    fn from(error: RepositoryError) -> Self {
+        Self::Repository(error)
+    }
+}
+
+fn compat_commit_error(error: SnapshotCommitError) -> RepositoryError {
+    match error {
+        SnapshotCommitError::Repository(error) => error,
+        // Совместимый API удерживает sender и не запрашивает отмену.
+        SnapshotCommitError::Cancelled => RepositoryError::Storage,
+    }
+}
+
 // Секретные поля намеренно не реализуют Debug.
 pub struct SourceRecord {
     pub id: i64,
@@ -78,6 +114,17 @@ pub struct StoredSubscription {
 pub struct EncryptedSubscriptionRepository {
     inner: Arc<Mutex<Database>>,
     gate: Arc<Semaphore>,
+    #[cfg(test)]
+    commit_boundary: Arc<Mutex<Option<CommitBoundaryHook>>>,
+}
+#[cfg(test)]
+type CommitBoundaryHook = Box<dyn Fn(CommitCheckpoint) + Send>;
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommitCheckpoint {
+    WriteBlocked,
+    BeforeAdmission,
+    Admitted,
 }
 struct Database {
     connection: Connection,
@@ -86,6 +133,15 @@ struct Database {
 }
 
 impl EncryptedSubscriptionRepository {
+    #[cfg(test)]
+    pub(crate) fn observe_write_wait(&self, notify: Arc<tokio::sync::Notify>) {
+        *self.commit_boundary.lock().expect("test hook") = Some(Box::new(move |phase| {
+            if phase == CommitCheckpoint::WriteBlocked {
+                notify.notify_one();
+            }
+        }));
+    }
+
     pub async fn open(path: PathBuf, key: Zeroizing<[u8; 32]>) -> Result<Self> {
         let permit = OPEN_GATE
             .acquire()
@@ -100,6 +156,8 @@ impl EncryptedSubscriptionRepository {
         Ok(Self {
             inner: Arc::new(Mutex::new(database)),
             gate: Arc::new(Semaphore::new(1)),
+            #[cfg(test)]
+            commit_boundary: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -140,6 +198,47 @@ impl EncryptedSubscriptionRepository {
             let _permit = permit;
             let mut database = database.lock().map_err(|_| RepositoryError::Storage)?;
             operation(&mut database)
+        })
+        .await
+        .map_err(|_| RepositoryError::Storage)?
+    }
+
+    async fn run_cancellable<T: Send + 'static>(
+        &self,
+        mut cancel: crate::Cancellation,
+        ack: Option<tokio::sync::OwnedSemaphorePermit>,
+        operation: impl FnOnce(&mut Database) -> std::result::Result<T, SnapshotCommitError>
+        + Send
+        + 'static,
+    ) -> std::result::Result<T, SnapshotCommitError> {
+        cancel.check().map_err(|_| SnapshotCommitError::Cancelled)?;
+        let permit = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(SnapshotCommitError::Cancelled),
+            result = self.gate.clone().acquire_owned() => result.map_err(|_| RepositoryError::Storage)?,
+        };
+        let cpu_permit = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(SnapshotCommitError::Cancelled),
+            result = crate::subscriptions::IMPORT_GATE.acquire() => result.map_err(|_| RepositoryError::Storage)?,
+        };
+        let database = self.inner.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ack = ack;
+            let _permit = permit;
+            let _cpu_permit = cpu_permit;
+            let mut db = database.lock().map_err(|_| RepositoryError::Storage)?;
+            cancel.check().map_err(|_| SnapshotCommitError::Cancelled)?;
+            db.connection
+                .busy_timeout(std::time::Duration::ZERO)
+                .map_err(storage)?;
+            let result = operation(&mut db);
+            let restore = db
+                .connection
+                .busy_timeout(std::time::Duration::from_secs(3))
+                .map_err(storage);
+            restore?;
+            result
         })
         .await
         .map_err(|_| RepositoryError::Storage)?
@@ -321,10 +420,46 @@ impl EncryptedSubscriptionRepository {
         expected_revision: i64,
         input: SnapshotInput,
     ) -> Result<i64> {
+        let (_sender, cancel) = crate::Cancellation::new();
+        self.commit_snapshot_cancellable(id, expected_generation, expected_revision, input, cancel)
+            .await
+            .map_err(compat_commit_error)
+    }
+
+    /// После допуска COMMIT возвращает его фактический результат. При отмене
+    /// ожидает rollback worker и освобождение обоих gates.
+    pub async fn commit_snapshot_cancellable(
+        &self,
+        id: i64,
+        expected_generation: i64,
+        expected_revision: i64,
+        input: SnapshotInput,
+        cancel: crate::Cancellation,
+    ) -> std::result::Result<i64, SnapshotCommitError> {
+        self.commit_snapshot_ack(
+            id,
+            expected_generation,
+            expected_revision,
+            input,
+            cancel,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn commit_snapshot_ack(
+        &self,
+        id: i64,
+        expected_generation: i64,
+        expected_revision: i64,
+        input: SnapshotInput,
+        cancel: crate::Cancellation,
+        ack: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> std::result::Result<i64, SnapshotCommitError> {
         positive(id)?;
         positive(expected_generation)?;
         if expected_revision < 0 {
-            return Err(RepositoryError::InvalidInput);
+            return Err(RepositoryError::InvalidInput.into());
         }
         let revision = expected_revision
             .checked_add(1)
@@ -333,23 +468,44 @@ impl EncryptedSubscriptionRepository {
         let metadata = Zeroizing::new(input.metadata);
         let validators = input.validators.map(Zeroizing::new);
         if body.len() > BODY_LIMIT {
-            return Err(RepositoryError::InvalidInput);
+            return Err(RepositoryError::InvalidInput.into());
         }
         check_small(&metadata)?;
         if let Some(value) = &validators {
             check_small(value)?;
         }
-        self.run(move |db| {
-            let parsed = prepare_profiles(&db.key, &db.id, id, &body)?;
+        #[cfg(test)]
+        let boundary = self.commit_boundary.clone();
+        self.run_cancellable(cancel.clone(), ack, move |db| {
+            let check = || cancel.check().map_err(|_| SnapshotCommitError::Cancelled);
+            check()?;
+            let parsed = prepare_profiles_checked(&db.key, &db.id, id, &body, &check)?;
             let body = encrypt(&db.key, &db.id, 2, id, expected_generation, revision, &body)?;
             let metadata = encrypt(&db.key, &db.id, 3, id, expected_generation, revision, &metadata)?;
             let validators = validators.as_ref().map(|v| encrypt(&db.key, &db.id, 4, id, expected_generation, revision, v)).transpose()?;
-            let tx = db.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+            let started = std::time::Instant::now();
+            let tx = loop {
+                check()?;
+                match rusqlite::Transaction::new_unchecked(&db.connection, TransactionBehavior::Immediate) {
+                    Ok(tx) => break tx,
+                    Err(error) if matches!(error.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)) && started.elapsed() < std::time::Duration::from_secs(3) => {
+                        #[cfg(test)]
+                        if let Some(hook) = boundary.lock().map_err(|_| RepositoryError::Storage)?.as_ref() { hook(CommitCheckpoint::WriteBlocked); }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(storage(error).into()),
+                }
+            };
             let generation: Option<i64> = tx.query_row("SELECT generation FROM sources WHERE id=?1", [id], |r| r.get(0)).optional().map_err(storage)?;
             let previous: i64 = tx.query_row("SELECT revision FROM snapshots WHERE source_id=?1", [id], |r| r.get(0)).optional().map_err(storage)?.unwrap_or(0);
-            if generation != Some(expected_generation) || previous != expected_revision { return Err(RepositoryError::Conflict); }
+            if generation != Some(expected_generation) || previous != expected_revision { return Err(RepositoryError::Conflict.into()); }
             tx.execute("INSERT INTO snapshots(source_id,source_generation,revision,body,metadata,validators) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(source_id) DO UPDATE SET source_generation=excluded.source_generation,revision=excluded.revision,body=excluded.body,metadata=excluded.metadata,validators=excluded.validators", params![id, expected_generation, revision, body, metadata, validators]).map_err(storage)?;
-            reconcile(&tx, &db.key, &db.id, id, expected_generation, revision, parsed)?;
+            reconcile_checked(&tx, &db.key, &db.id, id, expected_generation, revision, parsed, &check)?;
+            #[cfg(test)]
+            if let Some(hook) = boundary.lock().map_err(|_| RepositoryError::Storage)?.as_ref() { hook(CommitCheckpoint::BeforeAdmission); }
+            cancel.admit_commit().map_err(|_| SnapshotCommitError::Cancelled)?;
+            #[cfg(test)]
+            if let Some(hook) = boundary.lock().map_err(|_| RepositoryError::Storage)?.as_ref() { hook(CommitCheckpoint::Admitted); }
             tx.commit().map_err(storage)?;
             Ok(revision)
         }).await
@@ -567,29 +723,50 @@ impl Database {
     }
 }
 
+fn unsafe_path(
+    _path: &Path,
+    _branch: &'static str,
+    _node: &Path,
+    _observed: Option<&fs::Metadata>,
+    _error: Option<&std::io::Error>,
+) -> RepositoryError {
+    #[cfg(any(test, feature = "test-support"))]
+    path_diagnostics::record(_path, _branch, _node, _observed, _error);
+    RepositoryError::UnsafePath
+}
+
 fn secure_path(path: &Path) -> Result<()> {
     if !path.is_absolute() || path.file_name().is_none() {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(path, "input_shape", path, None, None));
     }
-    let parent = path.parent().ok_or(RepositoryError::UnsafePath)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| unsafe_path(path, "parent_missing", path, None, None))?;
     if !parent.exists() {
         DirBuilder::new()
             .mode(0o700)
             .create(parent)
-            .map_err(|_| RepositoryError::UnsafePath)?;
+            .map_err(|error| unsafe_path(path, "parent_create", parent, None, Some(&error)))?;
     }
     // canonicalize выявляет симлинки и в предках, а не только в последнем компоненте.
     if parent
         .canonicalize()
-        .map_err(|_| RepositoryError::UnsafePath)?
+        .map_err(|error| unsafe_path(path, "parent_canonicalize", parent, None, Some(&error)))?
         != parent
     {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(path, "parent_noncanonical", parent, None, None));
     }
-    let meta = fs::symlink_metadata(parent).map_err(|_| RepositoryError::UnsafePath)?;
+    let meta = fs::symlink_metadata(parent)
+        .map_err(|error| unsafe_path(path, "parent_stat", parent, None, Some(&error)))?;
     let uid = rustix::process::getuid().as_raw();
     if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o7777 != 0o700 {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(
+            path,
+            "parent_policy",
+            parent,
+            Some(&meta),
+            None,
+        ));
     }
     match fs::symlink_metadata(path) {
         Ok(meta) => {
@@ -598,7 +775,13 @@ fn secure_path(path: &Path) -> Result<()> {
                 || meta.mode() & 0o7777 != 0o600
                 || meta.nlink() != 1
             {
-                return Err(RepositoryError::UnsafePath);
+                return Err(unsafe_path(
+                    path,
+                    "database_policy",
+                    path,
+                    Some(&meta),
+                    None,
+                ));
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -608,26 +791,41 @@ fn secure_path(path: &Path) -> Result<()> {
                 .mode(0o600)
                 .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
                 .open(path)
-                .map_err(|_| RepositoryError::UnsafePath)?;
+                .map_err(|error| unsafe_path(path, "database_create", path, None, Some(&error)))?;
         }
-        Err(_) => return Err(RepositoryError::UnsafePath),
+        Err(error) => return Err(unsafe_path(path, "database_stat", path, None, Some(&error))),
     }
     // SQLite использует эти имена самостоятельно. Не разрешаем готовые симлинки.
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut name = path.as_os_str().to_os_string();
         name.push(suffix);
-        match fs::symlink_metadata(PathBuf::from(name)) {
+        let sidecar = PathBuf::from(name);
+        match fs::symlink_metadata(&sidecar) {
             Ok(meta)
                 if !meta.is_file()
                     || meta.uid() != uid
                     || meta.mode() & 0o077 != 0
                     || meta.nlink() != 1 =>
             {
-                return Err(RepositoryError::UnsafePath);
+                return Err(unsafe_path(
+                    path,
+                    "sidecar_policy",
+                    &sidecar,
+                    Some(&meta),
+                    None,
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(RepositoryError::UnsafePath),
+            Err(error) => {
+                return Err(unsafe_path(
+                    path,
+                    "sidecar_stat",
+                    &sidecar,
+                    None,
+                    Some(&error),
+                ));
+            }
         }
     }
     Ok(())
@@ -1619,16 +1817,29 @@ fn prepare_profiles(
     source: i64,
     body: &[u8],
 ) -> Result<PreparedCatalog> {
-    let report =
-        yonik_import::import_bytes(body.to_vec()).map_err(|_| RepositoryError::InvalidInput)?;
+    prepare_profiles_checked(key, db, source, body, &|| Ok(())).map_err(compat_commit_error)
+}
+fn prepare_profiles_checked(
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+    body: &[u8],
+    check: &impl Fn() -> std::result::Result<(), SnapshotCommitError>,
+) -> std::result::Result<PreparedCatalog, SnapshotCommitError> {
+    let report = yonik_import::import_bytes_cancellable(body.to_vec(), || check().is_ok())
+        .map_err(|error| match error {
+            yonik_import::CancellableImportError::Cancelled => SnapshotCommitError::Cancelled,
+            yonik_import::CancellableImportError::Import(_) => RepositoryError::InvalidInput.into(),
+        })?;
     if report.servers.len() > 20_000 || (report.servers.is_empty() && report.native_json.is_none())
     {
-        return Err(RepositoryError::InvalidInput);
+        return Err(RepositoryError::InvalidInput.into());
     }
     let raw = report.servers.len();
     let mut seen = std::collections::HashSet::new();
     let mut rows = Vec::new();
     for (ordinal, server) in report.servers.iter().enumerate() {
+        check()?;
         let fingerprint = fingerprint(key, db, source, server)?;
         if seen.insert(fingerprint.clone()) {
             rows.push(Prepared {
@@ -1722,6 +1933,13 @@ fn open_profile(key: &[u8; 32], db: &[u8; 32], r: &ProfileRow) -> Result<ServerP
     })
 }
 fn read_profiles(tx: &rusqlite::Transaction<'_>, source: i64) -> Result<Vec<ProfileRow>> {
+    read_profiles_checked(tx, source, &|| Ok(())).map_err(compat_commit_error)
+}
+fn read_profiles_checked(
+    tx: &rusqlite::Transaction<'_>,
+    source: i64,
+    check: &impl Fn() -> std::result::Result<(), SnapshotCommitError>,
+) -> std::result::Result<Vec<ProfileRow>, SnapshotCommitError> {
     let mut stmt=tx.prepare("SELECT id,source_id,fingerprint,generation,revision,ordinal,present,payload FROM profiles WHERE source_id=?1 LIMIT 40001").map_err(storage)?;
     let rows = stmt
         .query_map([source], |r| {
@@ -1736,11 +1954,15 @@ fn read_profiles(tx: &rusqlite::Transaction<'_>, source: i64) -> Result<Vec<Prof
                 payload: bounded_blob(r, 7, SMALL_LIMIT + 40)?,
             })
         })
-        .map_err(storage)?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| RepositoryError::Corrupt)?;
+        .map_err(storage)?;
+    let mut collected = Vec::new();
+    for row in rows {
+        check()?;
+        collected.push(row.map_err(|_| RepositoryError::Corrupt)?);
+    }
+    let rows = collected;
     if rows.len() > 40_000 {
-        return Err(RepositoryError::Corrupt);
+        return Err(RepositoryError::Corrupt.into());
     }
     Ok(rows)
 }
@@ -1753,13 +1975,32 @@ fn reconcile(
     revision: i64,
     prepared: PreparedCatalog,
 ) -> Result<()> {
+    reconcile_checked(tx, key, db, source, generation, revision, prepared, &|| {
+        Ok(())
+    })
+    .map_err(compat_commit_error)
+}
+// Дополнительный callback сохраняет существующие координаты legacy AAD.
+#[allow(clippy::too_many_arguments)]
+fn reconcile_checked(
+    tx: &rusqlite::Transaction<'_>,
+    key: &[u8; 32],
+    db: &[u8; 32],
+    source: i64,
+    generation: i64,
+    revision: i64,
+    prepared: PreparedCatalog,
+    check: &impl Fn() -> std::result::Result<(), SnapshotCommitError>,
+) -> std::result::Result<(), SnapshotCommitError> {
     let mut old = std::collections::HashMap::new();
-    for r in read_profiles(tx, source)? {
+    for r in read_profiles_checked(tx, source, check)? {
+        check()?;
         let p = open_profile(key, db, &r)?;
         old.insert(r.fingerprint.clone(), (r, p));
     }
     let unique = prepared.rows.len();
     for p in prepared.rows {
+        check()?;
         let existing = old.remove(&p.fingerprint);
         let (id, favorite) = if let Some((r, profile)) = existing {
             (r.id, profile.favorite)
@@ -1792,6 +2033,7 @@ fn reconcile(
         tx.execute("UPDATE profiles SET generation=?1,revision=?2,ordinal=?3,present=1,payload=?4 WHERE id=?5",params![generation,revision,r.ordinal,payload,id]).map_err(storage)?;
     }
     for (_, (mut r, p)) in old {
+        check()?;
         if p.favorite {
             r.present = false;
             let payload = seal_profile(key, db, &r, &p)?;

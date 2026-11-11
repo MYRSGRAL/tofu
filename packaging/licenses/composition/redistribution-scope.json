@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "package_sha256": "e53cb758ca1b9a2167a80c90ca50b1ab5eb4f6b67c5c8ec01c2bf0ccb856e8b0",
+  "artifact": "historical package78/source eec7; не latest product",
+  "regular_payload_paths": [
+    ".BUILDINFO",
+    ".MTREE",
+    ".PKGINFO",
+    "usr/bin/yonik-desktop",
+    "usr/lib/systemd/system/yonik-helper.service",
+    "usr/lib/systemd/system/yonik-worker-check.service",
+    "usr/lib/systemd/system/yonik-worker-check.socket",
+    "usr/lib/systemd/system/yonik-worker.service",
+    "usr/lib/systemd/system/yonik-worker.socket",
+    "usr/lib/sysusers.d/yonik-worker.conf",
+    "usr/lib/yonik/yonik-helper",
+    "usr/lib/yonik/yonik-worker",
+    "usr/share/applications/cloud.highpriority.yonik.desktop",
+    "usr/share/dbus-1/system-services/cloud.highpriority.yonik.Network1.service",
+    "usr/share/dbus-1/system.d/cloud.highpriority.yonik.Network1.conf",
+    "usr/share/icons/hicolor/scalable/apps/cloud.highpriority.yonik.svg",
+    "usr/share/polkit-1/actions/cloud.highpriority.yonik.policy"
+  ],
+  "elf_payload_paths": [
+    "usr/bin/yonik-desktop",
+    "usr/lib/yonik/yonik-helper",
+    "usr/lib/yonik/yonik-worker"
+  ],
+  "notices_installed": false,
+  "registry_in_package": false,
+  "qt_shared_objects_or_plugins_in_package": false,
+  "core_binaries_in_package": false,
+  "sources_sha256": {
+    "docs/PLAN.md": "0551fadde4720bdb3133546c30122a95dba87feda98089da82866f0d95366d11",
+    "docs/specs/requirements.md": "bb7c3280a997e603cc2eea7c630ab11b3af30b96238038aaa143be70f619162f",
+    "docs/specs/platforms.md": "68e4ab0c8f34619a2d5e693d3907fd4b2fab4cf9962c7222d59f607975292490",
+    "docs/specs/decisions.md": "5092f0b2d9bd9e2bb6ddb167c6209bcd698159fccaeae5845c01b3f7770056cd",
+    "docs/specs/validation-and-roadmap.md": "d4f70873439a3f10f007e66d9b2702eea59274e698760c9444cdbd91762b3c93",
+    "packaging/arch/README.md": "db61d31ed6964526acedbcff566bd622389725a0a5c1f8cca144870e2a19def1",
+    "packaging/arch/PKGBUILD": "ac9471bafbb87f50d5552c7d1f0e377786912ecb9db9b55abdb32d1784ba2326",
+    "crates/yonik-linux/src/helper/registry.rs": "1344d0ef0ae294af04ecc1b4b4ece8951fa8a091909c93ad8a64e620afec1cac",
+    "tools/build_native_adapter.py": "16977d4f6332b2c3c8d2c5ffa2beffc00564a605484b8152685426817a201062"
+  },
+  "scope": {
+    "redistributed": "Три ELF, units/sysusers/DBus/polkit/desktop/icon из payload; embedded/static/header/generated code требует отдельной атрибуции",
+    "external_os": "DT_NEEDED/Qt plugins/QML, предоставленные пакетами OS; 59-package dataset описывает наблюдённую VM, не payload YonIk",
+    "registry_provider": "Доверенные engines/registry.json ставятся отдельным системным поставщиком; обязательства зависят от его фактического payload",
+    "data_only": "Официальный Xray asset сканируется как DATA; его geoip/geosite/README не объявляются поставленными YonIk"
+  },
+  "release_requirements": "Выбранная лицензия, notices/сохранение условий, собственные исходники/инструкции/тесты, source obligations фактической поставки; evidence обязательных FR. Криптографический аудит каждого внешнего OS file не вводится как новый критерий."
+}

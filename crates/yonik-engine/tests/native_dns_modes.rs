@@ -10,6 +10,10 @@ fn generate_native_modes() {
         for mode in [NativeDnsMode::Real, NativeDnsMode::FakeIp] {
             let dns = DnsPolicy {
                 mode,
+                ipv4: true,
+                ipv6: false,
+                fake_exclusions: vec![],
+                require_mapping_lease: false,
                 upstream: "127.0.0.1:1053".parse().unwrap(),
                 listen_port: NonZeroU16::new(1054).unwrap(),
             };
@@ -55,6 +59,10 @@ fn reject_recursive_upstream_bootstrap_and_routing_before_activation() {
             let source = import_bytes(uri.as_bytes().to_vec()).unwrap();
             let mut dns = DnsPolicy {
                 mode: NativeDnsMode::Real,
+                ipv4: true,
+                ipv6: false,
+                fake_exclusions: vec![],
+                require_mapping_lease: false,
                 upstream: "127.0.0.1:1053".parse().unwrap(),
                 listen_port: NonZeroU16::new(1054).unwrap(),
             };
@@ -84,6 +92,84 @@ fn reject_recursive_upstream_bootstrap_and_routing_before_activation() {
                     PolicyCompileError::Unsupported(PolicyCapability::DnsContract)
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn explicit_family_and_guarantee_gates() {
+    let source = import_bytes(b"socks5://127.0.0.1:24082".to_vec()).unwrap();
+    for (engine, name) in [(Engine::Xray, "xray"), (Engine::SingBox, "sing-box")] {
+        for mode in [NativeDnsMode::Real, NativeDnsMode::FakeIp] {
+            let mut dns = DnsPolicy {
+                mode,
+                upstream: "[::1]:1053".parse().unwrap(),
+                listen_port: NonZeroU16::new(1054).unwrap(),
+                ipv4: false,
+                ipv6: true,
+                fake_exclusions: vec![],
+                require_mapping_lease: false,
+            };
+            let compile = |dns: &DnsPolicy| {
+                compile_native_dns(
+                    &source.servers[0],
+                    engine,
+                    NonZeroU16::new(10808).unwrap(),
+                    NonZeroU16::new(10809).unwrap(),
+                    &Policy::default(),
+                    PolicyMode::Names,
+                    dns,
+                )
+            };
+            let config = compile(&dns).unwrap();
+            let mut bytes = vec![];
+            config.write_sensitive(&mut bytes).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                value["dns"][if engine == Engine::Xray {
+                    "queryStrategy"
+                } else {
+                    "strategy"
+                }],
+                if engine == Engine::Xray {
+                    "UseIPv6"
+                } else {
+                    "ipv6_only"
+                }
+            );
+            if let Ok(path) = std::env::var("YONIK_DNS_EVIDENCE") {
+                std::fs::write(format!("{path}/{name}-{mode:?}-v6.json"), bytes).unwrap();
+            }
+            let upstream = dns.upstream;
+            for invalid in [
+                "[::]:1053",
+                "[ff02::1]:1053",
+                "[::ffff:127.0.0.1]:1053",
+                "[::1]:0",
+                "[::1]:1054",
+                "[fe80::1%1]:1053",
+            ] {
+                dns.upstream = invalid.parse().unwrap();
+                assert!(compile(&dns).is_err(), "Некорректный upstream {invalid}");
+            }
+            dns.upstream = upstream;
+            dns.ipv4 = true;
+            assert!(compile(&dns).is_err(), "Полный A/AAAA lease не доказан");
+            dns.ipv4 = false;
+            dns.ipv6 = false;
+            assert!(compile(&dns).is_err());
+            dns.ipv6 = true;
+            dns.require_mapping_lease = true;
+            assert!(compile(&dns).is_err(), "TTL/reset нельзя терять");
+            dns.require_mapping_lease = false;
+            dns.fake_exclusions
+                .push(yonik_domain::DomainPattern::Suffix(
+                    "local".parse().unwrap(),
+                ));
+            assert!(
+                compile(&dns).is_err(),
+                "Исключение требует собственного resolver"
+            );
         }
     }
 }
@@ -172,3 +258,27 @@ try:
 finally:stop.set();t.join(3);e.join(3)
 (base/'live-results.json').write_text(json.dumps(results,indent=2))
 "#;
+
+/// IPv6 upstream/AAAA/dial и пустая новая сессия, без изменений сети хоста.
+#[cfg(unix)]
+#[test]
+#[ignore = "явный изолированный IPv6 native gate"]
+fn live_ipv6_family_gates() {
+    explicit_family_and_guarantee_gates();
+    use std::os::unix::fs::MetadataExt;
+    let inode = std::fs::metadata("/proc/self/ns/net").unwrap().ino();
+    let status = std::process::Command::new("unshare")
+        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .args([
+            "--user",
+            "--map-root-user",
+            "--net",
+            "python",
+            "-c",
+            include_str!("fixtures/dns_ipv6.py"),
+            &inode.to_string(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}

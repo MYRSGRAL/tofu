@@ -1,0 +1,11 @@
+   Compiling yonik-desktop v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-4535b874-7ef9c9b8526f360b/crates/yonik-desktop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.77s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/p11-catalog/target/debug/deps/yonik_desktop-63d3efce3fdd56b5)
+
+running 4 tests
+test diagnostics::tests::routing_error_obeys_the_same_allowlist ... ok
+test diagnostics::tests::duplicate_and_depth_bounds ... ok
+test diagnostics::tests::metadata_only_and_unknown_rejected ... ok
+test diagnostics::tests::validator_parity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 4.26s

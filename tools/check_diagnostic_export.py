@@ -9,20 +9,22 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import NoReturn
 
 MAX_BYTES = 65_536
 MAX_DEPTH = 4
 MAX_ERRORS = 128
-# Подмножество существующих ключей Main.qml, без изменения общего контракта.
+CATALOG = json.loads(
+    (
+        Path(__file__).resolve().parents[1]
+        / "docs/specs/diagnostic-message-catalog.json"
+    ).read_text(encoding="utf-8")
+)
 MESSAGES = {
-    "cancelled": ("Операция отменена.", "Operation cancelled."),
-    "cleanup_failed": (
-        "Не удалось завершить отключение. Повторите остановку перед выходом.",
-        "Cleanup failed. Retry stopping before quitting.",
-    ),
+    item["message_key"]: (item["ru"], item["en"]) for item in CATALOG["messages"]
 }
-CODES = {"CANCELLED": "cancelled", "CLEANUP_FAILED": "cleanup_failed"}
+CODES = {item["code"]: item["message_key"] for item in CATALOG["messages"]}
 
 
 class ExportError(ValueError):
@@ -98,7 +100,12 @@ def export_metadata(raw: bytes) -> bytes:
             reject()
         # Свободные параметры и native cause пока не имеют безопасной схемы.
         fields(error["params"], set())
-    return (json.dumps(root, ensure_ascii=True, separators=(",", ":")) + "\n").encode()
+    result = (
+        json.dumps(root, ensure_ascii=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if len(result) > MAX_BYTES:
+        reject()
+    return result
 
 
 def main() -> int:

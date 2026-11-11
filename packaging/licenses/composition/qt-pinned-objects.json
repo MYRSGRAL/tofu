@@ -1,0 +1,17 @@
+{
+  "qtbase": {
+    "tag_object": "fcef5b2c755492753eb8f7424dd2bc7337832068",
+    "commit": "025bdad181de241e81bf853c8a2d7bf3d19261a9",
+    "mirror": "https://github.com/qt/qtbase.git"
+  },
+  "qtdeclarative": {
+    "tag_object": "c3ab6d3094e8b843c6fc3e04ed3e0f40d4092447",
+    "commit": "4332fbbb4c340463dc8cee36dda0c85d932122d8",
+    "mirror": "https://github.com/qt/qtdeclarative.git"
+  },
+  "qtsvg": {
+    "tag_object": "0a753f450c4b4671cc97ef1c566512b9ab322382",
+    "commit": "883a58532078d003cefef0a549bfe9f885ce41f5",
+    "mirror": "https://github.com/qt/qtsvg.git"
+  }
+}
