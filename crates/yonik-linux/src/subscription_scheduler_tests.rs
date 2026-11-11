@@ -377,7 +377,12 @@ fn schedule_clock_bounds() {
 
 #[tokio::test]
 async fn completion_due_survives_reopen_for_approve_and_discard() {
-    for approve in [false, true] {
+    for (approve, interval) in [
+        (false, 86400),
+        (true, 86400),
+        (false, 172800),
+        (true, 172800),
+    ] {
         let (dir, service) = service().await;
         let id = source(&service, "socks5://127.0.0.1:1080#persisted").await;
         let wall = Arc::new(AtomicU64::new(100));
@@ -389,6 +394,11 @@ async fn completion_due_survives_reopen_for_approve_and_discard() {
             Arc::new(move || clock.load(Ordering::Relaxed)),
         )
         .unwrap();
+        if interval != 86400 {
+            scheduler
+                .set_interval(Duration::from_secs(interval))
+                .unwrap();
+        }
         scheduler.schedule(id, 1, Duration::ZERO).unwrap();
         scheduler
             .dispatch(Duration::ZERO, policy(), &service, host())
@@ -409,7 +419,7 @@ async fn completion_due_survives_reopen_for_approve_and_discard() {
         let reopened = SubscriptionService::new(repo);
         let token = reopened.schedule_metadata(id).await.unwrap().unwrap();
         let state = token.state.unwrap();
-        assert_eq!(state.due_wall, Some(86600));
+        assert_eq!(state.due_wall, Some(200 + interval));
         assert_eq!(state.failures, 0);
         let mut runtime = runtime();
         runtime
@@ -856,4 +866,32 @@ async fn p2_hwid_сбрасывает_paused_в_переходе_поколен�
     assert_eq!(current.generation, 2);
     assert_eq!(current.state, None, "новый ресурс не наследует paused");
     service.close().await.unwrap();
+}
+
+#[test]
+fn persisted_интервал_больше_суток_и_граница() {
+    let state = ScheduleState {
+        version: 1,
+        recorded_wall: 100,
+        due_wall: Some(172900),
+        failures: 0,
+        paused: false,
+    };
+    state.validate().unwrap();
+    assert_eq!(
+        state.deadline(110, Duration::from_secs(7)),
+        Duration::from_secs(172797)
+    );
+    assert_eq!(
+        state.deadline(0, Duration::ZERO),
+        Duration::from_secs(172800)
+    );
+    assert!(
+        ScheduleState {
+            due_wall: Some(100 + u32::MAX as u64 + 1),
+            ..state
+        }
+        .validate()
+        .is_err()
+    );
 }
