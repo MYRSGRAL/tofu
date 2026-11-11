@@ -35,9 +35,12 @@
 Открытые #109/#112/#115/#119–#123 учитываются отдельно от main; #91 остаётся
 историческим открытым snapshot. Merge/CI/hash не заменяют runtime-приёмку.
 Приоритет: integrated production Apply и domain/app provenance, полный DNS/private
-lifecycle, затем физические G-UI/G-POWER и итоговая поставка. Go changes,
-nsfs adapter exception, физическая разблокировка KDE и доступ hardware counters
-требуют отдельных решений/доступа; остальные полезные направления продолжаются.
+lifecycle и итоговая поставка. По уточнению пользователя после #125 узкие
+Go-интеграции обоих закреплённых ядер с Rust broker/TUN FD и локальный
+`yonik-nsfs` adapter с Cargo edge явно разрешены; ожидание этих разрешений
+больше не блокирует работу. Root возобновил #122 anchor; это не runtime proof.
+Физические G-UI/G-POWER пользователь пока отложил: они остаются недоказанными,
+без waiver или PASS; разблокировка KDE и hardware-counter permissions не заявлены.
 
 ## Историческая очередь (10 ноября; не текущий статус)
 
@@ -162,7 +165,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P20 | Два редактора правил и каталог приложений | Частично | Редакторы, каталог и диагностика имеют component evidence; [L15](validation/2026-11-11-editor-policy-diagnostics.md). Осталось доказать атомарный actual Apply одного поколения и полную приёмку A-04/A-07/A-08 без потери семантики. [Спецификация](specs/routing-and-tray.md). |
 | P21 | Трей и desktop lifecycle | Частично | Базовые команды и single instance есть. Пройти T-01…T-04 на KDE, restart Plasma, отсутствие трея, ошибки cleanup, закрытие окна и «Выйти и отключиться». [Evidence](validation/2026-11-09-native-desktop.md), [приёмка](specs/validation-and-roadmap.md). |
 | P22 | Пакетные проверки серверов и диагностика | Частично | Есть HTTPS, три TCP-пробы и bounded API до 10 000 целей. Нужны пакетный GUI, endpoint/ошибки/ограничения и полная привязка результатов к поколению сети. [TCP series](validation/2026-11-09-tcp-series.md), [batch](validation/2026-11-09-tcp-batch.md). |
-| P23 | Выбор toolkit, G-UI и G-POWER | Частично | Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../bench/ui/README.md), [бюджеты](specs/performance.md). Экран блокировки и питание без согласования не менять. |
+| P23 | Выбор toolkit, G-UI и G-POWER | Частично | Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../bench/ui/README.md), [бюджеты](specs/performance.md). Физические G-UI/G-POWER пока отложены пользователем, без waiver/PASS; критерии и статус частичного выполнения сохранены. Экран блокировки и питание без согласования не менять. |
 | P24 | Arch-поставка, обновления и откат | Частично | Arch packaging реализован частично; OPEN #119 `6dc4658` содержит actual source build, old→new→old/uninstall, kernel upgrade и production userdata/future preferences. Нужны review/seal, интеграция и итоговая проверка поставки с trusted helper/ядрами; открытый delta не считается main. [Launcher](../tools/install_desktop.py), [платформы](specs/platforms.md). |
 | P25 | Открытая Linux-поставка и release-приёмка | Частично | GPL и README RU/EN есть. Нужны notices/SPDX и аудит условий зависимостей, пользовательские инструкции, зелёные проверки, evidence всех FR и явные ограничения. Релиз/публикация выполняются только в разрешённом объёме. [Лицензия](../LICENSE), [приёмка](specs/validation-and-roadmap.md). |
 | P26 | Android-приложение и поставка | Отложен | После P03: нативный UI/VpnService, встроенный WG, оба worker, protect/revoke/lifecycle/UID/package, полная матрица и измерения на физическом телефоне. [Платформы](specs/platforms.md), [этап 6](specs/validation-and-roadmap.md). |
