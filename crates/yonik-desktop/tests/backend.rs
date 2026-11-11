@@ -17,6 +17,9 @@ use std::{
 };
 use yonik_desktop::{DesktopHost, HostConfig};
 
+#[path = "support/harness_diagnostics.rs"]
+mod harness_diagnostics;
+
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 #[test]
@@ -75,6 +78,7 @@ pub(crate) struct Harness {
     pub(crate) host: DesktopHost,
     receiver: mpsc::Receiver<String>,
     snapshots: Vec<String>,
+    diagnostic: harness_diagnostics::Trace,
 }
 impl Harness {
     pub(crate) fn new(config: HostConfig) -> Self {
@@ -84,6 +88,7 @@ impl Harness {
         config: HostConfig,
         hook: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
+        let diagnostic = harness_diagnostics::Trace::new();
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
             let _ = sender.send(value.clone());
@@ -94,16 +99,21 @@ impl Harness {
             host,
             receiver,
             snapshots: Vec::new(),
+            diagnostic,
         }
     }
+    #[track_caller]
     pub(crate) fn wait(&mut self, predicate: impl Fn(&Value) -> bool) -> Value {
+        let caller = std::panic::Location::caller();
+        let started = Instant::now();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = self
                 .receiver
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("snapshot до deadline");
+                .unwrap_or_else(|error| self.diagnostic.fail(error, caller, started.elapsed()));
             let value: Value = serde_json::from_str(&snapshot).expect("JSON DTO");
+            self.diagnostic.snapshot(&value);
             self.snapshots.push(snapshot);
             if predicate(&value) {
                 return value;
@@ -111,12 +121,16 @@ impl Harness {
         }
     }
     pub(crate) fn send(&self, command: Value) {
+        self.diagnostic.command(&command);
         self.host.dispatch(&command.to_string()).expect("команда");
     }
+    #[track_caller]
     pub(crate) fn close(&mut self) {
+        self.diagnostic.command(&json!({"command":"shutdown"}));
         self.host.shutdown();
         self.wait(|value| value["closed"] == true);
         assert!(self.host.wait_closed(Duration::from_secs(2)));
+        self.diagnostic.closed();
     }
 }
 
@@ -1823,4 +1837,37 @@ fn явный_системный_режим_не_подменяется_local_so
     app.send(json!({"command":"set_connection_mode", "mode":"local"}));
     app.wait(|v| v["connection_mode"] == "local");
     app.close();
+}
+
+#[test]
+fn closed_snapshot_has_released_last_database_handle() {
+    let directory = Directory::new();
+    let (entered, receiver) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let resume = Mutex::new(resume);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        if serde_json::from_str::<Value>(snapshot).unwrap()["closed"] == true {
+            entered.send(()).unwrap();
+            resume
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap();
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.host.shutdown();
+    receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    let wal = directory.0.join("subscriptions.sqlite-wal");
+    let remaining_wal = fs::symlink_metadata(&wal).ok();
+    release.send(()).unwrap();
+    assert!(app.host.wait_closed(Duration::from_secs(2)));
+    assert!(
+        remaining_wal.is_none(),
+        "closed опубликован до закрытия последнего DB handle: wal ino/nlink/mode={:?}",
+        remaining_wal.map(|m| {
+            use std::os::unix::fs::MetadataExt;
+            (m.ino(), m.nlink(), m.mode())
+        })
+    );
 }

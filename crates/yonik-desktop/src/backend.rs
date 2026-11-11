@@ -3190,7 +3190,9 @@ async fn run(
         true
     };
     actor.selected = None;
-    let closed = actor.service.close().await.is_ok() && provider_closed && network_closed;
+    let service_closed = actor.service.close().await.is_ok();
+    let routing_closed = actor.routing_repository.close().await.is_ok();
+    let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
