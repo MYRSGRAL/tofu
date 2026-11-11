@@ -119,7 +119,7 @@ class Bus:
             self.lib.dbus_message_unref(message)
 
 
-def request(engine: str, app: bool) -> dict:
+def request(engine: str, app: bool, kill_switch: bool = True) -> dict:
     options = {
         name: None
         for name in [
@@ -172,7 +172,7 @@ def request(engine: str, app: bool) -> dict:
         "version": 1,
         "mode": "system_profile_policy",
         "engine": engine,
-        "kill_switch": True,
+        "kill_switch": kill_switch,
         "server": server,
         "policy": {
             "version": 1,
@@ -186,7 +186,9 @@ def request(engine: str, app: bool) -> dict:
     }
 
 
-def client(engine: str, app: bool) -> None:
+def client(
+    engine: str, app: bool, kill_switch: bool = True, ending: str = "stop"
+) -> None:
     assert os.getuid() == pwd.getpwnam("yonik-vm-allowed").pw_uid
     bus = Bus()
     stage = "initial_state"
@@ -196,7 +198,7 @@ def client(engine: str, app: bool) -> None:
             "initial State != no_managed_policy"
         )
         stage = "prepare"
-        prepared = bus.call("Prepare", request(engine, app))
+        prepared = bus.call("Prepare", request(engine, app, kill_switch))
         if app:
             assert prepared.get("error") == "unsupported", "Expected typed Unsupported"
         else:
@@ -254,16 +256,46 @@ def client(engine: str, app: bool) -> None:
                             "result": "PASS",
                         }
                     )
-            stage = "stop"
-            assert bus.call("Stop", {"version": 1}).get("state") in {
-                "recovery_required",
-                "verified_rules",
-                "no_managed_policy",
-            }
+            if ending != "stop":
+                stage = "ending_" + ending
+                emit({"event": "ending", "ending": ending})
+                assert sys.stdin.readline().strip() == "READY", (
+                    "Crash/recovery inspection failed"
+                )
+                # Только read-only State может быть Busy во время safety sweep.
+                # Unknown/неожиданный state не скрываются повторением.
+                expected = "recovery_required" if kill_switch else "no_managed_policy"
+                for attempt in range(20):
+                    observed = bus.call("State", {"version": 1})
+                    if observed.get("error") != "busy":
+                        assert observed.get("state") == expected, (
+                            "Recovery State mismatch"
+                        )
+                        break
+                    assert attempt < 19, "Recovery State Busy deadline"
+                    time.sleep(0.25)
+            else:
+                stage = "stop"
+                assert bus.call("Stop", {"version": 1}).get("state") == (
+                    "recovery_required" if kill_switch else "no_managed_policy"
+                )
+            stage = "kill_switch_witness"
+            try:
+                with socket.create_connection(("10.203.0.2", 24443), timeout=0.7):
+                    reachable = True
+            except OSError:
+                reachable = False
+            assert reachable == (not kill_switch), (
+                "Direct reachability violates kill-switch disposition"
+            )
+            emit({"event": "endpoint_after_ending", "reachable": reachable})
             stage = "unlock"
             assert (
                 bus.call("Unlock", {"version": 1}).get("state") == "no_managed_policy"
             )
+            stage = "endpoint_restored"
+            with socket.create_connection(("10.203.0.2", 24443), timeout=2):
+                emit({"event": "endpoint_after_unlock", "reachable": True})
         stage = "final_state"
         assert bus.call("State", {"version": 1}).get("state") == "no_managed_policy"
         emit({"event": "result", "result": "PASS", "engine": engine, "app": app})
@@ -359,6 +391,7 @@ def inspect_worker(engine: str) -> dict:
                         metadata = os.fstat(config.fileno())
                         seals = fcntl.fcntl(config, fcntl.F_GET_SEALS)
                         assert stat.S_ISREG(metadata.st_mode) and seals & 15 == 15
+                        assert stat.S_IMODE(metadata.st_mode) == 0o600
                         if engine == "sing-box":
                             assert (
                                 metadata.st_uid == pwd.getpwnam("yonik-worker").pw_uid
@@ -382,9 +415,85 @@ def inspect_worker(engine: str) -> dict:
     raise RuntimeError("Native worker readiness/identity deadline")
 
 
-def coordinator(engine: str, app: bool) -> None:
+def helper_identity() -> dict:
+    values = subprocess.check_output(
+        [
+            "systemctl",
+            "show",
+            "yonik-helper.service",
+            "-p",
+            "MainPID",
+            "-p",
+            "ActiveState",
+            "-p",
+            "NRestarts",
+        ],
+        text=True,
+    )
+    data = dict(line.split("=", 1) for line in values.splitlines())
+    pid = int(data["MainPID"])
+    assert pid > 1 and data["ActiveState"] == "active"
+    with Path(f"/proc/{pid}/exe").open("rb") as binary:
+        digest = hashlib.file_digest(binary, "sha256").hexdigest()
+    expected = json.loads((BASE / "manifest-before.json").read_text())["files"][
+        "yonik-helper"
+    ]
+    assert digest == expected
+    return {"pid": pid, "exe_sha256": digest, "restarts": int(data["NRestarts"])}
+
+
+def end_and_observe(ending: str) -> dict:
+    before = helper_identity()
+    assert ending in {"restart", "worker_exit"}
+    unit = "yonik-helper.service" if ending == "restart" else "yonik-worker.service"
+    subprocess.run(
+        ["systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", unit], check=True
+    )
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            after = helper_identity()
+            valid = (
+                after["pid"] != before["pid"]
+                if ending == "restart"
+                else after["pid"] == before["pid"]
+            )
+            journal = json.loads(Path("/run/yonik/network/journal.json").read_text())
+            empty = all(value in {"0", "absent"} for value in groups().values())
+            if (
+                valid
+                and empty
+                and not journal["records"]
+                and journal.get("session_recovery") is None
+            ):
+                if ending == "restart":
+                    assert after["restarts"] > before["restarts"]
+                else:
+                    assert after["restarts"] == before["restarts"]
+                return {
+                    "ending": ending,
+                    "signal_unit": unit,
+                    "helper_before": before,
+                    "helper_after": after,
+                    "automatic_worker_and_network_cleanup": True,
+                }
+        except (AssertionError, FileNotFoundError, KeyError, json.JSONDecodeError):
+            pass
+        time.sleep(0.1)
+    raise TimeoutError("Automatic recovery deadline; no Stop/Unlock recovery retry")
+
+
+def coordinator(
+    engine: str,
+    app: bool,
+    kill_switch: bool = True,
+    ending: str = "stop",
+    matrix: bool = False,
+) -> None:
     assert os.geteuid() == 0
     label = engine + ("-app-denial" if app else "-positive")
+    if matrix:
+        label = f"{engine}-{str(kill_switch).lower()}-{ending}"
     output = BASE / "results"
     output.mkdir(exist_ok=True)
     sampler = Sampler(output / (label + "-transitions.jsonl"))
@@ -400,6 +509,8 @@ def coordinator(engine: str, app: bool) -> None:
             "client",
             engine,
             "app" if app else "positive",
+            "true" if kill_switch else "false",
+            ending,
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -431,6 +542,13 @@ def coordinator(engine: str, app: bool) -> None:
                     events.append(event)
                     log.write(line + "\n")
                     log.flush()
+                    if event.get("event") == "ending":
+                        data = end_and_observe(ending)
+                        (output / (label + "-ending.json")).write_text(
+                            json.dumps(data, indent=2)
+                        )
+                        child.stdin.write(b"READY\n")
+                        child.stdin.flush()
                     if event.get("event") == "inspect_worker":
                         data = inspect_worker(engine)
                         (output / (label + "-worker.json")).write_text(
@@ -476,11 +594,45 @@ def coordinator(engine: str, app: bool) -> None:
             child.wait(timeout=5)
         sampler.stop.set()
         sampler.thread.join(timeout=2)
+    if app:
+        return
+    samples = [json.loads(line) for line in sampler.path.read_text().splitlines()]
+    live = next(
+        index for index, sample in enumerate(samples) if "1" in sample["after"].values()
+    )
+    drops = []
+    for previous, current in zip(samples[live:], samples[live + 1 :]):
+        if (
+            previous["records"] is not None
+            and current["records"] is not None
+            and current["records"] < previous["records"]
+        ):
+            assert all(
+                value in {"0", "absent"}
+                for side in ["before", "after"]
+                for value in current[side].values()
+            ), "Network cleanup observed before empty worker cgroups"
+            drops.append(current)
+    assert drops and samples[-1]["records"] == 0
+    (output / (label + "-cleanup.json")).write_text(
+        json.dumps({"worker_first_drops": drops, "final_cgroups": groups()}, indent=2)
+    )
 
 
 if __name__ == "__main__":
     guard()
     if sys.argv[1] == "client":
-        client(sys.argv[2], sys.argv[3] == "app")
+        client(
+            sys.argv[2],
+            sys.argv[3] == "app",
+            len(sys.argv) < 5 or sys.argv[4] == "true",
+            sys.argv[5] if len(sys.argv) > 5 else "stop",
+        )
     else:
-        coordinator(sys.argv[2], sys.argv[3] == "app")
+        coordinator(
+            sys.argv[2],
+            sys.argv[3] == "app",
+            len(sys.argv) < 5 or sys.argv[4] == "true",
+            sys.argv[5] if len(sys.argv) > 5 else "stop",
+            sys.argv[1] == "matrix",
+        )
