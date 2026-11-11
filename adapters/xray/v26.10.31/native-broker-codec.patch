@@ -2409,10 +2409,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
-index 0000000..7a70fa5
+index 0000000..0388fd5
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,104 @@
 +package nativehooks
 +
 +import (
@@ -2490,6 +2490,12 @@ index 0000000..7a70fa5
 +		if mode == "unknown" {
 +			reply.Status = Unknown
 +		}
++		if mode == "unavailable" {
++			reply.Status = Unavailable
++		}
++		if mode == "stale" {
++			reply.Expires = reply.Observed.Add(-time.Millisecond)
++		}
 +		if mode == "epoch" {
 +			reply.Binding.Epoch++
 +		}
@@ -2503,6 +2509,9 @@ index 0000000..7a70fa5
 +		c.mu.Lock()
 +		defer c.mu.Unlock()
 +		mode = next
++		if next == "revoke" {
++			_ = s.Revoke()
++		}
 +		if next == "cancel" {
 +			cancel()
 +		}
@@ -2981,3 +2990,50 @@ index e331c43..6002655 100644
 +		Content:     session.ContentFromContext(ctx),
  	}
  }
+diff --git a/common/yonikbroker/routing_legacy_test.go b/common/yonikbroker/routing_legacy_test.go
+new file mode 100644
+index 0000000..05efa9c
+--- /dev/null
++++ b/common/yonikbroker/routing_legacy_test.go
+@@ -0,0 +1,41 @@
++package nativehooks_test
++
++import (
++	"context"
++	"github.com/golang/mock/gomock"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/session"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	fdns "github.com/xtls/xray-core/features/dns"
++	rdns "github.com/xtls/xray-core/features/routing/dns"
++	rsession "github.com/xtls/xray-core/features/routing/session"
++	"github.com/xtls/xray-core/testing/mocks"
++	"testing"
++)
++
++func TestRoutingLegacyAndMandatoryMissingAPI(t *testing.T) {
++	for _, mode := range []string{"legacy", "known", "cancel", "revoke", "unknown", "unavailable", "stale"} {
++		t.Run(mode, func(t *testing.T) {
++			ctx := context.Background()
++			if mode != "legacy" {
++				var change func(string)
++				ctx, change = hooks.ClosedDNSFixture(t)
++				change(mode)
++			}
++			client := mocks.NewDNSClient(gomock.NewController(t))
++			if mode == "legacy" {
++				client.EXPECT().LookupIP("private.test", gomock.Any()).Return([]net.IP{net.ParseIP("192.168.0.1")}, uint32(60), nil).Times(1)
++			}
++			ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: net.TCPDestination(net.DomainAddress("private.test"), 443)}})
++			route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(ctx), fdns.Client(client))
++			ips := route.GetTargetIPs()
++			if mode == "legacy" {
++				if len(ips) != 1 || !ips[0].Equal(net.ParseIP("192.168.0.1")) {
++					t.Fatalf("legacy DNS: %v", ips)
++				}
++			} else if len(ips) != 0 {
++				t.Fatalf("managed missing API: %v", ips)
++			}
++		})
++	}
++}
