@@ -51,6 +51,53 @@ fn stop_acknowledges_queued_routing_mutation_and_allows_retry() {
     assert!(saved["routing_ack"]["error"].is_null());
     app.close();
 }
+#[test]
+fn routing_apply_после_stop_получает_свой_cancel_ack() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let first_ready = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == true && first_ready.fetch_add(1, Ordering::Relaxed) == 0 {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let _ = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("deadline");
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.send(
+        json!({"command":"routing_apply", "expected_revision":0, "request_id":79,
+        "source_generation":1, "snapshot_revision":1, "selected_profile_id":1}),
+    );
+    app.send(json!({"command":"stop"}));
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["routing_ack"]["request_id"] == 79);
+    assert_eq!(cancelled["routing_ack"]["error"], "cancelled");
+    app.close();
+}
+
+#[test]
+fn routing_apply_отклоняет_чужую_ревизию_до_helper() {
+    let directory = Directory::new();
+    let mut app = Harness::with_hook(directory.config(), |_| {});
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_connection_mode", "mode":"system"}));
+    app.wait(|v| v["connection_mode"] == "system");
+    app.send(
+        json!({"command":"routing_apply", "expected_revision":99, "request_id":80,
+        "source_generation":1, "snapshot_revision":1, "selected_profile_id":1}),
+    );
+    let rejected = app.wait(|v| v["routing_ack"]["request_id"] == 80);
+    assert_eq!(rejected["routing_ack"]["error"], "routing_stale");
+    assert_eq!(rejected["can_stop"], false);
+    app.close();
+}
+
 pub(crate) struct Directory(pub(crate) PathBuf);
 impl Directory {
     pub(crate) fn new() -> Self {

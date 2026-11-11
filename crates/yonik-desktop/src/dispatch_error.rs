@@ -17,7 +17,13 @@ pub fn snapshot(current: &str, request: &str, message: &str) -> String {
         }
         if matches!(
             command["command"].as_str(),
-            Some("edit_routing" | "routing_order" | "routing_delete" | "routing_default")
+            Some(
+                "edit_routing"
+                    | "routing_order"
+                    | "routing_delete"
+                    | "routing_default"
+                    | "routing_apply"
+            )
         ) {
             snapshot.insert(
                 "routing_ack".into(),

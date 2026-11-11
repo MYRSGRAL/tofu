@@ -85,3 +85,7 @@ pub mod system_client;
 pub mod attribution;
 #[cfg(target_os = "linux")]
 pub mod event_log;
+
+#[cfg(target_os = "linux")]
+#[path = "system_client/policy.rs"]
+pub mod system_policy;

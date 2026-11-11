@@ -946,8 +946,13 @@ ApplicationWindow {
                     ActionButton { text: window.tr("Как новое", "As new"); onClicked: { editor.selectedId = 0; editor.formRevision = window.state.routing_revision; editor.saveError = "" } }
                 }
                 PlainLabel { objectName: "routingSaveError"; Layout.fillWidth: true; visible: !!editor.saveError || !!(window.routingFeedback && window.routingFeedback.error); text: window.errorText(editor.saveError || (window.routingFeedback ? window.routingFeedback.error : "")) }
-                ActionButton { text: window.tr("Применить к сети", "Apply to network"); enabled: false }
-                SmallLabel { Layout.fillWidth: true; text: window.tr("Недоступно: system_tun=false. Системный путь и атрибуция потоков ещё не подтверждены. Изменения черновика сеть не меняют.", "Unavailable: system_tun=false. System routing and flow attribution are not verified. Draft edits do not change the network.") }
+                ActionButton {
+                    objectName: "routingApplyButton"
+                    text: window.tr("Применить к сети", "Apply to network")
+                    enabled: window.state.ready && !window.state.busy && !window.routingPending && window.state.connection_mode === "system" && window.state.system_tun_available && !window.state.system_busy && !window.state.can_stop && !window.state.system_recovery_pending && !!window.state.selected_profile && window.state.source_generation !== null
+                    onClicked: window.sendRouting({command: "routing_apply", source_generation: window.state.source_generation, snapshot_revision: window.state.revision, selected_profile_id: window.state.selected_profile})
+                }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Применение требует свежего подтверждения helper. TunnelStarting и VerifiedRules не подтверждают подключение или атрибуцию приложений.", "Apply requires fresh helper capabilities. TunnelStarting and VerifiedRules do not confirm connectivity or application attribution.") }
             }
         }
     }
