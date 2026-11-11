@@ -1,6 +1,7 @@
 """Мутации доверенного набора notices."""
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -56,3 +57,58 @@ class NoticesTests(unittest.TestCase):
                         ).hexdigest(),
                         digest,
                     )
+
+    def test_reused_output_packages_only_current_notices(self) -> None:
+        root = Path(__file__).parents[2]
+        entries, texts = notices.collect(root)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "notices"
+            notices.produce(root, output)
+            current = entries[:1]
+            keep = {digest for entry in current for digest in entry["hashes"]}
+            removed = set(texts) - keep
+            self.assertTrue(removed)
+            with patch.object(
+                notices,
+                "collect",
+                return_value=(current, {key: texts[key] for key in keep}),
+            ):
+                notices.produce(root, output)
+            # Исполняем настоящий package(), заменяя только внешние инструменты.
+            source = output.parent / "src"
+            source.mkdir()
+            (source / "yonik-notices").symlink_to(output, target_is_directory=True)
+            recipe = root / "packaging/arch/PKGBUILD"
+            revision = "eec7a56b6b03f2b022a87682f9097ce78b61fa0b"
+            (source / ("yonik-" + revision)).symlink_to(root, target_is_directory=True)
+            package = output.parent / "pkg"
+            (package / "usr/share/applications").mkdir(parents=True)
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-eu",
+                    "-c",
+                    """
+source "$1"
+srcdir="$2"; pkgdir="$3"; CARGO_TARGET_DIR="$2/target"
+python3() { :; }
+install() { if [[ "$1" == -m644 ]]; then printf '%s\\n' "${2##*/}"; fi; }
+package
+""",
+                    "fixture",
+                    str(recipe),
+                    str(source),
+                    str(package),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5,
+            )
+            self.assertFalse(removed & set(result.stdout.splitlines()))
+            names = (output / "payload.list").read_text().splitlines()
+            self.assertTrue(keep <= set(names))
+            self.assertFalse(removed & set(names))
+            self.assertTrue(all((output / name).is_file() for name in names))
+            self.assertEqual(len(names), len(set(names)))
+            self.assertFalse(any(name.endswith((".qml", ".qrc")) for name in names))

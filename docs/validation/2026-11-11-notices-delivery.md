@@ -42,3 +42,20 @@ NoticesView имеет явные пары RU/EN для отдельного ALL
 Сборочный каталог после проверки очистить, лог сохранить вне TTL.
 
 Pinned Rust 1.85.1 Clippy `--offline --locked -p yonik-desktop --all-targets --features gui -- -D warnings`: PASS, 5m08s. Использован общий two-slot wrapper, root flock, jobs=1 и собственный внешний target. C++/Qt выдал предупреждения SFINAE, проверка завершилась exit 0. Manifest был записан после старта; pre-build provenance не заявляется.
+
+## Исправление package payload после review
+
+Повторная генерация в прежний build-каталог сохраняет старые файлы. `package()`
+теперь читает явный текущий `payload.list`, сформированный из проверенного набора,
+и не устанавливает остальные файлы каталога. Регрессия выполняет настоящий
+`package()` со stub внешних инструментов: после удаления записей из inventory
+прежние тексты не попадают в устанавливаемый список. RED → GREEN подтверждён.
+Проверены 5 producer-тестов, 6 package-тестов, Ruff и Bash syntax.
+
+Новый delta-manifest находится в
+`/home/myrs/projects/yonik/local/validation/pr111-payload/manifest.json`.
+Он связывает текущие исходники и логи этих проверок. Исходный build manifest
+`local/evidence/notices/manifest.json` не подтверждает exact-head версии producer
+и PKGBUILD: их хеши отличались уже на первом review. Старое evidence сохранено,
+новая сборка ELF и повтор Qt этим исправлением не заявляются. Рецепт остаётся
+planned до обновления source archive и объявления Python build prerequisite.

@@ -95,6 +95,25 @@ def produce(root: Path, output: Path) -> Path:
         "LICENSE": "LICENSE",
     }.items():
         (output / name).write_bytes(read_bounded(root / source, root))
+    # Повторная генерация может оставить старые qrc-файлы в build-каталоге.
+    # В пакет включаем только текущий набор, а не содержимое этого каталога.
+    (output / "payload.list").write_text(
+        "\n".join(
+            sorted(
+                [
+                    "index.json",
+                    "inventory.json",
+                    "go-sources.json",
+                    "SCOPE.md",
+                    "SOURCE-OBLIGATIONS.md",
+                    "LICENSE",
+                    *texts,
+                ]
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     paths = sorted(
         output / name
         for name in [
