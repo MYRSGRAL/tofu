@@ -42,7 +42,8 @@ Evidence вне TTL: `/home/myrs/projects/yonik/local/validation/credentiallife/
 
 Rust 1.85.1 --locked: example build, scoped clippy -D warnings, fmt check;
 private-bus credentials_bus: 4 PASS. Python: py_compile PASS.
-Ruff отсутствует в окружении; host-install не выполнялся.
+Ruff 0.16.6 из существующего uv cache: format/check PASS; host-install не выполнялся.
+CI использует Ruff 0.17.4; равенство версий не заявляется.
 Тяжёлые Rust-команды используют with-rust-slot и один transient target.
 Production credentials/backend не изменялись.
 
