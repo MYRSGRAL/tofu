@@ -64,6 +64,9 @@ fn preserves_ip_underscore_idna_and_opaque_native() {
     );
     let report = import_bytes(opaque.clone().into_bytes()).unwrap();
     assert!(report.servers.is_empty());
-    assert!(report.issues.is_empty());
+    assert_eq!(
+        report.issues[0].code,
+        yonik_import::IssueCode::UnsupportedProtocol
+    );
     assert_eq!(report.native_json.unwrap().expose(), opaque);
 }
