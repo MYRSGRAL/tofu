@@ -41,6 +41,7 @@ ApplicationWindow {
     property int page: 0
     property int settingsOrigin: 0
     property string settingsSection: ""
+    property double maintenanceRequestSequence: 0
     property bool reducedMotion: false
     property var desiredProfileId: null
     property var desiredSourceId: null
@@ -141,6 +142,7 @@ ApplicationWindow {
             if (next && typeof next.error === "string" && !Array.isArray(next.sources) && !Array.isArray(next.profiles)) {
                 if (commandContext === "routing") completeRouting({request_id: routingRequestId, error: next.error, saved_id: null})
                 const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
+                if (next.maintenance_ack && typeof next.maintenance_ack === "object") update.maintenance_ack = next.maintenance_ack
                 if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
                 state = Object.assign({}, state, update)
                 parseError = ""
@@ -761,17 +763,24 @@ ApplicationWindow {
                 SectionTitle { text: window.tr("Настройки", "Settings") }
                 PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_warning; text: window.tr("Файл настроек повреждён или имеет неизвестный формат. Применены значения по умолчанию; исходник preferences.json сохранён, запись заблокирована.", "Settings are damaged or unsupported. Defaults are active; the original preferences.json is preserved and writes are blocked.") }
                 PlainLabel { objectName: "preferencesDurabilityWarning"; Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_durability_warning; color: "#e6bc83"; text: window.tr("Настройки применены, файл обновлён. Не удалось подтвердить синхронизацию каталога: сохранность при сбое питания неизвестна. Откат не выполнен.", "Settings were applied and the file was updated. Directory synchronization could not be confirmed: durability after power loss is unknown. No rollback was performed.") }
-                ColumnLayout {
+                ScrollView {
+                    id: settingsIndexScroll
+                    objectName: "settingsIndexScroll"
                     visible: window.settingsSection === ""
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    spacing: 10
-                    SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
-                    SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
-                    SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
-                    SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
-                    SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
-                    SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
-                    Item { Layout.fillHeight: true }
+                    clip: true
+                    ColumnLayout {
+                        width: settingsIndexScroll.availableWidth
+                        spacing: 10
+                        SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
+                        SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
+                        SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
+                        SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
+                        SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
+                        SettingsRow { objectName: "settingsScheduleButton"; text: "Обновления подписок"; description: "Интервал и фоновое окно"; symbol: "↻"; onClicked: window.settingsSection = "schedule" }
+                        SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
+                        SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
+                    }
                 }
                 Loader {
                     id: settingsPanel
@@ -780,12 +789,26 @@ ApplicationWindow {
                     visible: window.settingsSection !== ""
                     active: window.page === 2 && window.settingsSection !== ""
                     sourceComponent: window.settingsSection === "routing" ? routingPanel : window.settingsSection === "diagnostics" ? diagnosticsPanel
+                        : window.settingsSection === "maintenance" ? maintenancePanel
+                        : window.settingsSection === "schedule" ? schedulePanel
                         : window.settingsSection === "appearance" ? appearancePanel
                         : window.settingsSection === "about" ? aboutPanel : connectionPanel
                     onLoaded: if (item && !window.reducedMotion) panelEntrance.restart()
                     NumberAnimation { id: panelEntrance; target: settingsPanel; property: "opacity"; from: 0.6; to: 1; duration: 160 }
                 }
             }
+        }
+    }
+    Component {
+        id: maintenancePanel
+        MaintenanceView {
+            nextRequestId: function() { window.maintenanceRequestSequence += 1; return window.maintenanceRequestSequence }
+            sendCommand: function(command) { window.send(command) }
+            errorText: function(key) { return window.errorText(key) }
+            english: window.language === "en"
+            available: window.state.maintenance_available === true && window.editable
+            revision: window.state.revision || 0
+            response: window.state.maintenance_ack || null
         }
     }
     Component {
@@ -983,6 +1006,32 @@ ApplicationWindow {
         }
     }
     Component {
+        id: schedulePanel
+        ColumnLayout {
+            spacing: 18
+            PlainLabel { text: "Обновления подписок"; font.pixelSize: 19; font.weight: Font.DemiBold }
+            PlainLabel { text: "Интервал в часах (не менее 24)" }
+            SpinBox {
+                id: scheduleHours
+                objectName: "subscriptionInterval"
+                from: 24; to: 1193046
+                value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
+                editable: true
+                onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
+                Accessible.name: "Интервал обновлений в часах"
+            }
+            CheckBox {
+                objectName: "subscriptionBackground"
+                text: "Разрешить обновления в фоне"
+                checked: window.state.subscription_background === true
+                onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
+            }
+            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения." }
+            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
+            Item { Layout.fillHeight: true }
+        }
+    }
+    Component {
         id: appearancePanel
         ColumnLayout {
             spacing: 18
@@ -998,26 +1047,31 @@ ApplicationWindow {
     }
     Component {
         id: aboutPanel
-        ColumnLayout {
-            spacing: 18
-            SectionTitle { text: "yonik" }
-            SmallLabel { text: window.tr("Открытый исходный код", "Open source") }
-            Rectangle {
-                Layout.fillWidth: true; implicitHeight: buildDetails.implicitHeight + 32
-                color: window.surface; radius: 16
-                ColumnLayout {
-                    id: buildDetails
-                    anchors.fill: parent; anchors.margins: 16; spacing: 8
-                    SmallLabel { text: window.tr("СБОРКА", "BUILD"); font.pixelSize: 11; font.letterSpacing: 2 }
-                    PlainLabel { objectName: "buildIdLabel"; Layout.fillWidth: true; text: window.state.build_id || window.tr("Локальная сборка", "Local build"); font.pixelSize: 13; wrapMode: Text.WrapAnywhere }
+        PanelScroll {
+            id: aboutScroll
+            ColumnLayout {
+                width: aboutScroll.availableWidth
+                spacing: 18
+                SectionTitle { text: "yonik" }
+                SmallLabel { text: window.tr("Открытый исходный код", "Open source") }
+                Rectangle {
+                    Layout.fillWidth: true; implicitHeight: buildDetails.implicitHeight + 32
+                    color: window.surface; radius: 16
+                    ColumnLayout {
+                        id: buildDetails
+                        anchors.fill: parent; anchors.margins: 16; spacing: 8
+                        SmallLabel { text: window.tr("СБОРКА", "BUILD"); font.pixelSize: 11; font.letterSpacing: 2 }
+                        PlainLabel { objectName: "buildIdLabel"; Layout.fillWidth: true; text: window.state.build_id || window.tr("Локальная сборка", "Local build"); font.pixelSize: 13; wrapMode: Text.WrapAnywhere }
+                    }
                 }
+                RowLayout {
+                    PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
+                    HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея окно остаётся открытым для управления.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, the window stays open for control.") }
+                }
+                NoticesView { Layout.fillWidth: true; english: window.state.language === "en" }
+                ActionButton { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
+                Item { Layout.fillHeight: true }
             }
-            RowLayout {
-                PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
-                HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея окно остаётся открытым для управления.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, the window stays open for control.") }
-            }
-            ActionButton { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
-            Item { Layout.fillHeight: true }
         }
     }
     Component {

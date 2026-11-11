@@ -32,6 +32,11 @@ build() {
 
 package() {
     cd "$srcdir/yonik-$_revision"
+    python3 tools/compile_notices.py "$srcdir/yonik-notices"
+    install -dm755 "$pkgdir/usr/share/licenses/yonik"
+    while IFS= read -r notice; do
+        install -m644 "$srcdir/yonik-notices/$notice" "$pkgdir/usr/share/licenses/yonik/"
+    done < "$srcdir/yonik-notices/payload.list"
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-desktop" "$pkgdir/usr/bin/yonik-desktop"
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-helper" "$pkgdir/usr/lib/yonik/yonik-helper"
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-worker" "$pkgdir/usr/lib/yonik/yonik-worker"
