@@ -1941,7 +1941,7 @@ fn logs_save_uses_only_accepted_page_and_never_replaces_destination() {
     app.send(
         json!({"command":"logs_save", "page_request_id":"3", "destination":path, "request_id":"4"}),
     );
-    let saved = app.wait(|v| v["logs"]["request_id"] == "4");
+    let saved = app.wait(|v| v["logs"]["request_id"] == "4" && v["logs"]["status"] != "saving");
     assert_eq!(saved["logs"]["status"], "saved");
     assert!(saved["logs"]["export"].is_null());
     let original = fs::read(&path).expect("экспорт");
@@ -1957,8 +1957,26 @@ fn logs_save_uses_only_accepted_page_and_never_replaces_destination() {
     app.send(
         json!({"command":"logs_save", "page_request_id":"5", "destination":path, "request_id":"6"}),
     );
-    let refused = app.wait(|v| v["logs"]["request_id"] == "6");
+    let refused = app.wait(|v| v["logs"]["request_id"] == "6" && v["logs"]["status"] != "saving");
     assert_eq!(refused["logs"]["status"], "refused");
     assert_eq!(fs::read(path).expect("исходный файл"), original);
+    app.close();
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn logs_trusted_control_is_not_deserializable_from_ui() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    assert!(app.host.dispatch(r#"{"command":"logs_test"}"#).is_err());
+    let (sender, receiver) = mpsc::channel();
+    app.host.test_event_log(sender).expect("Rust control");
+    assert!(
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("ответ")
+            .is_some()
+    );
     app.close();
 }

@@ -27,6 +27,8 @@ pub(crate) struct Row {
     source: &'static str,
     code: String,
     value: Option<i32>,
+    session_id: Option<String>,
+    generation: Option<String>,
 }
 impl Page {
     pub fn read(log: &EventLog, after: u64, source: Source, request_id: String) -> Self {
@@ -38,13 +40,14 @@ impl Page {
             },
             code: None,
         };
-        let Some(page) = log.read(after, filter, MAX_PAGE) else {
+        let Some(scoped) = log.read_scoped(after, filter, MAX_PAGE) else {
             return Self {
                 request_id,
                 status: "busy",
                 ..Self::default()
             };
         };
+        let page = &scoped.page;
         Self {
             request_id,
             status: if page.events.is_empty() {
@@ -58,12 +61,15 @@ impl Page {
             missed: page.missed.to_string(),
             export: Some(format!(
                 "{}scope=page partial=true after={after}\n",
-                page.export()
+                scoped.export()
             )),
             events: page
                 .events
                 .iter()
-                .map(|event| Row {
+                .zip(&scoped.contexts)
+                .map(|(event, context)| Row {
+                    session_id: context.map(|c| c.session_id.to_string()),
+                    generation: context.map(|c| c.generation.to_string()),
                     id: event.id.to_string(),
                     source: match event.source {
                         EventSource::App => "app",
@@ -105,6 +111,7 @@ mod tests {
 }
 
 /// Публикует только принятую backend-страницу; содержимое от UI не принимается.
+#[cfg(test)]
 pub(crate) fn save(page: &Page, page_id: &str, destination: &str) -> &'static str {
     if page.request_id != page_id || !matches!(page.status, "ready" | "empty") {
         return "refused";
@@ -236,5 +243,71 @@ mod save_tests {
         fs::remove_file(link).expect("cleanup");
         fs::remove_file(destination).expect("cleanup");
         fs::remove_dir(directory).expect("cleanup");
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct SaveJob {
+    pending: Option<tokio::sync::oneshot::Receiver<(String, &'static str)>>,
+}
+impl SaveJob {
+    pub fn active(&self) -> bool {
+        self.pending.is_some()
+    }
+    pub fn start(
+        &mut self,
+        page: &Page,
+        page_id: &str,
+        destination: String,
+        request_id: String,
+    ) -> &'static str {
+        if self.active() {
+            return "busy";
+        }
+        if page.request_id != page_id || !matches!(page.status, "ready" | "empty") {
+            return "refused";
+        }
+        let Some(export) = page.export.clone().filter(|s| s.len() <= 65536) else {
+            return "refused";
+        };
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.pending = Some(receiver);
+        tokio::task::spawn_blocking(move || {
+            let status = match publish(&destination, export.as_bytes()) {
+                Ok(true) => "saved",
+                Ok(false) => "saved_durability_unknown",
+                Err(_) => "refused",
+            };
+            let _ = sender.send((request_id, status));
+        });
+        "saving"
+    }
+    pub async fn complete(&mut self) -> Option<(String, &'static str)> {
+        let result = match self.pending.as_mut() {
+            Some(receiver) => receiver.await.ok(),
+            None => std::future::pending().await,
+        };
+        self.pending = None;
+        result
+    }
+}
+
+#[cfg(test)]
+mod job_tests {
+    use super::*;
+    #[tokio::test]
+    async fn only_one_job_is_accepted_and_ack_keeps_id() {
+        let page = Page::read(&EventLog::new(), 0, Source::All, "1".into());
+        let mut job = SaveJob::default();
+        assert_eq!(
+            job.start(&page, "1", "relative-path-refused".into(), "2".into()),
+            "saving"
+        );
+        assert_eq!(
+            job.start(&page, "1", "relative-path-refused".into(), "3".into()),
+            "busy"
+        );
+        assert_eq!(job.complete().await, Some(("2".into(), "refused")));
+        assert!(!job.active());
     }
 }

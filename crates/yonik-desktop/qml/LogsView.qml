@@ -4,6 +4,8 @@ import QtQuick.Layouts
 
 ColumnLayout {
     id: root
+    objectName: "logsView"
+    property string status: root.page ? root.page.status : ""
     required property var backend
     property bool english: false
     property var response: null
@@ -24,6 +26,7 @@ ColumnLayout {
     onResponseChanged: {
         if (root.visible && root.pending !== "" && root.response && root.response.request_id === root.pending) {
             if (root.saving) {
+                if (root.response.status === "saving") return
                 root.saveStatus = root.response.status
                 root.saving = false
                 root.pending = ""
@@ -73,7 +76,7 @@ ColumnLayout {
             required property var modelData
             width: ListView.view.width
             textFormat: Text.PlainText
-            text: modelData.id + " · " + (modelData.source === "app" ? root.tr("Приложение", "Application") : root.tr("Движок", "Engine")) + " · " + modelData.code + (modelData.value === null ? "" : " · " + modelData.value)
+            text: modelData.id + (modelData.session_id ? " [" + modelData.session_id + "/" + modelData.generation + "]" : "") + " · " + (modelData.source === "app" ? root.tr("Приложение", "Application") : root.tr("Движок", "Engine")) + " · " + modelData.code + (modelData.value === null ? "" : " · " + modelData.value)
         }
     }
     TextField {
