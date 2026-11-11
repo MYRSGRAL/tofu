@@ -6,6 +6,7 @@ mod batch_diagnostics;
 mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
+use crate::maintenance;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
@@ -112,6 +113,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    MaintenanceStart {
+        request_id: u64,
+        operation: maintenance::Operation,
+        source: Option<PathBuf>,
+        destination: PathBuf,
+        revision: i64,
+    },
+    MaintenanceCancel {
+        request_id: u64,
+    },
     LogsRead {
         after: String,
         source: logs::Source,
@@ -485,6 +496,29 @@ impl Drop for DesktopHost {
 fn validate(command: &Command) -> Result<()> {
     let text = |s: &str, max| s.len() <= max && !s.chars().any(char::is_control);
     let valid = match command {
+        Command::MaintenanceStart {
+            request_id,
+            operation,
+            source,
+            destination,
+            revision,
+        } => {
+            let path = |value: &Path| {
+                value.is_absolute() && value.to_str().is_some_and(|value| text(value, 4096))
+            };
+            *request_id > 0
+                && *request_id <= 9_007_199_254_740_991
+                && *revision >= 0
+                && path(destination)
+                && match (operation, source) {
+                    (maintenance::Operation::Backup, None) => true,
+                    (maintenance::Operation::Restore, Some(source)) => path(source),
+                    _ => false,
+                }
+        }
+        Command::MaintenanceCancel { request_id } => {
+            *request_id > 0 && *request_id <= 9_007_199_254_740_991
+        }
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
@@ -631,6 +665,8 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    maintenance_available: bool,
+    maintenance_ack: Option<maintenance::Ack>,
     logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
@@ -697,6 +733,8 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            maintenance_available: false,
+            maintenance_ack: None,
             logs: logs::Page::default(),
             routing_diagnostics: crate::editor::Draft::default().diagnostics(),
             routing_explanation: serde_json::Value::Null,
@@ -1183,6 +1221,43 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::MaintenanceStart {
+                request_id,
+                operation,
+                source,
+                destination,
+                revision,
+            } => {
+                // До исправления P1 в backup GC admission остаётся закрытым.
+                let request = maintenance::Request {
+                    request_id,
+                    operation,
+                    source,
+                    destination,
+                    revision,
+                };
+                let error = if request.operation == maintenance::Operation::Backup
+                    && request.source.is_some()
+                {
+                    "invalid_input"
+                } else {
+                    "busy"
+                };
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some(error),
+                });
+                Ok(())
+            }
+            Command::MaintenanceCancel { request_id } => {
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some("busy"),
+                });
+                Ok(())
+            }
             Command::LogsRead {
                 after,
                 source,
@@ -3659,3 +3734,7 @@ mod system_recovery_tests {
         assert!(!snapshot.system_recovery_pending);
     }
 }
+
+#[cfg(test)]
+#[path = "maintenance_command_tests.rs"]
+mod maintenance_command_tests;

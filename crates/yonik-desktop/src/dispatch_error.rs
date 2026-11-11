@@ -6,6 +6,17 @@ pub fn snapshot(current: &str, request: &str, message: &str) -> String {
     if let Ok(command) = serde_json::from_str::<Value>(request) {
         if matches!(
             command["command"].as_str(),
+            Some("maintenance_start" | "maintenance_cancel")
+        ) {
+            if let Some(request_id) = command["request_id"].as_u64() {
+                snapshot.insert(
+                    "maintenance_ack".into(),
+                    json!({"request_id": request_id, "phase": "failed", "error": message}),
+                );
+            }
+        }
+        if matches!(
+            command["command"].as_str(),
             Some("edit_routing" | "routing_order" | "routing_delete" | "routing_default")
         ) {
             snapshot.insert(

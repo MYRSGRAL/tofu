@@ -1,6 +1,8 @@
 //! Зашифрованное хранилище подписок. Ключ предоставляется вызывающей стороной.
 
 mod backup;
+mod maintenance;
+pub use maintenance::MaintenanceAccess;
 mod batch_targets;
 #[cfg(test)]
 mod cancellation_tests;
