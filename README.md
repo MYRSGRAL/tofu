@@ -4,6 +4,8 @@
 
 [English](README.md) · [Русский](README.ru.md) · [GitHub](https://github.com/MYRSGRAL/yonik)
 
+[Linux user guide](docs/user/linux-en.md).
+
 [Implementation plan and current progress](docs/PLAN.md) (Russian).
 
 A native, open source proxy client in development. Linux first (CachyOS/Arch,

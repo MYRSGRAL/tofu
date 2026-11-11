@@ -89,3 +89,9 @@ P2 устранён: отказ очереди `logs_read` возвращает 
 Регрессия RED: вместо ID 7 оставался ID старой страницы 6; GREEN: четыре Rust-теста общего helper. Выполнены rustc/clippy-driver 1.85.1 с существующей readonly serde_json rlib, fmt и diff-check. Полный GUI для этой дельты не пересобирался. Настоящий QtTest 6.11.2 проверил busy ACK → повторный запрос → игнорирование старого ACK → готовая страница; один поведенческий тест плюс init/cleanup. Stub dispatch в этом QtTest не воспроизводит реальное переполнение очереди. CLI qmltestrunner из PATH оказался Qt5 и вернул exit1; он не считается пройденной проверкой.
 
 Evidence: `/home/myrs/projects/yonik/local/validation/pr98-logs-ack/`. Manifest записан после проверок; прежний native evidence не изменён. Actual GUI busy/loss и прочие открытые gates остаются открытыми.
+
+### Доставка ACK через неполный snapshot и объединение с main
+
+Повторная проверка обнаружила потерю startup ACK в early-return ветке `Main.qml`. Добавлен отдельный RED→GREEN: два Python/Node-теста выполняют фактическую функцию `readSnapshot()` из Main.qml, без её копии. ACK теперь сохраняется в state.logs при отсутствии каталога; обычная ошибка не создаёт страницу. Это тест функции, а не production failure GUI.
+
+При объединении с main f3c937d сохранены обе команды LogsRead/RoutingExplain, начальные diagnostics/logs, системные и журнальные regression tests. Combined Rust 1.85.1: 30 library + 36 backend + 4 dispatch tests PASS, один прежний ignored. Clippy all-targets с feature gui выполнен явным driver1.85.1; fmt, translations 230/96 и Ruff нового Python-теста прошли. GUI-типизация проверена, новый runtime GUI-бинарник не выпускался; прежние native traces не приписываются этому combined head.

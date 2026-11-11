@@ -1831,3 +1831,17 @@ fn stop_cancels_queued_logs_without_waiting_for_a_page() {
     app.wait(|v| v["logs"]["request_id"] == "2");
     app.close();
 }
+
+#[test]
+fn явный_системный_режим_не_подменяется_local_socks() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_connection_mode", "mode":"system"}));
+    let state = app.wait(|v| v["connection_mode"] == "system");
+    assert_ne!(state["status"], "Connected");
+    assert_eq!(state["system_state"], "Unknown");
+    app.send(json!({"command":"set_connection_mode", "mode":"local"}));
+    app.wait(|v| v["connection_mode"] == "local");
+    app.close();
+}
