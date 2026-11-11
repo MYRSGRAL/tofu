@@ -772,7 +772,7 @@ ApplicationWindow {
                     SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                     SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
                     SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
-                    SettingsRow { objectName: "settingsScheduleButton"; text: "Обновления подписок"; description: "Интервал и фоновое окно"; symbol: "↻"; onClicked: window.settingsSection = "schedule" }
+                    SettingsRow { objectName: "settingsScheduleButton"; text: window.tr("Обновления подписок", "Subscription updates"); description: window.tr("Интервал и фоновое окно", "Interval and background window"); symbol: "↻"; onClicked: window.settingsSection = "schedule" }
                     SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                     SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     Item { Layout.fillHeight: true }
@@ -861,24 +861,24 @@ ApplicationWindow {
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
-                SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: "Ограниченная диагностика сохранённой ревизии " + window.state.routing_revision + ". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены." }
-                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? "Отчёт устарел: черновик изменился. Требуется актуальный снимок." : "Анализ неполный: достигнут лимит или вход не поддерживается." }
+                SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: window.tr("Ограниченная диагностика сохранённой ревизии ", "Limited diagnostics for saved revision ") + window.state.routing_revision + window.tr(". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены.", ". No warnings does not prove compatibility. VPN/LAN are not configured here.") }
+                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? window.tr("Отчёт устарел: черновик изменился. Требуется актуальный снимок.", "Report is stale: the draft changed. A current snapshot is required.") : window.tr("Анализ неполный: достигнут лимит или вход не поддерживается.", "Analysis is incomplete: a limit was reached or input is unsupported.") }
                 Repeater {
                     model: window.state.routing_diagnostics ? window.state.routing_diagnostics.warnings : []
                     delegate: SmallLabel {
                         required property var modelData
                         Layout.fillWidth: true
-                        text: "#" + modelData.rule_id + " ← " + modelData.earlier + (modelData.kind === "shadowed" ? " · условия перекрыты старшим правилом" : " · возможное пересечение; существование потока не доказано")
+                        text: "#" + modelData.rule_id + " ← " + modelData.earlier + (modelData.kind === "shadowed" ? window.tr(" · условия перекрыты старшим правилом", " · conditions shadowed by an earlier rule") : window.tr(" · возможное пересечение; существование потока не доказано", " · possible overlap; existence of a flow is unproven"))
                     }
                 }
-                TextField { id: explainTarget; objectName: "routingExplainTarget"; Layout.fillWidth: true; placeholderText: "Почему такой маршрут: IP или домен (синтетический ввод)"; maximumLength: 253 }
-                ActionButton { objectName: "routingExplainButton"; text: "Объяснить сохранённый черновик"; onClicked: window.sendRouting({command: "routing_explain", target: explainTarget.text}) }
+                TextField { id: explainTarget; objectName: "routingExplainTarget"; Layout.fillWidth: true; placeholderText: window.tr("Почему такой маршрут: IP или домен (синтетический ввод)", "Explain route: IP or domain (synthetic input)"); maximumLength: 253 }
+                ActionButton { objectName: "routingExplainButton"; text: window.tr("Объяснить сохранённый черновик", "Explain saved draft"); onClicked: window.sendRouting({command: "routing_explain", target: explainTarget.text}) }
                 PlainLabel {
                     objectName: "routingExplanation"
                     Layout.fillWidth: true
                     property var explanation: window.state.routing_explanation
                     visible: !!explanation && explanation.revision === window.state.routing_revision && explanation.request_id === window.routingRequestId
-                    text: !explanation ? "" : explanation.result.status === "fixture" ? "Предварительный расчёт: " + explanation.result.action + " · " + explanation.result.origin : "Неизвестно: " + (explanation.result.reason === "application_witness_missing" ? "нет подтверждённой атрибуции приложения" : "нет подтверждённых DNS-данных") + ". Это не проверка применения."
+                    text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
                 }
                 RowLayout {
                     PlainLabel { text: window.tr("Остальной трафик", "Other traffic") }
@@ -1004,8 +1004,8 @@ ApplicationWindow {
         id: schedulePanel
         ColumnLayout {
             spacing: 18
-            PlainLabel { text: "Обновления подписок"; font.pixelSize: 19; font.weight: Font.DemiBold }
-            PlainLabel { text: "Интервал в часах (не менее 24)" }
+            PlainLabel { text: window.tr("Обновления подписок", "Subscription updates"); font.pixelSize: 19; font.weight: Font.DemiBold }
+            PlainLabel { text: window.tr("Интервал в часах (не менее 24)", "Interval in hours (at least 24)") }
             SpinBox {
                 id: scheduleHours
                 objectName: "subscriptionInterval"
@@ -1013,15 +1013,15 @@ ApplicationWindow {
                 value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
                 editable: true
                 onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
-                Accessible.name: "Интервал обновлений в часах"
+                Accessible.name: window.tr("Интервал обновлений в часах", "Update interval in hours")
             }
             CheckBox {
                 objectName: "subscriptionBackground"
-                text: "Разрешить обновления в фоне"
+                text: window.tr("Разрешить обновления в фоне", "Allow background updates")
                 checked: window.state.subscription_background === true
                 onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
             }
-            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения." }
+            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения.", "The shared background window is 60 seconds. Updates are deferred on unknown or metered networks and in power saving mode. The update report requires confirmation.") }
             PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
             Item { Layout.fillHeight: true }
         }

@@ -25,6 +25,29 @@ class TranslationTests(unittest.TestCase):
         self.assertGreater(inline, 0)
         self.assertGreater(keys, 0)
 
+    def test_p11_scoped_inventory(self) -> None:
+        source = (ROOT / checker.CATALOG).read_text()
+        self.assertGreater(checker.check_scoped_ui(source), 15)
+        for old, new in [
+            (
+                'window.tr("Обновления подписок", "Subscription updates")',
+                '"Обновления подписок"',
+            ),
+            (
+                'window.tr("Объяснить сохранённый черновик", "Explain saved draft")',
+                '"Explain saved draft"',
+            ),
+            ("id: schedulePanel", "id: renamedPanel"),
+            (
+                'text: "#" + modelData.rule_id',
+                'text: "Новая строка" + modelData.rule_id',
+            ),
+        ]:
+            with self.subTest(new=new), self.assertRaises(checker.CatalogError):
+                checker.check_scoped_ui(source.replace(old, new))
+        # Вне оговорённых границ этот gate не претендует на покрытие.
+        checker.check_scoped_ui(source + '\nLabel { text: "Вне scope" }')
+
     def test_tray_pairs(self) -> None:
         source = (ROOT / "crates/yonik-desktop/src/application.cpp").read_text()
         self.assertEqual(checker.check_cpp_source(source), 9)
@@ -104,7 +127,8 @@ class InventoryTests(unittest.TestCase):
             root = Path(directory)
             main = root / checker.CATALOG
             main.parent.mkdir(parents=True)
-            main.write_text(SOURCE, encoding="utf-8")
+            main_source = (ROOT / checker.CATALOG).read_text()
+            main.write_text(main_source, encoding="utf-8")
             cpp = root / "crates/yonik-desktop/src/application.cpp"
             cpp.parent.mkdir()
             cpp.write_text(
@@ -134,7 +158,7 @@ class InventoryTests(unittest.TestCase):
                                 with self.assertRaises(SystemExit) as raised:
                                     checker.main()
                         self.assertEqual(raised.exception.code, 1)
-                        self.assertEqual(main.read_text(encoding="utf-8"), SOURCE)
+                        self.assertEqual(main.read_text(encoding="utf-8"), main_source)
                 component.write_text('tr("Да", "Yes")', encoding="utf-8")
             with patch.object(sys, "argv", ["checker", "--root", str(root)]):
                 with contextlib.redirect_stdout(io.StringIO()):

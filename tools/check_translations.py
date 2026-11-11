@@ -193,6 +193,77 @@ def check_source(source: str, require_catalog: bool = True) -> tuple[int, int]:
     return inline, keys
 
 
+# Только существующие UI-участки P11. Это лексический gate, не JS/QML parser.
+SCOPED_UI = (
+    ('SettingsRow { objectName: "settingsScheduleButton"', "\n"),
+    (
+        '                SmallLabel { objectName: "routingDiagnosticsScope"',
+        "                RowLayout {",
+    ),
+    ("        id: schedulePanel", "        id: appearancePanel"),
+)
+# Технические objectName, enum/command IDs, разделители и цвет. Пользовательские
+# предложения вне tr запрещены на обоих языках, включая только латинские строки.
+SCOPED_TECHNICAL = frozenset(
+    {
+        "settingsScheduleButton",
+        "↻",
+        "schedule",
+        "routingDiagnosticsScope",
+        "routingDiagnosticsIncomplete",
+        "#",
+        " ← ",
+        "shadowed",
+        "routingExplainTarget",
+        "routingExplainButton",
+        "routing_explain",
+        "routingExplanation",
+        "",
+        "fixture",
+        " · ",
+        "application_witness_missing",
+        "dns_witness_missing",
+        "dns_missing",
+        "evaluation_rejected",
+        "subscriptionInterval",
+        "set_subscription_schedule",
+        "subscriptionBackground",
+        "preferences_write",
+        "#e6bc83",
+    }
+)
+
+
+def check_scoped_ui(source: str) -> int:
+    """Проверяет все литералы в трёх ограниченных contiguous участках Main."""
+    count = 0
+    for start, end in SCOPED_UI:
+        if source.count(start) != 1:
+            raise CatalogError(f"P11: граница отсутствует или неоднозначна: {start}")
+        offset = source.index(start)
+        stop = source.find(end, offset + len(start))
+        if stop < 0:
+            raise CatalogError(f"P11: конечная граница отсутствует: {end}")
+        ts = tokens(source[offset:stop])
+        index = 0
+        while index < len(ts):
+            if ts[index : index + 2] == ["tr", "("]:
+                if ts[index + 3 : index + 4] != [","] or ts[index + 5 : index + 6] != [
+                    ")"
+                ]:
+                    raise CatalogError("P11: разрешены только literal tr-пары")
+                validate_pair("P11", literal(ts[index + 2]), literal(ts[index + 4]))
+                count += 1
+                index += 6
+                continue
+            if ts[index].startswith(('"', "'")):
+                value = literal(ts[index])
+                if value not in SCOPED_TECHNICAL:
+                    raise CatalogError(f"P11: UI-литерал вне tr: {value}")
+            index += 1
+    return count
+
+
 def check_cpp_source(source: str) -> int:
     """Проверяет существующие QStringLiteral-пары tray, не пользовательские имена."""
     pattern = re.compile(
@@ -215,6 +286,7 @@ def main() -> int:
         paths = qml_inventory(args.root)
         if args.root / CATALOG not in paths:
             raise CatalogError("Основной каталог отсутствует в inventory")
+        check_scoped_ui(read_source(args.root / CATALOG))
         inline = keys = 0
         for path in paths:
             try:
