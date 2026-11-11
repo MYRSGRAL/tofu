@@ -1485,9 +1485,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
+index 0000000..660548c
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,95 @@
 +package nativehooks
 +
 +import (
@@ -1520,6 +1521,15 @@ new file mode 100644
 +// RoutingEntry проверяет исходный tuple до forced tag, PickRoute и default outbound.
 +// Отсутствие trusted handoff всегда закрывает routing.
 +func RoutingEntry(ctx context.Context) error {
++	return guardEntry(ctx, BeforeRouting)
++}
++
++// BeforeSocketDial получает новый proof исходного flow после DNS и ожиданий.
++func BeforeSocketDial(ctx context.Context) error {
++	return guardEntry(ctx, BeforeDial)
++}
++
++func guardEntry(ctx context.Context, stage Stage) error {
 +	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
 +	if !ok || c == nil {
 +		return ErrDenied
@@ -1530,7 +1540,7 @@ new file mode 100644
 +		return ErrDenied
 +	}
 +	if !c.required {
-+		return c.session.Guard(time.Now(), BeforeRouting, false, Flow{}, Evidence{})
++		return c.session.Guard(time.Now(), stage, false, Flow{}, Evidence{})
 +	}
 +	lookup := c.lookup
 +	if lookup == nil {
@@ -1542,7 +1552,7 @@ new file mode 100644
 +		_ = c.session.Revoke()
 +		return ErrDenied
 +	}
-+	return c.session.Guard(time.Now(), BeforeRouting, true, c.flow, proof)
++	return c.session.Guard(time.Now(), stage, true, c.flow, proof)
 +}
 +
 +// lookupAuthenticated не принимает proof от inbound/config: только authenticated wire reply.
@@ -2387,9 +2397,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
+index 0000000..6eb169f
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,61 @@
 +package nativehooks
 +
 +import (
@@ -2411,6 +2422,46 @@ new file mode 100644
 +		}
 +	}
 +}
++
++// ClosedDialFixture доступен только тестовому бинарнику, production issuer не открывает.
++func ClosedDialFixture(t *testing.T, mode string, protocol uint8) (context.Context, *int) {
++	t.Helper()
++	s, p, _ := fixture(t)
++	p.Flow.Protocol = protocol
++	calls := new(int)
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(cancel)
++	t.Cleanup(func() { _ = s.Revoke() })
++	c := &routingConsumer{session: s, required: true, flow: p.Flow}
++	c.lookup = func(context.Context, Flow) (Evidence, error) {
++		*calls++
++		p.Observed = time.Now()
++		p.Expires = p.Observed.Add(20 * time.Millisecond)
++		if *calls > 1 {
++			switch mode {
++			case "unknown":
++				p.Status = Unknown
++			case "unavailable":
++				p.Status = Unavailable
++			case "stale":
++				p.Expires = p.Observed.Add(-time.Millisecond)
++			case "cancel":
++				cancel()
++			case "revoke":
++				_ = s.Revoke()
++			}
++		}
++		return p, nil
++	}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if mode == "nohandoff" {
++		return context.Background(), calls
++	}
++	return ctx, calls
++}
 diff --git a/proxy/tun/worker_other.go b/proxy/tun/worker_other.go
 new file mode 100644
 --- /dev/null
@@ -2423,3 +2474,151 @@ new file mode 100644
 +import "context"
 +
 +func newWorkerTun(_ context.Context, options *Config) (Tun, error) { return NewTun(options) }
+diff --git a/common/yonikbroker/dial_callsite_test.go b/common/yonikbroker/dial_callsite_test.go
+new file mode 100644
+index 0000000..ef571bc
+--- /dev/null
++++ b/common/yonikbroker/dial_callsite_test.go
+@@ -0,0 +1,63 @@
++package nativehooks_test
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/xtls/xray-core/common/net"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/transport/internet"
++)
++
++type countingDialer struct{ calls int }
++
++func (d *countingDialer) Dial(context.Context, net.Address, net.Destination, *internet.SocketConfig) (net.Conn, error) {
++	d.calls++
++	return nil, errors.New("fixture dial")
++}
++func (*countingDialer) DestIpAddress() net.IP { return nil }
++
++func TestActualSystemDialGuard(t *testing.T) {
++	for _, network := range []net.Network{net.Network_TCP, net.Network_UDP} {
++		for _, mode := range []string{"unknown", "unavailable", "stale", "cancel", "revoke", "nohandoff", "known"} {
++			t.Run(network.String()+"/"+mode, func(t *testing.T) {
++				ctx, lookups := hooks.ClosedDialFixture(t, mode, map[net.Network]uint8{net.Network_TCP: 6, net.Network_UDP: 17}[network])
++				d := new(countingDialer)
++				internet.UseAlternativeSystemDialer(d)
++				defer internet.UseAlternativeSystemDialer(nil)
++				dest := net.Destination{Network: network, Address: net.LocalHostIP, Port: 443}
++				for _, opt := range []*internet.SocketConfig{nil, {}} {
++					_, _ = internet.DialSystem(ctx, dest, opt)
++				}
++				want := 0
++				if mode == "known" {
++					want = 2
++					if *lookups != 3 {
++						t.Fatalf("нет fresh lookup: %d", *lookups)
++					}
++				}
++				if d.calls != want {
++					t.Fatalf("dialcounter=%d, ожидалось %d", d.calls, want)
++				}
++			})
++		}
++	}
++}
++
++func TestActualLoopbackSocket(t *testing.T) {
++	listener, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	for _, network := range []net.Network{net.Network_TCP, net.Network_UDP} {
++		ctx, _ := hooks.ClosedDialFixture(t, "known", map[net.Network]uint8{net.Network_TCP: 6, net.Network_UDP: 17}[network])
++		addr := listener.Addr().(*net.TCPAddr)
++		conn, err := internet.DialSystem(ctx, net.Destination{Network: network, Address: net.LocalHostIP, Port: net.Port(addr.Port)}, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++		conn.Close()
++	}
++}
+diff --git a/transport/internet/dialer.go b/transport/internet/dialer.go
+index 6d7b905..3ec4c02 100644
+--- a/transport/internet/dialer.go
++++ b/transport/internet/dialer.go
+@@ -240,7 +240,7 @@ func DialSystem(ctx context.Context, dest net.Destination, sockopt *SocketConfig
+ 		}
+ 	}
+ 	if sockopt == nil {
+-		return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++		return guardedSystemDial(ctx, src, dest, sockopt)
+ 	}
+ 
+ 	if newDest, err := checkAddressPortStrategy(ctx, dest, sockopt); err == nil && newDest != nil {
+@@ -278,7 +278,7 @@ func DialSystem(ctx context.Context, dest net.Destination, sockopt *SocketConfig
+ 		return redirect(ctx, dest, sockopt.DialerProxy, h), nil
+ 	}
+ 
+-	return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++	return guardedSystemDial(ctx, src, dest, sockopt)
+ }
+ 
+ func InitSystemDialer(dc dns.Client, om outbound.Manager) {
+diff --git a/transport/internet/happy_eyeballs.go b/transport/internet/happy_eyeballs.go
+index 08a8a0e..73203d6 100644
+--- a/transport/internet/happy_eyeballs.go
++++ b/transport/internet/happy_eyeballs.go
+@@ -157,7 +157,7 @@ func sortIPs(ips []net.IP, prioritizeIPv6 bool, interleave uint32) []net.IP {
+ }
+ 
+ func tcpTryDial(ctx context.Context, src net.Address, sockopt *SocketConfig, ip net.IP, port net.Port, index int, resultCh chan<- *result) {
+-	conn, err := effectiveSystemDialer.Dial(ctx, src, net.Destination{Address: net.IPAddress(ip), Network: net.Network_TCP, Port: port}, sockopt)
++	conn, err := guardedSystemDial(ctx, src, net.Destination{Address: net.IPAddress(ip), Network: net.Network_TCP, Port: port}, sockopt)
+ 	select {
+ 	case <-ctx.Done():
+ 		if conn != nil {
+diff --git a/transport/internet/system_dialer.go b/transport/internet/system_dialer.go
+index f881a20..c9f48c6 100644
+--- a/transport/internet/system_dialer.go
++++ b/transport/internet/system_dialer.go
+@@ -10,6 +10,7 @@ import (
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"github.com/xtls/xray-core/features/dns"
+ 	"github.com/xtls/xray-core/features/outbound"
+ )
+@@ -93,6 +94,9 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
+ 				return nil
+ 			}
+ 		}
++		if err := hooks.BeforeSocketDial(ctx); err != nil {
++			return nil, err
++		}
+ 		packetConn, err := lc.ListenPacket(ctx, srcAddr.Network(), srcAddr.String())
+ 		var bindErr *BindError
+ 		if err != nil && runtime.GOOS == "windows" && go_errors.As(err, &bindErr) {
+@@ -168,6 +172,9 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
+ 		}
+ 	}
+ 
++	if err := hooks.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
+ 	return dialer.DialContext(ctx, dest.Network.SystemString(), dest.NetAddr())
+ }
+ 
+@@ -247,3 +254,11 @@ func (c *FakePacketConn) WriteTo(p []byte, _ net.Addr) (n int, err error) {
+ func (c *FakePacketConn) LocalAddr() net.Addr {
+ 	return &net.UDPAddr{IP: []byte{0, 0, 0, 0}}
+ }
++
++// guardedSystemDial закрывает все вызовы effective dialer, включая Happy Eyeballs.
++func guardedSystemDial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
++	if err := hooks.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
++	return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++}

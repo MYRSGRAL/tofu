@@ -19,3 +19,23 @@ Production issuer/relay и установка consumer в контекст по�
 добавленный `routing_entry_guard_connected=true` отмечает только этот guard.
 Pins, capabilities и wire ABI не изменены. После DNS, dial, TUN и sing-box
 остаются отдельными обязательными этапами.
+
+## Guard перед системным dial
+
+`DialSystem` (оба вызова) и каждый TCP Happy Eyeballs attempt используют
+`guardedSystemDial`: новый authenticated lookup исходного closed flow и
+`BeforeDial` непосредственно перед effective dialer. Default dialer повторяет
+проверку перед `DialContext` и UDP `ListenPacket`, после подготовки сокета.
+Контекст остаётся закрытым; routing proof не кэшируется для dial.
+
+`TestActualSystemDialGuard` вызывает настоящий `DialSystem`, заменяя только
+системный dialer счётчиком. После успешного routing fixture меняет ответ на
+Unknown/Unavailable/stale/cancel/revoke: оба варианта sockopt оставляют счётчик
+нулевым, как и отсутствие handoff. Known даёт два dial и два новых lookup.
+Матрица выполняется для TCP и UDP. `TestActualLoopbackSocket` дополнительно
+создаёт реальные loopback TCP и UDP сокеты через default dialer.
+
+Это доказательство общего socket dial path, не полноты DNS: contextless
+`LookupForIP`, freedom UDP resolver и DNS side effects требуют следующих задач.
+Production issuer остаётся закрытым, поэтому production runtime без handoff
+отказывает. Полная runtime цепочка и capabilities по-прежнему не заявлены.
