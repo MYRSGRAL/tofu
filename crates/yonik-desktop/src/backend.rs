@@ -205,6 +205,17 @@ enum Command {
         #[serde(default)]
         hwid_enabled: bool,
     },
+    SourceChange {
+        request_id: u64,
+        id: i64,
+        expected_generation: i64,
+        name: String,
+        url: String,
+        local_exception: bool,
+        route: Route,
+        #[serde(default)]
+        hwid_enabled: bool,
+    },
     RenameSource {
         id: i64,
         name: String,
@@ -300,6 +311,7 @@ impl Command {
             Self::Reload
                 | Self::AddSource { .. }
                 | Self::ImportSource { .. }
+                | Self::SourceChange { .. }
                 | Self::RenameSource { .. }
                 | Self::DeleteSource { .. }
                 | Self::CancelRefresh { .. }
@@ -564,6 +576,22 @@ fn validate(command: &Command) -> Result<()> {
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
+        Command::SourceChange {
+            request_id,
+            id,
+            expected_generation,
+            name,
+            url,
+            ..
+        } => {
+            *request_id > 0
+                && *request_id <= 9_007_199_254_740_991
+                && *id > 0
+                && *expected_generation > 0
+                && !name.trim().is_empty()
+                && text(name, 512)
+                && text(url, 8192)
+        }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
         Command::LogsSave {
             page_request_id,
@@ -699,6 +727,13 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
     })
 }
 #[derive(Serialize)]
+struct SourceChangeAck {
+    request_id: u64,
+    id: i64,
+    generation: Option<i64>,
+    error: Option<&'static str>,
+}
+#[derive(Serialize)]
 struct RoutingAck {
     request_id: u64,
     saved_id: Option<u64>,
@@ -721,6 +756,7 @@ struct Snapshot {
     logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
+    source_change_ack: Option<SourceChangeAck>,
     routing_catalog: serde_json::Value,
     routing_diagnostics: serde_json::Value,
     routing_explanation: serde_json::Value,
@@ -794,6 +830,7 @@ impl Snapshot {
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
             routing_ack: None,
+            source_change_ack: None,
             routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
             subscription_interval_seconds: 86400,
@@ -1482,6 +1519,45 @@ impl Actor {
                 self.state.pending = None;
                 self.clear_selection();
                 self.reload().await
+            }
+            Command::SourceChange {
+                request_id,
+                id,
+                expected_generation,
+                name,
+                url,
+                local_exception,
+                route,
+                hwid_enabled,
+            } => {
+                let source = SubscriptionSource::new(
+                    name,
+                    url,
+                    local_exception,
+                    match route {
+                        Route::Direct => FetchRoute::Direct,
+                        Route::Proxy => FetchRoute::Proxy,
+                    },
+                )
+                .and_then(|source| source.with_hwid(hwid_enabled))
+                .map_err(map_subscription)?;
+                let generation = self
+                    .service()
+                    .change_source(id, expected_generation, source)
+                    .await
+                    .map_err(map_subscription)?;
+                self.state.source_change_ack = Some(SourceChangeAck {
+                    request_id,
+                    id,
+                    generation: Some(generation),
+                    error: None,
+                });
+                if self.state.source_id == Some(id) {
+                    self.clear_selection();
+                    self.reload().await
+                } else {
+                    self.sources().await
+                }
             }
             Command::RenameSource { id, name } => {
                 self.service()
@@ -2643,6 +2719,14 @@ async fn session(
 
 fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'static str) {
     state.maintenance_available = false;
+    if let Command::SourceChange { request_id, id, .. } = command {
+        state.source_change_ack = Some(SourceChangeAck {
+            request_id: *request_id,
+            id: *id,
+            generation: None,
+            error: Some(error),
+        });
+    }
     if let Command::MaintenanceStart { request_id, .. }
     | Command::MaintenanceCancel { request_id } = command
     {
@@ -3229,6 +3313,10 @@ async fn run(
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Command::SourceChange { request_id, id, .. } = &envelope.command {
+                        actor.state.source_change_ack = Some(SourceChangeAck { request_id: *request_id, id: *id, generation: None, error: Some("cancelled") });
+                        actor.emit();
+                    }
                     if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
                         actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
                         actor.emit();
@@ -3339,6 +3427,37 @@ async fn run(
                     if quitting { break; }
                     continue;
                 }
+                let source_change = match &envelope.command {
+                    Command::SourceChange { request_id, id, .. } => Some((*request_id, *id)),
+                    _ => None,
+                };
+                if let Some((request_id, id)) = source_change {
+                    actor.state.source_change_ack = Some(SourceChangeAck { request_id, id, generation: None, error: Some("cancelled") });
+                    // Все сигналы до первого await; результаты отменённой работы не публикуются.
+                    // При интеграции Flight fences этот вариант входит в общий pre-edit predicate.
+                    if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
+                    if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
+                    if let Some(batch) = batch_running.as_mut() { batch.stop(); }
+                    if let Some(flight) = system_flight.as_ref().filter(|flight| flight.connecting) { flight.cancel.send_replace(true); system_stop = true; }
+                    actor.state.batch.invalidate();
+                    if scheduled.runtime.cancel(id, origin.elapsed()).is_err() {
+                        if let Some(ack) = actor.state.source_change_ack.as_mut() { ack.error = Some("storage"); }
+                        actor.state.command_error(true, "storage"); actor.emit(); continue;
+                    }
+                    // Domain-result отменённой работы не публикуется, panic worker запрещает мутацию.
+                    let mut drain_failed = false;
+                    if let Some(batch) = batch_running.take() { drain_failed |= batch.task.await.is_err(); }
+                    if let Some((_, _, task, _, _)) = refreshing.take() { drain_failed |= task.await.is_err(); actor.state.busy = false; actor.state.refresh_source_id = None; }
+                    if let Some(tcp) = tcp_running.take() { drain_failed |= tcp.task.await.is_err(); actor.state.tcp_busy = false; actor.state.tcp_name = None; }
+                    if drain_failed {
+                        if let Some(ack) = actor.state.source_change_ack.as_mut() { ack.error = Some("storage"); }
+                        actor.state.command_error(true, "storage"); actor.emit(); continue;
+                    }
+                    if actor.pending.as_ref().is_some_and(|pending| pending.identity().id == id) {
+                        if let Some(pending) = actor.pending.take() { actor.service().discard_refresh(*pending).await; }
+                        actor.state.pending = None;
+                    }
+                }
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
@@ -3351,13 +3470,14 @@ async fn run(
                     actor.state.command_error(true, "busy"); actor.emit(); continue;
                 }
                 let cancel_id = match &envelope.command {
-                    Command::DeleteSource { id } => Some(*id),
+                    Command::DeleteSource { id } | Command::SourceChange { id, .. } => Some(*id),
                     Command::SetSourceHwid { .. } | Command::Refresh => actor.state.source_id,
                     _ => None,
                 };
                 if let Some(id) = cancel_id {
                     let cancelled_review = scheduled.review == Some(id);
                     if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
+                        if source_change.is_some() { if let Some(ack) = actor.state.source_change_ack.as_mut() { ack.error = Some(error.key()); } }
                         actor.state.command_error(true, error.key()); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
@@ -3546,6 +3666,11 @@ async fn run(
                         if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         }
+                    }
+                }
+                if source_change.is_some() {
+                    if let Some(ack) = actor.state.source_change_ack.as_mut() {
+                        ack.error = outcome.as_ref().err().map(|error| error.key());
                     }
                 }
                 if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }

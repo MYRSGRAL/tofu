@@ -167,3 +167,98 @@ fn p05_host_manual_scheduled_матрица() {
         }
     }
 }
+
+#[test]
+fn p05_source_change_callback_cas_ack_и_закрытая_схема() {
+    let dir = Directory::new();
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"add_source","name":"P05","url":"https://example.invalid/old-canary","local_exception":false,"route":"proxy"}));
+    let id = app.wait(|v| v["source_id"].is_i64())["source_id"].clone();
+    let command = json!({"command":"source_change","request_id":71,"id":id,"expected_generation":1,"name":"P05","url":"https://example.invalid/new-canary","local_exception":false,"route":"proxy"});
+    app.send(command.clone());
+    let ack = app.wait(|v| v["source_change_ack"]["request_id"] == 71);
+    assert_eq!(ack["source_change_ack"]["id"], id);
+    assert_eq!(ack["source_change_ack"]["generation"], 2);
+    assert!(ack["source_change_ack"]["error"].is_null());
+    let mut stale = command.clone();
+    stale["request_id"] = json!(72);
+    app.send(stale);
+    let rejected = app.wait(|v| v["source_change_ack"]["request_id"] == 72);
+    assert!(!rejected["source_change_ack"]["error"].is_null());
+    assert!(rejected["source_change_ack"]["generation"].is_null());
+    let mut unknown = command.clone();
+    unknown["unknown"] = json!(true);
+    assert!(app.host.dispatch(&unknown.to_string()).is_err());
+    let mut invalid = command;
+    invalid["expected_generation"] = json!(0);
+    assert!(app.host.dispatch(&invalid.to_string()).is_err());
+    assert!(!ack.to_string().contains("canary"));
+    assert!(!rejected.to_string().contains("canary"));
+    app.close();
+}
+
+#[test]
+fn p05_source_change_отменяет_fetch_до_мутации() {
+    for scheduled in [false, true] {
+        let dir = Directory::new();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/sub", listener.local_addr().unwrap());
+        let (entered, barrier) = std::sync::mpsc::channel();
+        let server = thread::spawn(move || {
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    assert_eq!(stream.read(&mut byte).unwrap(), 1);
+                    request.push(byte[0]);
+                    assert!(request.len() < 32768);
+                }
+                if index == 0 {
+                    let body = "trojan://synthetic-old@example.invalid:443#old";
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).unwrap();
+                } else {
+                    entered.send(()).unwrap();
+                    // Сначала наблюдаем закрытие клиентом: никакого позднего response
+                    // до подтверждённой отмены сетевой операции.
+                    assert_eq!(stream.read(&mut byte).unwrap(), 0);
+                }
+            }
+        });
+        let mut app = Harness::new(dir.config());
+        app.wait(|v| v["ready"] == true);
+        app.send(json!({"command":"import_source","name":"P05","url":url,"local_exception":true,"route":"direct"}));
+        let initial = app.wait(|v| v["total"] == 1 && v["busy"] == false);
+        let id = initial["source_id"].clone();
+        let profile = initial["profiles"][0]["id"].clone();
+        if scheduled {
+            app.close();
+            сделать_overdue(&dir);
+            app = Harness::new(dir.config());
+            app.wait(|v| v["ready"] == true);
+            app.send(json!({"command":"subscription_visibility","visible":true}));
+            app.host
+                .set_subscription_policy(yonik_linux::SubscriptionPolicy {
+                    online: true,
+                    ..Default::default()
+                })
+                .unwrap();
+        } else {
+            app.send(json!({"command":"refresh"}));
+        }
+        barrier.recv_timeout(Duration::from_secs(5)).unwrap();
+        app.send(json!({"command":"source_change","request_id":91,"id":id,"expected_generation":1,"name":"P05","url":"https://example.invalid/new-canary","local_exception":false,"route":"proxy"}));
+        let ack = app.wait(|v| v["source_change_ack"]["request_id"] == 91);
+        assert!(ack["source_change_ack"]["error"].is_null());
+        assert_eq!(ack["source_change_ack"]["generation"], 2);
+        assert_eq!(ack["profiles"][0]["id"], profile);
+        assert!(ack["pending"].is_null());
+        assert_eq!(ack["busy"], false);
+        app.close();
+        server.join().unwrap();
+    }
+}

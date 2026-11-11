@@ -1,62 +1,90 @@
-# P05: ограниченная матрица acceptance
+# P05: Linux actual refresh acceptance
 
-База: `b9e5071784065c1fcb4813608d195421a146f80c`.
+База `b9e5071784065c1fcb4813608d195421a146f80c`; первый срез
+`9fcccfaa5f2acf8dd80cea34a99d874dc4fa046f`. Продолжение добавляет закрытый
+DesktopHost callback source_change и native fixture для обоих закреплённых ядер.
+Production fetch/subscriptions/repository/SystemSession/Client не меняются.
 
-Контракт: `data-and-contracts.md` §§1–3, `validation-and-roadmap.md` §матрица
-проверок и FR-06, `PLAN.md` P05. Пустой ответ не означает удаление профилей:
-контракт запрещает автоматическую замену рабочего snapshot. Частичный импорт
-показывает accepted/rejected и требует явного подтверждения.
+Контракт: data-and-contracts §§1–3; validation-and-roadmap, FR-06; PLAN P05.
+Пустой ответ не означает удаление: рабочий snapshot не заменяется автоматически.
+Partial публикует accepted/rejected и требует подтверждения именно этого отчёта.
+Endpoint/credentials меняют fingerprint, display name не является identity.
 
-| Requirement | Existing test / proof | Недостающий actual gate |
+| Requirement | Existing proof | Новый actual gate |
 | --- | --- | --- |
-| URL credentials rotation, стабильные source/profile IDs и favorite | subscription_refresh_contract::source_token_rotation_preserves_profile_id_and_favorite | сочетание rotation с full/partial/empty/corrupt/HTTP/304/size и scheduled |
-| Серверные credentials меняют fingerprint | profile identity baseline (accepted) | DesktopHost manual/scheduled, изменение видимого profile ID |
-| Empty/partial сохраняют рабочий snapshot до решения | subscriptions::partial_import_keeps_old_until_exact_report_is_approved, failed_http_and_empty_refresh_preserve_committed_snapshot | DesktopHost manual/scheduled матрица |
-| HTTP/304/size | subscriptions::conditional_304_updates_validator_without_replacing_body; subscription_refresh_contract::failed_wire_responses_preserve_every_persisted_snapshot_field | сочетание с rotation и DesktopHost |
-| Cancel/stale CAS | accepted PR95 и repository identity baseline | не повторять всю proof; комбинации с rotation остаются отдельным gate |
-| Proxy failure без DIRECT | subscriptions::proxy_policy_never_falls_back_to_direct; subscription_proxy::proxy_failures_never_fall_back; accepted PR96 DNS | actual pinned cores + DesktopHost manual/scheduled после rotation остаются gate |
-| Redirect/TLS | fetch/service bounded tests | actual own CA/private namespace, origin headers после rotation остаются gate |
-| Ограничение ресурсов | импорт ограничивает тело/число записей | size header rejection не доказывает 10x dataset/resource bound; gate остаётся |
+| Смена credentials источника, стабильный source ID | subscription_refresh_contract::source_token_rotation_preserves_profile_id_and_favorite | source_change callback с expected generation и matching ACK; actual Host manual/scheduled refresh после ротации через оба native SOCKS |
+| Rename / новые серверные credentials | accepted repository identity baseline | Native Host: rename сохраняет profile ID, смена VLESS credential создаёт новый ID; source ID сохраняется |
+| Full / empty / partial / corrupt | subscriptions partial/empty tests | Service и scheduler плюс Host manual/scheduled, оба ядра; до approve старый snapshot, partial counts, error сохраняет revision=1 |
+| HTTP fail / 304 / size | subscription_refresh_contract wire errors; conditional 304 | Обе native матрицы после rotation: HTTP503, unsolicited 304 без старых validators, size header rejection; положительный conditional304 отдельно в scoped Host/Service tests |
+| Redirect / origin boundary | fetch HWID/origin tests | Собственный HTTP upstream: same-origin и cross-origin redirect; query-token не переносится, cross destination проверяет отсутствие Authorization; policy локального исключения явная |
+| TLS verification | FetchHost transport | Своя CA только через SSL_CERT_FILE дочернего процесса; trusted HTTPS проходит, другая собственная CA отвергается; TLS fallback отсутствует |
+| Proxy refusal без DIRECT / DNS fallback | accepted PR96 policy/DNS path | Реальный SOCKS каждого native core → закрытый namespace endpoint; DIRECT connect fence защищает HTTP/TLS/cross/DNS upstream и refused port; два положительных controls; getaddrinfo=0 |
+| Отмена после response до commit | accepted PR95 cooperative/CAS/commit boundary | Actual Service Pending/Review — точный барьер полного response+parse; cancel перед commit оставляет revision=1; Host SourceChange отменяет pending review и не публикует его |
+| Stale repository CAS | accepted repository identity baseline / PR95 | Второй Service меняет generation после Pending, commit/finish_review отвергается; Host approve устаревшего report также не меняет snapshot |
+| После commit admission истинный результат | accepted PR95 locked-write boundary | Native Service admitted: подтверждённый commit=2, последующий cancel не откатывает snapshot; новых искусственных admission hooks нет |
+| Pre-edit cancellation / ACK | accepted PR95 и PR113 fences | Callback gate удерживает actual manual/scheduled HTTP, SourceChange ждёт закрытия socket и выдаёт ACK только после cancel; старый profile и snapshot сохраняются |
+| Ограниченный 10x dataset | scoped P05 acceptance | 200→2000 записей, <256 KiB, импорт deadline 15 s, страницы по 100, полное множество уникальных IDs; size rejection. Это не RSS benchmark |
+| Секреты / export | P11 отдельный writer | Native callback запрашивает existing logs_read/export; canaries отсутствуют в DTO/export, raw URL/body/credentials не выводятся; отдельная negative-export evidence |
 
-Новые файлы `crates/{yonik-linux,yonik-desktop}/tests/p05_acceptance.rs`
-не меняют production. Матрицы не являются полной приёмкой P05. RED/GREEN для
-production исправления не заявляется: конкретный production дефект ещё не доказан.
-Секретные тела/запросы fixture не экспортируются; используются синтетические данные.
+## Проверки и границы
 
-Добавлены actual gates:
+`p05_native.rs` запускается только ignored fixture `p05_native.py` в собственных
+user/network/PID namespaces с private D-Bus и ephemeral repository key.
+Каждый Host владеет настоящей LocalSession. Service/scheduler используют SOCKS
+именно этой сессии с явным literal DNS-over-TCP upstream. Core peer конфиги и
+CA/ключи — только в приватном временном каталоге; секреты не передаются argv.
 
-- Service manual/scheduled: 14 сочетаний после rotation URL token; стабильные
-  source/profile ID, favorite, revision/source generation, отсутствие старых
-  conditional headers; scheduled full/partial требует approve.
-- DesktopHost manual/scheduled: 16 сочетаний; rename сохраняет ID, изменение
-  серверных credentials создаёт новый ID, partial показывает accepted/rejected,
-  304 проверяется отдельным чтением encrypted repository с deadline до shutdown.
-- Service/scheduler: ненастроенный Proxy после rotation не обращается к DIRECT
-  listener и сохраняет offline snapshot. Это не pinned-core transport gate.
-- 200/2000 профилей: вход <256 KiB, импорт <15 секунд, чтение явными страницами
-  по 100, проверка полного множества уникальных ID. Это не измерение RSS.
+Повторно используются read-only артефакты sing-box 1.14.4 и Xray 26.10.31 из
+local/engines и committed engine_host/engine_compile/dns_fixture. Go source,
+сборка core, pins/dependencies, host keyring, resolver, routes/nft не менялись.
 
-Первый 10x прогон выявил неверное ожидание теста (default page limit 200,
-а ожидалось <=100); тест исправлен на явный limit=100. Это не production RED.
-Host gate использует существующий backend harness; 43 включённых теста
-отфильтрованы, их повторное выполнение не заявляется.
+Resolver interposer переиспользует PR96 source; дополнительный connect fence
+действует только на test executable, не на core. Controls принудительно вызывают
+lookup и fenced TCP connect, затем evidence счётчики обнуляются. Следовательно
+нулевые счётчики матрицы проверяют работоспособный механизм наблюдения.
 
-Запуск: отдельные user/network/PID namespaces, только свой loopback,
-DesktopHost под private dbus-run-session, ephemeral repository key. Rust 1.85.1,
-locked, jobs=1, общий rust slot, flock корня transient, единый target.
- Evidence вне TTL:
-`/home/myrs/projects/yonik/local/validation/p05-refresh`.
+SourceChange RED на исходном backend: invalid_input. GREEN — callback schema,
+CAS/ACK и удерживаемый fetch. Первый prototype native fixture отбросил watch
+sender и получил Cancelled; исправлено владение fixture, production fetch не
+менялся. Первоначальный scoped 10x тест неверно ожидал default page<=100
+(default=200); итог использует явный limit. Эти падения не production defects.
 
-Усиление 304 oracle обнаружило гонку первоначального fixture: reload сразу
-после записи ответа мог отменить refresh до commit. Oracle теперь ждёт revision
-в repository до shutdown. Production-дефект по этому падению не заявляется.
+Интеграция с PR113 выполняется ROOT: точный hunk и сохраняемые fences описаны
+в [source-change-integration](2026-11-11-p05-source-change-integration.md).
+Эта ветка не содержит merge/rebase PR113 и не заявляет проверку их общего head.
+UI credential editor не добавляется: callback acceptance использует публичный
+закрытый JSON API; stored secret URL не выдаётся.
 
-Финальная проверка: Linux acceptance — 3 passed, DesktopHost matrix — 1 passed
-(43 existing tests filtered), Rust 1.85.1 locked workspace clippy all-targets
-`-D warnings` — exit 0, fmt check — exit 0, git diff check — exit 0.
-Actual матрицы выполнялись за 2,92 и 1,62 секунды соответственно.
-Namespace D-Bus сообщил warning об inotify каталога /root; private bus и Host
-завершились штатно. Политика TLS/host networking не менялась.
-Evidence и оба исполняемых тестовых артефакта сохранены вне TTL в указанном
-каталоге. P05 остаётся частично выполненным; production fixes и RED/GREEN
-для них отсутствуют, полная приёмка не заявляется.
+Evidence/source/binary manifests сохраняются вне TTL:
+`/home/myrs/projects/yonik/local/validation/p05-native`.
+Старый scoped evidence: `/home/myrs/projects/yonik/local/validation/p05-refresh`.
+
+Финальные счётчики и результаты проверок добавляются после завершения runs.
+Полный P05 в PLAN не переключается: интеграция ROOT и review остаются отдельными.
+
+## Итог фактических запусков
+
+- sing-box 1.14.4 и Xray 26.10.31: каждый 30 Host + 32 Service/scheduler
+  сочетания, все прошли (124 суммарно). Native tests: sing-box 134,01 s, Xray 77,65 s.
+- Оба core: DNS positive control=1, DIRECT positive control=1;
+  system getaddrinfo=0, hidden DIRECT connect=0 после сброса controls.
+- Собственные upstream: 480 DNS-over-TCP queries, 232 HTTP target requests,
+  8 cross-origin requests, 8 trusted TLS requests.
+- 60 export/DTO страниц: canary/raw URI отсутствуют; отдельный
+  `negative-exports.json`. Сырые exports и тела не сохраняются.
+- Callback/scoped acceptance: 3 passed, 43 existing tests filtered.
+  Отдельный backend suite: 42 passed, 1 native test ignored; его actual заменяет
+  новая более широкая native matrix. Повтор accepted PR95/96 целиком не заявлен.
+- Rust 1.85.1: locked workspace clippy all-targets `-D warnings`, fmt check,
+  git diff check прошли. Ruff 0.16.6 check/format для новых Python fixtures прошли.
+- Private D-Bus предупреждает об inotify недоступного /root каталога; свои bus,
+  Host и core процессы завершаются штатно. Host bus/keyring не используются.
+
+Результаты: `results.json`, `counts.json`, `negative-exports.json`,
+`final-manifest.sha256`, `callback-final-manifest.sha256`, logs и бинарники
+находятся в evidence вне TTL. После завершения процессов target очищается cargo
+clean, собственный transient root удаляется; host caches не очищаются.
+
+Runtime criteria данного среза закрыты actual Linux gates. Остаётся внешняя
+интеграция с PR113 и review ROOT на общем head; она не является средовым blocker
+для выполненных матриц и не подменяется утверждением о полной готовности P05.
