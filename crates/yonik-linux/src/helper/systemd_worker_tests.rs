@@ -494,6 +494,8 @@ fn service_contract(mode: WorkerMode) -> Properties {
     ] {
         p.insert(key.into(), value(v));
     }
+    p.insert("RestrictNamespaces".into(), value(0u64));
+    p.insert("SystemCallArchitectures".into(), value(vec!["native"]));
     p.insert("UMask".into(), value(0o77u32));
     p.insert("KillSignal".into(), value(15i32));
     p.insert("FinalKillSignal".into(), value(9i32));
@@ -685,5 +687,35 @@ fn private_asset_mount_requires_bounded_controlled_tmpfs_options() {
             value(vec![("/dev/shm".to_owned(), options.to_owned())]),
         );
         assert!(validate_private_assets(&p).is_err());
+    }
+}
+
+#[test]
+fn namespace_filter_requires_typed_full_ban_and_native_abi() {
+    for mode in [WorkerMode::Run, WorkerMode::Check] {
+        for invalid in [value(true), value(1u64), value(u64::MAX), value(0u32)] {
+            let mut p = service_contract(mode);
+            p.insert("RestrictNamespaces".into(), invalid);
+            assert_eq!(
+                validate_service(&p, mode),
+                Err(WorkerSupervisorError::Untrusted)
+            );
+        }
+        for invalid in [vec![], vec!["x86"], vec!["native", "x86"]] {
+            let mut p = service_contract(mode);
+            p.insert("SystemCallArchitectures".into(), value(invalid));
+            assert_eq!(
+                validate_service(&p, mode),
+                Err(WorkerSupervisorError::Untrusted)
+            );
+        }
+        for missing in ["RestrictNamespaces", "SystemCallArchitectures"] {
+            let mut p = service_contract(mode);
+            p.remove(missing);
+            assert_eq!(
+                validate_service(&p, mode),
+                Err(WorkerSupervisorError::Untrusted)
+            );
+        }
     }
 }

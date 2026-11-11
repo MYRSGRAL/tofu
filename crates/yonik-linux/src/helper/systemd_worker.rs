@@ -704,6 +704,13 @@ fn validate_service(p: &Properties, mode: WorkerMode) -> Result<()> {
             return Err(WorkerSupervisorError::Untrusted);
         }
     }
+    // D-Bus t — allowed-mask: ноль запрещает все namespace types, включая новые.
+    // Properties не доказывают фактическую установку seccomp в kernel.
+    if number64(p, "RestrictNamespaces")? != 0
+        || strings(p, "SystemCallArchitectures")? != ["native"]
+    {
+        return Err(WorkerSupervisorError::Untrusted);
+    }
     if boolean(p, "PrivateNetwork")? != (mode == WorkerMode::Check)
         || boolean(p, "PrivateDevices")? != (mode == WorkerMode::Check)
         || number64(p, "CapabilityBoundingSet")? != caps
