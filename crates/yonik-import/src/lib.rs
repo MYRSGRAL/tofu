@@ -46,7 +46,77 @@ pub fn import_reader(reader: impl Read) -> Result<ImportReport, ImportFailure> {
     import_bytes(bytes)
 }
 
+/// Ошибка нового API: совместимый ImportFailure не меняет контракт.
+#[derive(Debug)]
+pub enum CancellableImportError {
+    Cancelled,
+    Import(ImportFailure),
+}
+
+impl std::fmt::Display for CancellableImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("Импорт отменён"),
+            Self::Import(error) => error.fmt(f),
+        }
+    }
+}
+impl std::error::Error for CancellableImportError {}
+
+pub(crate) struct Checkpoint<'a> {
+    proceed: &'a dyn Fn() -> bool,
+    cancelled: std::cell::Cell<bool>,
+}
+impl Checkpoint<'_> {
+    pub(crate) fn check(&self) -> Result<(), FatalError> {
+        if self.cancelled.get() || !(self.proceed)() {
+            self.cancelled.set(true);
+            Err(FatalError::Io)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Callback возвращает false при отмене. Отмена не публикует частичный отчёт.
+pub fn import_bytes_cancellable(
+    bytes: Vec<u8>,
+    proceed: impl Fn() -> bool,
+) -> Result<ImportReport, CancellableImportError> {
+    let checkpoint = Checkpoint {
+        proceed: &proceed,
+        cancelled: std::cell::Cell::new(false),
+    };
+    let result = import_bytes_checked(bytes, &checkpoint);
+    if checkpoint.cancelled.get() {
+        Err(CancellableImportError::Cancelled)
+    } else {
+        result.map_err(CancellableImportError::Import)
+    }
+}
+
 pub fn import_bytes(bytes: Vec<u8>) -> Result<ImportReport, ImportFailure> {
+    import_bytes_checked(
+        bytes,
+        &Checkpoint {
+            proceed: &|| true,
+            cancelled: std::cell::Cell::new(false),
+        },
+    )
+}
+
+fn import_bytes_checked(
+    bytes: Vec<u8>,
+    checkpoint: &Checkpoint<'_>,
+) -> Result<ImportReport, ImportFailure> {
+    if checkpoint.check().is_err() {
+        return Err(ImportFailure {
+            kind: FatalError::Io,
+            input: bytes,
+            complete: true,
+        });
+    }
+
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(ImportFailure {
             kind: FatalError::TooLarge,
@@ -59,7 +129,7 @@ pub fn import_bytes(bytes: Vec<u8>) -> Result<ImportReport, ImportFailure> {
         input: error.into_bytes(),
         complete: true,
     })?;
-    match parse_text(&original) {
+    match parse_text(&original, checkpoint) {
         Ok(parsed) => Ok(ImportReport {
             servers: parsed.servers,
             issues: parsed.issues,
@@ -82,7 +152,8 @@ struct ParsedBody {
     base64_envelope: bool,
 }
 
-fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
+fn parse_text(original: &str, checkpoint: &Checkpoint<'_>) -> Result<ParsedBody, FatalError> {
+    checkpoint.check()?;
     let cleaned = original.trim_start_matches('\u{feff}').trim();
     if cleaned.is_empty() {
         return Err(FatalError::Empty);
@@ -90,7 +161,7 @@ fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
     let base64_envelope = !cleaned.contains("://") && !cleaned.starts_with(['{', '[']);
     let decoded;
     let content = if base64_envelope {
-        decoded = decode::base64_text(cleaned)?;
+        decoded = decode::base64_text_checked(cleaned, checkpoint)?;
         decoded.trim_start_matches('\u{feff}')
     } else {
         original.trim_start_matches('\u{feff}')
@@ -101,12 +172,13 @@ fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
     let mut servers = Vec::new();
     let mut issues = Vec::new();
     let native_json = if content.trim_start().starts_with(['{', '[']) {
-        decode::json_depth(content)?;
+        decode::json_depth_checked(content, checkpoint)?;
         // RawValue проверяет синтаксис без построения произвольного дерева Value.
         serde_json::from_str::<&serde_json::value::RawValue>(content)
             .map_err(|_| FatalError::InvalidJson)?;
-        json::validate_unique(content).map_err(|_| FatalError::InvalidJson)?;
-        xray::extract(content, &mut servers, &mut issues)?;
+        json::validate_unique(content, checkpoint).map_err(|_| FatalError::InvalidJson)?;
+        checkpoint.check()?;
+        xray::extract(content, &mut servers, &mut issues, checkpoint)?;
         Some(SecretText::new(content.to_owned()))
     } else {
         if !content.contains("://") {
@@ -114,6 +186,7 @@ fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
         }
         let mut records = 0;
         for (index, line) in content.lines().enumerate() {
+            checkpoint.check()?;
             let text = line.trim();
             if text.is_empty() {
                 continue;
@@ -133,6 +206,7 @@ fn parse_text(original: &str) -> Result<ParsedBody, FatalError> {
         }
         None
     };
+    checkpoint.check()?;
     Ok(ParsedBody {
         servers,
         issues,

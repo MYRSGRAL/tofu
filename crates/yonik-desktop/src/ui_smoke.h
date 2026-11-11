@@ -49,6 +49,22 @@ inline bool matches(QQuickWindow* window, const QJsonObject& expected)
 {
     if (expected.size() > 32) return false;
     for (auto object = expected.begin(); object != expected.end(); ++object) {
+        if (object.key() == QStringLiteral("clipboard")) {
+            // Только smoke: проверяем собственный clipboard, не записывая его в trace.
+            const auto properties = object.value().toObject();
+            if (properties.size() != 1 || !properties.contains(QStringLiteral("text"))) return false;
+            const auto expectedText = properties.value(QStringLiteral("text"));
+            const auto actualText = QGuiApplication::clipboard()->text(QClipboard::Clipboard);
+            if (expectedText.isString()) {
+                if (actualText != expectedText.toString()) return false;
+            } else {
+                const auto condition = expectedText.toObject();
+                const auto fragment = condition.value(QStringLiteral("contains"));
+                if (condition.size() != 1 || !fragment.isString() || fragment.toString().size() > 2048
+                    || !actualText.contains(fragment.toString())) return false;
+            }
+            continue;
+        }
         auto* target = findObject(window, object.key());
         if (!target || !object.value().isObject()) return false;
         const auto properties = object.value().toObject();

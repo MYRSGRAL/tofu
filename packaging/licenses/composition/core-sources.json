@@ -1,0 +1,49 @@
+[
+  {
+    "core": "sing-box",
+    "ref": "c005f35300ce76427dc285481ec5695f5b179cd2",
+    "commit": "c005f35300ce76427dc285481ec5695f5b179cd2",
+    "commit_api": "https://api.github.com/repos/SagerNet/sing-box/commits/c005f35300ce76427dc285481ec5695f5b179cd2",
+    "source_url": "https://codeload.github.com/SagerNet/sing-box/tar.gz/c005f35300ce76427dc285481ec5695f5b179cd2",
+    "source_sha256": "1c4d2b3bf261a8d98e1b026be0bbcddbcb3f53bbca77eb15e8f25f7d4e602e59",
+    "texts": [
+      {
+        "source_path": "LICENSE",
+        "sha256": "650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c",
+        "file": "texts/650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c"
+      },
+      {
+        "source_path": "common/ja3/LICENSE",
+        "sha256": "31cbb9419e5fbd3fe353eb5b5efb2667d5969f42e44f976e8c0b3a28893b3c09",
+        "file": "texts/31cbb9419e5fbd3fe353eb5b5efb2667d5969f42e44f976e8c0b3a28893b3c09"
+      },
+      {
+        "source_path": "common/windivert/assets/LICENSE.txt",
+        "sha256": "14a0cb5214d536e4fdae6aa3f5696f981eeda106cd026e9794bba489ee79d628",
+        "file": "texts/14a0cb5214d536e4fdae6aa3f5696f981eeda106cd026e9794bba489ee79d628"
+      }
+    ],
+    "binary_binding": "buildinfo vcs.revision, modified=false"
+  },
+  {
+    "core": "xray",
+    "ref": "v26.10.31",
+    "commit": "a4a3dff5b20c2faae567b742c172c7b95e75c083",
+    "commit_api": "https://api.github.com/repos/XTLS/Xray-core/commits/v26.10.31",
+    "source_url": "https://codeload.github.com/XTLS/Xray-core/tar.gz/a4a3dff5b20c2faae567b742c172c7b95e75c083",
+    "source_sha256": "7dba1dd055bdc854a2c5311610872c9bf6315ddb0a741fb8c2206212cec51b53",
+    "texts": [
+      {
+        "source_path": "LICENSE",
+        "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+        "file": "texts/1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+      },
+      {
+        "source_path": "transport/internet/masque/connectip/LICENSE",
+        "sha256": "8bcbabf56e2d09741d209292f583cc1d0fe3c894040a03b972a656da87beeddf",
+        "file": "texts/8bcbabf56e2d09741d209292f583cc1d0fe3c894040a03b972a656da87beeddf"
+      }
+    ],
+    "binary_binding": "unresolved: main (devel), no VCS"
+  }
+]
