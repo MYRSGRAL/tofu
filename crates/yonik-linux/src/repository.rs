@@ -129,6 +129,8 @@ enum CommitCheckpoint {
     Admitted,
 }
 struct Database {
+    #[cfg(test)]
+    fail_format4: bool,
     connection: Connection,
     key: Zeroizing<[u8; 32]>,
     id: [u8; 32],
@@ -247,6 +249,28 @@ impl EncryptedSubscriptionRepository {
     }
 
     pub async fn create_source(&self, payload: Vec<u8>) -> Result<SourceRecord> {
+        if payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.create_source_format(payload, false, None).await
+    }
+    /// Atomic SourceDataV2 create + format4; backup нужен только при первом повышении.
+    pub async fn create_source_v2(
+        &self,
+        payload: Vec<u8>,
+        backup: Option<PathBuf>,
+    ) -> Result<SourceRecord> {
+        if !payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.create_source_format(payload, true, backup).await
+    }
+    async fn create_source_format(
+        &self,
+        payload: Vec<u8>,
+        v2: bool,
+        backup: Option<PathBuf>,
+    ) -> Result<SourceRecord> {
         let payload = Zeroizing::new(payload);
         check_small(&payload)?;
         self.run(move |db| {
@@ -254,6 +278,9 @@ impl EncryptedSubscriptionRepository {
                 .connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
+            if v2 {
+                backup::admit_format4(&tx, &db.key, &db.id, backup.as_deref())?;
+            }
             let count: i64 = tx
                 .query_row("SELECT count(*) FROM sources", [], |r| r.get(0))
                 .map_err(storage)?;
@@ -282,6 +309,88 @@ impl EncryptedSubscriptionRepository {
                 params![id, encrypted],
             )
             .map_err(storage)?;
+            if v2 {
+                tx.execute_batch("PRAGMA user_version=4;")
+                    .map_err(storage)?;
+                #[cfg(test)]
+                if db.fail_format4 {
+                    return Err(RepositoryError::Storage);
+                }
+            }
+            tx.commit().map_err(storage)?;
+            Ok(SourceRecord {
+                id,
+                generation: 1,
+                payload,
+            })
+        })
+        .await
+    }
+
+    pub async fn create_local_snapshot(
+        &self,
+        payload: Vec<u8>,
+        original: Vec<u8>,
+        cancel: crate::Cancellation,
+        backup: Option<PathBuf>,
+    ) -> Result<SourceRecord> {
+        if !payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        let payload = Zeroizing::new(payload);
+        check_small(&payload)?;
+        let original = Zeroizing::new(original);
+        if original.len() > BODY_LIMIT {
+            return Err(RepositoryError::InvalidInput);
+        }
+        #[cfg(test)]
+        let boundary = self.commit_boundary.clone();
+        self.run(move |db| {
+            cancel.check().map_err(|_| RepositoryError::Conflict)?;
+            let tx = db
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+            backup::admit_format4(&tx, &db.key, &db.id, backup.as_deref())?;
+            let count: i64 = tx
+                .query_row("SELECT count(*) FROM sources", [], |r| r.get(0))
+                .map_err(storage)?;
+            if count >= SOURCE_LIMIT {
+                return Err(RepositoryError::InvalidInput);
+            }
+            let next: i64 = tx
+                .query_row(
+                    "SELECT last_id FROM source_sequence WHERE singleton=1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(storage)?;
+            let id = next.checked_add(1).ok_or(RepositoryError::InvalidInput)?;
+            if next < 0 {
+                return Err(RepositoryError::Corrupt);
+            }
+            tx.execute(
+                "UPDATE source_sequence SET last_id=?1 WHERE singleton=1 AND last_id=?2",
+                params![id, next],
+            )
+            .map_err(storage)?;
+            let encrypted = encrypt(&db.key, &db.id, 1, id, 1, 0, &payload)?;
+            tx.execute(
+                "INSERT INTO sources(id,generation,payload) VALUES (?1,1,?2)",
+                params![id, encrypted],
+            )
+            .map_err(storage)?;
+            let parsed = prepare_profiles_checked(&db.key, &db.id, id, &original, &|| cancel.check().map_err(|_| SnapshotCommitError::Cancelled)).map_err(compat_commit_error)?;
+            let body = encrypt(&db.key, &db.id, 2, id, 1, 1, &original)?;
+            let metadata = encrypt(&db.key, &db.id, 3, id, 1, 1, b"{\"version\":1}")?;
+            tx.execute("INSERT INTO snapshots(source_id,source_generation,revision,body,metadata,validators) VALUES (?1,1,1,?2,?3,NULL)", params![id, body, metadata]).map_err(storage)?;
+            reconcile_checked(&tx, &db.key, &db.id, id, 1, 1, parsed, &|| cancel.check().map_err(|_| SnapshotCommitError::Cancelled)).map_err(compat_commit_error)?;
+            tx.execute_batch("PRAGMA user_version=4;").map_err(storage)?;
+            #[cfg(test)]
+            if db.fail_format4 { return Err(RepositoryError::Storage); }
+            #[cfg(test)]
+            if let Some(hook) = boundary.lock().map_err(|_| RepositoryError::Storage)?.as_ref() { hook(CommitCheckpoint::BeforeAdmission); }
+            cancel.admit_commit().map_err(|_| RepositoryError::Conflict)?;
             tx.commit().map_err(storage)?;
             Ok(SourceRecord {
                 id,
@@ -311,6 +420,14 @@ impl EncryptedSubscriptionRepository {
                 .connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
+            if payload_is_v2(&payload) {
+                let format: i64 = tx
+                    .query_row("PRAGMA user_version", [], |r| r.get(0))
+                    .map_err(storage)?;
+                if format != 4 {
+                    return Err(RepositoryError::InvalidInput);
+                }
+            }
             let changed = tx
                 .execute(
                     "UPDATE sources SET generation=?1,payload=?2 WHERE id=?3 AND generation=?4",
@@ -352,6 +469,14 @@ impl EncryptedSubscriptionRepository {
                 .connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
+            if payload_is_v2(&payload) {
+                let format: i64 = tx
+                    .query_row("PRAGMA user_version", [], |r| r.get(0))
+                    .map_err(storage)?;
+                if format != 4 {
+                    return Err(RepositoryError::InvalidInput);
+                }
+            }
             let row: Option<(i64, Vec<u8>)> = tx
                 .query_row(
                     "SELECT generation,payload FROM sources WHERE id=?1",
@@ -654,7 +779,7 @@ impl Database {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(storage)?;
-        if version > 3 {
+        if version > 4 {
             return Err(RepositoryError::UnsupportedVersion);
         }
         if version < 0 {
@@ -718,6 +843,8 @@ impl Database {
         }
         connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF;").map_err(storage)?;
         Ok(Self {
+            #[cfg(test)]
+            fail_format4: false,
             connection,
             key,
             id,
@@ -1603,7 +1730,7 @@ mod tests {
         ));
         let connection = Connection::open(dir.database()).expect("тестовое соединение");
         connection
-            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=4;")
+            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=5;")
             .expect("будущая версия");
         drop(connection);
         let before = fs::read(dir.database()).expect("данные");
@@ -2296,6 +2423,32 @@ impl EncryptedSubscriptionRepository {
         }).await
     }
     pub async fn save_routing_draft(&self, expected: i64, payload: Vec<u8>) -> Result<i64> {
+        if payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.save_routing_draft_format(expected, payload, false, None)
+            .await
+    }
+    /// Storage validation принадлежит typed caller; здесь обязательны backup и CAS.
+    pub async fn save_routing_draft_v2(
+        &self,
+        expected: i64,
+        payload: Vec<u8>,
+        backup: Option<PathBuf>,
+    ) -> Result<i64> {
+        if !payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.save_routing_draft_format(expected, payload, true, backup)
+            .await
+    }
+    async fn save_routing_draft_format(
+        &self,
+        expected: i64,
+        payload: Vec<u8>,
+        v2: bool,
+        backup: Option<PathBuf>,
+    ) -> Result<i64> {
         if expected < 0 || payload.len() > 262144 {
             return Err(RepositoryError::InvalidInput);
         }
@@ -2303,14 +2456,32 @@ impl EncryptedSubscriptionRepository {
             let revision = expected.checked_add(1).ok_or(RepositoryError::InvalidInput)?;
             let encrypted = encrypt(&db.key, &db.id, 8, 0, 0, revision, &payload)?;
             let tx = db.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+            if v2 { backup::admit_format4(&tx, &db.key, &db.id, backup.as_deref())?; }
             let changed = if expected == 0 {
                 tx.execute("INSERT OR IGNORE INTO routing_draft(singleton,revision,payload) VALUES(1,?1,?2)", params![revision, encrypted]).map_err(storage)?
             } else {
                 tx.execute("UPDATE routing_draft SET revision=?1,payload=?2 WHERE singleton=1 AND revision=?3", params![revision, encrypted, expected]).map_err(storage)?
             };
             if changed != 1 { return Err(RepositoryError::Conflict); }
+            if v2 {
+                tx.execute_batch("PRAGMA user_version=4;").map_err(storage)?;
+                #[cfg(test)]
+                if db.fail_format4 { return Err(RepositoryError::Storage); }
+            }
             tx.commit().map_err(storage)?;
             Ok(revision)
         }).await
     }
 }
+
+fn payload_is_v2(payload: &[u8]) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Version {
+        version: u8,
+    }
+    serde_json::from_slice::<Version>(payload).is_ok_and(|v| v.version == 2)
+}
+
+#[cfg(test)]
+#[path = "repository/format4_tests.rs"]
+mod format4_tests;
