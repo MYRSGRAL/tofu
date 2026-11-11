@@ -1,5 +1,6 @@
 diff --git a/common/yonikbroker/proof.go b/common/yonikbroker/proof.go
 new file mode 100644
+index 0000000..f06729a
 --- /dev/null
 +++ b/common/yonikbroker/proof.go
 @@ -0,0 +1,177 @@
@@ -182,6 +183,7 @@ new file mode 100644
 +func (s *Session) Context() context.Context { return s.ctx }
 diff --git a/common/yonikbroker/proof_test.go b/common/yonikbroker/proof_test.go
 new file mode 100644
+index 0000000..e1e71fd
 --- /dev/null
 +++ b/common/yonikbroker/proof_test.go
 @@ -0,0 +1,152 @@
@@ -339,6 +341,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/wire.go b/common/yonikbroker/wire.go
 new file mode 100644
+index 0000000..42190f3
 --- /dev/null
 +++ b/common/yonikbroker/wire.go
 @@ -0,0 +1,348 @@
@@ -692,6 +695,7 @@ new file mode 100644
 +func (s *Sequence) Retire() { s.pending = 0; s.retired = true }
 diff --git a/common/yonikbroker/wire_test.go b/common/yonikbroker/wire_test.go
 new file mode 100644
+index 0000000..7ed0af0
 --- /dev/null
 +++ b/common/yonikbroker/wire_test.go
 @@ -0,0 +1,256 @@
@@ -953,6 +957,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/frozen-vectors.json b/common/yonikbroker/frozen-vectors.json
 new file mode 100644
+index 0000000..63bf81e
 --- /dev/null
 +++ b/common/yonikbroker/frozen-vectors.json
 @@ -0,0 +1,135 @@
@@ -1093,6 +1098,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/bootstrap_linux.go b/common/yonikbroker/bootstrap_linux.go
 new file mode 100644
+index 0000000..d935550
 --- /dev/null
 +++ b/common/yonikbroker/bootstrap_linux.go
 @@ -0,0 +1,164 @@
@@ -1262,6 +1268,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/bootstrap_linux_test.go b/common/yonikbroker/bootstrap_linux_test.go
 new file mode 100644
+index 0000000..30f3ee1
 --- /dev/null
 +++ b/common/yonikbroker/bootstrap_linux_test.go
 @@ -0,0 +1,218 @@
@@ -1485,6 +1492,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/callsite_test.go b/common/yonikbroker/callsite_test.go
 new file mode 100644
+index 0000000..7bae4fd
 --- /dev/null
 +++ b/common/yonikbroker/callsite_test.go
 @@ -0,0 +1,105 @@
@@ -1595,9 +1603,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
+index 0000000..6bc24fa
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,52 @@
 +package nativehooks
 +
 +import (
@@ -1625,11 +1634,37 @@ new file mode 100644
 +		}
 +	}
 +}
++
++// ClosedSocketFixture меняет ответ только в закрытом тестовом consumer.
++func ClosedSocketFixture(t *testing.T) (context.Context, func(string), func() int) {
++	s, p, _ := fixture(t)
++	calls := 0
++	c := &routingConsumer{session: s, required: true, flow: p.Flow}
++	c.lookup = func(context.Context, Flow) (Evidence, error) { calls++; return p, nil }
++	ctx := context.WithValue(context.Background(), routingKey{}, c)
++	return ctx, func(mode string) {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		switch mode {
++		case "unknown":
++			p.Status = Unknown
++		case "unavailable":
++			p.Status = Unavailable
++		case "stale":
++			p.Binding.Epoch++
++		case "expired":
++			p.Expires = time.Now().Add(-time.Second)
++		case "revoke":
++			_ = s.Revoke()
++		}
++	}, func() int { c.mu.Lock(); defer c.mu.Unlock(); return calls }
++}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
+index 0000000..964da67
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,100 @@
 +package nativehooks
 +
 +import (
@@ -1661,18 +1696,27 @@ new file mode 100644
 +
 +// RoutingEntry проверяет исходный tuple до forced tag, PickRoute и default outbound.
 +// Отсутствие trusted handoff всегда закрывает routing.
-+func RoutingEntry(ctx context.Context) error {
++func BeforeSocketDial(ctx context.Context) error { return guardEntry(ctx, BeforeDial) }
++
++func RoutingEntry(ctx context.Context) error { return guardEntry(ctx, BeforeRouting) }
++
++func guardEntry(ctx context.Context, stage Stage) error {
 +	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
 +	if !ok || c == nil {
 +		return ErrDenied
 +	}
 +	c.mu.Lock()
 +	defer c.mu.Unlock()
-+	if c.session == nil || ctx.Err() != nil {
++	if c.session == nil {
++		return ErrDenied
++	}
++	if ctx.Err() != nil {
++		c.sequence.Retire()
++		_ = c.session.Revoke()
 +		return ErrDenied
 +	}
 +	if !c.required {
-+		return c.session.Guard(time.Now(), BeforeRouting, false, Flow{}, Evidence{})
++		return c.session.Guard(time.Now(), stage, false, Flow{}, Evidence{})
 +	}
 +	lookup := c.lookup
 +	if lookup == nil {
@@ -1684,7 +1728,12 @@ new file mode 100644
 +		_ = c.session.Revoke()
 +		return ErrDenied
 +	}
-+	return c.session.Guard(time.Now(), BeforeRouting, true, c.flow, proof)
++	if err := c.session.Guard(time.Now(), stage, true, c.flow, proof); err != nil {
++		c.sequence.Retire()
++		_ = c.session.Revoke()
++		return err
++	}
++	return nil
 +}
 +
 +// lookupAuthenticated не принимает proof от inbound/config: только authenticated wire reply.
@@ -1718,6 +1767,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
 new file mode 100644
+index 0000000..a379e5c
 --- /dev/null
 +++ b/common/yonikbroker/routing_test.go
 @@ -0,0 +1,58 @@
@@ -1780,9 +1830,10 @@ new file mode 100644
 +	}
 +}
 diff --git a/route/route.go b/route/route.go
+index 41b458c..c7bce0a 100644
 --- a/route/route.go
 +++ b/route/route.go
-@@ -12,6 +12,7 @@
+@@ -12,6 +12,7 @@ import (
  	"github.com/sagernet/sing-box/adapter"
  	"github.com/sagernet/sing-box/common/interrupt"
  	"github.com/sagernet/sing-box/common/sniff"
@@ -1790,7 +1841,7 @@ diff --git a/route/route.go b/route/route.go
  	C "github.com/sagernet/sing-box/constant"
  	"github.com/sagernet/sing-box/log"
  	R "github.com/sagernet/sing-box/route/rule"
-@@ -70,6 +71,9 @@
+@@ -70,6 +71,9 @@ func (r *Router) RouteConnectionEx(ctx context.Context, conn net.Conn, metadata
  }
  
  func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
@@ -1800,7 +1851,7 @@ diff --git a/route/route.go b/route/route.go
  	//nolint:staticcheck
  	if metadata.InboundDetour != "" {
  		if metadata.LastInbound == metadata.InboundDetour {
-@@ -229,6 +233,12 @@
+@@ -229,6 +233,12 @@ func registerInterrupt(chain []adapter.Outbound, closer io.Closer, onClose N.Clo
  }
  
  func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext) error {
@@ -1813,7 +1864,7 @@ diff --git a/route/route.go b/route/route.go
  	done := make(chan any)
  	err := r.routePacketConnection(ctx, conn, metadata, N.OnceClose(func(it error) {
  		close(done)
-@@ -261,6 +271,9 @@
+@@ -261,6 +271,9 @@ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn,
  }
  
  func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
@@ -1823,7 +1874,7 @@ diff --git a/route/route.go b/route/route.go
  	//nolint:staticcheck
  	if metadata.InboundDetour != "" {
  		if metadata.LastInbound == metadata.InboundDetour {
-@@ -376,6 +389,9 @@
+@@ -376,6 +389,9 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
  
  func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) adapter.PreMatchResult {
  	ctx := log.ContextWithNewID(r.ctx)
@@ -1833,7 +1884,7 @@ diff --git a/route/route.go b/route/route.go
  	metadata.PreMatch = true
  	continueResult := adapter.PreMatchResult{Action: adapter.PreMatchContinue}
  	packetDestination := metadata.Destination
-@@ -654,6 +670,9 @@
+@@ -654,6 +670,9 @@ func (r *Router) matchRule(
  	selectedRule adapter.Rule, selectedRuleIndex int,
  	buffers []*buf.Buffer, packetBuffers []*N.PacketBuffer, fatalErr error,
  ) {
@@ -1844,9 +1895,10 @@ diff --git a/route/route.go b/route/route.go
  	if fatalErr != nil {
  		return
 diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
+index fe95cb8..7fb0924 100644
 --- a/protocol/tun/inbound.go
 +++ b/protocol/tun/inbound.go
-@@ -2,6 +2,8 @@
+@@ -2,6 +2,8 @@ package tun
  
  import (
  	"context"
@@ -1855,7 +1907,7 @@ diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
  	"net"
  	"net/netip"
  	"os"
-@@ -354,6 +356,9 @@
+@@ -354,6 +356,9 @@ func (t *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
  			t.dnsHijackAddress = append(inet4DNSAddress, inet6DNSAddress...)
  		}
  	case adapter.StartStateStart:
@@ -1865,7 +1917,7 @@ diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
  		if t.tunOptions.EXP_ExternalConfiguration {
  			if _, err := net.InterfaceByName(t.tunOptions.Name); err != nil {
  				return E.Cause(err, "external_configuration interface is unavailable")
-@@ -470,11 +475,7 @@
+@@ -470,11 +475,7 @@ func (t *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
  			}
  		}
  		monitor.Start("open interface")
@@ -1878,7 +1930,7 @@ diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
  		monitor.Finish()
  		t.tunOptions.Name = tunOptions.Name
  		if err != nil {
-@@ -669,3 +670,27 @@
+@@ -669,3 +670,27 @@ func (t *autoRedirectHandler) NewPacketConnectionEx(ctx context.Context, conn N.
  func (t *autoRedirectHandler) NewDNSPacket(payload []byte, source M.Socksaddr, destination M.Socksaddr, writer N.PacketWriter) {
  	(*Inbound)(t).NewDNSPacket(payload, source, destination, writer)
  }
@@ -1908,6 +1960,7 @@ diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
 +}
 diff --git a/common/yonikbroker/closed_tun_linux.go b/common/yonikbroker/closed_tun_linux.go
 new file mode 100644
+index 0000000..5e6f13a
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux.go
 @@ -0,0 +1,222 @@
@@ -2135,6 +2188,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/closed_tun_linux_test.go
 new file mode 100644
+index 0000000..86fbcf0
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux_test.go
 @@ -0,0 +1,222 @@
@@ -2362,6 +2416,7 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/tun_callsite_test.go b/common/yonikbroker/tun_callsite_test.go
 new file mode 100644
+index 0000000..42333e9
 --- /dev/null
 +++ b/common/yonikbroker/tun_callsite_test.go
 @@ -0,0 +1,47 @@
@@ -2410,5 +2465,587 @@ new file mode 100644
 +	}
 +	if _, err = original.Stat(); err != nil {
 +		t.Fatal("original", err)
++	}
++}
+diff --git a/common/dialer/default.go b/common/dialer/default.go
+index 3bb2eac..2b327fb 100644
+--- a/common/dialer/default.go
++++ b/common/dialer/default.go
+@@ -11,6 +11,7 @@ import (
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+ 	"github.com/sagernet/sing-box/common/listener"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/option"
+ 	"github.com/sagernet/sing-box/service/powerreport"
+@@ -356,11 +357,11 @@ func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksadd
+ 				})
+ 			}
+ 			if destination.IsIPv6() {
+-				return listenConfig.ListenPacket(ctx, N.NetworkUDP, d.udpAddr6)
++				return listenGuardedPacket(ctx, listenConfig, N.NetworkUDP, d.udpAddr6)
+ 			} else if destination.IsIPv4() && !destination.Addr.IsUnspecified() {
+-				return listenConfig.ListenPacket(ctx, N.NetworkUDP+"4", d.udpAddr4)
++				return listenGuardedPacket(ctx, listenConfig, N.NetworkUDP+"4", d.udpAddr4)
+ 			} else {
+-				return listenConfig.ListenPacket(ctx, N.NetworkUDP, d.udpAddr4)
++				return listenGuardedPacket(ctx, listenConfig, N.NetworkUDP, d.udpAddr4)
+ 			}
+ 		})
+ 		return d.trackPacketConn(ctx, destination, packetConn, err)
+@@ -403,7 +404,7 @@ func (d *DefaultDialer) ListenSerialInterfacePacket(ctx context.Context, destina
+ 	}
+ 	listenConfig := d.udpListener
+ 	listenConfig.Control = control.Append(listenConfig.Control, d.serialInterfaceControl(*strategy, interfaceType, fallbackInterfaceType))
+-	packetConn, err := listenConfig.ListenPacket(ctx, network, "")
++	packetConn, err := listenGuardedPacket(ctx, listenConfig, network, "")
+ 	if err != nil {
+ 		// bind interface failed on legacy xiaomi systems
+ 		if d.defaultNetworkStrategy && errors.Is(err, syscall.EPERM) {
+@@ -461,7 +462,11 @@ func (d *DefaultDialer) trackConn(ctx context.Context, destination M.Socksaddr,
+ 			}})
+ 		}
+ 	}
+-	return conn, nil
++	release, ownErr := H.OwnSocket(ctx, conn)
++	if ownErr != nil {
++		return nil, ownErr
++	}
++	return &ownedSocketConn{Conn: conn, release: release}, nil
+ }
+ 
+ func (d *DefaultDialer) trackPacketConn(ctx context.Context, destination M.Socksaddr, conn net.PacketConn, err error) (net.PacketConn, error) {
+@@ -491,7 +496,11 @@ func (d *DefaultDialer) trackPacketConn(ctx context.Context, destination M.Socks
+ 			}}))
+ 		}
+ 	}
+-	return conn, nil
++	release, ownErr := H.OwnSocket(ctx, conn)
++	if ownErr != nil {
++		return nil, ownErr
++	}
++	return &ownedSocketPacket{PacketConn: conn, release: release}, nil
+ }
+ 
+ func (d *DefaultDialer) dialAttribution(ctx context.Context, destination M.Socksaddr) *powerreport.Attribution {
+diff --git a/common/dialer/resolution_pin.go b/common/dialer/resolution_pin.go
+index fd5d556..a5f5bc7 100644
+--- a/common/dialer/resolution_pin.go
++++ b/common/dialer/resolution_pin.go
+@@ -6,6 +6,7 @@ import (
+ 	"syscall"
+ 
+ 	"github.com/sagernet/sing-box/adapter"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
+ 	M "github.com/sagernet/sing/common/metadata"
+ )
+ 
+@@ -13,6 +14,9 @@ func dialPinnedContext(ctx context.Context, dialer *net.Dialer, network, address
+ 	if err := adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address)); err != nil {
+ 		return nil, err
+ 	}
++	if err := H.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
+ 	guarded := pinNetDialer(ctx, *dialer)
+ 	conn, err := guarded.DialContext(ctx, network, address)
+ 	if err != nil {
+@@ -27,15 +31,14 @@ func dialPinnedContext(ctx context.Context, dialer *net.Dialer, network, address
+ // непосредственно перед connect; каждый системный fallback получает свой guard.
+ func pinNetDialer(ctx context.Context, dialer net.Dialer) net.Dialer {
+ 	pin := adapter.ResolutionPinFromContext(ctx)
+-	if pin == nil {
+-		return dialer
+-	}
+-	deadline := pin.Deadline()
+-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+-		deadline = ctxDeadline
+-	}
+-	if dialer.Deadline.IsZero() || deadline.Before(dialer.Deadline) {
+-		dialer.Deadline = deadline
++	if pin != nil {
++		deadline := pin.Deadline()
++		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
++			deadline = ctxDeadline
++		}
++		if dialer.Deadline.IsZero() || deadline.Before(dialer.Deadline) {
++			dialer.Deadline = deadline
++		}
+ 	}
+ 	originalContext, original := dialer.ControlContext, dialer.Control
+ 	dialer.ControlContext = func(ctx context.Context, network, address string, conn syscall.RawConn) error {
+@@ -51,7 +54,10 @@ func pinNetDialer(ctx context.Context, dialer net.Dialer) net.Dialer {
+ 				return err
+ 			}
+ 		}
+-		return adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address))
++		if err := adapter.ValidateResolutionDial(ctx, M.ParseSocksaddr(address)); err != nil {
++			return err
++		}
++		return H.BeforeSocketDial(ctx)
+ 	}
+ 	return dialer
+ }
+diff --git a/common/dialer/resolution_pin_test.go b/common/dialer/resolution_pin_test.go
+index a8f2643..e07a9d7 100644
+--- a/common/dialer/resolution_pin_test.go
++++ b/common/dialer/resolution_pin_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"github.com/database64128/tfo-go/v2"
+ 	"github.com/miekg/dns"
+ 	"github.com/sagernet/sing-box/adapter"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
+ 	M "github.com/sagernet/sing/common/metadata"
+ 	"net"
+ 	"net/netip"
+@@ -109,7 +110,7 @@ func TestResolutionPinPreservesControlContextPrecedence(t *testing.T) {
+ 		t.Fatal("Control called despite ControlContext")
+ 		return nil
+ 	}, ControlContext: func(context.Context, string, string, syscall.RawConn) error { calls++; return nil }})
+-	if err := guarded.ControlContext(ctx, "tcp4", M.SocksaddrFrom(addresses[0], 443).String(), nil); err != nil || calls != 1 {
++	if err := guarded.ControlContext(ctx, "tcp4", M.SocksaddrFrom(addresses[0], 443).String(), nil); !errors.Is(err, H.ErrDenied) || calls != 1 {
+ 		t.Fatalf("calls=%d err=%v", calls, err)
+ 	}
+ }
+diff --git a/common/dialer/socket_guard.go b/common/dialer/socket_guard.go
+new file mode 100644
+index 0000000..2a3a5bf
+--- /dev/null
++++ b/common/dialer/socket_guard.go
+@@ -0,0 +1,67 @@
++package dialer
++
++import (
++	"context"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
++	"net"
++	"syscall"
++)
++
++// Проверка выполняется заново после каждого bind/control перед bind сокета.
++func listenGuardedPacket(ctx context.Context, config net.ListenConfig, network, address string) (net.PacketConn, error) {
++	if err := H.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
++	original := config.Control
++	config.Control = func(network, address string, raw syscall.RawConn) error {
++		if original != nil {
++			if err := original(network, address, raw); err != nil {
++				return err
++			}
++		}
++		return H.BeforeSocketDial(ctx)
++	}
++	return config.ListenPacket(ctx, network, address)
++}
++
++type ownedSocketConn struct {
++	net.Conn
++	release func() error
++}
++
++func (c *ownedSocketConn) Close() error { return c.release() }
++func (c *ownedSocketConn) Read(b []byte) (int, error) {
++	n, err := c.Conn.Read(b)
++	if err != nil {
++		_ = c.Close()
++	}
++	return n, err
++}
++func (c *ownedSocketConn) Write(b []byte) (int, error) {
++	n, err := c.Conn.Write(b)
++	if err != nil {
++		_ = c.Close()
++	}
++	return n, err
++}
++
++type ownedSocketPacket struct {
++	net.PacketConn
++	release func() error
++}
++
++func (c *ownedSocketPacket) Close() error { return c.release() }
++func (c *ownedSocketPacket) ReadFrom(b []byte) (int, net.Addr, error) {
++	n, a, err := c.PacketConn.ReadFrom(b)
++	if err != nil {
++		_ = c.Close()
++	}
++	return n, a, err
++}
++func (c *ownedSocketPacket) WriteTo(b []byte, a net.Addr) (int, error) {
++	n, err := c.PacketConn.WriteTo(b, a)
++	if err != nil {
++		_ = c.Close()
++	}
++	return n, err
++}
+diff --git a/common/dialer/tfo.go b/common/dialer/tfo.go
+index ded2518..a6d6908 100644
+--- a/common/dialer/tfo.go
++++ b/common/dialer/tfo.go
+@@ -11,6 +11,7 @@ import (
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+ 	"github.com/sagernet/sing-box/common/listener"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/bufio"
+ 	M "github.com/sagernet/sing/common/metadata"
+@@ -46,7 +47,7 @@ func DialSlowContext(dialer *tfo.Dialer, ctx context.Context, netns string, netw
+ 			return dialer.Dialer.DialContext(ctx, network, destination.AddrString())
+ 		}
+ 	}
+-	if adapter.ResolutionPinFromContext(ctx) != nil {
++	{
+ 		guarded := *dialer
+ 		guarded.Dialer = pinNetDialer(ctx, guarded.Dialer)
+ 		dialer = &guarded
+@@ -55,9 +56,9 @@ func DialSlowContext(dialer *tfo.Dialer, ctx context.Context, netns string, netw
+ 	var cancel context.CancelFunc
+ 	if adapter.ResolutionPinFromContext(ctx) != nil {
+ 		// TFO может отправить SYN только в initial Write: deadline нужен и ему.
+-		dialCtx, cancel = context.WithDeadline(context.WithoutCancel(ctx), dialer.Dialer.Deadline)
++		dialCtx, cancel = context.WithDeadline(ctx, dialer.Dialer.Deadline)
+ 	} else {
+-		dialCtx, cancel = context.WithCancel(context.WithoutCancel(ctx))
++		dialCtx, cancel = context.WithCancel(ctx)
+ 	}
+ 	return &slowOpenConn{
+ 		dialer:      dialer,
+@@ -113,6 +114,10 @@ func (c *slowOpenConn) Write(b []byte) (n int, err error) {
+ 			pinRejected = true
+ 			return nil, err
+ 		}
++		if err := H.BeforeSocketDial(c.ctx); err != nil {
++			pinRejected = true
++			return nil, err
++		}
+ 		conn, err := c.dialer.DialContext(c.ctx, c.network, c.destination.String(), b)
+ 		if err != nil {
+ 			if pinErr := adapter.ValidateResolutionDial(c.ctx, c.destination); pinErr != nil {
+diff --git a/common/yonikbroker/socket.go b/common/yonikbroker/socket.go
+new file mode 100644
+index 0000000..4868a9e
+--- /dev/null
++++ b/common/yonikbroker/socket.go
+@@ -0,0 +1,40 @@
++package nativehooks
++
++import (
++	"context"
++	"io"
++	"time"
++)
++
++// OwnSocket передаёт session единственное право закрытия опубликованного сокета.
++func OwnSocket(ctx context.Context, socket io.Closer) (func() error, error) {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.session == nil || ctx.Err() != nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
++	lookup := c.lookup
++	if lookup == nil {
++		lookup = c.lookupAuthenticated
++	}
++	proof, err := lookup(ctx, c.flow)
++	if err != nil || ctx.Err() != nil {
++		_ = socket.Close()
++		_ = c.session.Revoke()
++		return nil, ErrDenied
++	}
++	handle, err := c.session.Track(time.Now(), c.required, c.flow, proof, socket)
++	if err != nil {
++		_ = socket.Close()
++		_ = c.session.Revoke()
++		return nil, err
++	}
++	stop := context.AfterFunc(ctx, func() { _ = c.session.Revoke() })
++	return func() error { stop(); return c.session.Release(handle) }, nil
++}
+diff --git a/common/yonikbroker/socket_callsite_test.go b/common/yonikbroker/socket_callsite_test.go
+new file mode 100644
+index 0000000..e056bbd
+--- /dev/null
++++ b/common/yonikbroker/socket_callsite_test.go
+@@ -0,0 +1,272 @@
++package nativehooks_test
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	D "github.com/sagernet/sing-box/common/dialer"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
++	"github.com/sagernet/sing-box/option"
++	M "github.com/sagernet/sing/common/metadata"
++	"net"
++	"sync/atomic"
++	"syscall"
++
++	"testing"
++	"time"
++)
++
++func TestActualSocketGuard(t *testing.T) {
++	for _, network := range []string{"tcp", "udp", "listen"} {
++		for _, status := range []H.Status{H.Known, H.Unknown, H.Unavailable} {
++			t.Run(network+string(rune('0'+status)), func(t *testing.T) {
++				ctx := H.ClosedRoutingFixture(t, status)
++				d, err := D.NewDefault(ctx, option.DialerOptions{})
++				if err != nil {
++					t.Fatal(err)
++				}
++				target, err := net.Listen("tcp4", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer target.Close()
++				ctx, cancel := context.WithTimeout(ctx, time.Second)
++				defer cancel()
++				var conn interface{ Close() error }
++				if network == "listen" {
++					conn, err = d.ListenPacket(ctx, M.ParseSocksaddr("127.0.0.1:12345"))
++				} else {
++					conn, err = d.DialContext(ctx, network, M.ParseSocksaddr(target.Addr().String()))
++				}
++				if err == nil {
++					defer conn.Close()
++				}
++				if (err == nil) != (status == H.Known) {
++					t.Fatalf("status %v: %v", status, err)
++				}
++			})
++		}
++		t.Run(network+"-no-handoff", func(t *testing.T) {
++			ctx := context.Background()
++			d, err := D.NewDefault(ctx, option.DialerOptions{})
++			if err != nil {
++				t.Fatal(err)
++			}
++
++			if network == "listen" {
++				c, e := d.ListenPacket(ctx, M.ParseSocksaddr("127.0.0.1:12345"))
++				if e == nil {
++					c.Close()
++					t.Fatal("listen without handoff")
++				}
++			} else {
++				c, e := d.DialContext(ctx, network, M.ParseSocksaddr("127.0.0.1:9"))
++				if e == nil {
++					c.Close()
++					t.Fatal("dial without handoff")
++				}
++				if !errors.Is(e, H.ErrDenied) {
++					t.Fatalf("guard not reached: %v", e)
++				}
++			}
++		})
++	}
++}
++
++func TestActualSocketFreshProof(t *testing.T) {
++	for _, network := range []string{"tcp", "udp", "listen"} {
++		for _, mode := range []string{"known", "unknown", "unavailable", "stale", "expired", "revoke", "cancel"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				ctx, change, calls := H.ClosedSocketFixture(t)
++				if err := H.RoutingEntry(ctx); err != nil {
++					t.Fatal(err)
++				}
++				change(mode)
++				ctx, cancel := context.WithCancel(ctx)
++				defer cancel()
++				if mode == "cancel" {
++					cancel()
++				}
++				d, err := D.NewDefault(ctx, option.DialerOptions{})
++				if err != nil {
++					t.Fatal(err)
++				}
++				target, err := net.Listen("tcp4", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer target.Close()
++				var conn interface{ Close() error }
++				if network == "listen" {
++					conn, err = d.ListenPacket(ctx, M.ParseSocksaddr("127.0.0.1:12345"))
++				} else {
++					conn, err = d.DialContext(ctx, network, M.ParseSocksaddr(target.Addr().String()))
++				}
++				if err == nil {
++					defer conn.Close()
++				}
++				if (err == nil) != (mode == "known") {
++					t.Fatalf("%s: %v", mode, err)
++				}
++				if mode == "known" && calls() < 2 {
++					t.Fatalf("cached routing proof: %d", calls())
++				}
++			})
++		}
++	}
++}
++
++func TestActualDelayedTFODenial(t *testing.T) {
++	for _, mode := range []string{"unknown", "unavailable", "stale", "cancel"} {
++		t.Run(mode, func(t *testing.T) {
++			ctx, change, _ := H.ClosedSocketFixture(t)
++			ctx, cancel := context.WithCancel(ctx)
++			defer cancel()
++			opts := option.DialerOptions{}
++			opts.TCPFastOpen = true
++			d, err := D.NewDefault(ctx, opts)
++			if err != nil {
++				t.Fatal(err)
++			}
++			c, err := d.DialContext(ctx, "tcp", M.ParseSocksaddr("127.0.0.1:9"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer c.Close()
++			change(mode)
++			if mode == "cancel" {
++				cancel()
++			}
++			n, err := c.Write([]byte("запрещено"))
++			if n != 0 || !errors.Is(err, H.ErrDenied) {
++				t.Fatalf("n=%d err=%v", n, err)
++			}
++		})
++	}
++}
++
++func TestActualSocketRevokeCloses(t *testing.T) {
++	for _, network := range []string{"tcp", "udp", "listen"} {
++		t.Run(network, func(t *testing.T) {
++			ctx, change, _ := H.ClosedSocketFixture(t)
++			d, err := D.NewDefault(ctx, option.DialerOptions{})
++			if err != nil {
++				t.Fatal(err)
++			}
++			target, err := net.Listen("tcp4", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer target.Close()
++			if network == "listen" {
++				c, err := d.ListenPacket(ctx, M.ParseSocksaddr("127.0.0.1:12345"))
++				if err != nil {
++					t.Fatal(err)
++				}
++				change("revoke")
++				defer c.Close()
++				if _, err = c.WriteTo([]byte("x"), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9}); err == nil {
++					t.Fatal("revoked packet socket open")
++				}
++			} else {
++				c, err := d.DialContext(ctx, network, M.ParseSocksaddr(target.Addr().String()))
++				if err != nil {
++					t.Fatal(err)
++				}
++				change("revoke")
++				defer c.Close()
++				if _, err = c.Write([]byte("x")); err == nil {
++					t.Fatal("revoked socket open")
++				}
++			}
++		})
++	}
++}
++
++// ProtectPath расположен в настоящем control path системного dial/listen.
++// Счётчик считает handoff native FD, а не прямые вызовы broker guard.
++func TestActualSocketHandoffCounter(t *testing.T) {
++	for _, network := range []string{"tcp", "udp", "listen"} {
++		for _, mode := range []string{"known", "no-handoff", "unknown", "unavailable", "stale", "expired", "cancel", "revoke"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				var id [16]byte
++				if _, err := rand.Read(id[:]); err != nil {
++					t.Fatal(err)
++				}
++				path := "@yonik-counter-" + hex.EncodeToString(id[:])
++				l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
++				if err != nil {
++					t.Fatal(err)
++				}
++				var calls atomic.Int32
++				done := make(chan struct{})
++				go func() {
++					defer close(done)
++					for {
++						c, e := l.AcceptUnix()
++						if e != nil {
++							return
++						}
++						b := make([]byte, 1)
++						oob := make([]byte, 128)
++						_, n, _, _, e := c.ReadMsgUnix(b, oob)
++						if e == nil {
++							msgs, _ := syscall.ParseSocketControlMessage(oob[:n])
++							for _, msg := range msgs {
++								fds, _ := syscall.ParseUnixRights(&msg)
++								for _, fd := range fds {
++									_ = syscall.Close(fd)
++								}
++							}
++							calls.Add(1)
++							_, _ = c.Write([]byte{1})
++						}
++						_ = c.Close()
++					}
++				}()
++				defer func() { _ = l.Close(); <-done }()
++				ctx, change, _ := H.ClosedSocketFixture(t)
++				if err := H.RoutingEntry(ctx); err != nil {
++					t.Fatal(err)
++				}
++				change(mode)
++				if mode == "no-handoff" {
++					ctx = context.Background()
++				}
++				ctx, cancel := context.WithCancel(ctx)
++				defer cancel()
++				if mode == "cancel" {
++					cancel()
++				}
++				opts := option.DialerOptions{}
++				opts.ProtectPath = path
++				d, err := D.NewDefault(ctx, opts)
++				if err != nil {
++					t.Fatal(err)
++				}
++				target, err := net.Listen("tcp4", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer target.Close()
++				var c interface{ Close() error }
++				if network == "listen" {
++					c, err = d.ListenPacket(ctx, M.ParseSocksaddr("127.0.0.1:12345"))
++				} else {
++					c, err = d.DialContext(ctx, network, M.ParseSocksaddr(target.Addr().String()))
++				}
++				if err == nil {
++					defer c.Close()
++				}
++				want := int32(0)
++				if mode == "known" {
++					want = 1
++				}
++				if calls.Load() != want || (err == nil) != (mode == "known") {
++					t.Fatalf("native handoffs=%d want=%d err=%v", calls.Load(), want, err)
++				}
++			})
++		}
 +	}
 +}

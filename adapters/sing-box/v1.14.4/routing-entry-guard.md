@@ -20,4 +20,28 @@ cancel-during-lookup воспроизводит отказ и проверяет
 Production issuer/relay и установка consumer пока не подключены, поэтому
 production без trusted handoff закрывает routing. `runtime_hooks_connected=false`
 сохранён; pins, capabilities, ABI не изменены. TUN injection, afterDNS,
-beforeDial и полный revoke остаются обязательными отдельными этапами.
+и полная runtime цепочка остаются обязательными отдельными этапами.
+
+## Guard перед socket dial/listen
+
+`pinNetDialer` получает свежий `BeforeSocketDial` после control hooks для каждого
+TCP/UDP connect, включая parallel-interface и late fallback. UDP `ListenPacket`
+и serial-interface listen используют `listenGuardedPacket`: проверка до передачи
+управления и повторная после control hooks. TFO сохраняет отмену исходного flow,
+проверяет proof при initial Write и использует тот же control guard.
+
+`TestActualSocketGuard` и `TestActualSocketFreshProof` вызывают реальные API
+`DefaultDialer`: Known создаёт private loopback TCP/UDP socket; отсутствие handoff,
+Unknown/Unavailable, stale epoch, expired, cancel и revoke запрещают выдачу сокета.
+`TestActualDelayedTFODenial` меняет proof между возвратом deferred connection
+и initial Write. Отказ proof отзывает session и её зарегистрированные ресурсы.
+Wire, pins и capabilities сохранены. Это частичная приёмка перед dial/listen:
+DNS after-resolve и полная сеть остаются обязательным отдельным этапом.
+
+Счётчик lookup подтверждает новый proof вместо reuse routing proof.
+TestActualSocketHandoffCounter использует native ProtectPath как счётчик передачи
+реального socket FD: no-handoff/Unknown/Unavailable/stale/expired/cancel/revoke → 0,
+Known → 1 для TCP, UDP connect и UDP listen. RED запускается на исходном codec.
+Матрица реальных interface fallback в этой приёмке отсутствует. Transport-specific WireGuard/OpenVPN sockets,
+использующие UDPListenerControl, требуют отдельного анализа; общая приёмка
+DefaultDialer не доказывает их покрытие.

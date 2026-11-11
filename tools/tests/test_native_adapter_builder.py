@@ -141,8 +141,10 @@ class BuilderTests(unittest.TestCase):
                 subprocess.run(
                     [
                         *argv[:-1],
-                        "--exclude=route/route.go",
-                        "--exclude=protocol/tun/inbound.go",
+                        *(
+                            f"--exclude={name}"
+                            for name in metadata["callsite_files_sha256"]
+                        ),
                         argv[-1],
                     ],
                     cwd=cwd,
