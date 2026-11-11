@@ -198,6 +198,92 @@ pub fn receive_roles(
         record,
     })
 }
+/// Run хранит exact роли до exec; любой ранний возврат закрывает owned FD.
+pub(crate) struct RunHandoff {
+    permit: ProductionPermit,
+    roles: Roles,
+    binding: Binding,
+}
+impl RunHandoff {
+    pub(crate) fn exec(self, command: &mut std::process::Command) -> Result<(), WorkerError> {
+        self.permit.exec_run(self.roles, &self.binding, command)
+    }
+}
+
+fn bound_record(
+    record: &[u8; FRAME],
+    challenge: &[u8; 128],
+    helper_pid: u32,
+) -> Result<Binding, WorkerError> {
+    let binding = Binding {
+        nonce: record[8..40]
+            .try_into()
+            .map_err(|_| WorkerError::Protocol)?,
+        digest: record[40..72]
+            .try_into()
+            .map_err(|_| WorkerError::Protocol)?,
+        epoch: u64::from_be_bytes(
+            record[72..80]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+        ),
+        session: record[80..96]
+            .try_into()
+            .map_err(|_| WorkerError::Protocol)?,
+        generation: u64::from_be_bytes(
+            record[96..104]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+        ),
+        invocation: record[104..120]
+            .try_into()
+            .map_err(|_| WorkerError::Protocol)?,
+        server_pid: u32::from_be_bytes(
+            record[120..124]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+        ),
+        server_start: u64::from_be_bytes(
+            record[128..136]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+        ),
+    };
+    if binding.record()? != *record
+        || record[8..72] != challenge[8..72]
+        || record[80..96] != challenge[72..88]
+        || record[96..104] != challenge[88..96]
+        || record[104..120] != challenge[96..112]
+        || binding.server_pid != helper_pid
+    {
+        return Err(WorkerError::Peer);
+    }
+    Ok(binding)
+}
+
+pub(crate) fn receive_run_handoff(
+    socket: &OwnedFd,
+    challenge: &[u8; 128],
+    helper_pid: u32,
+    deadline: Instant,
+) -> Result<RunHandoff, WorkerError> {
+    // Gate предшествует чтению ролей и payload. Kernel proof пока не разрешён.
+    let permit = ProductionPermit::mint()?;
+    setup(socket, deadline)?;
+    let mut record = [0; FRAME];
+    let (size, _) = net::recv(socket, &mut record, RecvFlags::PEEK).map_err(|_| WorkerError::Io)?;
+    if size != FRAME {
+        return Err(WorkerError::Protocol);
+    }
+    let binding = bound_record(&record, challenge, helper_pid)?;
+    let roles = receive_roles(socket, &binding, deadline)?;
+    Ok(RunHandoff {
+        permit,
+        roles,
+        binding,
+    })
+}
+
 /// Неподделываемый production gate: конструкторов и caller bool нет.
 pub struct ProductionPermit {
     _private: (),
@@ -282,6 +368,54 @@ fn transport_send(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn run_gate_refuses_before_reading_roles() {
+        let (rx, _tx) = net::socketpair(
+            net::AddressFamily::UNIX,
+            net::SocketType::SEQPACKET,
+            net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        // Пустой канал: чтение зависло бы, gate должен отказать немедленно.
+        assert!(matches!(
+            receive_run_handoff(&rx, &[0; 128], std::process::id(), Instant::now()),
+            Err(WorkerError::Peer)
+        ));
+    }
+
+    #[test]
+    fn run_record_is_bound_to_closed_challenge_and_helper() {
+        let binding = Binding {
+            nonce: [1; 32],
+            digest: [2; 32],
+            epoch: 1,
+            session: [3; 16],
+            generation: 2,
+            invocation: [4; 16],
+            server_pid: 42,
+            server_start: 7,
+        };
+        let record = binding.record().unwrap();
+        let mut challenge = [0; 128];
+        challenge[8..72].copy_from_slice(&record[8..72]);
+        challenge[72..88].copy_from_slice(&record[80..96]);
+        challenge[88..96].copy_from_slice(&record[96..104]);
+        challenge[96..112].copy_from_slice(&record[104..120]);
+        assert!(bound_record(&record, &challenge, 42).is_ok());
+        assert!(bound_record(&record, &challenge, 43).is_err());
+        for index in [8, 40, 72, 88, 96] {
+            let mut forged = challenge;
+            forged[index] ^= 1;
+            assert!(bound_record(&record, &forged, 42).is_err());
+        }
+        for index in [0, 124, 136, 144, 191] {
+            let mut forged = record;
+            forged[index] ^= 1;
+            assert!(bound_record(&forged, &challenge, 42).is_err());
+        }
+    }
+
     #[test]
     fn actual_exact_two_fd_roundtrip_and_cleanup() {
         let (rx, tx) = net::socketpair(

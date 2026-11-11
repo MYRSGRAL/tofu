@@ -367,7 +367,10 @@ fn receive(
     ))
 }
 
-pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), WorkerError> {
+pub(crate) fn bootstrap(
+    stream: &UnixStream,
+    mode: WorkerMode,
+) -> Result<Option<super::role_handoff::RunHandoff>, WorkerError> {
     stream
         .set_read_timeout(Some(TIMEOUT))
         .map_err(|_| WorkerError::Io)?;
@@ -377,8 +380,9 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
     if n.0 != 8 {
         return Err(WorkerError::Protocol);
     }
-    if &marker != OFFER {
-        return Ok(());
+    let v2 = &marker == super::role_handoff::OFFER;
+    if &marker != OFFER && !v2 {
+        return Ok(None);
     }
     if mode != WorkerMode::Run {
         return Err(WorkerError::Protocol);
@@ -407,7 +411,12 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
         }
     }
     if msg.bytes != 8
-        || &marker != OFFER
+        || &marker
+            != if v2 {
+                super::role_handoff::OFFER
+            } else {
+                OFFER
+            }
         || msg
             .flags
             .intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC)
@@ -456,12 +465,31 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
     if ack != closed || !extra.is_empty() || c.pid != peer.pid || !c.uid.is_root() {
         return Err(WorkerError::Peer);
     }
-    Ok(())
+    if v2 {
+        return super::role_handoff::receive_run_handoff(
+            &socket,
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+        )
+        .map(Some);
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn check_rejects_v2_before_accepting_descriptors() {
+        use std::io::Write;
+        let (worker, mut helper) = UnixStream::pair().unwrap();
+        helper.write_all(super::super::role_handoff::OFFER).unwrap();
+        assert!(matches!(
+            bootstrap(&worker, WorkerMode::Check),
+            Err(WorkerError::Protocol)
+        ));
+    }
     #[test]
     fn unbound_challenge_is_rejected() {
         assert!(Challenge::new([0; 32], [1; 16], 1, [2; 16]).is_err());

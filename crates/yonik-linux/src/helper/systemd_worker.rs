@@ -131,6 +131,22 @@ impl BootstrapUnitObservation {
         self.validate_identity()?;
         Ok(witness)
     }
+    /// Canonical issuer до закрытого kernel gate. Observation и namespace FD
+    /// уничтожаются при отказе; payload и роли ещё не отправлены.
+    pub fn probe_run_role_gate(
+        self,
+        stream: &std::os::unix::net::UnixStream,
+        digest: [u8; 32],
+        session: [u8; 16],
+        generation: u64,
+    ) -> Result<()> {
+        let observation = self.exchange(stream, digest, session, generation)?;
+        let result = crate::worker::role_handoff::ProductionPermit::mint()
+            .map(|_| ())
+            .map_err(|_| WorkerSupervisorError::UnitProofGap);
+        drop(observation);
+        result
+    }
     fn validate_identity(&self) -> Result<()> {
         if Instant::now() >= self.expires {
             return Err(WorkerSupervisorError::UnitProofGap);
