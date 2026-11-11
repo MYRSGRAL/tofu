@@ -296,6 +296,7 @@ impl Fixture {
             transfer: None,
             current: None,
             clean: false,
+            retained_copy: None,
             fence: Box::new(FakeFence(Arc::clone(&state))),
         };
         Self {
@@ -604,4 +605,85 @@ fn missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown() {
     );
     std::fs::remove_dir(path.join(WorkerMode::Run.service())).unwrap();
     std::fs::remove_dir(path).unwrap();
+}
+
+#[tokio::test]
+async fn copy_reservation_survives_cancel_and_populated_cgroup_until_empty() {
+    use sha2::Digest;
+    let mut fixture = Fixture::new().await;
+    let path = std::path::Path::new("/usr/bin/true");
+    let bytes = std::fs::read(path).unwrap();
+    let binary = crate::BinarySnapshot::load(
+        path,
+        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
+        yonik_engine::Engine::SingBox,
+    )
+    .unwrap();
+    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    let config = yonik_engine::compile(
+        &server,
+        yonik_engine::Engine::SingBox,
+        std::num::NonZeroU16::new(10808).unwrap(),
+    )
+    .unwrap();
+    let payload = Arc::new(WorkerPayload::new(binary, config).unwrap());
+    let weak = Arc::downgrade(&payload);
+    fixture.supervisor.retained_copy = Some(payload);
+    fixture.state.lock().unwrap().populated = true;
+    let (signal, mut cancelled) = Cancellation::new();
+    signal.send_replace(true);
+    assert!(
+        fixture
+            .supervisor
+            .cleanup(&mut cancelled, Instant::now() + Duration::from_secs(1))
+            .await
+            .is_err()
+    );
+    assert!(weak.upgrade().is_some());
+    let (_keep, mut cancel) = Cancellation::new();
+    assert!(
+        fixture
+            .supervisor
+            .cleanup(&mut cancel, Instant::now() + Duration::from_millis(80))
+            .await
+            .is_err()
+    );
+    assert!(weak.upgrade().is_some());
+    fixture.state.lock().unwrap().populated = false;
+    fixture
+        .supervisor
+        .cleanup(&mut cancel, Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn private_asset_mount_requires_bounded_controlled_tmpfs_options() {
+    let mut p = Properties::new();
+    for options in [
+        "rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=128",
+        "size=67108864,mode=01777,nr_inodes=128,noexec,nodev,nosuid,rw",
+    ] {
+        p.insert(
+            "TemporaryFileSystem".into(),
+            value(vec![("/dev/shm".to_owned(), options.to_owned())]),
+        );
+        assert!(validate_private_assets(&p).is_ok());
+    }
+    for options in [
+        "rw,nosuid,nodev,noexec,mode=1777",
+        "rw,nosuid,nodev,noexec,mode=1777,size=128M,nr_inodes=128",
+        "rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=129",
+        "rw,nosuid,nodev,exec,mode=1777,size=64M,nr_inodes=128",
+    ] {
+        p.insert(
+            "TemporaryFileSystem".into(),
+            value(vec![("/dev/shm".to_owned(), options.to_owned())]),
+        );
+        assert!(validate_private_assets(&p).is_err());
+    }
 }

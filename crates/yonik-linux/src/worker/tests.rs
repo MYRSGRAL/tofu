@@ -245,3 +245,109 @@ fn received_descriptors_are_cloexec_and_executable_is_copied() {
     assert!(fcntl_getfd(&input).unwrap().contains(FdFlags::CLOEXEC));
     assert!(input.set_len(5).is_err());
 }
+
+#[test]
+fn worker_owned_config_preserves_bytes_cursor_seals_and_budget() {
+    use std::os::unix::fs::MetadataExt;
+    let bytes = b"{\"secret\":\"fixture-only\"}";
+    let mut source = sealed_config(bytes).unwrap();
+    source.seek(SeekFrom::Start(7)).unwrap();
+    let budget = crate::helper::memory::ByteBudget::new(bytes.len());
+    let mut copy = worker_owned_config(&source, &budget).unwrap();
+    assert_eq!(source.stream_position().unwrap(), 7);
+    assert_eq!(copy.file.stream_position().unwrap(), 0);
+    assert_eq!(
+        copy.file.metadata().unwrap().uid(),
+        rustix::process::getuid().as_raw()
+    );
+    assert_eq!(copy.file.metadata().unwrap().mode() & 0o777, 0o600);
+    let mut actual = Vec::new();
+    copy.file.read_to_end(&mut actual).unwrap();
+    assert_eq!(actual, bytes);
+    assert!(fcntl_get_seals(&copy.file).unwrap().contains(SEALS));
+    assert!(copy.file.set_len(0).is_err());
+    assert_eq!(budget.used(), bytes.len());
+    assert!(worker_owned_config(&source, &budget).is_err());
+    assert_eq!(budget.used(), bytes.len());
+    drop(copy);
+    assert_eq!(budget.used(), 0);
+    assert!(worker_owned_config(&config_file().unwrap(), &budget).is_err());
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn source_config_memfd_is_private_before_write_and_after_seal() {
+    use std::os::unix::fs::MetadataExt;
+    let mut file = config_file().unwrap();
+    assert_eq!(file.metadata().unwrap().mode() & 0o777, 0o600);
+    assert_eq!(
+        file.metadata().unwrap().uid(),
+        rustix::process::geteuid().as_raw()
+    );
+    assert_eq!(file.stream_position().unwrap(), 0);
+    assert!(
+        rustix::io::fcntl_getfd(&file)
+            .unwrap()
+            .contains(rustix::io::FdFlags::CLOEXEC)
+    );
+    let bytes = b"{\"fixture\":true}";
+    file.write_all(bytes).unwrap();
+    fcntl_add_seals(&file, SEALS).unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    validate_file(&file, bytes.len(), Hasher::digest(bytes).into()).unwrap();
+    assert_eq!(file.stream_position().unwrap(), 0);
+    assert_eq!(file.metadata().unwrap().mode() & 0o777, 0o600);
+    assert!(fcntl_get_seals(&file).unwrap().contains(SEALS));
+    assert!(file.write_all(b"changed").is_err());
+    let mut actual = [0u8; 16];
+    assert_eq!(
+        file.read_at(&mut actual[..bytes.len()], 0).unwrap(),
+        bytes.len()
+    );
+    assert_eq!(&actual[..bytes.len()], bytes);
+}
+
+#[test]
+fn bundle_v2_header_has_closed_ordered_roles_and_engine() {
+    let header = Header {
+        mode: WorkerMode::Check,
+        engine: Engine::Xray,
+        length: 12,
+        binary_hash: [1; 32],
+        config_hash: [2; 32],
+    };
+    let resource = yonik_engine::resource_bundle::ExternalRef {
+        engine: Engine::Xray,
+        digest: [3; 32],
+        bytes: 25,
+        records: 1,
+        kind: yonik_engine::resource_bundle::ResourceKind::Cidrs,
+        format_version: 1,
+    };
+    let mut encoded = header.encode().to_vec();
+    encoded[7] = 2;
+    encoded[10] = 1;
+    encoded.extend_from_slice(&1u64.to_be_bytes());
+    encoded.extend_from_slice(&2u64.to_be_bytes());
+    encode_resource(&mut encoded, &resource);
+    assert_eq!(decode_bundle_header(&encoded).unwrap().1.len(), 1);
+    for length in [0, 79, 80, 81, 95, 96, 149] {
+        assert!(decode_bundle_header(&encoded[..length.min(encoded.len())]).is_err());
+    }
+    for (position, value) in [
+        (7, 3),
+        (10, 0),
+        (10, 17),
+        (11, 1),
+        (96, 2),
+        (97, 99),
+        (101, 9),
+    ] {
+        let mut wrong = encoded.clone();
+        wrong[position] = value;
+        assert!(decode_bundle_header(&wrong).is_err());
+    }
+    encoded[10] = 2;
+    encode_resource(&mut encoded, &resource);
+    assert!(decode_bundle_header(&encoded).is_err());
+}

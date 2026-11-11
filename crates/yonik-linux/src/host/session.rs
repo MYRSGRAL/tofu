@@ -160,7 +160,7 @@ impl LocalSession {
     }
     /// Явное подключение журнала; прежний конструктор сохраняет поведение.
     pub fn with_event_log(mut self, log: crate::event_log::EventLog) -> Self {
-        self.event_log = Some(log);
+        self.event_log = log.session_scope();
         self
     }
     fn log(&self, code: crate::event_log::EventCode) {
@@ -181,6 +181,7 @@ impl LocalSession {
     }
 
     fn accept(&mut self, event: Event) -> Result<(), HostError> {
+        let cleanup_failed = matches!(event, Event::CleanupFailed);
         let token = self.active.ok_or(HostError::State)?;
         match self
             .session
@@ -188,6 +189,9 @@ impl LocalSession {
             .map_err(|_| HostError::State)?
         {
             Outcome::Applied(next) => {
+                if cleanup_failed {
+                    self.log(crate::event_log::EventCode::CleanupFailed);
+                }
                 self.active = next;
                 Ok(())
             }
@@ -201,8 +205,12 @@ impl LocalSession {
         cancel: &mut Cancellation,
     ) -> Result<(), HostError> {
         cancel.check()?;
-        self.log(crate::event_log::EventCode::StartRequested);
         let token = self.session.begin().map_err(|_| HostError::State)?;
+        self.event_log = self
+            .event_log
+            .as_ref()
+            .map(|log| log.with_generation(token.generation()));
+        self.log(crate::event_log::EventCode::StartRequested);
         let plan = self
             .session
             .prepare(token, LOCAL_ENV, checked.digest)

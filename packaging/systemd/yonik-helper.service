@@ -31,6 +31,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+TemporaryFileSystem=/dev/shm:rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=128
 PrivateDevices=yes
 BindPaths=/dev/net/tun
 DeviceAllow=/dev/net/tun rw
