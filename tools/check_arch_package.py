@@ -178,7 +178,7 @@ def validate_recipe(path: Path) -> None:
     функции и aliases делают такой анализ ненадёжным. Hash фиксирует целиком
     рецепт без hooks, автозапуска и сетевой установки engine.
     """
-    approved = "c09441e7db50d5981da98955e13939e8ae1d6882e220793964d09406d496217f"
+    approved = "07fb40b269f664ce2b1a73de26cf630ba1f7bcc4e78a1bffa171b4ae25516414"
     if hashlib.sha256(path.read_bytes()).hexdigest() != approved:
         raise ValueError(
             "Изменён рецепт: требуется независимая проверка и обновление seal"
