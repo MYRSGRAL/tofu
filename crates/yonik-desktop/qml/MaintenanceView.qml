@@ -29,10 +29,13 @@ ColumnLayout {
         if ((operation === "restore" && !sourcePath) || !destinationPath) return
         pending = nextRequestId()
         feedback = tr("Подготовка копии…", "Preparing copy…")
-        const request = {command: "maintenance_start", request_id: pending,
-            operation: operation, destination: destinationPath, revision: revision}
-        if (operation === "restore") request.source = sourcePath
-        sendCommand(request)
+        if (operation === "restore") {
+            sendCommand({command: "maintenance_start", request_id: pending,
+                operation: operation, source: sourcePath, destination: destinationPath, revision: revision})
+        } else {
+            sendCommand({command: "maintenance_start", request_id: pending,
+                operation: operation, destination: destinationPath, revision: revision})
+        }
     }
     onResponseChanged: {
         if (!response || response.request_id !== pending) return

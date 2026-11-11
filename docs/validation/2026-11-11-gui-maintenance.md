@@ -44,6 +44,7 @@ fsync сохраняет Storage/неопределённость результ
 - backup fault/crash fixtures: 15 passed;
 - cancellation admission, late publication и cleanup uncertainty: 3 passed;
 - `clippy --all-targets -- -D warnings` для desktop/linux и fmt: passed;
+- RU/EN catalog checker: 246 inline-пар и 96 ключей, passed;
 - Qt 6.11.2 `/usr/lib/qt6/bin/qmltestrunner`: 5 passed (3 проверки плюс
   init/cleanup), offscreen, private D-Bus, Qt dialog fallback. Проверяется
   обработка clicked/accepted signals, выбранных путей, matching ACK и отмены;
