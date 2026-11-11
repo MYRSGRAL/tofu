@@ -1487,7 +1487,7 @@ diff --git a/common/yonikbroker/callsite_test.go b/common/yonikbroker/callsite_t
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/callsite_test.go
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,105 @@
 +package nativehooks_test
 +
 +import (
@@ -1497,6 +1497,7 @@ new file mode 100644
 +	"github.com/sagernet/sing-box/log"
 +	"github.com/sagernet/sing-box/option"
 +	"github.com/sagernet/sing-box/route"
++	N "github.com/sagernet/sing/common/network"
 +	"github.com/sagernet/sing/service"
 +	"net"
 +	"net/netip"
@@ -1577,16 +1578,33 @@ new file mode 100644
 +		}
 +	}
 +}
++
++// Встраивание интерфейса ловит любой неожиданный I/O вызов через nil.
++type countedPacket struct {
++	N.PacketConn
++	closes int
++}
++
++func (p *countedPacket) Close() error { p.closes++; return nil }
++func TestDeniedPacketOwnership(t *testing.T) {
++	p := new(countedPacket)
++	err := new(route.Router).RoutePacketConnection(context.Background(), p, adapter.InboundContext{})
++	if err != nativehooks.ErrDenied || p.closes != 1 {
++		t.Fatalf("deny=%v closes=%d", err, p.closes)
++	}
++}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,27 @@
 +package nativehooks
 +
 +import (
 +	"context"
++	"os"
 +	"testing"
++	"time"
 +)
 +
 +func ClosedRoutingFixture(t *testing.T, status Status) context.Context {
@@ -1594,11 +1612,24 @@ new file mode 100644
 +	p.Status = status
 +	return context.WithValue(context.Background(), routingKey{}, &routingConsumer{session: s, required: true, flow: p.Flow, lookup: func(context.Context, Flow) (Evidence, error) { return p, nil }})
 +}
++
++func ClosedTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	ctx, original, cancel := closedTUNFixture(t)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	return ctx, original, func() {
++		cancel()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("native revoke deadline")
++		}
++	}
++}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,86 @@
 +package nativehooks
 +
 +import (
@@ -1620,6 +1651,9 @@ new file mode 100644
 +	flow           Flow
 +	bootstrap      Bootstrap
 +	channel, pidfd *os.File
++	owned          *os.File
++	ownedHandle    *Handle
++	attached       AttachBody
 +	sequence       Sequence
 +	next           uint64
 +	lookup         func(context.Context, Flow) (Evidence, error) // Только закрытый test fixture.
@@ -1766,17 +1800,20 @@ diff --git a/route/route.go b/route/route.go
  	//nolint:staticcheck
  	if metadata.InboundDetour != "" {
  		if metadata.LastInbound == metadata.InboundDetour {
-@@ -229,6 +233,9 @@
+@@ -229,6 +233,12 @@
  }
  
  func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext) error {
 +	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		if conn != nil {
++			_ = conn.Close()
++		}
 +		return err
 +	}
  	done := make(chan any)
  	err := r.routePacketConnection(ctx, conn, metadata, N.OnceClose(func(it error) {
  		close(done)
-@@ -261,6 +268,9 @@
+@@ -261,6 +271,9 @@
  }
  
  func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
@@ -1786,7 +1823,7 @@ diff --git a/route/route.go b/route/route.go
  	//nolint:staticcheck
  	if metadata.InboundDetour != "" {
  		if metadata.LastInbound == metadata.InboundDetour {
-@@ -376,6 +386,9 @@
+@@ -376,6 +389,9 @@
  
  func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) adapter.PreMatchResult {
  	ctx := log.ContextWithNewID(r.ctx)
@@ -1796,7 +1833,7 @@ diff --git a/route/route.go b/route/route.go
  	metadata.PreMatch = true
  	continueResult := adapter.PreMatchResult{Action: adapter.PreMatchContinue}
  	packetDestination := metadata.Destination
-@@ -654,6 +667,9 @@
+@@ -654,6 +670,9 @@
  	selectedRule adapter.Rule, selectedRuleIndex int,
  	buffers []*buf.Buffer, packetBuffers []*N.PacketBuffer, fatalErr error,
  ) {
@@ -1806,3 +1843,572 @@ diff --git a/route/route.go b/route/route.go
  	fatalErr = r.prepareMatchMetadata(ctx, metadata)
  	if fatalErr != nil {
  		return
+diff --git a/protocol/tun/inbound.go b/protocol/tun/inbound.go
+--- a/protocol/tun/inbound.go
++++ b/protocol/tun/inbound.go
+@@ -2,6 +2,8 @@
+ 
+ import (
+ 	"context"
++	nativehooks "github.com/sagernet/sing-box/common/yonikbroker"
++	"io"
+ 	"net"
+ 	"net/netip"
+ 	"os"
+@@ -354,6 +356,9 @@
+ 			t.dnsHijackAddress = append(inet4DNSAddress, inet6DNSAddress...)
+ 		}
+ 	case adapter.StartStateStart:
++		if !t.tunOptions.EXP_ExternalConfiguration {
++			return nativehooks.ErrDenied
++		}
+ 		if t.tunOptions.EXP_ExternalConfiguration {
+ 			if _, err := net.InterfaceByName(t.tunOptions.Name); err != nil {
+ 				return E.Cause(err, "external_configuration interface is unavailable")
+@@ -470,11 +475,7 @@
+ 			}
+ 		}
+ 		monitor.Start("open interface")
+-		if t.usePlatformInterface {
+-			tunInterface, err = t.platformInterface.OpenInterface(&tunOptions, t.platformOptions)
+-		} else {
+-			tunInterface, err = tun.New(tunOptions)
+-		}
++		tunInterface, err = NewOwnedInterface(t.ctx, tunOptions)
+ 		monitor.Finish()
+ 		t.tunOptions.Name = tunOptions.Name
+ 		if err != nil {
+@@ -669,3 +670,27 @@
+ func (t *autoRedirectHandler) NewDNSPacket(payload []byte, source M.Socksaddr, destination M.Socksaddr, writer N.PacketWriter) {
+ 	(*Inbound)(t).NewDNSPacket(payload, source, destination, writer)
+ }
++
++// Close остаётся в session custody при обычном завершении и отзыве.
++type ownedTun struct {
++	tun.Tun
++	release func() error
++}
++
++func (t *ownedTun) Close() error { return t.release() }
++
++// NewOwnedInterface — actual constructor Start; config FD не создаёт authority.
++func NewOwnedInterface(ctx context.Context, options tun.Options) (tun.Tun, error) {
++	if !options.EXP_ExternalConfiguration || options.FileDescriptor != 0 || options.NetNs != "" || options.AutoRoute || options.StrictRoute {
++		return nil, nativehooks.ErrDenied
++	}
++	opened, release, err := nativehooks.OpenTUN(ctx, options.Name, options.MTU, func(fd int) (io.Closer, error) {
++		options.FileDescriptor = fd
++		options.GSO = false
++		return tun.New(options)
++	})
++	if err != nil {
++		return nil, err
++	}
++	return &ownedTun{Tun: opened.(tun.Tun), release: release}, nil
++}
+diff --git a/common/yonikbroker/closed_tun_linux.go b/common/yonikbroker/closed_tun_linux.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/closed_tun_linux.go
+@@ -0,0 +1,222 @@
++//go:build linux && !android
++
++package nativehooks
++
++import (
++	"context"
++	"io"
++	"net"
++	"os"
++	"sync"
++	"syscall"
++	"time"
++
++	"golang.org/x/sys/unix"
++)
++
++// closedAttach принимает владение только уже аутентифицированным worker handoff.
++// Production issuer пока не подключён; config/env не вызывают этот конструктор.
++func closedAttach(ctx context.Context, record []byte, channel, pidfd *os.File) (context.Context, error) {
++	ok := false
++	defer func() {
++		if !ok {
++			if channel != nil {
++				_ = channel.Close()
++			}
++			if pidfd != nil {
++				_ = pidfd.Close()
++			}
++		}
++	}()
++	b, err := DecodeBootstrap(record, 2)
++	if err != nil || ctx.Err() != nil {
++		return nil, ErrDenied
++	}
++	hello, files, err := b.ReceiveAuthenticated(channel, pidfd)
++	for _, f := range files {
++		_ = f.Close()
++	}
++	if err != nil || hello.Header.Kind != HelloKind {
++		return nil, ErrDenied
++	}
++	selected := uint64(OwnedTUN)
++	if hello.Hello.AppRequired {
++		selected = AllFeatures
++	}
++	features, err := EncodeFeatures(b.Binding, selected, hello.Hello.AppRequired, hello.Hello.Supported)
++	if err != nil {
++		return nil, err
++	}
++	if err = syscall.Sendmsg(int(channel.Fd()), features, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		return nil, ErrDenied
++	}
++	attach, files, err := b.ReceiveAuthenticated(channel, pidfd)
++	if err != nil || attach.Header.Kind != AttachKind || len(files) != 1 {
++		for _, f := range files {
++			_ = f.Close()
++		}
++		return nil, ErrDenied
++	}
++	f := files[0]
++	s, err := NewSession(b.Binding, hello.Hello.OwnerTTL)
++	if err != nil {
++		_ = f.Close()
++		return nil, err
++	}
++	c := &routingConsumer{session: s, required: hello.Hello.AppRequired, bootstrap: b, channel: channel, pidfd: pidfd, owned: f, attached: attach.Attach}
++	c.ownedHandle, err = s.Track(time.Now(), false, Flow{}, Evidence{}, f)
++	if err != nil {
++		_ = f.Close()
++		return nil, err
++	}
++	if validateTUN(f, attach.Attach) != nil {
++		_ = s.Revoke()
++		return nil, ErrDenied
++	}
++	ack, err := EncodeAttachACK(b.Binding)
++	if err != nil {
++		_ = s.Revoke()
++		return nil, err
++	}
++	if err = syscall.Sendmsg(int(channel.Fd()), ack, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		_ = s.Revoke()
++		return nil, ErrDenied
++	}
++	ok = true
++	go c.monitorTUN(ctx)
++	return context.WithValue(ctx, routingKey{}, c), nil
++}
++
++func validateTUN(f *os.File, a AttachBody) error {
++	if f == nil {
++		return ErrDenied
++	}
++	req, err := unix.NewIfreq("")
++	if err != nil || unix.IoctlIfreq(int(f.Fd()), unix.TUNGETIFF, req) != nil {
++		return ErrDenied
++	}
++	if req.Name() != a.Name || req.Uint16() != unix.IFF_TUN|unix.IFF_NO_PI {
++		return ErrDenied
++	}
++	iface, err := net.InterfaceByName(a.Name)
++	if err != nil || iface.Index != int(a.Ifindex) || iface.MTU != int(a.MTU) {
++		return ErrDenied
++	}
++	flags, err := unix.FcntlInt(f.Fd(), unix.F_GETFD, 0)
++	if err != nil || flags&unix.FD_CLOEXEC == 0 {
++		return ErrDenied
++	}
++	status, err := unix.FcntlInt(f.Fd(), unix.F_GETFL, 0)
++	if err != nil || status&unix.O_NONBLOCK == 0 {
++		return ErrDenied
++	}
++	return nil
++}
++
++type onceTUN struct {
++	io.Closer
++	once sync.Once
++	err  error
++}
++
++func (t *onceTUN) Close() error { t.once.Do(func() { t.err = t.Closer.Close() }); return t.err }
++
++// OpenTUN внедряет FD только из закрытого контекста. При успехе native constructor
++// владеет raw FD; при ошибке constructor обязан оставить raw FD вызывающему.
++// Возвращённый release используется вместо прямого Close ядра.
++func OpenTUN(ctx context.Context, name string, mtu uint32, factory func(int) (io.Closer, error)) (io.Closer, func() error, error) {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil || factory == nil {
++		return nil, nil, ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	success := false
++	defer func() {
++		if !success && c.session != nil {
++			_ = c.session.Revoke()
++		}
++	}()
++	if c.session == nil || c.owned == nil || ctx.Err() != nil || c.bootstrap.CheckServer(c.pidfd) != nil || c.session.Guard(time.Now(), BeforeRouting, false, Flow{}, Evidence{}) != nil || name != c.attached.Name || mtu != c.attached.MTU || validateTUN(c.owned, c.attached) != nil {
++		return nil, nil, ErrDenied
++	}
++	fd, err := unix.FcntlInt(c.owned.Fd(), unix.F_DUPFD_CLOEXEC, 3)
++	if err != nil {
++		return nil, nil, err
++	}
++	_ = c.session.Release(c.ownedHandle)
++	c.owned = nil
++	native, err := factory(fd)
++	if err != nil || native == nil {
++		_ = unix.Close(fd)
++		_ = c.session.Revoke()
++		return nil, nil, ErrDenied
++	}
++	closed := &onceTUN{Closer: native}
++	if ctx.Err() != nil || c.bootstrap.CheckServer(c.pidfd) != nil {
++		_ = closed.Close()
++		return nil, nil, ErrDenied
++	}
++	h, err := c.session.Track(time.Now(), false, Flow{}, Evidence{}, closed)
++	if err != nil {
++		_ = closed.Close()
++		return nil, nil, err
++	}
++	success = true
++	return native, func() error { return c.session.Release(h) }, nil
++}
++
++func (c *routingConsumer) monitorTUN(ctx context.Context) {
++	defer c.channel.Close()
++	defer c.pidfd.Close()
++	defer c.session.Revoke()
++	ticker := time.NewTicker(5 * time.Millisecond)
++	defer ticker.Stop()
++	for {
++		select {
++		case <-ctx.Done():
++			return
++		case <-c.session.Context().Done():
++			return
++		case <-ticker.C:
++			c.mu.Lock()
++			if c.bootstrap.CheckServer(c.pidfd) != nil {
++				c.mu.Unlock()
++				return
++			}
++			fd := int(c.channel.Fd())
++			var set syscall.FdSet
++			if fd < 0 || fd >= len(set.Bits)*64 {
++				c.mu.Unlock()
++				return
++			}
++			set.Bits[fd/64] |= 1 << uint(fd%64)
++			timeout := syscall.Timeval{}
++			n, err := syscall.Select(fd+1, &set, nil, nil, &timeout)
++			if err != nil {
++				c.mu.Unlock()
++				return
++			}
++			if n != 0 {
++				_, files, _ := c.bootstrap.ReceiveAuthenticated(c.channel, c.pidfd)
++				for _, f := range files {
++					_ = f.Close()
++				}
++				// Любое unsolicited сообщение (включая REVOKE), EOF или invalid frame отзывает custody.
++				c.mu.Unlock()
++				return
++			}
++			c.mu.Unlock()
++		}
++	}
++}
++
++// CarryClosedSession сохраняет только уже доверенную session при upstream detach.
++// Непроверенные context values и caller assertions authority не создают.
++func CarryClosedSession(source, target context.Context) context.Context {
++	c, ok := source.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		return target
++	}
++	return context.WithValue(target, routingKey{}, c)
++}
+diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/closed_tun_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/closed_tun_linux_test.go
+@@ -0,0 +1,222 @@
++//go:build linux && !android
++
++package nativehooks
++
++import (
++	"context"
++	"golang.org/x/sys/unix"
++	"io"
++	"net"
++	"os"
++	"syscall"
++	"testing"
++	"time"
++)
++
++// Frozen issuer fixture имеет только собственный bound TUN внутри отдельной netns.
++func closedTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	return closedTUNFixtureMode(t, "cancel")
++}
++func closedTUNFixtureMode(t *testing.T, mode string) (context.Context, *os.File, func()) {
++	t.Helper()
++	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
++		t.Skip("нужен isolated namespace launcher")
++	}
++	current, err := os.Readlink("/proc/self/ns/net")
++	if err != nil || current == os.Getenv("YONIK_HOST_NETNS") {
++		t.Fatal("тест требует отдельную netns")
++	}
++	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	original := os.NewFile(uintptr(fd), "fixture-original")
++	t.Cleanup(func() { original.Close() })
++	req, _ := unix.NewIfreq("ynkfixture0")
++	req.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
++	if err = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); err != nil {
++		t.Fatal(err)
++	}
++	iface, err := net.InterfaceByName(req.Name())
++	if err != nil {
++		t.Fatal(err)
++	}
++	b, pidfd := liveBootstrap(t)
++	record := roleRecord()
++	be.PutUint32(record[120:], b.ServerPID)
++	be.PutUint64(record[128:], b.ServerStarttime)
++	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	receiver := os.NewFile(uintptr(pair[0]), "fixture-receiver")
++	sender := os.NewFile(uintptr(pair[1]), "fixture-sender")
++	t.Cleanup(func() { sender.Close() })
++	if err = syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++		t.Fatal(err)
++	}
++	hello := makeFrame(HelloKind, 0, b.Binding, 176)
++	copy(hello[96:112], b.Session[:])
++	be.PutUint64(hello[112:], b.Generation)
++	copy(hello[120:136], b.Invocation[:])
++	be.PutUint32(hello[136:], MaxFrameBytes)
++	be.PutUint16(hello[140:], 1)
++	be.PutUint64(hello[144:], uint64(OwnerTTL))
++	be.PutUint64(hello[152:], uint64(BootstrapTTL))
++	be.PutUint64(hello[160:], OwnedTUN)
++	attach := makeFrame(AttachKind, 0, b.Binding, 128)
++	be.PutUint32(attach[96:], 1)
++	be.PutUint32(attach[100:], uint32(iface.Index))
++	be.PutUint32(attach[104:], 0x1001)
++	be.PutUint32(attach[108:], uint32(iface.MTU))
++	copy(attach[112:], iface.Name)
++	done := make(chan error, 1)
++	go func() {
++		if e := syscall.Sendmsg(pair[1], hello, nil, nil, 0); e != nil {
++			done <- e
++			return
++		}
++		buffer := make([]byte, 256)
++		_, e := syscall.Read(pair[1], buffer)
++		if e != nil {
++			done <- e
++			return
++		}
++		if e = syscall.Sendmsg(pair[1], attach, syscall.UnixRights(fd), nil, 0); e != nil {
++			done <- e
++			return
++		}
++		_, e = syscall.Read(pair[1], buffer)
++		done <- e
++	}()
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(cancel)
++	result, err := closedAttach(ctx, record, receiver, pidfd)
++	if err != nil {
++		sender.Close()
++		t.Fatal(err)
++	}
++	select {
++	case err = <-done:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("issuer deadline")
++	}
++	consumer := result.Value(routingKey{}).(*routingConsumer)
++	t.Cleanup(func() {
++		cancel()
++		select {
++		case <-consumer.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Error("cleanup deadline")
++		}
++	})
++	revoke := cancel
++	if mode == "eof" {
++		revoke = func() { _ = sender.Close() }
++	}
++	if mode == "revoke" {
++		revoke = func() {
++			frame := makeFrame(RevokeKind, 0, b.Binding, 104)
++			be.PutUint32(frame[96:], 1)
++			_ = syscall.Sendmsg(pair[1], frame, nil, nil, 0)
++		}
++	}
++	return result, original, revoke
++}
++
++type fixtureCloser struct{ file *os.File }
++
++func (c *fixtureCloser) Close() error { return c.file.Close() }
++func TestClosedTUNAttachCustody(t *testing.T) {
++	for _, mode := range []string{"cancel", "eof", "revoke"} {
++		t.Run(mode, func(t *testing.T) { testClosedTUNCustody(t, mode) })
++	}
++}
++func testClosedTUNCustody(t *testing.T, mode string) {
++	ctx, original, cancel := closedTUNFixtureMode(t, mode)
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var received *os.File
++	_, release, err := OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(fd int) (io.Closer, error) {
++		received = os.NewFile(uintptr(fd), "native-duplicate")
++		return &fixtureCloser{received}, nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	cancel()
++	deadline := time.Now().Add(time.Second)
++	for {
++		if _, err = received.Stat(); err != nil {
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("cancel не закрыл native handle")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	if err = release(); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(int) (io.Closer, error) { t.Fatal("повторная инъекция"); return nil, nil }); err == nil {
++		t.Fatal("ATTACH повторно использован")
++	}
++	if _, err = original.Stat(); err != nil {
++		t.Fatal("helper original закрыт", err)
++	}
++}
++func TestOpenTUNWithoutHandoff(t *testing.T) {
++	called := false
++	_, _, err := OpenTUN(context.Background(), "ignored", 1500, func(int) (io.Closer, error) { called = true; return nil, nil })
++	if err == nil || called {
++		t.Fatal("нет closed custody", err, called)
++	}
++}
++
++func TestClosedTUNRejectMetadata(t *testing.T) {
++	ctx, _, _ := closedTUNFixture(t)
++	for _, item := range []struct {
++		name string
++		mtu  uint32
++	}{{"wrong", 1500}, {"ynkfixture0", 68}} {
++		if _, _, err := OpenTUN(ctx, item.name, item.mtu, func(int) (io.Closer, error) { t.Fatal("metadata bypass"); return nil, nil }); err == nil {
++			t.Fatal("metadata accepted")
++		}
++	}
++	f, err := os.Open("/dev/null")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer f.Close()
++	if validateTUN(f, AttachBody{Name: "ynkfixture0", MTU: 1500, Ifindex: 1}) == nil {
++		t.Fatal("не-TUN FD")
++	}
++}
++
++func TestClosedTUNOneUse(t *testing.T) {
++	ctx, _, _ := closedTUNFixture(t)
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var received *os.File
++	factory := func(fd int) (io.Closer, error) {
++		received = os.NewFile(uintptr(fd), "single-use")
++		return &fixtureCloser{received}, nil
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), factory); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(int) (io.Closer, error) { t.Fatal("повторная инъекция"); return nil, nil }); err == nil {
++		t.Fatal("повторный ATTACH")
++	}
++	if _, err = received.Stat(); err == nil {
++		t.Fatal("close-on-error")
++	}
++}
+diff --git a/common/yonikbroker/tun_callsite_test.go b/common/yonikbroker/tun_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/tun_callsite_test.go
+@@ -0,0 +1,47 @@
++package nativehooks_test
++
++import (
++	"context"
++	nativehooks "github.com/sagernet/sing-box/common/yonikbroker"
++	"github.com/sagernet/sing-box/protocol/tun"
++	T "github.com/sagernet/sing-tun"
++	"net"
++	"testing"
++	"time"
++)
++
++func TestActualTUNConstructor(t *testing.T) {
++	if _, err := tun.NewOwnedInterface(context.Background(), T.Options{EXP_ExternalConfiguration: true, Name: "ignored", MTU: 1500}); err == nil {
++		t.Fatal("нет handoff")
++	}
++	ctx, original, cancel := nativehooks.ClosedTUNFixture(t)
++	ctx = nativehooks.CarryClosedSession(ctx, context.Background())
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	native, err := tun.NewOwnedInterface(ctx, T.Options{EXP_ExternalConfiguration: true, Name: iface.Name, MTU: uint32(iface.MTU)})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = native.Start(); err != nil {
++		t.Fatal(err)
++	}
++	cancel()
++	done := make(chan error, 1)
++	go func() { _, err := native.Read(make([]byte, 2048)); done <- err }()
++	select {
++	case err = <-done:
++		if err == nil {
++			t.Fatal("закрытый TUN читает")
++		}
++	case <-time.After(time.Second):
++		t.Fatal("revoke не закрыл TUN")
++	}
++	if err = native.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = original.Stat(); err != nil {
++		t.Fatal("original", err)
++	}
++}

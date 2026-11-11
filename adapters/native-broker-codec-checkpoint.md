@@ -4,8 +4,8 @@
 Оба `native-broker-codec.patch` добавляют одинаковый компонент в
 `common/yonikbroker` pinned sing-box v1.14.4 и Xray v26.10.31.
 `tools/build_native_adapter.py --native-codec` применяет патч, сверяет SHA256
-каждого файла и запускает его тесты до сборки ядра. Этот режим не подключает
-компонент к runtime и не включает featureack, capabilities или native pins.
+каждого файла и запускает его тесты до сборки ядра. Этот режим подключает fail-closed routing-entry guards и закрытые TUN-конструкторы.
+Production issuer ещё не подключён; featureack, capabilities и native pins не включаются.
 
 Проверяются frozen Rust vectors, границы сообщений, reserved bytes, FD count,
 canonical tuple, обязательный OWNED_TUN, app-required feature matrix, binding,
@@ -28,7 +28,10 @@ credentials/liveness на каждом recvmsg, затем внедрить owne
 реальные call sites до routing, после DNS и до dial. Xray openFromEnv не является
 источником authority. Наличие codec не доказывает эти свойства.
 
-Runtime hooks, owned-TUN injection и helper VM end-to-end acceptance пока не
-реализованы этим checkpoint. Rust исходники и общие контракты не изменялись;
+Private frozen-issuer fixture проверяет ATTACH→owned-TUN injection в actual
+конструкторах обоих cores и cancel/EOF/REVOKE. Production handoff и helper VM
+end-to-end acceptance пока не реализованы. After-DNS/before-dial/full-flow
+revoke остаются отдельными обязательными стадиями. Подробности:
+[закрытый TUN](../docs/validation/2026-11-12-closed-native-tun.md). Rust исходники и общие контракты не изменялись;
 MSRV 1.85.1 `cargo fmt --all --check` и
 `cargo clippy --locked -p yonik-linux --all-targets -- -D warnings` прошли.

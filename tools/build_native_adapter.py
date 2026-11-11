@@ -319,11 +319,25 @@ def build_locked(
                 ],
                 source,
             )
+        if metadata.get("owned_tun_constructor_connected"):
+            runner.run(
+                [
+                    "go",
+                    "test",
+                    "-p=1",
+                    "-mod=readonly",
+                    "./proxy/tun" if engine == "xray" else "./protocol/tun",
+                ],
+                source,
+            )
         if modules != {name: sha256(source / name) for name in modules}:
             raise BuildError("Codec изменил go.mod/go.sum")
         codec_record = {
             "patch_sha256": digest,
             "runtime_hooks_connected": False,
+            "owned_tun_constructor_connected": metadata.get(
+                "owned_tun_constructor_connected", False
+            ),
             "frozen_spec_commit": metadata["frozen_spec_commit"],
             "routing_entry_guard_connected": metadata.get(
                 "routing_entry_guard_connected", False
