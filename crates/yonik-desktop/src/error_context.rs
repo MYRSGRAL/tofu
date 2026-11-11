@@ -25,6 +25,7 @@ pub enum Stage {
     Cleanup,
     HelperRpc,
     RoutingSave,
+    MaintenanceAdmission,
     MaintenanceCopy,
     MaintenanceReopen,
     MaintenanceDrain,
@@ -80,6 +81,16 @@ pub enum Cause {
     RoutingRepositoryMissing,
     RoutingRepositoryConflict,
     RoutingRepositoryFailed,
+    MaintenanceAdmissionBusy,
+    MaintenanceAdmissionRevision,
+    MaintenanceAdmissionIdentity,
+    MaintenanceAdmissionInvalidInput,
+    MaintenanceAdmissionUnavailable,
+    MaintenanceAdmissionUnsupported,
+    MaintenanceAdmissionDraining,
+    MaintenanceAdmissionReopenUnavailable,
+    MaintenanceAdmissionStale,
+    MaintenanceAdmissionSchedulerUnavailable,
     MaintenanceCopyInvalidInput,
     MaintenanceCopyUnsafePath,
     MaintenanceCopyUnsupportedVersion,
@@ -138,10 +149,17 @@ pub enum Cause {
 
 impl Cause {
     pub fn allows(self, slot: Slot) -> bool {
+        if matches!(
+            self,
+            Self::MaintenanceAdmissionUnsupported | Self::MaintenanceAdmissionReopenUnavailable
+        ) {
+            return matches!(slot, Slot::MaintenanceAck | Slot::Error | Slot::Connection);
+        }
         match self.identity().2 {
-            Stage::MaintenanceCopy | Stage::MaintenanceDrain | Stage::MaintenanceReopen => {
-                slot == Slot::MaintenanceAck
-            }
+            Stage::MaintenanceAdmission
+            | Stage::MaintenanceCopy
+            | Stage::MaintenanceDrain
+            | Stage::MaintenanceReopen => slot == Slot::MaintenanceAck,
             Stage::LogsRead => slot == Slot::LogsRead,
             Stage::LogsSave => slot == Slot::LogsSave,
             Stage::SchedulerAdmission => matches!(slot, Slot::Error | Slot::Source),
@@ -209,6 +227,32 @@ impl Cause {
                 "preferences_write",
                 Stage::StorageWrite,
             ),
+            Self::MaintenanceAdmissionBusy => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionRevision => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionIdentity => (
+                "INVALID_INPUT",
+                "invalid_input",
+                Stage::MaintenanceAdmission,
+            ),
+            Self::MaintenanceAdmissionInvalidInput => (
+                "INVALID_INPUT",
+                "invalid_input",
+                Stage::MaintenanceAdmission,
+            ),
+            Self::MaintenanceAdmissionUnavailable => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionUnsupported => {
+                ("STARTUP", "startup", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionDraining => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionReopenUnavailable => {
+                ("BUSY", "busy", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionStale => {
+                ("CANCELLED", "cancelled", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionSchedulerUnavailable => {
+                ("STARTUP", "startup", Stage::MaintenanceAdmission)
+            }
             Self::MaintenanceCopyInvalidInput => {
                 ("INVALID_INPUT", "invalid_input", Stage::MaintenanceCopy)
             }

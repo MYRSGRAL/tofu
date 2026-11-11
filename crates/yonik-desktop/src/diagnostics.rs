@@ -310,7 +310,8 @@ pub fn export_snapshot_v2(raw: &str) -> Option<String> {
                 "logs_generation"
             } else if matches!(
                 expected.stage,
-                context::Stage::MaintenanceCopy
+                context::Stage::MaintenanceAdmission
+                    | context::Stage::MaintenanceCopy
                     | context::Stage::MaintenanceDrain
                     | context::Stage::MaintenanceReopen
             ) {

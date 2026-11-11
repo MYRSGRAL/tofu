@@ -937,5 +937,99 @@
       "source"
     ],
     "generation_required": true
+  },
+  "maintenance_admission_busy": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_revision": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_identity": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_invalid_input": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_unavailable": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_unsupported": {
+    "code": "STARTUP",
+    "message_key": "startup",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack",
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_draining": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_reopen_unavailable": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack",
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_stale": {
+    "code": "CANCELLED",
+    "message_key": "cancelled",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_admission_scheduler_unavailable": {
+    "code": "STARTUP",
+    "message_key": "startup",
+    "stage": "maintenance_admission",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
   }
 }

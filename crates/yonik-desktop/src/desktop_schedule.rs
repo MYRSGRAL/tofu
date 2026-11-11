@@ -357,7 +357,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let service = SubscriptionService::new(repo);
+        let service = SubscriptionService::new(repo.clone());
         for name in ["Первый", "Второй"] {
             service
                 .add(
@@ -426,10 +426,44 @@ mod tests {
             .unwrap();
         assert!(!message["ru"].as_str().unwrap().is_empty());
         assert!(!message["en"].as_str().unwrap().is_empty());
+        let outcome = super::super::maintenance_job::run(
+            service,
+            repo,
+            owner,
+            None,
+            super::super::maintenance::Request {
+                request_id: 1,
+                operation: super::super::maintenance::Operation::Backup,
+                source: None,
+                destination: path.join("backup.sqlite"),
+                revision: 0,
+            },
+            yonik_linux::MaintenanceControl::default(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(outcome.result, Ok(()));
+        assert!(outcome.drained);
+        let (service, repo, replacement) = outcome.handles.expect("успешная замена maintenance B");
+        assert_ne!(replacement.generation, 77);
+        let mut owner = DesktopSchedule::new().expect("освобождённый placeholder");
+        super::super::accept_maintenance_owner(&mut state, &mut owner, replacement);
+        state.emit(&callback);
+        assert!(
+            crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap()).is_none(),
+            "контексты A должны отклоняться после принятия maintenance B"
+        );
+        owner
+            .runtime
+            .shutdown(Duration::ZERO)
+            .await
+            .expect("закрытие B");
+        drop(owner);
         state.command_error(true, "storage");
         state.emit(&callback);
         assert!(crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap()).is_none());
         service.close().await.unwrap();
+        repo.close().await.expect("закрытие repository");
         std::fs::remove_dir_all(path).unwrap();
     }
 

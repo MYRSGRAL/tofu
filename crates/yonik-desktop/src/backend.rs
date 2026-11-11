@@ -1549,32 +1549,25 @@ impl Actor {
                     destination,
                     revision,
                 };
-                let error = if request.operation == maintenance::Operation::Backup
+                let cause = if request.operation == maintenance::Operation::Backup
                     && request.source.is_some()
                 {
-                    "invalid_input"
+                    Cause::MaintenanceAdmissionInvalidInput
                 } else {
-                    "busy"
+                    Cause::MaintenanceAdmissionBusy
                 };
-                self.state
-                    .error_contexts
-                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-                self.state.maintenance_ack = Some(maintenance::Ack {
-                    request_id,
-                    phase: maintenance::Phase::Failed,
-                    error: Some(error),
-                });
+                let generation = self.state.maintenance_generation;
+                maintenance_refusal(&mut self.state, request_id, cause, generation);
                 Ok(())
             }
             Command::MaintenanceCancel { request_id } => {
-                self.state
-                    .error_contexts
-                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-                self.state.maintenance_ack = Some(maintenance::Ack {
+                let generation = self.state.maintenance_generation;
+                maintenance_refusal(
+                    &mut self.state,
                     request_id,
-                    phase: maintenance::Phase::Failed,
-                    error: Some("busy"),
-                });
+                    Cause::MaintenanceAdmissionBusy,
+                    generation,
+                );
                 Ok(())
             }
             #[cfg(feature = "test-support")]
@@ -2976,19 +2969,56 @@ async fn session(
     Ok(())
 }
 
-fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'static str) {
+impl maintenance::AdmissionError {
+    pub fn context(self) -> crate::diagnostics::context::Cause {
+        use crate::diagnostics::context::Cause;
+        match self {
+            Self::Busy => Cause::MaintenanceAdmissionBusy,
+            Self::Revision => Cause::MaintenanceAdmissionRevision,
+            Self::Identity => Cause::MaintenanceAdmissionIdentity,
+            Self::InvalidInput => Cause::MaintenanceAdmissionInvalidInput,
+        }
+    }
+}
+
+fn accept_maintenance_owner(
+    state: &mut Snapshot,
+    scheduled: &mut DesktopSchedule,
+    owner: DesktopSchedule,
+) {
+    state.scheduler_generation = Some(owner.generation);
+    *scheduled = owner;
+}
+
+fn maintenance_refusal(state: &mut Snapshot, request_id: u64, cause: Cause, generation: u64) {
+    let context = crate::diagnostics::context::ErrorContext::new(
+        Slot::MaintenanceAck,
+        cause,
+        Some(request_id),
+    );
+    state.maintenance_generation = generation;
+    state
+        .error_contexts
+        .set_ack(Slot::MaintenanceAck, cause, request_id, generation);
+    state.maintenance_ack = Some(maintenance::Ack {
+        request_id,
+        phase: maintenance::Phase::Failed,
+        error: Some(context.message_key),
+    });
+}
+
+fn reject_unavailable_command(
+    state: &mut Snapshot,
+    command: &Command,
+    error: &'static str,
+    cause: Cause,
+    generation: u64,
+) {
     state.maintenance_available = false;
     if let Command::MaintenanceStart { request_id, .. }
     | Command::MaintenanceCancel { request_id } = command
     {
-        state
-            .error_contexts
-            .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-        state.maintenance_ack = Some(maintenance::Ack {
-            request_id: *request_id,
-            phase: maintenance::Phase::Failed,
-            error: Some(error),
-        });
+        maintenance_refusal(state, *request_id, cause, generation);
     }
     if let Some(request_id) = command.routing_request_id() {
         state
@@ -3013,6 +3043,17 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
         let _sent = reply.send(None);
     }
     state.command_error(false, error);
+    if matches!(
+        command,
+        Command::MaintenanceStart { .. } | Command::MaintenanceCancel { .. }
+    ) {
+        state
+            .error_contexts
+            .set_generation(Slot::Error, cause, Some(generation));
+        state
+            .error_contexts
+            .set_generation(Slot::Connection, cause, Some(generation));
+    }
 }
 
 async fn wait_startup_shutdown(
@@ -3027,7 +3068,7 @@ async fn wait_startup_shutdown(
             changed = priority.changed() => if changed.is_err() { break; },
             command = commands.recv(), if commands_open => {
                 if let Some(command) = command {
-                    reject_unavailable_command(state, &command.command, "startup");
+                    reject_unavailable_command(state, &command.command, "startup", Cause::MaintenanceAdmissionUnsupported, command.generation);
                     state.emit(callback);
                 } else { commands_open = false; }
             }
@@ -3603,7 +3644,7 @@ async fn run(
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
                     if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
+                        maintenance_refusal(&mut actor.state, *request_id, Cause::MaintenanceAdmissionStale, envelope.generation);
                         actor.emit();
                     }
                     if let Some(request_id) = envelope.command.routing_request_id() {
@@ -3620,16 +3661,16 @@ async fn run(
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
                     let live = config.data_dir.join("subscriptions.sqlite");
                     if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                        let cause = if actor.state.maintenance_available { Cause::MaintenanceAdmissionBusy } else { Cause::MaintenanceAdmissionUnavailable }; maintenance_refusal(&mut actor.state, request.request_id, cause, envelope.generation);
                         actor.emit(); continue;
                     }
-                    if let Err(error) = maintenance_controller.begin(&request, &live, actor.state.revision) {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
+                    if let Err(error) = maintenance_controller.begin_typed(&request, &live, actor.state.revision) {
+                        maintenance_refusal(&mut actor.state, request.request_id, error.context(), envelope.generation);
                         actor.emit(); continue;
                     }
-                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
+                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionUnavailable, envelope.generation); actor.emit(); continue; };
+                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionUnavailable, envelope.generation); actor.emit(); continue; };
+                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionSchedulerUnavailable, envelope.generation); actor.emit(); continue; } };
                     let owner = std::mem::replace(&mut scheduled, replacement);
                     let request_id = request.request_id;
                     let cancellation = yonik_linux::MaintenanceControl::default();
@@ -3663,9 +3704,9 @@ async fn run(
                                         actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                     }
                                     Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
-                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                        maintenance_refusal(&mut actor.state, *id, Cause::MaintenanceAdmissionDraining, command.generation);
                                     }
-                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy"),
+                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy", Cause::MaintenanceAdmissionReopenUnavailable, command.generation),
                                 }
                                 actor.emit();
                             }
@@ -3679,7 +3720,7 @@ async fn run(
                         job_drained = outcome.drained;
                         result = outcome.result;
                         if let Some((service, repository, owner)) = outcome.handles {
-                            actor.service = Some(service); actor.routing_repository = Some(repository); scheduled = owner;
+                            actor.service = Some(service); actor.routing_repository = Some(repository); accept_maintenance_owner(&mut actor.state, &mut scheduled, owner);
                         }
                     }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
@@ -3705,7 +3746,7 @@ async fn run(
                                 }
                                 command = commands.recv(), if commands_open => {
                                     if let Some(command) = command {
-                                        reject_unavailable_command(&mut actor.state, &command.command, "busy");
+                                        reject_unavailable_command(&mut actor.state, &command.command, "busy", Cause::MaintenanceAdmissionReopenUnavailable, command.generation);
                                         actor.emit();
                                     } else { quitting = true; commands_open = false; }
                                 }
@@ -3717,6 +3758,7 @@ async fn run(
                     continue;
                 }
                 if matches!(&envelope.command, Command::LogsRead { .. } | Command::LogsSave { .. }) { actor.state.logs_generation = envelope.generation; }
+                if matches!(&envelope.command, Command::MaintenanceCancel { .. }) { actor.state.maintenance_generation = envelope.generation; }
                 let context_request_id = envelope.command.routing_request_id();
                 if context_request_id.is_some() { actor.state.routing_generation = envelope.generation; actor.state.error_contexts.clear(Slot::RoutingAck); }
                 let source_operation = envelope.command.is_source_operation();
@@ -4639,6 +4681,27 @@ mod maintenance_context_tests {
         let mut sibling = state.clone();
         sibling["maintenance_ack"]["request_id"] = serde_json::json!(78);
         assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        for (id, revision, reason, key) in [
+            (
+                78,
+                ready["revision"].as_i64().expect("revision") + 1,
+                "maintenance_admission_revision",
+                "busy",
+            ),
+            (
+                77,
+                ready["revision"].as_i64().expect("revision"),
+                "maintenance_admission_identity",
+                "invalid_input",
+            ),
+        ] {
+            host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":id,"operation":"backup","destination":destination,"revision":revision}).to_string()).expect("admission command");
+            let refused = wait(&|value| {
+                value["maintenance_ack"]["request_id"] == id
+                    && value["maintenance_ack"]["error"] == key
+            });
+            super::maintenance_job::assert_admission_context(&refused, reason);
+        }
         let legacy = crate::diagnostics::export_snapshot(&state.to_string()).expect("V1");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&legacy).expect("JSON"),
