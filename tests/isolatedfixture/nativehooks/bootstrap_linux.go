@@ -157,5 +157,8 @@ func (b Bootstrap) ReceiveAuthenticated(channel, pidfd *os.File) (Frame, []*os.F
 	if err != nil || frame.CheckBinding(b.Binding, frame.Header.RequestID) != nil {
 		return fail(files)
 	}
+	if frame.Header.Kind == HelloKind && (frame.Hello.Session != b.Session || frame.Hello.Generation != b.Generation || frame.Hello.Invocation != b.Invocation) {
+		return fail(files)
+	}
 	return frame, files, nil
 }

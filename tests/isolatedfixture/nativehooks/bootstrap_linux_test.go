@@ -155,3 +155,64 @@ func TestRecvClosesRejectedRights(t *testing.T) {
 		t.Fatalf("FD leak: %d -> %d", len(before), len(after))
 	}
 }
+
+func TestHelloMatchesEntireBootstrapIdentity(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("нужен изолированный user namespace с UID 0")
+	}
+	for _, field := range []string{"control", "session", "generation", "invocation"} {
+		t.Run(field, func(t *testing.T) {
+			b, pidfd := liveBootstrap(t)
+			var data []byte
+			for _, vector := range vectors(t) {
+				candidate := wireBytes(t, vector)
+				frame, err := DecodeFrame(candidate, vector.FDCount)
+				if err == nil && frame.Header.Kind == HelloKind {
+					data = candidate
+					break
+				}
+			}
+			if data == nil {
+				t.Fatal("нет корректного HELLO control")
+			}
+			be.PutUint64(data[24:], b.Binding.Epoch)
+			copy(data[32:64], b.Binding.ConfigDigest[:])
+			copy(data[64:96], b.Binding.Nonce[:])
+			copy(data[96:112], b.Session[:])
+			be.PutUint64(data[112:], b.Generation)
+			copy(data[120:136], b.Invocation[:])
+			switch field {
+			case "session":
+				data[96] ^= 128
+			case "generation":
+				be.PutUint64(data[112:], b.Generation+1)
+			case "invocation":
+				data[120] ^= 128
+			}
+			pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receiver := os.NewFile(uintptr(pair[0]), "receiver")
+			sender := os.NewFile(uintptr(pair[1]), "sender")
+			defer receiver.Close()
+			defer sender.Close()
+			if err := syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Sendmsg(pair[1], data, nil, nil, 0); err != nil {
+				t.Fatal(err)
+			}
+			_, files, err := b.ReceiveAuthenticated(receiver, pidfd)
+			for _, file := range files {
+				file.Close()
+			}
+			if field == "control" && err != nil {
+				t.Fatalf("корректный HELLO отклонён: %v", err)
+			}
+			if field != "control" && err == nil {
+				t.Fatalf("принята чужая identity: %s", field)
+			}
+		})
+	}
+}
