@@ -42,6 +42,8 @@ def inside(args: argparse.Namespace) -> None:
         raise RuntimeError('Нет private proc')
     if os.readlink('/proc/self/ns/net') == args.parent_net:
         raise RuntimeError('Нет private net')
+    if sorted(path.name for path in Path('/sys/class/net').iterdir()) != ['lo']:
+        raise RuntimeError('Ожидался только loopback')
     baseline = snapshot()
     results = []
     for engine in range(2):
@@ -101,7 +103,7 @@ def main() -> None:
         if path.is_file():
             manifest['sha256'][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
-    command = ['unshare', '--user', '--map-root-user', '--net', '--pid', '--fork', '--mount-proc', 'sh', '-c',
+    command = ['unshare', '--user', '--map-root-user', '--net', '--pid', '--fork', '--kill-child=SIGKILL', '--mount-proc', 'sh', '-c',
                'ip link set lo up && exec dbus-run-session -- "$@"', 'matrix', sys.executable, str(Path(__file__).resolve()),
                args.binary, args.cores, str(args.output.resolve()), '--inside', '--parent-net', os.readlink('/proc/self/ns/net')]
     subprocess.run(command, check=True, timeout=190)
