@@ -98,7 +98,7 @@ impl Actor {
             revision,
             ..BatchState::default()
         };
-        let repo = self.routing_repository.clone();
+        let repo = self.routing_repository().clone();
         Ok(spawn_batch(
             repo,
             source,

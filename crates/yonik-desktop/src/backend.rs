@@ -6,6 +6,9 @@ mod batch_diagnostics;
 mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
+use crate::maintenance;
+#[path = "maintenance_job.rs"]
+mod maintenance_job;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
@@ -125,6 +128,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    MaintenanceStart {
+        request_id: u64,
+        operation: maintenance::Operation,
+        source: Option<PathBuf>,
+        destination: PathBuf,
+        revision: i64,
+    },
+    MaintenanceCancel {
+        request_id: u64,
+    },
     LogsRead {
         after: String,
         source: logs::Source,
@@ -498,6 +511,29 @@ impl Drop for DesktopHost {
 fn validate(command: &Command) -> Result<()> {
     let text = |s: &str, max| s.len() <= max && !s.chars().any(char::is_control);
     let valid = match command {
+        Command::MaintenanceStart {
+            request_id,
+            operation,
+            source,
+            destination,
+            revision,
+        } => {
+            let path = |value: &Path| {
+                value.is_absolute() && value.to_str().is_some_and(|value| text(value, 4096))
+            };
+            *request_id > 0
+                && *request_id <= 9_007_199_254_740_991
+                && *revision >= 0
+                && path(destination)
+                && match (operation, source) {
+                    (maintenance::Operation::Backup, None) => true,
+                    (maintenance::Operation::Restore, Some(source)) => path(source),
+                    _ => false,
+                }
+        }
+        Command::MaintenanceCancel { request_id } => {
+            *request_id > 0 && *request_id <= 9_007_199_254_740_991
+        }
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
@@ -644,6 +680,8 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    maintenance_available: bool,
+    maintenance_ack: Option<maintenance::Ack>,
     logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
@@ -710,6 +748,8 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            maintenance_available: false,
+            maintenance_ack: None,
             logs: logs::Page::default(),
             routing_diagnostics: crate::editor::Draft::default().diagnostics(),
             routing_explanation: serde_json::Value::Null,
@@ -897,11 +937,11 @@ async fn open(
 
 struct Actor {
     event_log: yonik_linux::event_log::EventLog,
-    routing_repository: EncryptedSubscriptionRepository,
+    routing_repository: Option<EncryptedSubscriptionRepository>,
     routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
-    service: SubscriptionService,
+    service: Option<SubscriptionService>,
     state: Snapshot,
     callback: Callback,
     selected: Option<ResolvedProfile>,
@@ -911,13 +951,26 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    // Внешний цикл и методы Actor работают только online. Supervisor полностью
+    // перехватывает dispatch между take slots и возвратом handles после join.
+    fn service(&self) -> &SubscriptionService {
+        self.service
+            .as_ref()
+            .expect("online dispatch требует service slot")
+    }
+    fn routing_repository(&self) -> &EncryptedSubscriptionRepository {
+        self.routing_repository
+            .as_ref()
+            .expect("online dispatch требует repository slot")
+    }
+
     async fn save_routing(&mut self, candidate: crate::editor::Draft) -> Result<()> {
         candidate.policy().map_err(DesktopError)?;
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
         let revision = self
-            .routing_repository
+            .routing_repository()
             .save_routing_draft(expected, candidate.json().into_bytes())
             .await
             .map_err(|error| {
@@ -1046,13 +1099,13 @@ impl Actor {
         let identity = SubscriptionIdentity {
             id,
             generation: self
-                .service
+                .service()
                 .schedule_generation(id)
                 .await
                 .map_err(map_subscription)?
                 .ok_or(DesktopError("source_required"))?,
         };
-        let service = self.service.clone();
+        let service = self.service().clone();
         let (cancel, receiver) = watch::channel(false);
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1098,7 +1151,8 @@ impl Actor {
         );
     }
     fn emit(&mut self) {
-        self.state.can_connect = self.selected.is_some()
+        self.state.can_connect = self.state.ready
+            && self.selected.is_some()
             && !self.state.can_stop
             && !self.state.system_busy
             && !self.state.busy
@@ -1121,7 +1175,7 @@ impl Actor {
     }
     async fn sources(&mut self) -> Result<()> {
         let page = self
-            .service
+            .service()
             .sources_page(self.state.sources_offset)
             .await
             .map_err(map_subscription)?;
@@ -1148,14 +1202,14 @@ impl Actor {
             return Ok(());
         };
         let summary = self
-            .service
+            .service()
             .source_summary(id)
             .await
             .map_err(map_subscription)?;
         self.state.source_hwid_enabled = summary.hwid_enabled;
         self.state.source_name = Some(summary.name);
         let page = self
-            .service
+            .service()
             .profiles(
                 id,
                 ProfileQuery {
@@ -1196,6 +1250,43 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::MaintenanceStart {
+                request_id,
+                operation,
+                source,
+                destination,
+                revision,
+            } => {
+                // До исправления P1 в backup GC admission остаётся закрытым.
+                let request = maintenance::Request {
+                    request_id,
+                    operation,
+                    source,
+                    destination,
+                    revision,
+                };
+                let error = if request.operation == maintenance::Operation::Backup
+                    && request.source.is_some()
+                {
+                    "invalid_input"
+                } else {
+                    "busy"
+                };
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some(error),
+                });
+                Ok(())
+            }
+            Command::MaintenanceCancel { request_id } => {
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some("busy"),
+                });
+                Ok(())
+            }
             Command::LogsRead {
                 after,
                 source,
@@ -1314,7 +1405,7 @@ impl Actor {
                 )
                 .and_then(|source| source.with_hwid(hwid_enabled))
                 .map_err(map_subscription)?;
-                let id = self.service.add(source).await.map_err(map_subscription)?;
+                let id = self.service().add(source).await.map_err(map_subscription)?;
                 self.state.source_id = Some(id);
                 self.state.offset = 0;
                 self.pending = None;
@@ -1323,7 +1414,7 @@ impl Actor {
                 self.reload().await
             }
             Command::RenameSource { id, name } => {
-                self.service
+                self.service()
                     .rename_source(id, name.clone())
                     .await
                     .map_err(map_subscription)?;
@@ -1339,7 +1430,7 @@ impl Actor {
                 if self.pending.is_some() {
                     return Err(DesktopError("busy"));
                 }
-                self.service
+                self.service()
                     .delete_source(id)
                     .await
                     .map_err(map_subscription)?;
@@ -1358,7 +1449,7 @@ impl Actor {
                     .state
                     .source_id
                     .ok_or(DesktopError("source_required"))?;
-                self.service
+                self.service()
                     .set_source_hwid(id, enabled)
                     .await
                     .map_err(map_subscription)?;
@@ -1382,7 +1473,7 @@ impl Actor {
                 let pending = self.pending.take().ok_or(DesktopError("review_required"))?;
                 let identity = pending.identity();
                 self.state.pending = None;
-                self.service
+                self.service()
                     .commit(pending.approve_after_review())
                     .await
                     .map_err(map_subscription)?;
@@ -1418,7 +1509,7 @@ impl Actor {
                 self.page().await
             }
             Command::Favorite { id, value } => {
-                self.service
+                self.service()
                     .set_favorite(id, value)
                     .await
                     .map_err(map_subscription)?;
@@ -1426,7 +1517,7 @@ impl Actor {
             }
             Command::SelectProfile { id, revision } => {
                 let profile = self
-                    .service
+                    .service()
                     .select_profile(id, revision)
                     .await
                     .map_err(|_| DesktopError("profile_unavailable"))?;
@@ -1566,7 +1657,7 @@ impl Actor {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.service
+        self.service()
             .record_schedule_completion(identity, success, wall)
             .await
             .map_err(map_subscription)
@@ -1587,7 +1678,7 @@ impl Actor {
                         self.pending = Some(pending);
                         Ok(())
                     } else {
-                        self.service
+                        self.service()
                             .commit(pending.accept_clean().map_err(map_subscription)?)
                             .await
                             .map_err(map_subscription)?;
@@ -1773,11 +1864,11 @@ mod settings_tests {
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
             event_log: yonik_linux::event_log::EventLog::new(),
-            routing_repository,
+            routing_repository: Some(routing_repository),
             routing_revision: Some(0),
             preferences_store,
             preferences,
-            service,
+            service: Some(service),
             state: Snapshot::new(true),
             callback: Arc::new(|_| {}),
             selected: None,
@@ -1849,7 +1940,13 @@ mod settings_tests {
         assert_eq!(actor.preferences.language, "en");
         assert!(actor.state.preferences_durability_warning);
         assert_eq!(Store::open(&directory.0).1.language, "en");
-        actor.service.close().await.expect("закрытие БД");
+        actor
+            .service
+            .take()
+            .expect("online service перед закрытием")
+            .close()
+            .await
+            .expect("закрытие БД");
     }
 }
 
@@ -2506,6 +2603,7 @@ async fn run(
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
     state.probe_expected_status = preferences.probe_status;
+    state.maintenance_available = true;
     state.ready = true;
     let network_monitor = NetworkMonitor::start().ok();
     let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
@@ -2514,11 +2612,11 @@ async fn run(
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
         event_log: yonik_linux::event_log::EventLog::new(),
-        routing_repository,
+        routing_repository: Some(routing_repository),
         routing_revision: Some(0),
         preferences_store,
         preferences,
-        service,
+        service: Some(service),
         state,
         callback,
         selected: None,
@@ -2527,7 +2625,7 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
-    match actor.routing_repository.routing_draft().await {
+    match actor.routing_repository().routing_draft().await {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
             .ok()
@@ -2586,7 +2684,13 @@ async fn run(
         Err(error) => {
             actor.state.command_error(true, error.key());
             actor.state.ready = false;
-            actor.state.closed = actor.service.close().await.is_ok();
+            actor.state.closed = actor
+                .service
+                .take()
+                .expect("online service перед закрытием")
+                .close()
+                .await
+                .is_ok();
             actor.state.emit(&actor.callback);
             control.closed();
             return;
@@ -2595,7 +2699,7 @@ async fn run(
     scheduled.policy = *subscription_policy.borrow_and_update();
     scheduled.visible = *subscription_visible.borrow_and_update();
     let mut schedule_loaded = false;
-    if let Err(error) = scheduled.load(&actor.service, origin.elapsed()).await {
+    if let Err(error) = scheduled.load(actor.service(), origin.elapsed()).await {
         actor.state.command_error(true, error.key());
         actor.emit();
     } else {
@@ -2605,6 +2709,7 @@ async fn run(
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
     let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+    let mut maintenance_controller = maintenance::Controller::default();
     loop {
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
@@ -2647,7 +2752,7 @@ async fn run(
             if let Ok(mut replacement) = DesktopSchedule::new() {
                 replacement.policy = policy;
                 replacement.visible = visible;
-                if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await {
+                if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor.state.command_error(true, error.key());
                 }
                 scheduled = replacement;
@@ -2687,7 +2792,7 @@ async fn run(
                     let visible = scheduled.visible;
                     if let Ok(mut replacement) = DesktopSchedule::new() {
                         replacement.policy = policy; replacement.visible = visible;
-                        if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await { actor.state.command_error(true, error.key()); }
+                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.command_error(true, error.key()); }
                         scheduled = replacement;
                     }
                 }
@@ -2801,7 +2906,7 @@ async fn run(
                     schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
                     let host = &schedule_host;
                     let policy = scheduled.policy();
-                    match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
+                    match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
                         Err(_) => actor.state.command_error(true, "storage"),
                     }
@@ -2916,7 +3021,7 @@ async fn run(
                     let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 actor.emit();
             }
@@ -2926,6 +3031,10 @@ async fn run(
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
+                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
+                        actor.emit();
+                    }
                     if let Some(request_id) = envelope.command.routing_request_id() {
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
@@ -2934,6 +3043,91 @@ async fn run(
                         actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }
+                    continue;
+                }
+                if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
+                    let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
+                    let live = config.data_dir.join("subscriptions.sqlite");
+                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() {
+                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                        actor.emit(); continue;
+                    }
+                    if let Err(error) = maintenance_controller.begin(&request, &live, actor.state.revision) {
+                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
+                        actor.emit(); continue;
+                    }
+                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
+                    let owner = std::mem::replace(&mut scheduled, replacement);
+                    let request_id = request.request_id;
+                    let cancellation = yonik_linux::MaintenanceControl::default();
+                    let mut job = tokio::spawn(maintenance_job::run(service, repository, owner, refreshing.take(), request, cancellation.clone(), origin.elapsed()));
+                    actor.state.ready = false;
+                    actor.state.busy = true;
+                    actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Draining, error: None });
+                    actor.emit();
+                    let outcome = loop {
+                        tokio::select! {
+                            biased;
+                            changed = priority.changed() => {
+                                if changed.is_err() { quitting = true; }
+                                let action = *priority.borrow_and_update();
+                                quitting |= action.shutdown;
+                                cancellation.cancel();
+                                actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Cancelling, error: None });
+                                actor.emit();
+                            }
+                            result = &mut job => break result,
+                            command = commands.recv(), if !quitting => {
+                                let Some(command) = command else { quitting = true; cancellation.cancel(); continue; };
+                                match command.command {
+                                    Command::MaintenanceCancel { request_id: id } if id == request_id => cancellation.cancel(),
+                                    Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
+                                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                    }
+                                    _ => actor.state.command_error(false, "busy"),
+                                }
+                                actor.emit();
+                            }
+                        }
+                    };
+                    let mut result = Err("cleanup_failed");
+                    let mut job_drained = false;
+                    if let Ok(outcome) = outcome {
+                        job_drained = outcome.drained;
+                        result = outcome.result;
+                        if let Some((service, repository, owner)) = outcome.handles {
+                            actor.service = Some(service); actor.routing_repository = Some(repository); scheduled = owner;
+                        }
+                    }
+                    let online = actor.service.is_some() && actor.routing_repository.is_some();
+
+                    // Completion принадлежит единственному join handle этого request;
+                    // внешние callbacks не могут завершить следующую generation.
+                    if job_drained { maintenance_controller.drained(request_id, result); }
+                    actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
+                    actor.state.ready = online && !quitting;
+                    actor.state.busy = false;
+                    actor.emit();
+                    if !online {
+                        // Неизвестный drain не разрешает Closed и освобождение lock.
+                        // Reopen failure с подтверждённым drain ждёт явный Shutdown.
+                        let mut commands_open = true;
+                        while !quitting || !job_drained {
+                            tokio::select! {
+                                changed = priority.changed() => {
+                                    quitting = changed.is_err() || priority.borrow_and_update().shutdown;
+                                }
+                                command = commands.recv(), if commands_open => {
+                                    if command.is_none() { quitting = true; commands_open = false; }
+                                    actor.state.command_error(false, "busy"); actor.emit();
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    if quitting { break; }
                     continue;
                 }
                 let source_operation = envelope.command.is_source_operation();
@@ -2958,7 +3152,7 @@ async fn run(
                         actor.state.command_error(true, error.key()); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
-                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
+                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         } else { actor.state.command_error(true, "busy"); }
                         actor.emit(); continue;
@@ -2982,7 +3176,7 @@ async fn run(
                         let approve = matches!(envelope.command, Command::ApproveRefresh);
                         let id = scheduled.review.take().expect("review guard");
                         actor.state.pending = None;
-                        match scheduled.runtime.finish_review(&actor.service, id, approve, || origin.elapsed()).await {
+                        match scheduled.runtime.finish_review(actor.service(), id, approve, || origin.elapsed()).await {
                             Ok(_) => { actor.clear_selection(); actor.page().await }
                             Err(error) => Err(map_subscription(error)),
                         }
@@ -3136,11 +3330,11 @@ async fn run(
                 };
                 if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
-                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
+                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         }
                     }
@@ -3246,8 +3440,16 @@ async fn run(
         true
     };
     actor.selected = None;
-    let service_closed = actor.service.close().await.is_ok();
-    let routing_closed = actor.routing_repository.close().await.is_ok();
+    let service_closed = if let Some(service) = actor.service.take() {
+        service.close().await.is_ok()
+    } else {
+        true
+    };
+    let routing_closed = if let Some(repository) = actor.routing_repository.take() {
+        repository.close().await.is_ok()
+    } else {
+        true
+    };
     let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
@@ -3294,11 +3496,11 @@ mod routing_regressions {
         (
             Actor {
                 event_log: yonik_linux::event_log::EventLog::new(),
-                routing_repository,
+                routing_repository: Some(routing_repository),
                 routing_revision: Some(0),
                 preferences_store,
                 preferences,
-                service,
+                service: Some(service),
                 state: Snapshot::new(true),
                 callback: Arc::new(|_| {}),
                 selected: None,
@@ -3368,7 +3570,7 @@ mod routing_regressions {
             vec![2]
         );
         let saved = actor
-            .routing_repository
+            .routing_repository()
             .routing_draft()
             .await
             .expect("БД")
@@ -3382,7 +3584,7 @@ mod routing_regressions {
     async fn repository_conflict_returns_matching_error_ack_without_accepting_form() {
         let (mut actor, lock, path) = fixture().await;
         actor
-            .routing_repository
+            .routing_repository()
             .save_routing_draft(0, actor.state.routing.json().into_bytes())
             .await
             .expect("внешняя запись");
@@ -3678,3 +3880,7 @@ mod system_recovery_tests {
         assert!(!snapshot.system_recovery_pending);
     }
 }
+
+#[cfg(test)]
+#[path = "maintenance_command_tests.rs"]
+mod maintenance_command_tests;

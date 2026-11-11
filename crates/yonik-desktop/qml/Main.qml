@@ -41,6 +41,7 @@ ApplicationWindow {
     property int page: 0
     property int settingsOrigin: 0
     property string settingsSection: ""
+    property double maintenanceRequestSequence: 0
     property bool reducedMotion: false
     property var desiredProfileId: null
     property var desiredSourceId: null
@@ -141,6 +142,7 @@ ApplicationWindow {
             if (next && typeof next.error === "string" && !Array.isArray(next.sources) && !Array.isArray(next.profiles)) {
                 if (commandContext === "routing") completeRouting({request_id: routingRequestId, error: next.error, saved_id: null})
                 const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
+                if (next.maintenance_ack && typeof next.maintenance_ack === "object") update.maintenance_ack = next.maintenance_ack
                 if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
                 state = Object.assign({}, state, update)
                 parseError = ""
@@ -769,6 +771,7 @@ ApplicationWindow {
                     SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
                     SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                     SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
+                    SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
                     SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                     SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     Item { Layout.fillHeight: true }
@@ -780,12 +783,25 @@ ApplicationWindow {
                     visible: window.settingsSection !== ""
                     active: window.page === 2 && window.settingsSection !== ""
                     sourceComponent: window.settingsSection === "routing" ? routingPanel : window.settingsSection === "diagnostics" ? diagnosticsPanel
+                        : window.settingsSection === "maintenance" ? maintenancePanel
                         : window.settingsSection === "appearance" ? appearancePanel
                         : window.settingsSection === "about" ? aboutPanel : connectionPanel
                     onLoaded: if (item && !window.reducedMotion) panelEntrance.restart()
                     NumberAnimation { id: panelEntrance; target: settingsPanel; property: "opacity"; from: 0.6; to: 1; duration: 160 }
                 }
             }
+        }
+    }
+    Component {
+        id: maintenancePanel
+        MaintenanceView {
+            nextRequestId: function() { window.maintenanceRequestSequence += 1; return window.maintenanceRequestSequence }
+            sendCommand: function(command) { window.send(command) }
+            errorText: function(key) { return window.errorText(key) }
+            english: window.language === "en"
+            available: window.state.maintenance_available === true && window.editable
+            revision: window.state.revision || 0
+            response: window.state.maintenance_ack || null
         }
     }
     Component {
