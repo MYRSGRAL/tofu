@@ -1781,3 +1781,53 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
     app.close();
     server.join().expect("HTTP fixture");
 }
+
+#[test]
+fn logs_explicit_page_is_safe_and_stop_remains_available() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"engine", "request_id":"1"}));
+    let page = app.wait(|v| v["logs"]["request_id"] == "1");
+    assert_eq!(page["logs"]["status"], "empty");
+    assert_eq!(page["logs"]["events"].as_array().unwrap().len(), 0);
+    assert!(
+        page["logs"]["export"]
+            .as_str()
+            .unwrap()
+            .starts_with("yonik-events-v1")
+    );
+    assert!(app.host.dispatch(r#"{"command":"logs_read","after":"https://SECRET","source":"app","request_id":"2"}"#).is_err());
+    app.send(json!({"command":"stop"}));
+    app.close();
+}
+
+#[test]
+fn stop_cancels_queued_logs_without_waiting_for_a_page() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let first_ready = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == true && first_ready.fetch_add(1, Ordering::Relaxed) == 0 {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let _ = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"1"}));
+    app.send(json!({"command":"stop"}));
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["logs"]["status"] == "cancelled");
+    assert_eq!(cancelled["logs"]["request_id"], "1");
+    assert!(cancelled["logs"]["export"].is_null());
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"2"}));
+    app.wait(|v| v["logs"]["request_id"] == "2");
+    app.close();
+}

@@ -980,6 +980,7 @@ ApplicationWindow {
             objectName: "diagnosticsScroll"
             ColumnLayout {
                 width: diagnosticsScroll.availableWidth; spacing: 14
+                LogsView { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en"; response: window.state.logs || null }
                 DiagnosticsExport { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en" }
                 PlainLabel { Layout.fillWidth: true; visible: !!window.connectionError || !!window.parseError; color: "#e6bc83"; text: window.parseError || (window.connectionError ? window.errorText(window.connectionError) : "") }
                     Rectangle {

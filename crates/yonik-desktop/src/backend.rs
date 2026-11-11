@@ -4,6 +4,8 @@
 mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
+#[path = "logs.rs"]
+mod logs;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
@@ -108,6 +110,11 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    LogsRead {
+        after: String,
+        source: logs::Source,
+        request_id: String,
+    },
     RoutingCatalog {
         processes: bool,
         query: String,
@@ -457,6 +464,9 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsRead {
+            after, request_id, ..
+        } => logs::valid_number(after) && logs::valid_number(request_id),
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
         Command::BatchPage { offset } => *offset <= 10_000,
         Command::SourcePage { offset } => *offset <= 40_000,
@@ -595,6 +605,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
     routing_catalog: serde_json::Value,
@@ -652,6 +663,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            logs: logs::Page::default(),
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
             routing_ack: None,
@@ -829,6 +841,7 @@ async fn open(
 }
 
 struct Actor {
+    event_log: yonik_linux::event_log::EventLog,
     routing_repository: EncryptedSubscriptionRepository,
     routing_revision: Option<i64>,
     preferences: Preferences,
@@ -1116,6 +1129,19 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::LogsRead {
+                after,
+                source,
+                request_id,
+            } => {
+                self.state.logs = logs::Page::read(
+                    &self.event_log,
+                    after.parse().map_err(|_| DesktopError("invalid_input"))?,
+                    source,
+                    request_id,
+                );
+                Ok(())
+            }
             Command::RoutingCatalog {
                 processes,
                 query,
@@ -1634,6 +1660,7 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            event_log: yonik_linux::event_log::EventLog::new(),
             routing_repository,
             routing_revision: Some(0),
             preferences_store,
@@ -2106,10 +2133,14 @@ async fn session(
     engine: Engine,
     target: ProbeTarget,
     mut cancel: Cancellation,
-    updates: mpsc::Sender<SessionUpdate>,
+    updates: (
+        mpsc::Sender<SessionUpdate>,
+        yonik_linux::event_log::EventLog,
+    ),
     mut network: Option<NetworkWatch>,
 ) -> std::result::Result<(), LocalSession> {
-    let Ok(mut session) = LocalSession::new() else {
+    let (updates, event_log) = updates;
+    let Ok(session) = LocalSession::new() else {
         let _ = updates
             .send(SessionUpdate {
                 status: "Error",
@@ -2120,6 +2151,7 @@ async fn session(
             .await;
         return Ok(());
     };
+    let mut session = session.with_event_log(event_log);
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -2357,6 +2389,7 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        event_log: yonik_linux::event_log::EventLog::new(),
         routing_repository,
         routing_revision: Some(0),
         preferences_store,
@@ -2712,6 +2745,10 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
+                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                        actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
+                        actor.emit();
+                    }
                     continue;
                 }
                 let source_operation = envelope.command.is_source_operation();
@@ -2862,7 +2899,7 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -3013,6 +3050,7 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                event_log: yonik_linux::event_log::EventLog::new(),
                 routing_repository,
                 routing_revision: Some(0),
                 preferences_store,
