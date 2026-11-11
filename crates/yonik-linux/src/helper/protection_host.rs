@@ -50,6 +50,9 @@ impl std::fmt::Debug for GuardArtifact {
     }
 }
 impl PreparedArtifact for GuardArtifact {
+    fn bundle_digests(&self) -> Option<super::service::BundleDigests> {
+        self.session.as_ref().and_then(|session| session.bundle)
+    }
     fn current_digest(&self) -> ConfigDigest {
         ConfigDigest::new(Sha256::digest(&self.bytes).into())
     }
@@ -95,6 +98,7 @@ struct Backend {
 enum Operation {
     Prepare(u32, bool),
     PrepareProfile(u32, Box<super::service::SystemProfileRequest>),
+    PrepareBundle(u32, Box<super::service::SystemBundleRequest>),
     Apply(u32, GuardPlan, NetworkStamp),
     ApplyProfile(u32, Arc<SessionArtifact>, NetworkStamp),
     State(u32),
@@ -373,6 +377,10 @@ impl Backend {
                 let _ = finished.send(());
                 Ok(Reply::State(ProtectionState::NoManagedPolicy))
             }
+            Operation::PrepareBundle(uid, request) => self
+                .prepare_bundle_profile(uid, *request, &mut cancel)
+                .await
+                .map(Reply::Prepared),
             Operation::PrepareProfile(uid, request) => self
                 .prepare_profile(uid, *request, &mut cancel)
                 .await
@@ -543,6 +551,27 @@ fn compile_protection(
 }
 impl ProtectionHost for SystemProtectionHost {
     type Artifact = GuardArtifact;
+    fn bundle_transport(&self) -> bool {
+        true
+    }
+    async fn prepare_bundle(
+        &mut self,
+        uid: u32,
+        request: super::service::SystemBundleRequest,
+        cancel: Cancellation,
+    ) -> Result<(GuardArtifact, PreparedContext), ServiceError> {
+        let Reply::Prepared(artifact) = self
+            .job(Operation::PrepareBundle(uid, Box::new(request)), cancel)
+            .await?
+        else {
+            return Err(ServiceError::Unavailable);
+        };
+        let context = self.context(uid)?;
+        if !self._monitor.watch().current().is_current(artifact.stamp) {
+            return Err(stale());
+        }
+        Ok((artifact, context))
+    }
     async fn prepare_profile(
         &mut self,
         uid: u32,

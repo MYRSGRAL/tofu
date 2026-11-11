@@ -456,3 +456,259 @@ async fn production_singbox_worker_owned_stdin() -> Result {
     recovered?;
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "Только собственная production VM, real system bus/polkit и coordinator inspection"]
+async fn production_helper_resource_bundle_both_cores() -> Result {
+    use sha2::{Digest, Sha256};
+    use std::{io::Write, os::unix::fs::DirBuilderExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use yonik_engine::{
+        Engine,
+        resource_bundle::{ResourceBinding, ResourceKind, ResourceRule, VerifiedCatalog},
+    };
+    use yonik_linux::{
+        Cancellation,
+        bundle_identity::CompileRequirements,
+        bundle_request::BundleRequest,
+        resource_catalog::{ResourceCatalog, SourceResource},
+        rule_set_store::{EncryptedRuleSetStore, WorkerEmptyEvidence},
+        system_client::{State, SystemClient},
+    };
+    guard()?;
+    require(
+        rustix::process::geteuid().is_root(),
+        "Требуется авторизованный VM root controller",
+    )?;
+    let status = fs::read_to_string("/proc/self/status")?;
+    require(
+        status
+            .lines()
+            .any(|line| line == "CapEff:\t0000000000000000"),
+        "Controller должен быть без capabilities для same-UID proc identity fence",
+    )?;
+    let _lock = vm_lock::acquire()?;
+    let base = std::path::Path::new("/opt/yonik-bundle-case/actual");
+    fs::DirBuilder::new().mode(0o700).create(base)?;
+    let mut source = Vec::new();
+    writeln!(&mut source, "198.20.0.3/32")?;
+    for i in 0..49_998u32 {
+        writeln!(&mut source, "10.0.{}.{}/32", i / 256, i % 256)?;
+    }
+    writeln!(&mut source, "2001:db8:746f::3/128")?;
+    let server = yonik_import::import_bytes(
+        b"vless://00112233-4455-6677-8899-aabbccddeeff@10.203.0.2:24443?security=none".to_vec(),
+    )?;
+    let (_keep, cancel) = Cancellation::new();
+    for (engine, label) in [(Engine::Xray, "xray"), (Engine::SingBox, "sing-box")] {
+        let deadline = || tokio::time::Instant::now() + Duration::from_secs(60);
+        let mut client = SystemClient::system(deadline(), cancel.clone()).await?;
+        require(
+            client.state(deadline(), cancel.clone()).await? == State::NoManagedPolicy,
+            "Нечистый исходный State",
+        )?;
+        require(
+            client
+                .bundle_capabilities(deadline(), cancel.clone())
+                .await?
+                .canonical_fd_transport,
+            "Нет negotiated bundle capability",
+        )?;
+        let path = base.join(format!("store-{label}"));
+        fs::DirBuilder::new().mode(0o700).create(&path)?;
+        let mut key = [0u8; 32];
+        getrandom::getrandom(&mut key).map_err(|_| io::Error::other("Fixture RNG недоступен"))?;
+        let mut store = EncryptedRuleSetStore::open(fs::File::open(&path)?, key)?;
+        let catalog = ResourceCatalog::build(
+            engine,
+            &[SourceResource {
+                source: &source,
+                digest: Sha256::digest(&source).into(),
+                count: 50_000,
+                kind: ResourceKind::Cidrs,
+            }],
+            &mut store,
+        )?;
+        store.commit(0, catalog.references())?;
+        let expected = catalog.manifest().to_vec();
+        drop(catalog);
+        let lease = store.lease_current()?;
+        let exported = lease.canonical_sources()?;
+        let files = exported
+            .resources
+            .iter()
+            .map(|(_, f)| f.try_clone())
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let canonical = exported
+            .resources
+            .iter()
+            .map(|(d, _)| d.clone())
+            .collect::<Vec<_>>();
+        let policy = yonik_engine::policy_wire::SystemPolicy::parse(
+            r#"{"version":1,"default_action":"proxy","user_rules":[{"id":7,"enabled":true,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":[]}],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}"#,
+        )?;
+        let pin = Sha256::digest(fs::read(format!("/usr/lib/yonik/engines/{label}"))?).into();
+        let mut request = BundleRequest {
+            server: yonik_import::ServerIntent::from_server(&server.servers[0])?,
+            policy,
+            engine,
+            native_pin: pin,
+            revision: 1,
+            intent_digest: [0; 32],
+            requirements: CompileRequirements {
+                kill_switch: false,
+                system_tun: true,
+            },
+            bindings: vec![ResourceBinding {
+                rule: ResourceRule::User(7),
+                resource: 0,
+            }],
+            canonical,
+            expected_native: expected.clone(),
+        };
+        request.intent_digest = request.digest()?;
+        let prepared = client
+            .prepare_bundle(&request, &files, deadline(), cancel.clone())
+            .await?;
+        require(
+            prepared.intent_digest == request.intent_digest
+                && prepared.runtime_bundle_digest != prepared.intent_digest,
+            "Intent/runtime identities",
+        )?;
+        require(
+            client
+                .apply_bundle(prepared, deadline(), cancel.clone())
+                .await?
+                == State::TunnelStarting,
+            "Production bundle Apply",
+        )?;
+        let output = Command::new("/usr/bin/systemctl")
+            .args([
+                "show",
+                "--property=MainPID",
+                "--value",
+                "yonik-worker.service",
+            ])
+            .output()?;
+        require(output.status.success(), "MainPID query")?;
+        let pid: u32 = std::str::from_utf8(&output.stdout)?.trim().parse()?;
+        require(pid > 1, "Worker отсутствует")?;
+        let marker = serde_json::to_vec(
+            &json!({"engine":label,"pid":pid,"digest":expected[0].digest,"bytes":expected[0].bytes,"records":50_000}),
+        )?;
+        let pending = base.join(format!("{label}-applied.pending"));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&pending)?;
+        file.write_all(&marker)?;
+        file.sync_all()?;
+        fs::hard_link(&pending, base.join(format!("{label}-applied.json")))?;
+        fs::remove_file(pending)?;
+        let until = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !base.join(format!("{label}-inspected")).exists() {
+            require(
+                tokio::time::Instant::now() < until,
+                "Нет coordinator inspection",
+            )?;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        for address in [
+            "198.20.0.2",
+            "198.20.0.3",
+            "2001:db8:746f::2",
+            "2001:db8:746f::3",
+        ] {
+            let ip: std::net::IpAddr = address.parse()?;
+            let target = std::net::SocketAddr::new(ip, 24081);
+            let route = Command::new("/usr/bin/ip")
+                .args(["-j", "route", "get", address, "uid", "0"])
+                .output()?;
+            require(route.status.success(), "Route witness")?;
+            let routes: Value = serde_json::from_slice(&route.stdout)?;
+            require(
+                routes[0]["dev"]
+                    .as_str()
+                    .is_some_and(|dev| dev.starts_with("tofu")),
+                "Traffic bypasses TUN",
+            )?;
+            for udp in [false, true] {
+                let operation = async {
+                    let payload = [b'p'; 32];
+                    let mut response = [0u8; 42];
+                    if udp {
+                        let bind = if ip.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+                        let socket = tokio::net::UdpSocket::bind(bind).await?;
+                        socket.connect(target).await?;
+                        socket.send(&payload).await?;
+                        let size = socket.recv(&mut response).await?;
+                        if size != response.len() {
+                            return Ok::<bool, io::Error>(false);
+                        }
+                    } else {
+                        let mut socket = tokio::net::TcpStream::connect(target).await?;
+                        socket.write_all(&payload).await?;
+                        socket.read_exact(&mut response).await?;
+                    }
+                    Ok::<bool, io::Error>(
+                        response[..10] == *b"yonik-tun:" && response[10..] == payload,
+                    )
+                };
+                let passed = matches!(
+                    tokio::time::timeout(Duration::from_secs(2), operation).await,
+                    Ok(Ok(true))
+                );
+                let matched = address.ends_with(".3") || address.ends_with("::3");
+                require(passed != matched, "Bundle membership dataflow mismatch")?;
+                eprintln!(
+                    "bundle engine={label} target={address} udp={udp} matched={matched} response={passed}"
+                );
+            }
+        }
+        require(
+            client.stop(deadline(), cancel.clone()).await? == State::NoManagedPolicy,
+            "Stop bundle",
+        )?;
+        require(
+            client.unlock(deadline(), cancel.clone()).await? == State::NoManagedPolicy,
+            "Unlock bundle",
+        )?;
+        struct Empty;
+        impl WorkerEmptyEvidence for Empty {
+            fn worker_and_cgroup_empty(&self) -> bool {
+                for unit in ["yonik-worker.service", "yonik-worker-check.service"] {
+                    let Ok(output) = Command::new("/usr/bin/systemctl")
+                        .args(["show", "--property=MainPID", "--value", unit])
+                        .output()
+                    else {
+                        return false;
+                    };
+                    if !output.status.success()
+                        || String::from_utf8_lossy(&output.stdout).trim() != "0"
+                    {
+                        return false;
+                    }
+                    match fs::read_to_string(format!(
+                        "/sys/fs/cgroup/system.slice/{unit}/cgroup.events"
+                    )) {
+                        Ok(value) if value.lines().any(|line| line == "populated 0") => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        _ => return false,
+                    }
+                }
+                true
+            }
+        }
+        require(
+            Empty.worker_and_cgroup_empty(),
+            "Нет actual worker+cgroup-empty evidence",
+        )?;
+        lease.release_after_empty(&Empty)?;
+        require(
+            store.reservations()?.active_quarantine == 0,
+            "Lease не освобождён после empty evidence",
+        )?;
+        eprintln!("bundle engine={label} worker_cgroup_empty=true lease_released=true");
+    }
+    Ok(())
+}

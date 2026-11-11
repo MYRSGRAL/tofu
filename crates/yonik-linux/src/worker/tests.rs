@@ -306,3 +306,48 @@ fn source_config_memfd_is_private_before_write_and_after_seal() {
     );
     assert_eq!(&actual[..bytes.len()], bytes);
 }
+
+#[test]
+fn bundle_v2_header_has_closed_ordered_roles_and_engine() {
+    let header = Header {
+        mode: WorkerMode::Check,
+        engine: Engine::Xray,
+        length: 12,
+        binary_hash: [1; 32],
+        config_hash: [2; 32],
+    };
+    let resource = yonik_engine::resource_bundle::ExternalRef {
+        engine: Engine::Xray,
+        digest: [3; 32],
+        bytes: 25,
+        records: 1,
+        kind: yonik_engine::resource_bundle::ResourceKind::Cidrs,
+        format_version: 1,
+    };
+    let mut encoded = header.encode().to_vec();
+    encoded[7] = 2;
+    encoded[10] = 1;
+    encoded.extend_from_slice(&1u64.to_be_bytes());
+    encoded.extend_from_slice(&2u64.to_be_bytes());
+    encode_resource(&mut encoded, &resource);
+    assert_eq!(decode_bundle_header(&encoded).unwrap().1.len(), 1);
+    for length in [0, 79, 80, 81, 95, 96, 149] {
+        assert!(decode_bundle_header(&encoded[..length.min(encoded.len())]).is_err());
+    }
+    for (position, value) in [
+        (7, 3),
+        (10, 0),
+        (10, 17),
+        (11, 1),
+        (96, 2),
+        (97, 99),
+        (101, 9),
+    ] {
+        let mut wrong = encoded.clone();
+        wrong[position] = value;
+        assert!(decode_bundle_header(&wrong).is_err());
+    }
+    encoded[10] = 2;
+    encode_resource(&mut encoded, &resource);
+    assert!(decode_bundle_header(&encoded).is_err());
+}

@@ -26,6 +26,9 @@ const FACTORY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Реализация вычисляет SHA-256 текущих bytes, а не возвращает сохранённый digest.
 /// Доверенный factory обязан выполнить config-check до передачи artifact.
 pub trait PreparedArtifact: Send + 'static {
+    fn bundle_digests(&self) -> Option<super::service::BundleDigests> {
+        None
+    }
     fn current_digest(&self) -> ConfigDigest;
     /// Размер конфигурационного payload; память sealed binary учитывается отдельно.
     fn byte_len(&self) -> usize;

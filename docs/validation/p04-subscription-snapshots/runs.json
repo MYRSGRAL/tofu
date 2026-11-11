@@ -1,0 +1,738 @@
+[
+  {
+    "count": 1000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.3771696449985029,
+    "cpu_s": 0.145413,
+    "peak_rss_kib": 13828,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 6451094
+      },
+      "compiled": [
+        4000,
+        4000
+      ],
+      "config_bytes": [
+        1862400,
+        1370400
+      ],
+      "disk_imported": 4000,
+      "final_state": {
+        "encrypted_body_bytes": 51200,
+        "pages": 89,
+        "profiles": 1000,
+        "rss_kib": 6944,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 83,
+            "profiles": 1000,
+            "rss_kib": 6856,
+            "snapshots": 20
+          },
+          "wall_ns": 45324610
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6928,
+            "snapshots": 20
+          },
+          "wall_ns": 55006854
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6940,
+            "snapshots": 20
+          },
+          "wall_ns": 51285339
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6944,
+            "snapshots": 20
+          },
+          "wall_ns": 58854389
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 4000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 1000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.35452653499669395,
+    "cpu_s": 0.125779,
+    "peak_rss_kib": 13836,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 26787791
+      },
+      "compiled": [
+        4000,
+        4000
+      ],
+      "config_bytes": [
+        1862400,
+        1370400
+      ],
+      "disk_imported": 4000,
+      "final_state": {
+        "encrypted_body_bytes": 51200,
+        "pages": 89,
+        "profiles": 1000,
+        "rss_kib": 6884,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 83,
+            "profiles": 1000,
+            "rss_kib": 6800,
+            "snapshots": 20
+          },
+          "wall_ns": 44056707
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6872,
+            "snapshots": 20
+          },
+          "wall_ns": 48117300
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6880,
+            "snapshots": 20
+          },
+          "wall_ns": 43025590
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6884,
+            "snapshots": 20
+          },
+          "wall_ns": 51243709
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 4000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 1000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.33649997699831147,
+    "cpu_s": 0.11172199999999999,
+    "peak_rss_kib": 13844,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 24560787
+      },
+      "compiled": [
+        4000,
+        4000
+      ],
+      "config_bytes": [
+        1862400,
+        1370400
+      ],
+      "disk_imported": 4000,
+      "final_state": {
+        "encrypted_body_bytes": 51200,
+        "pages": 89,
+        "profiles": 1000,
+        "rss_kib": 6764,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 83,
+            "profiles": 1000,
+            "rss_kib": 6676,
+            "snapshots": 20
+          },
+          "wall_ns": 34730601
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6752,
+            "snapshots": 20
+          },
+          "wall_ns": 46077570
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6760,
+            "snapshots": 20
+          },
+          "wall_ns": 44603779
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 89,
+            "profiles": 1000,
+            "rss_kib": 6764,
+            "snapshots": 20
+          },
+          "wall_ns": 48079750
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 4000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 1000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.3601154449934256,
+    "cpu_s": 0.13177599999999998,
+    "peak_rss_kib": 13844,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 26168192
+      },
+      "compiled": [
+        4000,
+        4000
+      ],
+      "config_bytes": [
+        1862400,
+        1370400
+      ],
+      "disk_imported": 4000,
+      "final_state": {
+        "encrypted_body_bytes": 51200,
+        "pages": 89,
+        "profiles": 1000,
+        "rss_kib": 6964,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 83,
+            "profiles": 1000,
+            "rss_kib": 6884,
+            "snapshots": 20
+          },
+          "wall_ns": 39320266
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6956,
+            "snapshots": 20
+          },
+          "wall_ns": 45556004
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6956,
+            "snapshots": 20
+          },
+          "wall_ns": 46385209
+        },
+        {
+          "retained_servers": 1000,
+          "retained_source_bytes": 50300,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 51100,
+            "pages": 88,
+            "profiles": 1000,
+            "rss_kib": 6964,
+            "snapshots": 20
+          },
+          "wall_ns": 63429404
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 4000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 10000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 1.1607469800001127,
+    "cpu_s": 0.884919,
+    "peak_rss_kib": 13848,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 31102826
+      },
+      "compiled": [
+        40000,
+        40000
+      ],
+      "config_bytes": [
+        18702400,
+        13782400
+      ],
+      "disk_imported": 40000,
+      "final_state": {
+        "encrypted_body_bytes": 514600,
+        "pages": 805,
+        "profiles": 10000,
+        "rss_kib": 12752,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 684,
+            "profiles": 10000,
+            "rss_kib": 12852,
+            "snapshots": 20
+          },
+          "wall_ns": 206168792
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 791,
+            "profiles": 10000,
+            "rss_kib": 13220,
+            "snapshots": 20
+          },
+          "wall_ns": 254931136
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 805,
+            "profiles": 10000,
+            "rss_kib": 13280,
+            "snapshots": 20
+          },
+          "wall_ns": 238654006
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 805,
+            "profiles": 10000,
+            "rss_kib": 13272,
+            "snapshots": 20
+          },
+          "wall_ns": 280533912
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 40000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 10000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 1.2067562999945949,
+    "cpu_s": 0.927389,
+    "peak_rss_kib": 13860,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 32178981
+      },
+      "compiled": [
+        40000,
+        40000
+      ],
+      "config_bytes": [
+        18702400,
+        13782400
+      ],
+      "disk_imported": 40000,
+      "final_state": {
+        "encrypted_body_bytes": 514600,
+        "pages": 803,
+        "profiles": 10000,
+        "rss_kib": 12792,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 681,
+            "profiles": 10000,
+            "rss_kib": 12876,
+            "snapshots": 20
+          },
+          "wall_ns": 212688184
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 787,
+            "profiles": 10000,
+            "rss_kib": 13232,
+            "snapshots": 20
+          },
+          "wall_ns": 245004245
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 795,
+            "profiles": 10000,
+            "rss_kib": 13280,
+            "snapshots": 20
+          },
+          "wall_ns": 256006783
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 803,
+            "profiles": 10000,
+            "rss_kib": 13312,
+            "snapshots": 20
+          },
+          "wall_ns": 310847157
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 40000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 10000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 1.1295206479990156,
+    "cpu_s": 0.8587159999999999,
+    "peak_rss_kib": 13864,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 31219484
+      },
+      "compiled": [
+        40000,
+        40000
+      ],
+      "config_bytes": [
+        18702400,
+        13782400
+      ],
+      "disk_imported": 40000,
+      "final_state": {
+        "encrypted_body_bytes": 514600,
+        "pages": 805,
+        "profiles": 10000,
+        "rss_kib": 12768,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 682,
+            "profiles": 10000,
+            "rss_kib": 12856,
+            "snapshots": 20
+          },
+          "wall_ns": 216303712
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 792,
+            "profiles": 10000,
+            "rss_kib": 13228,
+            "snapshots": 20
+          },
+          "wall_ns": 252510016
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 801,
+            "profiles": 10000,
+            "rss_kib": 13284,
+            "snapshots": 20
+          },
+          "wall_ns": 231342044
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 805,
+            "profiles": 10000,
+            "rss_kib": 13292,
+            "snapshots": 20
+          },
+          "wall_ns": 255482156
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 40000,
+      "successful_commits": 80
+    }
+  },
+  {
+    "count": 10000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 1.2618054639970069,
+    "cpu_s": 0.973627,
+    "peak_rss_kib": 13872,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cancel_probe": {
+        "aborted_future_committed": true,
+        "revision": 5,
+        "settled_ns": 38548262
+      },
+      "compiled": [
+        40000,
+        40000
+      ],
+      "config_bytes": [
+        18702400,
+        13782400
+      ],
+      "disk_imported": 40000,
+      "final_state": {
+        "encrypted_body_bytes": 514600,
+        "pages": 804,
+        "profiles": 10000,
+        "rss_kib": 12712,
+        "snapshots": 20
+      },
+      "phases": [
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 0,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 684,
+            "profiles": 10000,
+            "rss_kib": 12808,
+            "snapshots": 20
+          },
+          "wall_ns": 202306030
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 1,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 791,
+            "profiles": 10000,
+            "rss_kib": 13172,
+            "snapshots": 20
+          },
+          "wall_ns": 291409850
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 2,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 802,
+            "profiles": 10000,
+            "rss_kib": 13236,
+            "snapshots": 20
+          },
+          "wall_ns": 280080663
+        },
+        {
+          "retained_servers": 10000,
+          "retained_source_bytes": 512800,
+          "round": 3,
+          "state": {
+            "encrypted_body_bytes": 513600,
+            "pages": 804,
+            "profiles": 10000,
+            "rss_kib": 13216,
+            "snapshots": 20
+          },
+          "wall_ns": 300377887
+        }
+      ],
+      "refusal_preserved": true,
+      "rounds": 4,
+      "sources": 20,
+      "staged_imported": 40000,
+      "successful_commits": 80
+    }
+  }
+]
