@@ -831,6 +831,25 @@ ApplicationWindow {
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
+                SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: "Ограниченная диагностика сохранённой ревизии " + window.state.routing_revision + ". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены." }
+                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? "Отчёт устарел: черновик изменился. Требуется актуальный снимок." : "Анализ неполный: достигнут лимит или вход не поддерживается." }
+                Repeater {
+                    model: window.state.routing_diagnostics ? window.state.routing_diagnostics.warnings : []
+                    delegate: SmallLabel {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: "#" + modelData.rule_id + " ← " + modelData.earlier + (modelData.kind === "shadowed" ? " · условия перекрыты старшим правилом" : " · возможное пересечение; существование потока не доказано")
+                    }
+                }
+                TextField { id: explainTarget; objectName: "routingExplainTarget"; Layout.fillWidth: true; placeholderText: "Почему такой маршрут: IP или домен (синтетический ввод)"; maximumLength: 253 }
+                ActionButton { objectName: "routingExplainButton"; text: "Объяснить сохранённый черновик"; onClicked: window.sendRouting({command: "routing_explain", target: explainTarget.text}) }
+                PlainLabel {
+                    objectName: "routingExplanation"
+                    Layout.fillWidth: true
+                    property var explanation: window.state.routing_explanation
+                    visible: !!explanation && explanation.revision === window.state.routing_revision && explanation.request_id === window.routingRequestId
+                    text: !explanation ? "" : explanation.result.status === "fixture" ? "Предварительный расчёт: " + explanation.result.action + " · " + explanation.result.origin : "Неизвестно: " + (explanation.result.reason === "application_witness_missing" ? "нет подтверждённой атрибуции приложения" : "нет подтверждённых DNS-данных") + ". Это не проверка применения."
+                }
                 RowLayout {
                     PlainLabel { text: window.tr("Остальной трафик", "Other traffic") }
                     ComboBox { model: ["Proxy", "Direct", "Block"]; currentIndex: window.state.routing ? ["proxy", "direct", "block"].indexOf(window.state.routing.default_action) : 0; onActivated: window.sendRouting({command: "routing_default", action: ["proxy", "direct", "block"][currentIndex]}) }
@@ -844,12 +863,12 @@ ApplicationWindow {
                         PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
                         SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules") }
                         RowLayout {
-                            ActionButton { text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
-                            ActionButton { text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
+                            ActionButton { objectName: "routingEdit" + ruleRow.modelData.id; text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
+                            ActionButton { objectName: "routingUp" + ruleRow.modelData.id; text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
                             ActionButton { text: "↓"; Accessible.name: window.tr("Ниже", "Move down"); onClicked: editor.order(ruleRow.modelData.id, 1, false) }
                             ActionButton { text: "×"; Accessible.name: window.tr("Удалить", "Delete"); onClicked: editor.order(ruleRow.modelData.id, 0, true) }
                         }
-                        ActionButton { text: window.tr("Дублировать", "Duplicate"); onClicked: { editor.load(ruleRow.modelData); editor.selectedId = 0; editor.formRevision = window.state.routing_revision } }
+                        ActionButton { objectName: "routingDuplicate" + ruleRow.modelData.id; text: window.tr("Дублировать", "Duplicate"); onClicked: { editor.load(ruleRow.modelData); editor.selectedId = 0; editor.formRevision = window.state.routing_revision } }
                         Divider {}
                     }
                 }
@@ -882,7 +901,7 @@ ApplicationWindow {
                 TextArea { visible: editor.advanced || editor.simpleGroup === 2; id: cidrInput; objectName: "routingCidr"; Layout.fillWidth: true; placeholderText: "192.0.2.0/24"; wrapMode: TextEdit.Wrap; selectByMouse: true }
                 SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Порты, протоколы, process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Ports, protocols, process names, UID, cgroup and PID are unsupported by the current model.") }
                 ComboBox { id: actionInput; model: ["Proxy", "Direct", "Block"] }
-                CheckBox { id: enabledInput; checked: true; text: window.tr("Правило включено", "Rule enabled") }
+                CheckBox { id: enabledInput; objectName: "routingEnabled"; checked: true; text: window.tr("Правило включено", "Rule enabled") }
                 CheckBox { id: broadInput; text: window.tr("Подтверждаю правило для любого трафика", "Confirm matching all traffic") }
                 RowLayout {
                     ActionButton {
