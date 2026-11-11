@@ -5,6 +5,7 @@ mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
 use crate::preferences::{Preferences, SaveOutcome, Store};
+use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use yonik_engine::Engine;
 use yonik_import::{Field, IssueCode, ReviewFlag};
+use yonik_linux::system_client::{ClientError, State as SystemState, SystemClient};
 use yonik_linux::{
     BinarySnapshot, Cancellation, CheckedConfig, CredentialError, EncryptedSubscriptionRepository,
     FetchError, FetchRoute, HostError, LocalSession, NetworkMonitor, NetworkSnapshot, NetworkStamp,
@@ -222,6 +224,11 @@ enum Command {
         offset: usize,
     },
     CancelTcp,
+    SetConnectionMode {
+        mode: ConnectionMode,
+    },
+    SystemState,
+    SystemUnlock,
     Connect,
     Stop,
     Shutdown,
@@ -280,6 +287,13 @@ impl EngineChoice {
         }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ConnectionMode {
+    Local,
+    System,
+}
+
 struct Envelope {
     generation: u64,
     tcp_generation: u64,
@@ -392,6 +406,8 @@ impl DesktopHost {
                 | Command::Refresh
                 | Command::ApproveRefresh
                 | Command::DiscardRefresh
+                | Command::SystemState
+                | Command::SystemUnlock
                 | Command::Connect
                 | Command::Stop
                 | Command::Shutdown
@@ -629,6 +645,11 @@ struct Snapshot {
     total: usize,
     offset: usize,
     revision: i64,
+    connection_mode: ConnectionMode,
+    system_state: &'static str,
+    can_unlock: bool,
+    system_recovery_pending: bool,
+    system_busy: bool,
     status: &'static str,
     selected_profile: Option<i64>,
     selected_name: Option<String>,
@@ -688,6 +709,11 @@ impl Snapshot {
             total: 0,
             offset: 0,
             revision: 0,
+            connection_mode: ConnectionMode::Local,
+            system_state: "Unknown",
+            can_unlock: false,
+            system_recovery_pending: false,
+            system_busy: false,
             status: "Disconnected",
             selected_profile: None,
             selected_name: None,
@@ -1042,6 +1068,7 @@ impl Actor {
     fn emit(&mut self) {
         self.state.can_connect = self.selected.is_some()
             && !self.state.can_stop
+            && !self.state.system_busy
             && !self.state.busy
             && self.state.pending.is_none();
         self.state.emit(&self.callback);
@@ -2441,6 +2468,11 @@ async fn run(
     }
     actor.emit();
     let (updates, mut events) = mpsc::channel::<SessionUpdate>(16);
+    let mut system_session: Option<SystemSession> = None;
+    let mut system_flight: Option<Flight> = None;
+    let mut system_stop = false;
+    let mut system_active = false;
+    let mut system_poll = tokio::time::interval(Duration::from_secs(2));
     let mut running: Option<Running> = None;
     let mut failed_session: Option<LocalSession> = None;
     let mut refreshing: Option<RefreshTask> = None;
@@ -2546,6 +2578,13 @@ async fn run(
             biased;
             changed = priority.changed() => {
                 if changed.is_err() { quitting = true; }
+                if actor.state.connection_mode == ConnectionMode::System && (system_active || system_flight.is_some()) {
+                    system_stop |= system_active || system_flight.as_ref().is_some_and(|flight| flight.mutating);
+                    actor.state.system_busy = true;
+                    actor.state.system_state = "Unknown";
+                    actor.state.status = "Unknown";
+                    if let Some(flight) = &system_flight { flight.cancel.send_replace(true); }
+                }
                 proxy_session.send_replace(None);
                 let action = *priority.borrow_and_update();
                 quitting |= action.shutdown;
@@ -2575,11 +2614,59 @@ async fn run(
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
                 }
-                if running.is_none() && failed_session.is_none() {
+                if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() {
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
                 }
-                actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" };
+                if actor.state.connection_mode == ConnectionMode::Local { actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" }; }
                 actor.emit();
+            }
+            result = async { match system_flight.as_mut() {
+                Some(flight) => (&mut flight.task).await,
+                None => std::future::pending().await,
+            } } => {
+                if let Some(flight) = system_flight.take() {
+                    // После долгого State recovery-действия получают окно до следующего poll.
+                    system_poll.reset();
+                    let stale = (flight.connecting && system_stop) || flight.generation != control.generation.load(Ordering::SeqCst)
+                        || (flight.connecting && flight.revision != system_revision(&actor));
+                    match result {
+                        Ok((session, result)) => {
+                            system_session = session;
+                            if stale {
+                                system_stop |= flight.mutating || system_active;
+                                actor.state.system_state = "Unknown";
+                                actor.state.status = "Unknown";
+                            } else {
+                                if flight.connecting || (flight.mutating && result.is_err()) { system_active = !matches!(result, Err(ClientError::Unsupported | ClientError::Denied | ClientError::InvalidRequest | ClientError::Busy)); }
+                                if !flight.connecting && system_stop { system_active = !matches!(result, Ok(SystemState::NoManagedPolicy | SystemState::VerifiedRules | SystemState::RecoveryRequired)); system_stop = false; }
+                                match result {
+                                    Ok(state) => {
+                                        if state == SystemState::NoManagedPolicy { system_active = false; }
+                                        else if matches!(state, SystemState::TunnelStarting | SystemState::Unknown) { system_active = true; }
+                                        record_system(&mut actor.state, state)
+                                    },
+                                    Err(error) => {
+                                        record_system(&mut actor.state, SystemState::Unknown);
+                                        actor.state.command_error(false, system_error(error));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => { record_system(&mut actor.state, SystemState::Unknown); system_active = true; }
+                    }
+                    actor.state.system_busy = false;
+                    actor.state.can_stop = system_active || system_stop;
+                    if !actor.state.can_stop { actor.state.active_name = None; actor.state.active_engine = None; }
+                    actor.emit();
+                }
+            }
+            _ = system_poll.tick(), if actor.state.connection_mode == ConnectionMode::System && system_flight.is_none() && system_session.is_some() && !quitting => {
+                if system_session.as_ref().is_some_and(|session| session.snapshot() == SystemState::Unknown) {
+                    record_system(&mut actor.state, SystemState::Unknown); actor.emit();
+                }
+                let generation = control.generation.load(Ordering::SeqCst);
+                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation));
+                actor.state.system_busy = true; actor.emit();
             }
             _ = &mut provider => {},
             changed = system_policy.changed(), if provider_enabled => {
@@ -2794,6 +2881,11 @@ async fn run(
                 }
                 actor.state.begin_command(&envelope.command);
                 let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
+                if matches!(envelope.command, Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Reload | Command::ApproveRefresh) {
+                    if let Some(flight) = system_flight.as_ref().filter(|flight| flight.connecting) {
+                        flight.cancel.send_replace(true); system_stop = true;
+                    }
+                }
                 let outcome = match envelope.command {
                     Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
                     Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
@@ -2893,6 +2985,34 @@ async fn run(
                             Err(error) => Err(error),
                         } }
                     }
+                    Command::SetConnectionMode { mode } => {
+                        if actor.state.can_stop || actor.state.system_recovery_pending || system_flight.is_some() || system_stop { Err(DesktopError("busy")) }
+                        else { actor.state.connection_mode = mode; actor.state.status = "Disconnected"; Ok(()) }
+                    }
+                    Command::SystemState | Command::SystemUnlock => {
+                        if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy")) }
+                        else {
+                            let operation = if matches!(envelope.command, Command::SystemUnlock) { Operation::Unlock } else { Operation::State };
+                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation));
+                            actor.state.status = "Unknown"; Ok(())
+                        }
+                    }
+                    Command::Connect if actor.state.connection_mode == ConnectionMode::System => {
+                        if actor.state.can_stop || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
+                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
+                        else if let Some(profile) = actor.selected.as_ref() {
+                            match yonik_import::ServerIntent::from_server(&profile.server) {
+                                Ok(server) => {
+                                    system_flight = Some(Flight::start(system_session.take(), Operation::Connect(Box::new(server), actor.state.engine.engine()), system_revision(&actor), envelope.generation));
+                                    actor.state.can_stop = true; system_active = true;
+                                    actor.state.active_name = Some(profile.profile.name.clone());
+                                    actor.state.active_engine = Some(actor.state.engine);
+                                    actor.state.system_state = "Unknown"; actor.state.status = "Preparing"; Ok(())
+                                }
+                                Err(_) => Err(DesktopError("engine_config")),
+                            }
+                        } else { Err(DesktopError("profile_required")) }
+                    }
                     Command::Connect => {
                         if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
                         else if session_generation == u64::MAX { Err(DesktopError("engine_failed")) }
@@ -2936,6 +3056,7 @@ async fn run(
                     }
                 }
                 if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }
+                actor.state.system_busy = system_flight.is_some();
                 actor.emit();
             }
         }
@@ -2984,13 +3105,35 @@ async fn run(
             actor.state.tcp_result = None;
             actor.emit();
         }
+        if system_flight
+            .as_ref()
+            .is_some_and(|flight| flight.connecting && flight.revision != system_revision(&actor))
+        {
+            if let Some(flight) = &system_flight {
+                flight.cancel.send_replace(true);
+            }
+            system_stop = true;
+        }
+        if system_stop && system_flight.is_none() {
+            let generation = control.generation.load(Ordering::SeqCst);
+            system_flight = Some(Flight::start(
+                system_session.take(),
+                Operation::Stop,
+                system_revision(&actor),
+                generation,
+            ));
+            actor.state.system_busy = true;
+            actor.emit();
+        }
         if quitting
+            && system_flight.is_none()
+            && !system_stop
             && batch_running.is_none()
             && running.is_none()
             && refreshing.is_none()
             && tcp_running.is_none()
         {
-            if failed_session.is_some() {
+            if failed_session.is_some() || system_active {
                 quitting = false;
                 actor.state.command_error(false, "cleanup_failed");
                 actor.emit();
@@ -3262,5 +3405,160 @@ mod proxy_session_tests {
         let (result, ()) =
             tokio::join!(host.fetch(&source, FetchRoute::Proxy, None, cancel), revoke);
         assert_eq!(result.unwrap_err(), FetchError::Cancelled);
+    }
+}
+
+fn system_revision(actor: &Actor) -> ProfileRevision {
+    ProfileRevision {
+        source: actor.state.source_id.unwrap_or_default() as u64,
+        profile: actor.state.selected_profile.unwrap_or_default() as u64,
+        generation: actor.state.revision as u64,
+    }
+}
+fn record_system(snapshot: &mut Snapshot, state: SystemState) {
+    let label = match state {
+        SystemState::Unknown => "Unknown",
+        SystemState::NoManagedPolicy => "NoManagedPolicy",
+        SystemState::TunnelStarting => "TunnelStarting",
+        SystemState::VerifiedRules => "VerifiedRules",
+        SystemState::RecoveryRequired => "RecoveryRequired",
+    };
+    snapshot.system_state = label;
+    snapshot.status = label;
+    // Unknown — потеря доказательства, а не доказательство отсутствия ресурсов.
+    match state {
+        SystemState::NoManagedPolicy => snapshot.system_recovery_pending = false,
+        SystemState::TunnelStarting
+        | SystemState::VerifiedRules
+        | SystemState::RecoveryRequired => {
+            snapshot.system_recovery_pending = true;
+        }
+        SystemState::Unknown => {}
+    }
+    snapshot.can_unlock = snapshot.system_recovery_pending;
+}
+fn system_error(error: ClientError) -> &'static str {
+    match error {
+        ClientError::Unsupported => "system_unsupported",
+        ClientError::Denied => "system_denied",
+        ClientError::Cancelled => "cancelled",
+        ClientError::Busy => "busy",
+        ClientError::OwnerLost => "system_owner_lost",
+        ClientError::Deadline | ClientError::Timeout => "system_timeout",
+        _ => "system_unavailable",
+    }
+}
+
+/// Одна ограниченная операция. Владение session возвращается даже после отмены RPC.
+pub(crate) enum Operation {
+    Connect(Box<yonik_import::ServerIntent>, Engine),
+    Stop,
+    Unlock,
+    State,
+}
+pub(crate) struct Flight {
+    pub cancel: tokio::sync::watch::Sender<bool>,
+    pub task: tokio::task::JoinHandle<(
+        Option<SystemSession>,
+        std::result::Result<SystemState, ClientError>,
+    )>,
+    pub generation: u64,
+    pub revision: ProfileRevision,
+    pub connecting: bool,
+    pub mutating: bool,
+}
+impl Flight {
+    pub fn start(
+        session: Option<SystemSession>,
+        operation: Operation,
+        revision: ProfileRevision,
+        generation: u64,
+    ) -> Self {
+        let connecting = matches!(operation, Operation::Connect(..));
+        let mutating = !matches!(operation, Operation::State);
+        let (cancel, cancellation) = Cancellation::new();
+        let task = tokio::spawn(async move {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut session = match session {
+                Some(session) if !session.owner_lost() => session,
+                _ => match SystemClient::system(deadline, cancellation.clone()).await {
+                    Ok(client) => SystemSession::new(client, revision),
+                    Err(error) => return (None, Err(error)),
+                },
+            };
+            session.revise(revision);
+            let result = match operation {
+                Operation::Connect(server, engine) => {
+                    match session
+                        .prepare(
+                            revision,
+                            &server,
+                            engine,
+                            true,
+                            deadline,
+                            cancellation.clone(),
+                        )
+                        .await
+                    {
+                        Ok(()) => session.apply(revision, deadline, cancellation).await,
+                        Err(error) => Err(error),
+                    }
+                }
+                Operation::Stop => session.stop(deadline, cancellation).await,
+                Operation::Unlock => session.unlock(deadline, cancellation).await,
+                Operation::State => session.state(deadline, cancellation).await,
+            };
+            (Some(session), result)
+        });
+        Self {
+            cancel,
+            task,
+            generation,
+            revision,
+            connecting,
+            mutating,
+        }
+    }
+}
+
+#[cfg(test)]
+mod system_recovery_tests {
+    use super::*;
+
+    #[test]
+    fn неопределённый_state_сохраняет_барьер_и_unlock() {
+        for retained in [
+            SystemState::VerifiedRules,
+            SystemState::RecoveryRequired,
+            SystemState::TunnelStarting,
+        ] {
+            let mut snapshot = Snapshot::new(true);
+            record_system(&mut snapshot, retained);
+            for error in [
+                ClientError::Timeout,
+                ClientError::Unavailable,
+                ClientError::OwnerLost,
+            ] {
+                record_system(&mut snapshot, SystemState::Unknown);
+                snapshot.command_error(false, system_error(error));
+                assert!(snapshot.system_recovery_pending);
+                assert!(snapshot.can_unlock);
+                assert_eq!(snapshot.system_state, "Unknown");
+            }
+        }
+    }
+
+    #[test]
+    fn подтверждённая_очистка_снимает_барьер() {
+        let mut snapshot = Snapshot::new(true);
+        record_system(&mut snapshot, SystemState::VerifiedRules);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(snapshot.system_recovery_pending);
+        // И State, и Unlock передают сюда только принятый typed ответ helper.
+        record_system(&mut snapshot, SystemState::NoManagedPolicy);
+        assert!(!snapshot.system_recovery_pending);
+        assert!(!snapshot.can_unlock);
+        record_system(&mut snapshot, SystemState::Unknown);
+        assert!(!snapshot.system_recovery_pending);
     }
 }
