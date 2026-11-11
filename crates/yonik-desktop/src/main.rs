@@ -1,5 +1,7 @@
 #![deny(unsafe_code)]
 
+mod dispatch_error;
+
 // Модуль содержит только декларацию сгенерированного FFI.
 #[allow(unsafe_code)]
 mod bridge;
@@ -92,7 +94,7 @@ mod bridge_impl {
 
         pub fn dispatch(mut self: Pin<&mut Self>, request: QString) {
             let Some(host) = self.host.as_ref() else {
-                self.report_error("startup");
+                self.report_dispatch_error(&request.to_string(), "startup");
                 return;
             };
             if let Err(error) = host.dispatch(&request.to_string()) {
@@ -121,22 +123,12 @@ mod bridge_impl {
         }
 
         fn report_dispatch_error(self: Pin<&mut Self>, request: &str, message: &str) {
-            let mut snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+            let snapshot = crate::dispatch_error::snapshot(
                 &self.snapshot_json().to_string(),
-            )
-            .unwrap_or_default();
-            if let Ok(command) = serde_json::from_str::<serde_json::Value>(request) {
-                if matches!(
-                    command["command"].as_str(),
-                    Some("edit_routing" | "routing_order" | "routing_delete" | "routing_default")
-                ) {
-                    snapshot.insert("routing_ack".into(), serde_json::json!({"request_id": command["request_id"], "saved_id": null, "error": message}));
-                }
-            }
-            snapshot.insert("error".into(), message.into());
-            self.set_snapshot_json(QString::from(
-                &serde_json::Value::Object(snapshot).to_string(),
-            ));
+                request,
+                message,
+            );
+            self.set_snapshot_json(QString::from(&snapshot));
         }
 
         fn report_error(self: Pin<&mut Self>, message: &str) {
