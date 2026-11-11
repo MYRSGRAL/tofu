@@ -140,7 +140,9 @@ ApplicationWindow {
             if (next && Object.keys(next).length === 0) return
             if (next && typeof next.error === "string" && !Array.isArray(next.sources) && !Array.isArray(next.profiles)) {
                 if (commandContext === "routing") completeRouting({request_id: routingRequestId, error: next.error, saved_id: null})
-                state = Object.assign({}, state, commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error})
+                const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
+                if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
+                state = Object.assign({}, state, update)
                 parseError = ""
                 return
             }
@@ -959,6 +961,13 @@ ApplicationWindow {
                     }
                     HelpButton { explanation: window.tr("Локальный SOCKS настраивается в нужном приложении. Системный режим требует capability и разрешения helper. Подтверждение правил ещё не подтверждает доступ через туннель.", "Configure local SOCKS in your application. System mode requires helper capability and authorization. Verified rules do not confirm tunnel connectivity.") }
                 }
+                PlainLabel { text: window.tr("DNS для обновлений через Proxy", "DNS for Proxy updates") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Укажите IP:порт или [IPv6]:порт DNS-over-TCP сервера. Он используется через активное SOCKS-подключение только для обновлений подписок в режиме Proxy. Пустое значение запрещает DNS для доменных адресов. Настройки DNS ОС и ядра не меняются. Изменение доступно после отключения.", "Enter IP:port or [IPv6]:port of a DNS-over-TCP server. Subscription updates in Proxy mode use it through the active SOCKS connection. Empty disables domain DNS. OS and core DNS settings are unchanged. Disconnect before editing.") }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField { id: proxyFetchDns; objectName: "proxyFetchDns"; Layout.fillWidth: true; maximumLength: 128; text: window.state.proxy_fetch_dns || ""; enabled: window.editable && !window.state.can_stop; Accessible.name: window.tr("DNS обновлений Proxy", "Proxy update DNS") }
+                    ActionButton { objectName: "saveProxyFetchDns"; text: window.tr("Сохранить", "Save"); enabled: window.editable && !window.state.can_stop; onClicked: window.send({command: "set_proxy_fetch_dns", upstream: proxyFetchDns.text}) }
+                }
                 PlainLabel { visible: window.state.connection_mode === "system"; text: window.tr("Состояние helper: ", "Helper state: ") + (window.state.system_state || "Unknown") }
                 ActionButton { objectName: "systemStateButton"; visible: window.state.connection_mode === "system"; enabled: !window.state.system_busy; text: window.tr("Проверить состояние", "Check state"); onClicked: window.send({command: "system_state"}) }
                 ActionButton { objectName: "systemUnlockButton"; visible: window.state.connection_mode === "system"; enabled: !!window.state.can_unlock && !window.state.system_busy && !window.state.can_stop; text: window.tr("Снять сохранённую блокировку", "Unlock retained protection"); onClicked: window.send({command: "system_unlock"}) }
@@ -1018,6 +1027,7 @@ ApplicationWindow {
             objectName: "diagnosticsScroll"
             ColumnLayout {
                 width: diagnosticsScroll.availableWidth; spacing: 14
+                LogsView { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en"; response: window.state.logs || null }
                 DiagnosticsExport { Layout.fillWidth: true; backend: window.backendForDiagnostics; english: window.state.language === "en" }
                 PlainLabel { Layout.fillWidth: true; visible: !!window.connectionError || !!window.parseError; color: "#e6bc83"; text: window.parseError || (window.connectionError ? window.errorText(window.connectionError) : "") }
                     Rectangle {
