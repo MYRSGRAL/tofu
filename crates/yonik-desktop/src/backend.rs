@@ -2043,6 +2043,16 @@ impl Actor {
     }
 }
 
+// Всегда дожидается ACK/drain; проверка поколения относится только к публикации.
+async fn await_current_schedule<T>(
+    operation: impl std::future::Future<Output = T>,
+    current: &AtomicU64,
+    expected: u64,
+) -> Option<T> {
+    let outcome = operation.await;
+    (current.load(Ordering::SeqCst) == expected).then_some(outcome)
+}
+
 fn map_subscription(error: SubscriptionError) -> DesktopError {
     DesktopError(match error {
         SubscriptionError::InvalidSource => "invalid_input",
@@ -3782,11 +3792,13 @@ async fn run(
                 };
                 if let Some(id) = cancel_id {
                     let cancelled_review = scheduled.review == Some(id);
-                    if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
+                    let Some(cancelled) = await_current_schedule(scheduled.cancel(id, || origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                    if let Err(error) = cancelled {
                         actor.state.schedule_error(error, Some(scheduled.generation)); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
-                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
+                        let Some(reloaded) = await_current_schedule(scheduled.reload_id(actor.service(), id, origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                        if let Err(error) = reloaded {
                             actor.state.schedule_error(error, Some(scheduled.generation));
                         } else { actor.state.command_error(true, "busy"); }
                         actor.emit(); continue;
@@ -3969,7 +3981,8 @@ async fn run(
                 }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
-                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
+                        let Some(reloaded) = await_current_schedule(scheduled.reload_id(actor.service(), id, origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                        if let Err(error) = reloaded {
                             actor.state.schedule_error(error, Some(scheduled.generation));
                         }
                     }

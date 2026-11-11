@@ -401,6 +401,76 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn stale_command_waits_for_admission_ack_without_publishing_failure() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path =
+            std::env::temp_dir().join(format!("p11-stale-command-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let current = std::sync::atomic::AtomicU64::new(1);
+        let outcome = super::super::await_current_schedule(
+            owner.cancel(id, || {
+                // Приоритетная команда принята после исходной проверки, до ACK.
+                current.store(2, std::sync::atomic::Ordering::SeqCst);
+                Duration::ZERO
+            }),
+            &current,
+            1,
+        )
+        .await;
+        assert!(
+            outcome.is_none(),
+            "Устаревшая команда не публикует admission failure"
+        );
+        assert!(
+            !owner.runtime.cancellation_pending(id),
+            "ACK/drain обязателен даже для stale результата"
+        );
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn actual_cancel_admission_failure_context() {
         use std::os::unix::fs::DirBuilderExt;
         let path = std::env::temp_dir().join(format!("p11-drain-{}", std::process::id()));
@@ -446,11 +516,15 @@ mod tests {
             .unwrap();
         let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
         assert!(status.success());
-        let failure =
-            tokio::time::timeout(Duration::from_secs(2), owner.cancel(id, || Duration::ZERO))
-                .await
-                .unwrap()
-                .unwrap_err();
+        let current = std::sync::atomic::AtomicU64::new(1);
+        let failure = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::super::await_current_schedule(owner.cancel(id, || Duration::ZERO), &current, 1),
+        )
+        .await
+        .unwrap()
+        .expect("Текущее поколение сохраняет admission failure")
+        .unwrap_err();
         assert_eq!(failure.cause, Some(Cause::SchedulerRepositoryCorrupt));
         assert!(!owner.runtime.cancellation_pending(id));
         let mut state = super::super::Snapshot::new(true);
