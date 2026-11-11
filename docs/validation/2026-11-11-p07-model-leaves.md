@@ -32,7 +32,7 @@ networking §§2/4; validation-and-roadmap A-04/A-07/A-08.
 | Reorder/partial/stale не удаляет записи; revision/report/ACK | B:3736, :3753, :3795, :3819 `routing_regressions` | Reuse существующего proof, backend не изменён |
 | PID/unknown field не теряется тихо | E `pid_is_not_a_persistent_selector`; serde deny_unknown_fields | Отказ DTO, не сохранение неизвестного платформенного правила |
 | Сохранение неприменимого платформенного селектора и разрешение перед activation | ОТКРЫТО: Conditions/RuleInput хранят только executable/domain/CIDR | Отказ parse сам по себе не выполняет требование сохранения |
-| Simple→advanced→simple на реальных editor functions + persistence | ОТКРЫТО в pure-model proof: editor.rs не содержит mode transformation; QML Main.qml:838/867 переключает presentation bool | Существующий PR94 actual Qt не переносится на текущий QML автоматически |
+| Simple→advanced→simple на реальных editor functions + persistence | ЗАКРЫТО actual Qt текущих исходников: editor_persistence_smoke.py, 4 запуска / 69 шагов; см. [отчёт](2026-11-11-p07-qt-persistence.md) | Реальные Main.qml/bridge/DesktopHost и encrypted DB, без копии QML логики |
 | Порт/protocol/process name/UID/cgroup capability | ОТКРЫТО: текущая общая модель их не выражает | Unsupported не удаляется ради green |
 | Failed Apply сохраняет рабочее поколение, старые потоки не мигрируют | ВНЕ pure-model proof: actual P20/native acceptance | Не подменять saved Draft проверкой Apply |
 | A-08 bounded catalog/no Exec/no secret args/hidden scanning | ВНЕ этого ownership; нужны catalog/UI доказательства | Отказ PID не закрывает весь A-08 |
@@ -58,10 +58,12 @@ hashes всех перечисленных model/test sources сохранены
 ## Остаток для ROOT
 
 Для полного common Linux P07 ещё нужно решить контракт сохранения unsupported
-selector и выделения реальной границы двух представлений. Production proposal:
-сначала согласовать с ROOT место opaque platform selector и его activation refusal,
-а также API представления, позволяющий проверять реальные переходы и persistence
-без копии QML-логики в тестах. Этот PR такого API не изобретает.
+selector. Реальный переход представлений и persistence отдельно проверены actual Qt.
+Production proposal: сначала согласовать с ROOT закрытый типизированный platform
+selector и его activation refusal. API представления для тестов не требуется: actual Qt proof использует существующие
+controls и bindings. Этот PR такого API не добавляет. Reviewable proposal сохранён
+в 2026-11-11-p07-unsupported-proposal.md; ROOT отложил production-эволюцию до
+согласования единого контракта после native broker/wire handoff.
 
 Actual worker/provenance, application AND domain в TUN и оба native ядра остаются
 будущими gates; `system_tun=false`. Синтетический caller witness не verified owner.
