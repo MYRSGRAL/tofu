@@ -1187,6 +1187,7 @@ struct Actor {
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: Option<EncryptedSubscriptionRepository>,
+    format4_backup: Option<PathBuf>,
     routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
@@ -1222,27 +1223,36 @@ impl Actor {
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
-        let revision = self
-            .routing_repository()
-            .save_routing_draft(expected, candidate.json().into_bytes())
-            .await
-            .map_err(|error| {
-                self.state.error_contexts.set_ack(
-                    Slot::RoutingAck,
-                    if error == yonik_linux::RepositoryError::Conflict {
-                        Cause::RoutingRepositoryConflict
-                    } else {
-                        Cause::RoutingRepositoryFailed
-                    },
-                    request_id,
-                    self.state.routing_generation,
-                );
-                DesktopError(if error == yonik_linux::RepositoryError::Conflict {
-                    "routing_stale"
+        let revision = if candidate.version == 2 {
+            self.routing_repository()
+                .save_routing_draft_v2(
+                    expected,
+                    candidate.json().into_bytes(),
+                    self.format4_backup.clone(),
+                )
+                .await
+        } else {
+            self.routing_repository()
+                .save_routing_draft(expected, candidate.json().into_bytes())
+                .await
+        }
+        .map_err(|error| {
+            self.state.error_contexts.set_ack(
+                Slot::RoutingAck,
+                if error == yonik_linux::RepositoryError::Conflict {
+                    Cause::RoutingRepositoryConflict
                 } else {
-                    "routing_storage"
-                })
-            })?;
+                    Cause::RoutingRepositoryFailed
+                },
+                request_id,
+                self.state.routing_generation,
+            );
+            DesktopError(if error == yonik_linux::RepositoryError::Conflict {
+                "routing_stale"
+            } else {
+                "routing_storage"
+            })
+        })?;
         self.routing_revision = Some(revision);
         self.state.routing_revision = Some(revision);
         self.state.routing_diagnostics = candidate.diagnostics();
@@ -2322,6 +2332,7 @@ mod settings_tests {
             event_log: yonik_linux::event_log::EventLog::new(),
             logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository: Some(routing_repository),
+            format4_backup: None,
             routing_revision: Some(0),
             preferences_store,
             preferences,
@@ -3200,6 +3211,7 @@ async fn run(
         event_log: yonik_linux::event_log::EventLog::new(),
         logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository: Some(routing_repository),
+        format4_backup: None,
         routing_revision: Some(0),
         preferences_store,
         preferences,
@@ -3694,6 +3706,7 @@ async fn run(
                     let owner = std::mem::replace(&mut scheduled, replacement);
                     let request_id = request.request_id;
                     let cancellation = yonik_linux::MaintenanceControl::default();
+                    let backup_destination = (request.operation == maintenance::Operation::Backup).then(|| request.destination.clone());
                     let mut job = tokio::spawn(maintenance_job::run(service, repository, owner, refreshing.take(), request, cancellation.clone(), origin.elapsed()));
                     actor.state.ready = false;
                     actor.state.busy = true;
@@ -3743,6 +3756,7 @@ async fn run(
                             actor.service = Some(service); actor.routing_repository = Some(repository); scheduled = owner;
                         }
                     }
+                    if result.is_ok() { actor.format4_backup = backup_destination; }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
 
                     // Completion принадлежит единственному join handle этого request;
@@ -3967,6 +3981,9 @@ async fn run(
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
+                    Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage")),
+                    Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage")),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option")),
                     Command::Connect if actor.state.connection_mode == ConnectionMode::System => {
                         if actor.state.can_stop || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
                         else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
@@ -4212,6 +4229,7 @@ mod routing_regressions {
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository: Some(routing_repository),
+                format4_backup: None,
                 routing_revision: Some(0),
                 preferences_store,
                 preferences,

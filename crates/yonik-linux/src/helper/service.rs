@@ -313,7 +313,7 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                 }
                 "system_profile" | "system_profile_policy" => {
                     let (dto, policy) = if route.mode == "system_profile_policy" {
-                        if !yonik_engine::policy_wire::bounded_depth(json, 5)
+                        if !yonik_engine::policy_wire::bounded_depth(json, 6)
                             || !json.trim_start().starts_with('{')
                         {
                             return Err(ServiceError::InvalidRequest);
