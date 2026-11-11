@@ -95,6 +95,24 @@ pub(crate) fn extract(
             // Каждое дерево ограничено MAX_ENTRY_BYTES; глубина проверена до extract.
             let node: Value =
                 serde_json::from_str(raw.get()).map_err(|_| FatalError::InvalidJson)?;
+            if node.get("type").is_some() {
+                let result = crate::singbox::normalize(&node);
+                match result {
+                    Ok(mut server) => {
+                        server.source = crate::SecretText::new(raw.get().to_owned());
+                        if node.get("protocol").is_some()
+                            || config
+                                .keys()
+                                .any(|k| !matches!(k.as_str(), "outbounds" | "tag" | "remarks"))
+                        {
+                            server.review_flags.push(ReviewFlag::UnsupportedOption);
+                        }
+                        servers.push(server);
+                    }
+                    Err(error) => issue(issues, count, error),
+                }
+                continue;
+            }
             let Some(protocol) = node.get("protocol") else {
                 continue;
             };

@@ -5,6 +5,7 @@ mod identity;
 mod intent;
 mod json;
 mod model;
+mod singbox;
 mod uri;
 mod xray;
 

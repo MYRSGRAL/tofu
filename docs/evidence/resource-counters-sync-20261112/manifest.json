@@ -1,0 +1,26 @@
+{
+  "source_head": "7a88bac22e34a43784c4d594cbfeacf9ab536793",
+  "parent": "ea49d1e185e94b4c70bd75c83656ec9dd4c10e46",
+  "main": "473a53b902d3a6e3ef26f286916ed1018219bc00",
+  "sha256": {
+    "tools/resource_counters.py": "a86987de0c809805d985e4b81883bf6bea1060971f031e537e6a040dad8ad4ca",
+    "tools/ui_benchmark.py": "727ae13c8f5bb11e0966a4fb57fa26ca2f9dd23803a668a8b9869750b1b057db",
+    "tools/tests/test_resource_counters.py": "c56f63661fa2f9ffb9a6413bf4adec406a21743f70684ec4bd702426ddfa4ba7",
+    "tools/tests/test_ui_benchmark.py": "1601b54998ea0f2e528d675558edbccc97f5d1760fac4a5b43bc874eb06c7f62",
+    "Cargo.lock": "092bcc6b03e4af984988cce478969c1ec0ac4908ad5a29b0c62172bc17da8ab6",
+    "bench/ui/Cargo.lock": "aed1e31ff1e82271e416c439278c9984c3371ec38729b64a076060cc4b6a6ce9"
+  },
+  "physical_acceptance": false,
+  "python_tests": {
+    "harness": 23,
+    "counters": 7,
+    "result": "PASS",
+    "warning": "Python 3.14 ResourceWarning in external waitpid test; no foreign PID signals"
+  },
+  "build": {
+    "jobs": 1,
+    "slot_wrapper": "/home/myrs/projects/yonik/local/orchestration/with-rust-slot",
+    "task_root": "/var/tmp/codex-myrs/transient/pr108-sync-20261112",
+    "root_lock": "shared flock"
+  }
+}
