@@ -29,6 +29,8 @@ use std::{
 use yonik_application::ConfigDigest;
 use yonik_engine::{CompiledConfig, Engine};
 
+pub mod anchor_exchange;
+
 const TIMEOUT: Duration = Duration::from_secs(5);
 const HEADER_LEN: usize = 80;
 const BUNDLE_HEADER_LEN: usize = 96;
@@ -762,6 +764,7 @@ pub async fn serve(mode: WorkerMode) -> Result<(), WorkerError> {
     serve_stream(stream, mode).await
 }
 async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), WorkerError> {
+    anchor_exchange::bootstrap(&stream, mode)?;
     let Received {
         binary,
         config,

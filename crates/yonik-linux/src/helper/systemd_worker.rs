@@ -45,6 +45,7 @@ pub enum WorkerSupervisorError {
     Stale,
     NotEmpty,
     RecoveryRequired,
+    UnitProofGap,
 }
 impl std::fmt::Display for WorkerSupervisorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,6 +58,7 @@ impl std::fmt::Display for WorkerSupervisorError {
             Self::Protocol => "Некорректный ответ worker",
             Self::Stale => "Экземпляр worker изменился",
             Self::NotEmpty => "Завершение worker не подтверждено",
+            Self::UnitProofGap => "Не подтверждён unit/kernel proof worker",
             Self::RecoveryRequired => "Требуется восстановление worker",
         })
     }
@@ -96,6 +98,92 @@ impl WorkerTicket {
             && self.invocation != [0; 16]
     }
 }
+/// Наблюдение canonical PID1 bootstrap, ещё не proof неизменности namespace.
+/// Конструктор закрыт; caller PID/UID и namespace numbers не принимаются.
+pub struct BootstrapUnitObservation {
+    pid: u32,
+    uid: u32,
+    gid: u32,
+    start: u64,
+    invocation: [u8; 16],
+    expires: Instant,
+    pidfd: std::os::fd::OwnedFd,
+}
+impl BootstrapUnitObservation {
+    /// Только transport observation: NS_GET_NSTYPE/kernel attestation обязательны
+    /// отдельно. Возвращаемое значение не может активировать attribution.
+    pub fn exchange(
+        self,
+        stream: &std::os::unix::net::UnixStream,
+        digest: [u8; 32],
+        session: [u8; 16],
+        generation: u64,
+    ) -> Result<crate::worker::anchor_exchange::NamespaceObservation> {
+        self.validate_identity()?;
+        let witness = crate::worker::anchor_exchange::Challenge::new(
+            digest,
+            session,
+            generation,
+            self.invocation,
+        )
+        .and_then(|challenge| challenge.exchange(stream, self.pid, self.uid))
+        .map_err(|_| WorkerSupervisorError::Protocol)?;
+        self.validate_identity()?;
+        Ok(witness)
+    }
+    fn validate_identity(&self) -> Result<()> {
+        if Instant::now() >= self.expires {
+            return Err(WorkerSupervisorError::UnitProofGap);
+        }
+        use std::os::fd::AsRawFd;
+        let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))
+            .map_err(unavailable)?;
+        if info.lines().find_map(|line| {
+            line.strip_prefix("Pid:")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+        }) != Some(self.pid)
+            || bootstrap_start(self.pid)? != self.start
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        let status =
+            std::fs::read_to_string(format!("/proc/{}/status", self.pid)).map_err(unavailable)?;
+        let uids = status
+            .lines()
+            .find_map(|line| line.strip_prefix("Uid:"))
+            .ok_or(WorkerSupervisorError::Untrusted)?;
+        let uids = uids
+            .split_whitespace()
+            .map(str::parse::<u32>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        let gids = status
+            .lines()
+            .find_map(|line| line.strip_prefix("Gid:"))
+            .ok_or(WorkerSupervisorError::Untrusted)?;
+        let gids = gids
+            .split_whitespace()
+            .map(str::parse::<u32>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        if uids != [self.uid; 4]
+            || gids != [self.gid; 4]
+            || std::fs::read_to_string(format!("/proc/{}/cgroup", self.pid)).map_err(unavailable)?
+                != format!("0::{}\n", WorkerMode::Run.cgroup())
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        Ok(())
+    }
+}
+fn bootstrap_start(pid: u32) -> Result<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(unavailable)?;
+    stat.rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(19))
+        .and_then(|v| v.parse().ok())
+        .ok_or(WorkerSupervisorError::Untrusted)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkerLiveness {
     Running,
@@ -215,6 +303,124 @@ impl SystemWorkerSupervisor {
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
             supervisor.clean = supervisor.all_empty().await?;
             Ok(supervisor)
+        })
+        .await
+        .map_err(|_| WorkerSupervisorError::Timeout)?
+    }
+    /// Только свежая socket-activated Run invocation до передачи payload.
+    /// Эта проверка не mint-ит OpaqueVerifiedWorkerUnit без kernel proof.
+    pub async fn inspect_anchor_bootstrap(&self) -> Result<BootstrapUnitObservation> {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            if self.pending != Some(WorkerMode::Run)
+                || self.current.is_some()
+                || self.transfer.is_some()
+            {
+                return Err(WorkerSupervisorError::UnitProofGap);
+            }
+            let proxy = zbus::fdo::DBusProxy::new(&self.connection)
+                .await
+                .map_err(unavailable)?;
+            let owner = proxy
+                .get_name_owner(zbus::names::BusName::try_from(DESTINATION).map_err(unavailable)?)
+                .await
+                .map_err(unavailable)?;
+            let unique =
+                zbus::names::BusName::try_from(self.owner.as_str()).map_err(unavailable)?;
+            if owner.as_str() != self.owner
+                || proxy
+                    .get_connection_unix_user(unique.clone())
+                    .await
+                    .map_err(unavailable)?
+                    != 0
+                || proxy
+                    .get_connection_unix_process_id(unique)
+                    .await
+                    .map_err(unavailable)?
+                    != 1
+            {
+                return Err(WorkerSupervisorError::Untrusted);
+            }
+            verify_installed()?;
+            self.validate_contract().await?;
+            let state = self.state(WorkerMode::Run).await?;
+            if state.pid == 0 || state.active != "active" {
+                return Err(WorkerSupervisorError::UnitProofGap);
+            }
+            let invocation: [u8; 16] = state
+                .invocation
+                .try_into()
+                .map_err(|_| WorkerSupervisorError::UnitProofGap)?;
+            if invocation == [0; 16] {
+                return Err(WorkerSupervisorError::UnitProofGap);
+            }
+            // Защищает loader/ранний bootstrap до установки nondumpable.
+            if !matches!(
+                std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
+                    .map_err(unavailable)?
+                    .trim(),
+                "1" | "2" | "3"
+            ) {
+                return Err(WorkerSupervisorError::UnitProofGap);
+            }
+            let etc = child(&root()?, "etc")?;
+            let passwd =
+                File::from(openat(&etc, "passwd", FILE_FLAGS, Mode::empty()).map_err(unavailable)?);
+            trusted(&passwd, false)?;
+            let passwd = read_bounded(passwd)?;
+            let mut entries = passwd
+                .lines()
+                .filter(|line| line.starts_with("yonik-worker:"));
+            let entry = entries.next().ok_or(WorkerSupervisorError::Untrusted)?;
+            if entries.next().is_some() {
+                return Err(WorkerSupervisorError::Untrusted);
+            }
+            let uid = entry
+                .split(':')
+                .nth(2)
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|v| *v != 0)
+                .ok_or(WorkerSupervisorError::Untrusted)?;
+            let gid = entry
+                .split(':')
+                .nth(3)
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|v| *v != 0)
+                .ok_or(WorkerSupervisorError::Untrusted)?;
+            let group =
+                File::from(openat(&etc, "group", FILE_FLAGS, Mode::empty()).map_err(unavailable)?);
+            trusted(&group, false)?;
+            let groups = read_bounded(group)?;
+            let mut groups = groups
+                .lines()
+                .filter(|line| line.starts_with("yonik-worker:"));
+            if groups
+                .next()
+                .and_then(|line| line.split(':').nth(2))
+                .and_then(|v| v.parse::<u32>().ok())
+                != Some(gid)
+                || groups.next().is_some()
+            {
+                return Err(WorkerSupervisorError::Untrusted);
+            }
+            let pid =
+                rustix::process::Pid::from_raw(i32::try_from(state.pid).map_err(unavailable)?)
+                    .ok_or(WorkerSupervisorError::Untrusted)?;
+            let observation = BootstrapUnitObservation {
+                pid: state.pid,
+                uid,
+                gid,
+                start: bootstrap_start(state.pid)?,
+                invocation,
+                expires: Instant::now() + Duration::from_secs(1),
+                pidfd: rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::NONBLOCK)
+                    .map_err(unavailable)?,
+            };
+            observation.validate_identity()?;
+            let after = self.state(WorkerMode::Run).await?;
+            if after.pid != observation.pid || after.invocation != observation.invocation {
+                return Err(WorkerSupervisorError::Stale);
+            }
+            Ok(observation)
         })
         .await
         .map_err(|_| WorkerSupervisorError::Timeout)?

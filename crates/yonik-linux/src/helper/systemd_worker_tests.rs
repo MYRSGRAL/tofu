@@ -719,3 +719,86 @@ fn namespace_filter_requires_typed_full_ban_and_native_abi() {
         }
     }
 }
+
+#[tokio::test]
+async fn bootstrap_observation_requires_fresh_untransferred_run() {
+    let mut fixture = Fixture::new().await;
+    fixture.supervisor.pending = None;
+    assert!(matches!(
+        fixture.supervisor.inspect_anchor_bootstrap().await,
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
+    fixture.supervisor.pending = Some(WorkerMode::Check);
+    assert!(matches!(
+        fixture.supervisor.inspect_anchor_bootstrap().await,
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
+    assert!(fixture.state.lock().unwrap().jobs.is_empty());
+}
+
+#[tokio::test]
+async fn actual_controlled_bootstrap_transport_without_ptrace() -> Result<()> {
+    if std::env::var_os("YONIK_ANCHOR_FIXED_UNIT_VM").is_none() {
+        return Ok(());
+    }
+    assert_eq!(
+        std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
+            .map_err(unavailable)?
+            .trim(),
+        "QEMU"
+    );
+    let marker =
+        std::fs::symlink_metadata("/etc/yonik-production-helper-vm").map_err(unavailable)?;
+    assert!(marker.is_file() && marker.uid() == 0 && marker.mode() & 0o022 == 0);
+    assert_eq!(
+        std::fs::read_to_string("/etc/yonik-production-helper-vm").map_err(unavailable)?,
+        "yonik-production-helper-disposable-v1\n"
+    );
+    let status = std::fs::read_to_string("/proc/self/status").map_err(unavailable)?;
+    assert!(status.lines().any(|line| line == "NoNewPrivs:\t1"));
+    for field in ["CapEff:", "CapPrm:", "CapBnd:"] {
+        let caps = status
+            .lines()
+            .find_map(|line| line.strip_prefix(field))
+            .and_then(|v| u64::from_str_radix(v.trim(), 16).ok());
+        assert_eq!(caps, Some(1 << 12), "{field}");
+    }
+    assert_eq!(rustix::process::getuid().as_raw(), 0);
+    let mut supervisor = SystemWorkerSupervisor::system().await?;
+    let (_sender, mut cancel) = Cancellation::new();
+    let deadline = Instant::now() + DEADLINE;
+    supervisor
+        .begin(WorkerMode::Run, &mut cancel, deadline)
+        .await?;
+    let result = async {
+        let stream = tokio::net::UnixStream::connect(WorkerMode::Run.channel())
+            .await
+            .map_err(unavailable)?;
+        let ready = Instant::now() + Duration::from_secs(1);
+        loop {
+            if supervisor.state(WorkerMode::Run).await?.active == "active" {
+                break;
+            }
+            if Instant::now() >= ready {
+                return Err(WorkerSupervisorError::Timeout);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let bootstrap = supervisor.inspect_anchor_bootstrap().await?;
+        let stream = stream.into_std().map_err(unavailable)?;
+        stream.set_nonblocking(false).map_err(unavailable)?;
+        let witness = bootstrap.exchange(&stream, [1; 32], [2; 16], 7)?;
+        assert_eq!(witness.retained_namespace_count(), 2);
+        // Это observation, не production anchor: payload/assets не передаются.
+        witness.revoke();
+        assert_eq!(witness.retained_namespace_count(), 0);
+        drop(stream);
+        Ok(())
+    }
+    .await;
+    let cleanup = supervisor
+        .cleanup(&mut cancel, Instant::now() + DEADLINE)
+        .await;
+    result?;
+    cleanup
+}

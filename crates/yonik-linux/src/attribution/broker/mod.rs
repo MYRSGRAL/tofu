@@ -214,9 +214,32 @@ fn receive_frame(
     Ok((bytes, credentials.ok_or(Unavailable::Authority)?))
 }
 
+/// Lookup использует только scope broker; worker mount namespace не является
+/// свидетельством покрытия таблиц процессов и FD владельцев приложения.
+pub struct BrokerLookupView {
+    pid: u32,
+    namespaces: [(u64, u64); 3],
+}
+impl BrokerLookupView {
+    pub fn capture() -> Result<Self, Unavailable> {
+        let pid = std::process::id();
+        Ok(Self {
+            pid,
+            namespaces: namespaces(pid)?,
+        })
+    }
+    fn validate(&self) -> Result<(), Unavailable> {
+        if self.pid != std::process::id() || namespaces(self.pid)? != self.namespaces {
+            return Err(Unavailable::Coverage);
+        }
+        Ok(())
+    }
+}
+
 /// Не Deserialize: worker PID и UID никогда не берутся из запроса.
 pub struct TrustedContext {
     worker: Process,
+    lookup_view: BrokerLookupView,
     target_uid: u32,
     epoch: u64,
     nonce: [u8; 32],
@@ -244,6 +267,7 @@ impl TrustedContext {
                     e
                 }
             })?,
+            lookup_view: BrokerLookupView::capture()?,
             target_uid,
             epoch,
             nonce,
@@ -297,6 +321,11 @@ impl Broker {
         rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
             .map_err(|_| Unavailable::Authority)?;
         context.worker.validate()?;
+        context.lookup_view.validate()?;
+        // Legacy direct-proc admission сохраняет прежний контракт общего scope.
+        if context.worker.namespaces != context.lookup_view.namespaces {
+            return Err(Unavailable::Coverage);
+        }
         Ok(Self {
             context,
             cache: VecDeque::new(),
@@ -479,3 +508,15 @@ mod receiver_tests;
 // Test-only pending validator до согласования trusted unit proof и custody с Root/FDwriter109.
 #[cfg(test)]
 mod worker_anchor;
+
+#[cfg(test)]
+mod lookup_view_tests {
+    use super::*;
+    #[test]
+    fn broker_view_is_bound_to_its_own_process_scope() {
+        let mut view = BrokerLookupView::capture().unwrap();
+        assert_eq!(view.validate(), Ok(()));
+        view.namespaces[2].1 ^= 1;
+        assert_eq!(view.validate(), Err(Unavailable::Coverage));
+    }
+}

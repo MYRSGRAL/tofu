@@ -195,9 +195,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
         return Err(Unavailable::Cancelled);
     }
     context.worker.validate()?;
-    if namespaces(std::process::id())? != context.worker.namespaces {
-        return Err(Unavailable::Coverage);
-    }
+    context.lookup_view.validate()?;
     if ![2, 10].contains(&flow.family) || ![6, 17].contains(&flow.protocol) {
         return Err(Unavailable::Malformed);
     }
@@ -270,7 +268,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
                 .map_err(|_| Unavailable::Coverage)?
                 .uid()
                 != context.target_uid
-                || namespaces(tid)? != context.worker.namespaces
+                || namespaces(tid)? != context.lookup_view.namespaces
             {
                 return Err(Unavailable::Coverage);
             }
@@ -304,7 +302,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
             }
             if task.metadata().map_err(|_| Unavailable::Coverage)?.uid() != context.target_uid
                 || super::start(tid)? != task_start
-                || namespaces(tid)? != context.worker.namespaces
+                || namespaces(tid)? != context.lookup_view.namespaces
             {
                 return Err(Unavailable::Coverage);
             }
@@ -387,11 +385,9 @@ pub(super) fn revalidate(
         return Err(Unavailable::Timeout);
     }
     context.worker.validate()?;
-    if namespaces(std::process::id())? != context.worker.namespaces {
-        return Err(Unavailable::Coverage);
-    }
+    context.lookup_view.validate()?;
     let process = Process::capture(s.pid, context.target_uid)?;
-    if process.start != s.start_time || process.namespaces != context.worker.namespaces {
+    if process.start != s.start_time || process.namespaces != context.lookup_view.namespaces {
         return Err(Unavailable::Authority);
     }
     let exe = fs::metadata(format!("/proc/{}/exe", s.pid)).map_err(|_| Unavailable::Coverage)?;
@@ -399,7 +395,7 @@ pub(super) fn revalidate(
         return Err(Unavailable::Authority);
     }
     if super::start(s.task_id)? != s.task_start
-        || namespaces(s.task_id)? != context.worker.namespaces
+        || namespaces(s.task_id)? != context.lookup_view.namespaces
     {
         return Err(Unavailable::Authority);
     }
