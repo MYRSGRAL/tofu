@@ -15,9 +15,9 @@ ColumnLayout {
     Button {
         objectName: "copyDiagnosticsButton"
         text: tr("Копировать диагностику", "Copy diagnostics")
-        onClicked: result.text = root.backend.copy_diagnostics()
+        onClicked: result.text = root.backend.copy_diagnostics_v2()
             ? (tr("Скопировано", "Copied"))
-            : (tr("Экспорт недоступен: неизвестная ошибка.", "Export unavailable: unknown error."))
+            : (tr("Экспорт недоступен: нет проверенных метаданных этой ошибки.", "Export unavailable: verified metadata for this error are missing."))
     }
     Label { id: result; objectName: "diagnosticsExportResult"; Layout.fillWidth: true; wrapMode: Text.Wrap }
 }

@@ -1,7 +1,77 @@
 //! Все ожидания repository gates находятся в job, вне actor dispatch.
 use super::*;
 
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Failure {
+    Copy(yonik_linux::MaintenanceError),
+    Reopen(yonik_linux::RepositoryError),
+    Access(yonik_linux::RepositoryError),
+}
+impl Failure {
+    pub fn context(self) -> Cause {
+        match self {
+            Self::Copy(yonik_linux::MaintenanceError::Cancelled) => Cause::MaintenanceCancelled,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::InvalidInput,
+            )) => Cause::MaintenanceCopyInvalidInput,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::UnsafePath,
+            )) => Cause::MaintenanceCopyUnsafePath,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::UnsupportedVersion,
+            )) => Cause::MaintenanceCopyUnsupportedVersion,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::Corrupt,
+            )) => Cause::MaintenanceCopyCorrupt,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::Storage,
+            )) => Cause::MaintenanceCopyStorage,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::Conflict,
+            )) => Cause::MaintenanceCopyConflict,
+            Self::Copy(yonik_linux::MaintenanceError::Repository(
+                yonik_linux::RepositoryError::NotFound,
+            )) => Cause::MaintenanceCopyNotFound,
+            Self::Reopen(yonik_linux::RepositoryError::InvalidInput) => {
+                Cause::MaintenanceReopenInvalidInput
+            }
+            Self::Reopen(yonik_linux::RepositoryError::UnsafePath) => {
+                Cause::MaintenanceReopenUnsafePath
+            }
+            Self::Reopen(yonik_linux::RepositoryError::UnsupportedVersion) => {
+                Cause::MaintenanceReopenUnsupportedVersion
+            }
+            Self::Reopen(yonik_linux::RepositoryError::Corrupt) => Cause::MaintenanceReopenCorrupt,
+            Self::Reopen(yonik_linux::RepositoryError::Storage) => Cause::MaintenanceReopenStorage,
+            Self::Reopen(yonik_linux::RepositoryError::Conflict) => {
+                Cause::MaintenanceReopenConflict
+            }
+            Self::Reopen(yonik_linux::RepositoryError::NotFound) => {
+                Cause::MaintenanceReopenNotFound
+            }
+            Self::Access(yonik_linux::RepositoryError::InvalidInput) => {
+                Cause::MaintenanceAccessInvalidInput
+            }
+            Self::Access(yonik_linux::RepositoryError::UnsafePath) => {
+                Cause::MaintenanceAccessUnsafePath
+            }
+            Self::Access(yonik_linux::RepositoryError::UnsupportedVersion) => {
+                Cause::MaintenanceAccessUnsupportedVersion
+            }
+            Self::Access(yonik_linux::RepositoryError::Corrupt) => Cause::MaintenanceAccessCorrupt,
+            Self::Access(yonik_linux::RepositoryError::Storage) => Cause::MaintenanceAccessStorage,
+            Self::Access(yonik_linux::RepositoryError::Conflict) => {
+                Cause::MaintenanceAccessConflict
+            }
+            Self::Access(yonik_linux::RepositoryError::NotFound) => {
+                Cause::MaintenanceAccessNotFound
+            }
+        }
+    }
+}
+
 pub(super) struct Outcome {
+    pub cause: Option<Failure>,
     pub drained: bool,
     pub handles: Option<(
         SubscriptionService,
@@ -40,7 +110,7 @@ pub(super) async fn run(
                 move |access, _, _| async move {
                     entered.notify_one();
                     release.notified().await;
-                    (access, Err("cancelled"))
+                    (access, Err("cancelled"), None)
                 },
             )
             .await;
@@ -55,21 +125,22 @@ pub(super) async fn run(
         cancel,
         now,
         |access, request, cancel| async move {
-            let result = access
+            let typed_result = access
                 .copy_closed(request.source, request.destination, cancel)
-                .await
-                .map_err(|error| match error {
-                    yonik_linux::MaintenanceError::Cancelled => "cancelled",
-                    yonik_linux::MaintenanceError::Repository(
-                        yonik_linux::RepositoryError::InvalidInput
-                        | yonik_linux::RepositoryError::UnsafePath,
-                    ) => "invalid_input",
-                    yonik_linux::MaintenanceError::Repository(
-                        yonik_linux::RepositoryError::Conflict,
-                    ) => "busy",
-                    _ => "storage",
-                });
-            (access, result)
+                .await;
+            let cause = typed_result.as_ref().err().copied().map(Failure::Copy);
+            let result = typed_result.map_err(|error| match error {
+                yonik_linux::MaintenanceError::Cancelled => "cancelled",
+                yonik_linux::MaintenanceError::Repository(
+                    yonik_linux::RepositoryError::InvalidInput
+                    | yonik_linux::RepositoryError::UnsafePath,
+                ) => "invalid_input",
+                yonik_linux::MaintenanceError::Repository(
+                    yonik_linux::RepositoryError::Conflict,
+                ) => "busy",
+                _ => "storage",
+            });
+            (access, result, cause)
         },
     )
     .await
@@ -96,6 +167,7 @@ where
             Output = (
                 yonik_linux::MaintenanceAccess,
                 std::result::Result<(), &'static str>,
+                Option<Failure>,
             ),
         >,
 {
@@ -111,21 +183,26 @@ where
     let access = repository.maintenance_access().await;
     let service_closed = service.close().await.is_ok();
     let repository_closed = repository.close().await.is_ok();
-    let Ok(access) = access else {
-        return Outcome {
-            drained: schedule_closed && service_closed && repository_closed,
-            handles: None,
-            result: Err("storage"),
-        };
+    let access = match access {
+        Ok(access) => access,
+        Err(error) => {
+            return Outcome {
+                cause: Some(Failure::Access(error)),
+                drained: schedule_closed && service_closed && repository_closed,
+                handles: None,
+                result: Err("storage"),
+            };
+        }
     };
     if !schedule_closed || !service_closed || !repository_closed {
         return Outcome {
+            cause: None,
             drained: false,
             handles: None,
             result: Err("cleanup_failed"),
         };
     }
-    let (access, result) = leaf(access, request, cancel).await;
+    let (access, result, cause) = leaf(access, request, cancel).await;
     match access.reopen().await {
         Ok(repository) => {
             let service = SubscriptionService::new(repository.clone());
@@ -135,6 +212,7 @@ where
                         .load(&service, now.saturating_add(started.elapsed()))
                         .await;
                     Outcome {
+                        cause: if loaded.is_ok() { cause } else { None },
                         drained: true,
                         handles: Some((service, repository, schedule)),
                         result: if loaded.is_ok() {
@@ -148,6 +226,7 @@ where
                     let service_closed = service.close().await.is_ok();
                     let repository_closed = repository.close().await.is_ok();
                     Outcome {
+                        cause: None,
                         drained: service_closed && repository_closed,
                         handles: None,
                         result: Err("storage"),
@@ -155,7 +234,8 @@ where
                 }
             }
         }
-        Err(_) => Outcome {
+        Err(error) => Outcome {
+            cause: Some(Failure::Reopen(error)),
             drained: true,
             handles: None,
             result: Err("storage"),
@@ -433,7 +513,7 @@ mod tests {
                 probe.close().await.expect("закрытие probe");
                 entered.send(()).expect("готовность");
                 released.await.expect("leaf release");
-                (access, Err("cancelled"))
+                (access, Err("cancelled"), None)
             },
         ));
         tokio::time::timeout(Duration::from_secs(5), ready)
