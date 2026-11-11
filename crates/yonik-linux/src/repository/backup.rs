@@ -285,22 +285,6 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     )
     .map_err(|_| RepositoryError::Conflict)?;
-    recover_staging(parent)?;
-    if destination
-        .try_exists()
-        .map_err(|_| RepositoryError::UnsafePath)?
-    {
-        return Err(RepositoryError::Conflict);
-    }
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let mut name = destination.as_os_str().to_os_string();
-        name.push(suffix);
-        match fs::symlink_metadata(PathBuf::from(name)) {
-            Ok(_) => return Err(RepositoryError::Conflict),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(RepositoryError::UnsafePath),
-        }
-    }
     let meta = fs::symlink_metadata(source).map_err(|_| RepositoryError::UnsafePath)?;
     if meta.len() == 0 || meta.len() > BACKUP_LIMIT {
         return Err(RepositoryError::InvalidInput);
@@ -349,15 +333,27 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         return Err(RepositoryError::InvalidInput);
     }
     validate(&connection, key)?;
-    let mut nonce = [0u8; 16];
-    getrandom::getrandom(&mut nonce).map_err(|_| RepositoryError::Storage)?;
-    let stage = parent.join(format!(".yonik-backup-{:032x}", u128::from_le_bytes(nonce)));
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&stage)
-        .map_err(|_| RepositoryError::Storage)?;
+    reject_private_namespace(parent, key)?;
+    reject_private_namespace(source.parent().ok_or(RepositoryError::UnsafePath)?, key)?;
+    recover_staging(parent, key)?;
+    if destination
+        .try_exists()
+        .map_err(|_| RepositoryError::UnsafePath)?
+    {
+        return Err(RepositoryError::Conflict);
+    }
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut name = destination.as_os_str().to_os_string();
+        name.push(suffix);
+        match fs::symlink_metadata(PathBuf::from(name)) {
+            Ok(_) => return Err(RepositoryError::Conflict),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(RepositoryError::UnsafePath),
+        }
+    }
+
+    let namespace = create_namespace(parent, key)?;
+    let stage = namespace.join("candidate");
     let result = (|| {
         checkpoint("before-vacuum")?;
         // VACUUM INTO доступен без rusqlite backup feature; копирует ciphertext.
@@ -400,7 +396,7 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         checkpoint("after-publication")?;
         Ok(())
     })();
-    let cleanup = fs::remove_file(&stage).map_err(|_| RepositoryError::Storage);
+    let cleanup = remove_owned_namespace(parent, &namespace, key);
     result?;
     cleanup?;
     // Ошибка здесь означает неопределённую durability уже опубликованного файла.
@@ -409,27 +405,235 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
     checkpoint("after-directory-sync")
 }
 
-// Под flock каталога живой backup не может владеть staging. Удаляем только
-// зарезервированные имена и приватные regular files нашего UID; symlink не трогаем.
-fn recover_staging(parent: &Path) -> Result<()> {
-    for entry in fs::read_dir(parent).map_err(|_| RepositoryError::Storage)? {
+const NAMESPACE_PREFIX: &str = ".yonik-maintenance-";
+const OWNER_FILE: &str = "owner.v1";
+
+fn identity(meta: &fs::Metadata) -> [u8; 16] {
+    let mut id = [0; 16];
+    id[..8].copy_from_slice(&meta.dev().to_le_bytes());
+    id[8..].copy_from_slice(&meta.ino().to_le_bytes());
+    id
+}
+
+fn ownership_mac(
+    parent: &Path,
+    namespace: &Path,
+    candidate: &[u8; 16],
+    key: &[u8; 32],
+) -> Result<hmac::Hmac<sha2::Sha256>> {
+    use hmac::Mac;
+    use std::os::unix::ffi::OsStrExt;
+    let mut mac = <hmac::Hmac<sha2::Sha256> as Mac>::new_from_slice(key)
+        .map_err(|_| RepositoryError::Storage)?;
+    mac.update(b"YonIk maintenance namespace ownership v1\0");
+    mac.update(&identity(
+        &fs::symlink_metadata(parent).map_err(|_| RepositoryError::Storage)?,
+    ));
+    mac.update(&identity(
+        &fs::symlink_metadata(namespace).map_err(|_| RepositoryError::Storage)?,
+    ));
+    mac.update(
+        namespace
+            .file_name()
+            .ok_or(RepositoryError::UnsafePath)?
+            .as_bytes(),
+    );
+    mac.update(candidate);
+    Ok(mac)
+}
+
+fn private_file(path: &Path) -> Result<fs::File> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|_| RepositoryError::UnsafePath)?;
+    let file = fs::File::from(fd);
+    let meta = file.metadata().map_err(|_| RepositoryError::Storage)?;
+    if !meta.is_file()
+        || meta.uid() != rustix::process::getuid().as_raw()
+        || meta.mode() & 0o7777 != 0o600
+    {
+        return Err(RepositoryError::UnsafePath);
+    }
+    Ok(file)
+}
+
+// Отсутствующий marker — недоказанное владение, а не разрешение на удаление.
+fn owned_record(parent: &Path, namespace: &Path, key: &[u8; 32]) -> Result<Option<[u8; 16]>> {
+    use hmac::Mac;
+    use std::io::Read;
+    let meta = fs::symlink_metadata(namespace).map_err(|_| RepositoryError::Storage)?;
+    if !meta.is_dir()
+        || meta.uid() != rustix::process::getuid().as_raw()
+        || meta.mode() & 0o7777 != 0o700
+    {
+        return Err(RepositoryError::UnsafePath);
+    }
+    match fs::symlink_metadata(namespace.join(OWNER_FILE)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(RepositoryError::Storage),
+        Ok(_) => {}
+    }
+    let marker = private_file(&namespace.join(OWNER_FILE))?;
+    if marker
+        .metadata()
+        .map_err(|_| RepositoryError::Storage)?
+        .nlink()
+        != 1
+    {
+        return Err(RepositoryError::UnsafePath);
+    }
+    let mut bytes = Vec::with_capacity(49);
+    marker
+        .take(49)
+        .read_to_end(&mut bytes)
+        .map_err(|_| RepositoryError::Storage)?;
+    if bytes.len() != 48 {
+        return Err(RepositoryError::UnsafePath);
+    }
+    let mut candidate = [0; 16];
+    candidate.copy_from_slice(&bytes[..16]);
+    ownership_mac(parent, namespace, &candidate, key)?
+        .verify_slice(&bytes[16..])
+        .map_err(|_| RepositoryError::UnsafePath)?;
+    Ok(Some(candidate))
+}
+
+fn reject_private_namespace(path: &Path, key: &[u8; 32]) -> Result<()> {
+    if path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with(NAMESPACE_PREFIX))
+    {
+        if let Some(parent) = path.parent() {
+            if owned_record(parent, path, key)?.is_some() {
+                return Err(RepositoryError::UnsafePath);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn create_namespace(parent: &Path, key: &[u8; 32]) -> Result<PathBuf> {
+    use hmac::Mac;
+    use std::io::Write;
+    let mut nonce = [0; 16];
+    getrandom::getrandom(&mut nonce).map_err(|_| RepositoryError::Storage)?;
+    let namespace = parent.join(format!(
+        "{NAMESPACE_PREFIX}{:032x}",
+        u128::from_le_bytes(nonce)
+    ));
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&namespace)
+        .map_err(|_| RepositoryError::Storage)?;
+    checkpoint("namespace-created")?;
+    let stage = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(namespace.join("candidate"))
+        .map_err(|_| RepositoryError::Storage)?;
+    checkpoint("candidate-created")?;
+    let id = identity(&stage.metadata().map_err(|_| RepositoryError::Storage)?);
+    let tag = ownership_mac(parent, &namespace, &id, key)?
+        .finalize()
+        .into_bytes();
+    let mut marker = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(namespace.join(OWNER_FILE))
+        .map_err(|_| RepositoryError::Storage)?;
+    marker
+        .write_all(&id)
+        .map_err(|_| RepositoryError::Storage)?;
+    checkpoint("marker-prefix")?;
+    marker
+        .write_all(&tag)
+        .and_then(|()| marker.sync_all())
+        .map_err(|_| RepositoryError::Storage)?;
+    fs::File::open(&namespace)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| RepositoryError::Storage)?;
+    fs::File::open(parent)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| RepositoryError::Storage)?;
+    checkpoint("ownership-synced")?;
+    Ok(namespace)
+}
+
+// Только аутентифицированный namespace и исходный inode candidate. Имена
+// публичных файлов вообще не являются доказательством владения.
+fn remove_owned_namespace(parent: &Path, namespace: &Path, key: &[u8; 32]) -> Result<()> {
+    let Some(candidate) = owned_record(parent, namespace, key)? else {
+        return Ok(());
+    };
+    // Сначала проверяем весь набор; неизвестные данные сохраняются для ручного разбора.
+    for entry in fs::read_dir(namespace).map_err(|_| RepositoryError::Storage)? {
         let entry = entry.map_err(|_| RepositoryError::Storage)?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let Some(nonce) = name.strip_prefix(".yonik-backup-") else {
-            continue;
-        };
-        if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if entry.file_name() == OWNER_FILE {
             continue;
         }
-        let meta = fs::symlink_metadata(entry.path()).map_err(|_| RepositoryError::Storage)?;
-        if !meta.is_file()
-            || meta.uid() != rustix::process::getuid().as_raw()
-            || meta.mode() & 0o7777 != 0o600
+        let name = entry.file_name();
+        if ![
+            "candidate",
+            "candidate-journal",
+            "candidate-wal",
+            "candidate-shm",
+        ]
+        .iter()
+        .any(|n| name == *n)
         {
             return Err(RepositoryError::UnsafePath);
         }
-        fs::remove_file(entry.path()).map_err(|_| RepositoryError::Storage)?;
+        let file = private_file(&entry.path())?;
+        let meta = file.metadata().map_err(|_| RepositoryError::Storage)?;
+        if (name == "candidate" && identity(&meta) != candidate)
+            || meta.nlink() > if name == "candidate" { 2 } else { 1 }
+        {
+            return Err(RepositoryError::UnsafePath);
+        }
+    }
+    for name in [
+        "candidate",
+        "candidate-journal",
+        "candidate-wal",
+        "candidate-shm",
+    ] {
+        match fs::remove_file(namespace.join(name)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(RepositoryError::Storage),
+        }
+    }
+    checkpoint("cleanup-stage-unlinked")?;
+    fs::File::open(namespace)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| RepositoryError::Storage)?;
+    fs::remove_file(namespace.join(OWNER_FILE)).map_err(|_| RepositoryError::Storage)?;
+    checkpoint("cleanup-marker-unlinked")?;
+    fs::remove_dir(namespace).map_err(|_| RepositoryError::Storage)
+}
+
+fn recover_staging(parent: &Path, key: &[u8; 32]) -> Result<()> {
+    for entry in fs::read_dir(parent).map_err(|_| RepositoryError::Storage)? {
+        let entry = entry.map_err(|_| RepositoryError::Storage)?;
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(NAMESPACE_PREFIX)
+            && entry
+                .file_type()
+                .map_err(|_| RepositoryError::Storage)?
+                .is_dir()
+        {
+            remove_owned_namespace(parent, &entry.path(), key)?;
+        }
     }
     Ok(())
 }
