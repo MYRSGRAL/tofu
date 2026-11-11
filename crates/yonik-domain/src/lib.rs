@@ -19,3 +19,6 @@ mod dns_policy;
 pub use dns_policy::{DnsPolicy, NativeDnsMode};
 
 pub mod policy_diagnostics;
+
+mod resources;
+pub use resources::{ResourceConditions, ResourceRule};

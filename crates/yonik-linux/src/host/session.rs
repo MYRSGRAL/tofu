@@ -112,6 +112,8 @@ impl CheckedConfig {
 /// Один владелец сериализует start/check/stop. На Drop — аварийный kill_on_drop;
 /// подтверждение cleanup выдаётся только после явного stop().await.
 pub struct LocalSession {
+    #[cfg(feature = "test-support")]
+    cleanup_fault: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     event_log: Option<crate::event_log::EventLog>,
     session: Session,
     active: Option<Token>,
@@ -135,6 +137,8 @@ impl LocalSession {
             .map_err(|_| HostError::State)?;
         let id = NonZeroU64::new(id).ok_or(HostError::State)?;
         Ok(Self {
+            #[cfg(feature = "test-support")]
+            cleanup_fault: None,
             session: Session::new(id),
             event_log: None,
             active: None,
@@ -145,9 +149,18 @@ impl LocalSession {
             probe_access: ProbeAccess::default(),
         })
     }
+    /// Отрицательный стенд: удерживает реальные ресурсы до снятия fault.
+    #[cfg(feature = "test-support")]
+    pub fn with_cleanup_fault(
+        mut self,
+        fault: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.cleanup_fault = Some(fault);
+        self
+    }
     /// Явное подключение журнала; прежний конструктор сохраняет поведение.
     pub fn with_event_log(mut self, log: crate::event_log::EventLog) -> Self {
-        self.event_log = Some(log);
+        self.event_log = log.session_scope();
         self
     }
     fn log(&self, code: crate::event_log::EventCode) {
@@ -168,6 +181,7 @@ impl LocalSession {
     }
 
     fn accept(&mut self, event: Event) -> Result<(), HostError> {
+        let cleanup_failed = matches!(event, Event::CleanupFailed);
         let token = self.active.ok_or(HostError::State)?;
         match self
             .session
@@ -175,6 +189,9 @@ impl LocalSession {
             .map_err(|_| HostError::State)?
         {
             Outcome::Applied(next) => {
+                if cleanup_failed {
+                    self.log(crate::event_log::EventCode::CleanupFailed);
+                }
                 self.active = next;
                 Ok(())
             }
@@ -188,8 +205,12 @@ impl LocalSession {
         cancel: &mut Cancellation,
     ) -> Result<(), HostError> {
         cancel.check()?;
-        self.log(crate::event_log::EventCode::StartRequested);
         let token = self.session.begin().map_err(|_| HostError::State)?;
+        self.event_log = self
+            .event_log
+            .as_ref()
+            .map(|log| log.with_generation(token.generation()));
+        self.log(crate::event_log::EventCode::StartRequested);
         let plan = self
             .session
             .prepare(token, LOCAL_ENV, checked.digest)
@@ -300,6 +321,16 @@ impl LocalSession {
         self.release().await
     }
     async fn release(&mut self) -> Result<(), HostError> {
+        #[cfg(feature = "test-support")]
+        if self.child.is_some()
+            && self
+                .cleanup_fault
+                .as_ref()
+                .is_some_and(|fault| fault.load(Ordering::Acquire))
+        {
+            self.accept(Event::CleanupFailed)?;
+            return Err(HostError::Cleanup);
+        }
         if let Some(child) = self.child.as_mut() {
             if process::terminate_logged(child, self.event_log.as_ref())
                 .await

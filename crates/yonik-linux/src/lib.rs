@@ -82,4 +82,24 @@ pub mod presets;
 pub mod system_client;
 
 #[cfg(target_os = "linux")]
+pub mod attribution;
+#[cfg(target_os = "linux")]
 pub mod event_log;
+
+#[cfg(target_os = "linux")]
+pub mod rule_set_custody;
+
+#[cfg(target_os = "linux")]
+pub mod rule_set_store;
+
+#[cfg(target_os = "linux")]
+pub mod resource_catalog;
+
+#[cfg(target_os = "linux")]
+pub mod resource_fd_receiver;
+
+#[cfg(target_os = "linux")]
+pub mod bundle_identity;
+
+#[cfg(target_os = "linux")]
+pub mod bundle_request;
