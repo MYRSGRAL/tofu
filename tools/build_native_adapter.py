@@ -302,9 +302,16 @@ def build_locked(
         for name, expected in metadata["package_files_sha256"].items():
             if sha256(package / name) != expected:
                 raise BuildError(f"Codec hash mismatch: {name}")
+        for name, expected in metadata.get("callsite_files_sha256", {}).items():
+            if sha256(source / name) != expected:
+                raise BuildError(f"Callsite hash mismatch: {name}")
         runner.run(
             ["go", "test", "-p=1", "-mod=readonly", "./common/yonikbroker"], source
         )
+        if engine == "xray" and metadata.get("routing_entry_guard_connected"):
+            runner.run(
+                ["go", "test", "-p=1", "-mod=readonly", "./app/dispatcher"], source
+            )
         if modules != {name: sha256(source / name) for name in modules}:
             raise BuildError("Codec изменил go.mod/go.sum")
         codec_record = {

@@ -1091,3 +1091,660 @@ new file mode 100644
 +    }
 +  ]
 +}
+diff --git a/app/dispatcher/default.go b/app/dispatcher/default.go
+--- a/app/dispatcher/default.go
++++ b/app/dispatcher/default.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"context"
++	nativehooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -265,6 +266,9 @@
+ 
+ // Dispatch implements routing.Dispatcher.
+ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destination) (*transport.Link, error) {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		return nil, err
++	}
+ 	if !destination.IsValid() {
+ 		panic("Dispatcher: Invalid destination.")
+ 	}
+@@ -322,6 +326,9 @@
+ 
+ // DispatchLink implements routing.Dispatcher.
+ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.Destination, outbound *transport.Link) error {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		return err
++	}
+ 	if !destination.IsValid() {
+ 		return errors.New("Dispatcher: Invalid destination.")
+ 	}
+@@ -341,7 +348,7 @@
+ 	outbound = WrapLink(ctx, d.policy, d.stats, outbound)
+ 	sniffingRequest := content.SniffingRequest
+ 	if !sniffingRequest.Enabled {
+-		d.routedDispatch(ctx, outbound, destination)
++		return d.routedDispatch(ctx, outbound, destination)
+ 	} else {
+ 		cReader := &cachedReader{
+ 			reader: outbound.Reader.(buf.TimeoutReader),
+@@ -369,10 +376,8 @@
+ 				ob.Target = destination
+ 			}
+ 		}
+-		d.routedDispatch(ctx, outbound, destination)
+-	}
+-
+-	return nil
++		return d.routedDispatch(ctx, outbound, destination)
++	}
+ }
+ 
+ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, network net.Network) (SniffResult, error) {
+@@ -431,7 +436,12 @@
+ 	return contentResult, contentErr
+ }
+ 
+-func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination) {
++func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination) error {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		common.Close(link.Writer)
++		common.Interrupt(link.Reader)
++		return err
++	}
+ 	outbounds := session.OutboundsFromContext(ctx)
+ 	ob := outbounds[len(outbounds)-1]
+ 
+@@ -450,7 +460,7 @@
+ 			errors.LogError(ctx, "non existing tag for platform initialized detour: ", forcedOutboundTag)
+ 			common.Close(link.Writer)
+ 			common.Interrupt(link.Reader)
+-			return
++			return nativehooks.ErrDenied
+ 		}
+ 	} else if d.router != nil {
+ 		if route, err := d.router.PickRoute(routingLink); err == nil {
+@@ -467,7 +477,7 @@
+ 				errors.LogWarning(ctx, "non existing outTag: ", outTag)
+ 				common.Close(link.Writer)
+ 				common.Interrupt(link.Reader)
+-				return // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
++				return nativehooks.ErrDenied // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
+ 			}
+ 		} else {
+ 			if err != common.ErrNoClue {
+@@ -485,7 +495,7 @@
+ 		errors.LogInfo(ctx, "default outbound handler not exist")
+ 		common.Close(link.Writer)
+ 		common.Interrupt(link.Reader)
+-		return
++		return nativehooks.ErrDenied
+ 	}
+ 
+ 	ob.Tag = handler.Tag()
+@@ -505,4 +515,5 @@
+ 	}
+ 
+ 	handler.Dispatch(ctx, link)
+-}
++	return nil
++}
+diff --git a/common/yonikbroker/bootstrap_linux.go b/common/yonikbroker/bootstrap_linux.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/bootstrap_linux.go
+@@ -0,0 +1,164 @@
++package nativehooks
++
++import (
++	"fmt"
++	"os"
++	"strconv"
++	"strings"
++	"syscall"
++	"time"
++)
++
++// Bootstrap содержит только поля замороженного closed worker handoff.
++// Вызывающий protected worker обязан подтвердить происхождение record до exec.
++// Разбор произвольной строки окружения сам по себе authority не создаёт.
++type Bootstrap struct {
++	Binding         Binding
++	Session         [16]byte
++	Generation      uint64
++	Invocation      [16]byte
++	ServerPID       uint32
++	ServerStarttime uint64
++}
++
++func DecodeBootstrap(b []byte, fdCount int) (Bootstrap, error) {
++	var r Bootstrap
++	if len(b) != 192 || fdCount != 2 || string(b[:8]) != "YNKROLE1" || zero(b[8:40]) || zero(b[40:72]) || u64(b, 72) == 0 || zero(b[80:96]) || u64(b, 96) == 0 || zero(b[104:120]) || u32(b, 120) == 0 || u32(b, 124) != 0 || u64(b, 128) == 0 || !zero(b[136:144]) || u16(b, 144) != 2 || u16(b, 146) != 1 || u16(b, 148) != 2 || !zero(b[150:192]) {
++		return r, ErrMalformed
++	}
++	copy(r.Binding.Nonce[:], b[8:40])
++	copy(r.Binding.ConfigDigest[:], b[40:72])
++	r.Binding.Epoch = u64(b, 72)
++	copy(r.Session[:], b[80:96])
++	r.Generation = u64(b, 96)
++	copy(r.Invocation[:], b[104:120])
++	r.ServerPID = u32(b, 120)
++	r.ServerStarttime = u64(b, 128)
++	return r, nil
++}
++
++// CheckServer сверяет live pidfd и starttime. FD принадлежит custody вызывающего.
++// pidfd readable при exit, поэтому одного существующего /proc/PID недостаточно.
++func (b Bootstrap) CheckServer(pidfd *os.File) error {
++	if pidfd == nil {
++		return ErrDenied
++	}
++	fd := int(pidfd.Fd())
++	var set syscall.FdSet
++	if fd < 0 || fd >= len(set.Bits)*64 {
++		return ErrDenied
++	}
++	set.Bits[fd/64] |= 1 << uint(fd%64)
++	timeout := syscall.Timeval{}
++	n, err := syscall.Select(fd+1, &set, nil, nil, &timeout)
++	if err != nil || n != 0 {
++		return ErrDenied
++	}
++	info, err := os.ReadFile(fmt.Sprintf("/proc/self/fdinfo/%d", fd))
++	if err != nil {
++		return ErrDenied
++	}
++	found := false
++	for _, line := range strings.Split(string(info), "\n") {
++		fields := strings.Fields(line)
++		if len(fields) == 2 && fields[0] == "Pid:" {
++			pid, e := strconv.ParseUint(fields[1], 10, 32)
++			if e != nil || pid != uint64(b.ServerPID) {
++				return ErrDenied
++			}
++			found = true
++		}
++	}
++	if !found {
++		return ErrDenied
++	}
++	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", b.ServerPID))
++	if err != nil {
++		return ErrDenied
++	}
++	end := strings.LastIndexByte(string(stat), ')')
++	if end < 0 {
++		return ErrDenied
++	}
++	fields := strings.Fields(string(stat[end+1:]))
++	if len(fields) <= 19 {
++		return ErrDenied
++	}
++	start, err := strconv.ParseUint(fields[19], 10, 64)
++	if err != nil || start != b.ServerStarttime {
++		return ErrDenied
++	}
++	return nil
++}
++
++// ReceiveAuthenticated принимает владение всеми полученными FD даже при отказе.
++// Возвращённые FD переходят вызывающему только после всех проверок.
++func (b Bootstrap) ReceiveAuthenticated(channel, pidfd *os.File) (Frame, []*os.File, error) {
++	fail := func(files []*os.File) (Frame, []*os.File, error) {
++		for _, f := range files {
++			_ = f.Close()
++		}
++		return Frame{}, nil, ErrDenied
++	}
++	if channel == nil || b.CheckServer(pidfd) != nil {
++		return fail(nil)
++	}
++	kind, err := syscall.GetsockoptInt(int(channel.Fd()), syscall.SOL_SOCKET, syscall.SO_TYPE)
++	if err != nil || kind != syscall.SOCK_SEQPACKET {
++		return fail(nil)
++	}
++	pass, err := syscall.GetsockoptInt(int(channel.Fd()), syscall.SOL_SOCKET, syscall.SO_PASSCRED)
++	if err != nil || pass != 1 {
++		return fail(nil)
++	}
++	data := make([]byte, MaxFrameBytes+1)
++	control := make([]byte, syscall.CmsgSpace(4*16)+syscall.CmsgSpace(syscall.SizeofUcred))
++	fd := int(channel.Fd())
++	var ready syscall.FdSet
++	if fd < 0 || fd >= len(ready.Bits)*64 {
++		return fail(nil)
++	}
++	ready.Bits[fd/64] |= 1 << uint(fd%64)
++	timeout := syscall.NsecToTimeval(int64(20 * time.Millisecond))
++	count, waitErr := syscall.Select(fd+1, &ready, nil, nil, &timeout)
++	if waitErr != nil || count != 1 {
++		return fail(nil)
++	}
++	n, oobn, flags, _, err := syscall.Recvmsg(fd, data, control, syscall.MSG_CMSG_CLOEXEC|syscall.MSG_DONTWAIT)
++	var files []*os.File
++	messages, parseErr := syscall.ParseSocketControlMessage(control[:oobn])
++	credentials := 0
++	valid := true
++	for _, message := range messages {
++		switch {
++		case message.Header.Level == syscall.SOL_SOCKET && message.Header.Type == syscall.SCM_RIGHTS:
++			rights, e := syscall.ParseUnixRights(&message)
++			if e != nil {
++				valid = false
++				continue
++			}
++			for _, fd := range rights {
++				files = append(files, os.NewFile(uintptr(fd), "native-broker-received"))
++			}
++		case message.Header.Level == syscall.SOL_SOCKET && message.Header.Type == syscall.SCM_CREDENTIALS:
++			credentials++
++			cred, e := syscall.ParseUnixCredentials(&message)
++			if e != nil || uint32(cred.Pid) != b.ServerPID || cred.Uid != 0 {
++				valid = false
++			}
++		default:
++			valid = false
++		}
++	}
++	if err != nil || parseErr != nil || !valid || credentials != 1 || flags&(syscall.MSG_TRUNC|syscall.MSG_CTRUNC) != 0 || n == 0 || b.CheckServer(pidfd) != nil {
++		return fail(files)
++	}
++	frame, err := DecodeFrame(data[:n], len(files))
++	if err != nil || frame.CheckBinding(b.Binding, frame.Header.RequestID) != nil {
++		return fail(files)
++	}
++	if frame.Header.Kind == HelloKind && (frame.Hello.Session != b.Session || frame.Hello.Generation != b.Generation || frame.Hello.Invocation != b.Invocation) {
++		return fail(files)
++	}
++	return frame, files, nil
++}
+diff --git a/common/yonikbroker/bootstrap_linux_test.go b/common/yonikbroker/bootstrap_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/bootstrap_linux_test.go
+@@ -0,0 +1,218 @@
++package nativehooks
++
++import (
++	"os"
++	"runtime"
++	"strconv"
++	"strings"
++	"syscall"
++	"testing"
++)
++
++func roleRecord() []byte {
++	b := make([]byte, 192)
++	copy(b, "YNKROLE1")
++	b[8] = 1
++	b[40] = 2
++	be.PutUint64(b[72:], 3)
++	b[80] = 4
++	be.PutUint64(b[96:], 5)
++	b[104] = 6
++	be.PutUint32(b[120:], 7)
++	be.PutUint64(b[128:], 8)
++	be.PutUint16(b[144:], 2)
++	be.PutUint16(b[146:], 1)
++	be.PutUint16(b[148:], 2)
++	return b
++}
++func TestClosedBootstrap(t *testing.T) {
++	b := roleRecord()
++	r, e := DecodeBootstrap(b, 2)
++	if e != nil || r.ServerPID != 7 || r.Binding.Epoch != 3 {
++		t.Fatal(r, e)
++	}
++	for _, n := range []int{0, 1, 3} {
++		if _, e := DecodeBootstrap(b, n); e == nil {
++			t.Fatalf("принято %d FD", n)
++		}
++	}
++	for _, n := range []int{0, 136, 137, 143, 144, 146, 148, 150, 191} {
++		bad := append([]byte(nil), b...)
++		bad[n] ^= 255
++		if _, e := DecodeBootstrap(bad, 2); e == nil {
++			t.Fatalf("принято изменение byte %d", n)
++		}
++	}
++	for _, n := range []int{0, 136, 191, 193} {
++		bad := make([]byte, n)
++		copy(bad, b)
++		if _, e := DecodeBootstrap(bad, 2); e == nil {
++			t.Fatalf("принята длина %d", n)
++		}
++	}
++	if r.CheckServer(nil) == nil {
++		t.Fatal("nil pidfd принят")
++	}
++}
++
++func TestBootstrapRejectsMissingIdentity(t *testing.T) {
++	for _, span := range [][2]int{{8, 40}, {40, 72}, {72, 80}, {80, 96}, {96, 104}, {104, 120}, {120, 124}, {128, 136}} {
++		b := roleRecord()
++		for i := span[0]; i < span[1]; i++ {
++			b[i] = 0
++		}
++		if _, err := DecodeBootstrap(b, 2); err == nil {
++			t.Fatalf("принято пустое поле %v", span)
++		}
++	}
++	b := roleRecord()
++	be.PutUint32(b[124:], 1000)
++	if _, err := DecodeBootstrap(b, 2); err == nil {
++		t.Fatal("принят server UID != 0")
++	}
++}
++
++// Linux pidfd_open имеет номер 434 на поддерживаемых здесь amd64/arm64.
++func liveBootstrap(t *testing.T) (Bootstrap, *os.File) {
++	t.Helper()
++	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
++		t.Skip("pidfd fixture поддерживает amd64/arm64")
++	}
++	fd, _, errno := syscall.Syscall(434, uintptr(os.Getpid()), 0, 0)
++	if errno != 0 {
++		t.Skipf("pidfd_open: %v", errno)
++	}
++	f := os.NewFile(fd, "test-pidfd")
++	t.Cleanup(func() { _ = f.Close() })
++	stat, err := os.ReadFile("/proc/self/stat")
++	if err != nil {
++		t.Fatal(err)
++	}
++	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
++	start, err := strconv.ParseUint(fields[19], 10, 64)
++	if err != nil {
++		t.Fatal(err)
++	}
++	record := roleRecord()
++	be.PutUint32(record[120:], uint32(os.Getpid()))
++	be.PutUint64(record[128:], start)
++	b, err := DecodeBootstrap(record, 2)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b, f
++}
++func TestLiveAnchor(t *testing.T) {
++	b, f := liveBootstrap(t)
++	if err := b.CheckServer(f); err != nil {
++		t.Fatal(err)
++	}
++	b.ServerStarttime++
++	if b.CheckServer(f) == nil {
++		t.Fatal("принят чужой starttime")
++	}
++	b.ServerStarttime--
++	b.ServerPID++
++	if b.CheckServer(f) == nil {
++		t.Fatal("принят чужой PID")
++	}
++}
++func TestRecvClosesRejectedRights(t *testing.T) {
++	b, pidfd := liveBootstrap(t)
++	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	receiver := os.NewFile(uintptr(pair[0]), "receiver")
++	sender := os.NewFile(uintptr(pair[1]), "sender")
++	defer receiver.Close()
++	defer sender.Close()
++	if err := syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++		t.Fatal(err)
++	}
++	pipeR, pipeW, err := os.Pipe()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer pipeR.Close()
++	defer pipeW.Close()
++	before, err := os.ReadDir("/proc/self/fd")
++	if err != nil {
++		t.Fatal(err)
++	}
++	// Некорректный frame с real SCM_RIGHTS обязан закрыть полученный duplicate.
++	if err := syscall.Sendmsg(pair[1], []byte("malformed"), syscall.UnixRights(int(pipeR.Fd())), nil, 0); err != nil {
++		t.Fatal(err)
++	}
++	if _, files, err := b.ReceiveAuthenticated(receiver, pidfd); err == nil || len(files) != 0 {
++		t.Fatal("принят malformed frame")
++	}
++	after, err := os.ReadDir("/proc/self/fd")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(before) != len(after) {
++		t.Fatalf("FD leak: %d -> %d", len(before), len(after))
++	}
++}
++
++func TestHelloMatchesEntireBootstrapIdentity(t *testing.T) {
++	if os.Geteuid() != 0 {
++		t.Skip("нужен изолированный user namespace с UID 0")
++	}
++	for _, field := range []string{"control", "session", "generation", "invocation"} {
++		t.Run(field, func(t *testing.T) {
++			b, pidfd := liveBootstrap(t)
++			var data []byte
++			for _, vector := range vectors(t) {
++				candidate := wireBytes(t, vector)
++				frame, err := DecodeFrame(candidate, vector.FDCount)
++				if err == nil && frame.Header.Kind == HelloKind {
++					data = candidate
++					break
++				}
++			}
++			if data == nil {
++				t.Fatal("нет корректного HELLO control")
++			}
++			be.PutUint64(data[24:], b.Binding.Epoch)
++			copy(data[32:64], b.Binding.ConfigDigest[:])
++			copy(data[64:96], b.Binding.Nonce[:])
++			copy(data[96:112], b.Session[:])
++			be.PutUint64(data[112:], b.Generation)
++			copy(data[120:136], b.Invocation[:])
++			switch field {
++			case "session":
++				data[96] ^= 128
++			case "generation":
++				be.PutUint64(data[112:], b.Generation+1)
++			case "invocation":
++				data[120] ^= 128
++			}
++			pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			receiver := os.NewFile(uintptr(pair[0]), "receiver")
++			sender := os.NewFile(uintptr(pair[1]), "sender")
++			defer receiver.Close()
++			defer sender.Close()
++			if err := syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++				t.Fatal(err)
++			}
++			if err := syscall.Sendmsg(pair[1], data, nil, nil, 0); err != nil {
++				t.Fatal(err)
++			}
++			_, files, err := b.ReceiveAuthenticated(receiver, pidfd)
++			for _, file := range files {
++				file.Close()
++			}
++			if field == "control" && err != nil {
++				t.Fatalf("корректный HELLO отклонён: %v", err)
++			}
++			if field != "control" && err == nil {
++				t.Fatalf("принята чужая identity: %s", field)
++			}
++		})
++	}
++}
+diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/routing.go
+@@ -0,0 +1,81 @@
++package nativehooks
++
++import (
++	"context"
++	"os"
++	"sync"
++	"syscall"
++	"time"
++)
++
++// routingKey закрыт: config, env и caller assertions не создают authority.
++type routingKey struct{}
++
++// routingConsumer создаётся только closed worker handoff; production producer ещё не подключён.
++type routingConsumer struct {
++	mu             sync.Mutex
++	session        *Session
++	required       bool
++	flow           Flow
++	bootstrap      Bootstrap
++	channel, pidfd *os.File
++	sequence       Sequence
++	next           uint64
++	lookup         func(context.Context, Flow) (Evidence, error) // Только закрытый test fixture.
++}
++
++// RoutingEntry проверяет исходный tuple до forced tag, PickRoute и default outbound.
++// Отсутствие trusted handoff всегда закрывает routing.
++func RoutingEntry(ctx context.Context) error {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		return ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.session == nil || ctx.Err() != nil {
++		return ErrDenied
++	}
++	if !c.required {
++		return c.session.Guard(time.Now(), BeforeRouting, false, Flow{}, Evidence{})
++	}
++	lookup := c.lookup
++	if lookup == nil {
++		lookup = c.lookupAuthenticated
++	}
++	proof, err := lookup(ctx, c.flow)
++	if err != nil {
++		return ErrDenied
++	}
++	return c.session.Guard(time.Now(), BeforeRouting, true, c.flow, proof)
++}
++
++// lookupAuthenticated не принимает proof от inbound/config: только authenticated wire reply.
++func (c *routingConsumer) lookupAuthenticated(ctx context.Context, flow Flow) (Evidence, error) {
++	if c.channel == nil || c.pidfd == nil || ctx.Err() != nil {
++		return Evidence{}, ErrDenied
++	}
++	c.next++
++	if c.sequence.Begin(c.next) != nil {
++		return Evidence{}, ErrDenied
++	}
++	started := time.Now()
++	fail := func() (Evidence, error) { c.sequence.Retire(); _ = c.session.Revoke(); return Evidence{}, ErrDenied }
++	request, err := EncodeLookup(c.bootstrap.Binding, c.next, flow)
++	if err != nil || c.bootstrap.CheckServer(c.pidfd) != nil {
++		return fail()
++	}
++	if err := syscall.Sendmsg(int(c.channel.Fd()), request, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		return fail()
++	}
++	reply, files, err := c.bootstrap.ReceiveAuthenticated(c.channel, c.pidfd)
++	for _, file := range files {
++		_ = file.Close()
++	}
++	if err != nil || len(files) != 0 || reply.Header.Kind != ReplyKind || reply.CheckBinding(c.bootstrap.Binding, c.next) != nil || c.sequence.Complete(c.next) != nil {
++		return fail()
++	}
++	now := time.Now()
++	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
++	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
++}
+diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/routing_test.go
+@@ -0,0 +1,44 @@
++package nativehooks
++
++import (
++	"context"
++	"testing"
++)
++
++func TestRoutingEntryClosedFixture(t *testing.T) {
++	if RoutingEntry(context.Background()) == nil {
++		t.Fatal("нет сессии")
++	}
++	for _, status := range []Status{Known, Unknown, Unavailable} {
++		s, p, _ := fixture(t)
++		p.Status = status
++		c := &routingConsumer{session: s, required: true, flow: p.Flow, lookup: func(context.Context, Flow) (Evidence, error) { return p, nil }}
++		ctx := context.WithValue(context.Background(), routingKey{}, c)
++		if err := RoutingEntry(ctx); (err == nil) != (status == Known) {
++			t.Fatal(status, err)
++		}
++		_ = s.Revoke()
++		if RoutingEntry(ctx) == nil {
++			t.Fatal("отзыв")
++		}
++	}
++}
++
++func TestRoutingEntryRequiresClosedConsumer(t *testing.T) {
++	s, p, _ := fixture(t)
++	for _, c := range []*routingConsumer{nil, {}, {session: s, required: true, flow: p.Flow}} {
++		ctx := context.WithValue(context.Background(), routingKey{}, c)
++		if RoutingEntry(ctx) == nil {
++			t.Fatal("нет trusted lookup")
++		}
++	}
++	ctx := context.WithValue(context.Background(), routingKey{}, &routingConsumer{session: s})
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal("non-app control", err)
++	}
++	cancelctx, cancel := context.WithCancel(ctx)
++	cancel()
++	if RoutingEntry(cancelctx) == nil {
++		t.Fatal("cancel")
++	}
++}
+diff --git a/app/dispatcher/yonik_guard_test.go b/app/dispatcher/yonik_guard_test.go
+new file mode 100644
+--- /dev/null
++++ b/app/dispatcher/yonik_guard_test.go
+@@ -0,0 +1,24 @@
++package dispatcher
++
++import (
++	"context"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/session"
++	"github.com/xtls/xray-core/transport"
++	"testing"
++)
++
++func TestYonikGuardBeforeRouting(t *testing.T) {
++	d := new(DefaultDispatcher)
++	dst := net.TCPDestination(net.LocalHostIP, 443)
++	ctx := session.SetForcedOutboundTagToContext(context.Background(), "must-not-route")
++	if link, err := d.Dispatch(ctx, dst); err == nil || link != nil {
++		t.Fatal("Dispatch пропустил отсутствующий handoff")
++	}
++	if err := d.DispatchLink(ctx, dst, &transport.Link{}); err == nil {
++		t.Fatal("DispatchLink пропустил отсутствующий handoff")
++	}
++	if err := d.routedDispatch(ctx, &transport.Link{}, dst); err == nil {
++		t.Fatal("routedDispatch пропустил отсутствующий handoff")
++	}
++}
