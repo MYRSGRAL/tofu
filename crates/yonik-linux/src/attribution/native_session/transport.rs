@@ -63,6 +63,26 @@ fn receive(
         }
     }
 }
+fn send_once(socket: &OwnedFd, bytes: &[u8], fd: Option<&OwnedFd>) -> Result<bool, Unavailable> {
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut ancillary = SendAncillaryBuffer::new(&mut space);
+    let rights = fd.map(|f| [f.as_fd()]);
+    if let Some(rights) = &rights {
+        if !ancillary.push(SendAncillaryMessage::ScmRights(rights)) {
+            return Err(Unavailable::Limit);
+        }
+    }
+    match net::sendmsg(
+        socket,
+        &[IoSlice::new(bytes)],
+        &mut ancillary,
+        SendFlags::DONTWAIT | SendFlags::NOSIGNAL,
+    ) {
+        Ok(n) if n == bytes.len() => Ok(true),
+        Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => Ok(false),
+        _ => Err(Unavailable::Disconnected),
+    }
+}
 fn send(
     socket: &OwnedFd,
     bytes: &[u8],
@@ -72,27 +92,43 @@ fn send(
 ) -> Result<(), Unavailable> {
     loop {
         fence(deadline, cancel)?;
-        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
-        let mut ancillary = SendAncillaryBuffer::new(&mut space);
-        let rights = fd.map(|f| [f.as_fd()]);
-        if let Some(rights) = &rights {
-            if !ancillary.push(SendAncillaryMessage::ScmRights(rights)) {
-                return Err(Unavailable::Limit);
-            }
+        if send_once(socket, bytes, fd)? {
+            return fence(deadline, cancel);
         }
-        match net::sendmsg(
-            socket,
-            &[IoSlice::new(bytes)],
-            &mut ancillary,
-            SendFlags::DONTWAIT | SendFlags::NOSIGNAL,
-        ) {
-            Ok(n) if n == bytes.len() => return fence(deadline, cancel),
-            Err(rustix::io::Errno::AGAIN) => std::thread::sleep(TICK),
-            Err(rustix::io::Errno::INTR) => continue,
-            _ => return Err(Unavailable::Disconnected),
-        }
+        std::thread::sleep(TICK);
     }
 }
+fn send_reply(
+    socket: &OwnedFd,
+    bytes: &mut [u8],
+    snapshot_expiry: Option<Instant>,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> Result<(), Unavailable> {
+    if bytes.get(96) != Some(&1) {
+        return send(socket, bytes, None, deadline, cancel);
+    }
+    // Очередь не создаёт новый observation interval для уже проверенного owner.
+    let deadline = deadline.min(snapshot_expiry.ok_or(Unavailable::Authority)?);
+    loop {
+        fence(deadline, cancel)?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(Unavailable::Timeout);
+        }
+        bytes
+            .get_mut(104..112)
+            .ok_or(Unavailable::Malformed)?
+            .copy_from_slice(
+                &(remaining.as_nanos().min(u128::from(wire::OWNER_TTL_NS)) as u64).to_be_bytes(),
+            );
+        if send_once(socket, bytes, None)? {
+            return fence(deadline, cancel);
+        }
+        std::thread::sleep(TICK);
+    }
+}
+
 impl Session {
     /// Потребляет все роли. metadata — только от helper resource owner.
     /// cancel не является authority и может только отозвать существующую сессию.
@@ -132,13 +168,22 @@ impl Session {
             }
             let deadline = (Instant::now() + Duration::from_nanos(wire::OWNER_TTL_NS)).min(expires);
             let lookup = self.lookup(&bytes).map_err(|_| Unavailable::Malformed)?;
+            let snapshot_expiry = match &lookup {
+                Lookup::KnownOwner(owner) => Some(
+                    owner
+                        .observed_from
+                        .checked_add(Duration::from_nanos(wire::OWNER_TTL_NS))
+                        .ok_or(Unavailable::Timeout)?,
+                ),
+                _ => None,
+            };
             fence(deadline, cancel)?;
-            let reply = self.reply(
+            let mut reply = self.reply(
                 header.request_id,
                 lookup,
                 wire::lookup_flow(&bytes).map_err(|_| Unavailable::Malformed)?,
             )?;
-            send(&socket, &reply, None, deadline, cancel)?;
+            send_reply(&socket, &mut reply, snapshot_expiry, deadline, cancel)?;
         }
     }
     fn reply(
@@ -451,6 +496,67 @@ pub(super) mod tests {
             Err(Unavailable::Timeout)
         );
         drop(peer);
+    }
+    #[test]
+    fn known_reply_backpressure_cannot_extend_snapshot_expiry() {
+        let (session, peer, _) = fixture();
+        let worker = &session.roles.as_ref().unwrap().worker;
+        loop {
+            match net::send(worker, &[0; 768], SendFlags::DONTWAIT | SendFlags::NOSIGNAL) {
+                Ok(_) => (),
+                Err(rustix::io::Errno::AGAIN) => break,
+                e => panic!("{e:?}"),
+            }
+        }
+        let expiry = Instant::now() + Duration::from_millis(5);
+        let reader = std::thread::spawn(move || {
+            // Освобождаем очередь после исходного expiry, но до request deadline.
+            std::thread::sleep(Duration::from_millis(30));
+            let mut bytes = [0; 2048];
+            while net::recv(&peer, &mut bytes, RecvFlags::DONTWAIT).is_ok() {}
+            peer
+        });
+        let mut bytes = vec![0; 162];
+        bytes[96] = 1;
+        bytes[104..112].copy_from_slice(&5_000_000u64.to_be_bytes());
+        let result = send_reply(
+            worker,
+            &mut bytes,
+            Some(expiry),
+            Instant::now() + Duration::from_secs(1),
+            &AtomicBool::new(false),
+        );
+        let peer = reader.join().unwrap();
+        assert_eq!(result, Err(Unavailable::Timeout));
+        let mut bytes = [0; 2048];
+        assert_eq!(
+            net::recv(&peer, &mut bytes, RecvFlags::DONTWAIT),
+            Err(rustix::io::Errno::AGAIN)
+        );
+    }
+    #[test]
+    fn known_reply_ttl_uses_remaining_snapshot_budget() {
+        let (session, peer, _) = fixture();
+        let mut bytes = vec![0; 162];
+        bytes[96] = 1;
+        bytes[104..112].copy_from_slice(&wire::OWNER_TTL_NS.to_be_bytes());
+        let expiry = Instant::now() + Duration::from_millis(10);
+        send_reply(
+            &session.roles.as_ref().unwrap().worker,
+            &mut bytes,
+            Some(expiry),
+            Instant::now() + Duration::from_secs(1),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let received = receive(
+            &peer,
+            Instant::now() + Duration::from_secs(1),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let ttl = u64::from_be_bytes(received[104..112].try_into().unwrap());
+        assert!(ttl > 0 && ttl <= 10_000_000);
     }
     #[test]
     fn foreign_epoch_and_wrong_phase_rejected_over_socket() {
