@@ -795,9 +795,8 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
     }
     if mode == WorkerMode::Check {
         check_assets(&binary, &config.file, assets.as_ref()).await?;
-        if let Some(assets) = assets.as_mut() {
-            assets.cleanup_after_reap()?;
-        }
+        // Check мог породить потомков: assets остаются issued до unit/cgroup-empty.
+        // Drop удерживает их budget в quarantine; private mount убирает только PID1.
         for resource in &resources {
             resource.inherit(false)?;
         }
@@ -816,7 +815,7 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
             Ok(command) => command,
             Err(error) => {
                 if let Some(assets) = assets.as_mut() {
-                    assets.cleanup_after_reap()?;
+                    assets.cleanup_after_failed_exec()?;
                 }
                 return Err(error);
             }
@@ -824,7 +823,7 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
         let _error = command.exec();
         // exec вернулся: новый child не создан, собственный ledger можно убрать.
         if let Some(assets) = assets.as_mut() {
-            assets.cleanup_after_reap()?;
+            assets.cleanup_after_failed_exec()?;
         }
         return Err(WorkerError::Exec);
     }

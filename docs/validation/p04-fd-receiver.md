@@ -4,6 +4,7 @@
 PR90 `7fedcd07014b410ecb278b19be58c55d5f2d8775` и PR101
 `8b7261ef81978b3dc473b913c0a5ccc92f512cc1`. P2 inventory fix
 `12803936f500c3ecb798b9e1843f8fc21ff1fe82` импортирован как `fdc39f0`;
+OFD custody fix `79df8539fbe5c1c474be8f3f5a2f2d3e0b73b1ea` импортирован как `43bd261`.
 canonical sidecars используют `reserve(bytes, 1)`, reuse — `reserve(0, 0)`.
 Исходные encoder и native custody format не менялись.
 
@@ -93,7 +94,12 @@ Materialization: exclusive0700 role/CSPRNG root; digest-only filenames; bounded
 stream/hash/fsync/verify и regular files0400. Это не обещание F_SEAL для filesystem
 copy; исходный worker memfd остаётся sealed. Private custody ledger содержит
 session/generation/cgroup, role/nonce, root dev/ino/mount и ordered inode/hash/size.
-После child reap guard удаляет только known owned entries с identity checks.
+Cleanup до выдачи consumer либо после возврата неуспешного exec удаляет только
+known owned entries после проверки всего ledger: dev/ino/UID/nlink, exact bytes,
+bounded streaming SHA и неизменные mtime/ctime во время чтения. Подмена оставляет
+ledger, данные и reservation в quarantine. Direct-child reap не разрешает cleanup:
+после успешного config-check assets остаются issued, включая возможных потомков,
+до завершения unit/cgroup. Helper удерживает payload credit до trusted empty proof.
 Foreign entry/unknown child → bounded quarantine. Run/crash namespace cleanup
 зависит от controlled unit lifetime и подтверждённой пустой cgroup, без name-only GC.
 
@@ -111,3 +117,22 @@ private tmpfs guard/foreign/budget fixture выполняются на frozen ca
 собственной signed-base VM с real system bus/polkit и production executables.
 До результатов VM production PASS не заявляется. Native app AND и Domain+CIDR/
 real provenance остаются genuine gates; полного P04 этот slice не объявляет.
+
+### Historical frozen69 и review P2
+
+Frozen `69d7ac4414bd051bd876e28e6f91de8150b4d7e7`: настоящий system bus/polkit,
+PrepareBundle/Apply, 50000 CIDR каждому pinned core, TCP/UDP IPv4/IPv6 match/miss,
+worker-owned sealed FD32 и private Xray tmpfs/ledger прошли; Stop завершился
+пустым cgroup перед release lease, foreign network sentinels сохранились.
+VM выключена с qemu_exit=0. Evidence `historical-69d7ac4/` и `actual-assets-retry.log`.
+Первый guard launcher получил EXEC203 из-за 0700 transport-каталога в госте;
+после root-owned0755 guest-only fixture directory guard прошёл. Этот прогон —
+только historical evidence: два независимо найденных cleanup P2 блокируют его
+приёмку как final gate. Нельзя приписывать его следующему source head.
+
+Три regressions воспроизвели RED: issued assets после reap, same-inode size change,
+same-size rewrite. Исправление сохраняет custody и quota; forked descendant с
+открытым FD подтверждает, что reap прямого parent не является empty evidence.
+Actual private tmpfs fixture дополнительно переписывает owned0400 файл тем же
+inode и проверяет сохранение ledger/reservation. Итог нового VM gate фиксируется
+отдельно после сборки изменённых helper/worker.
