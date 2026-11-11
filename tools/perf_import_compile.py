@@ -75,6 +75,37 @@ def run_child(command: list[str], body: bytes, timeout: float) -> dict:
     return result
 
 
+def require_success(row: dict, count: int, rules: int) -> None:
+    """Timeout/refusal не является завершённым измерением обычной нагрузки."""
+    result = row.get("result")
+    if (
+        row.get("cancelled") is not False
+        or row.get("exit") != 0
+        or not isinstance(result, dict)
+    ):
+        raise RuntimeError("Обычный resource child не завершился успешно")
+    if (
+        result.get("imported") != count
+        or result.get("compiled") != count
+        or result.get("app_rules") != rules
+        or result.get("mixed_domain_refused") is not True
+    ):
+        raise RuntimeError("Неполный импорт/compile или изменена семантика rules")
+    for key in (
+        "import_ns",
+        "compile_ns",
+        "policy_ns",
+        "config_total_bytes",
+        "policy_bytes",
+        "native_rules",
+    ):
+        value = result.get(key)
+        if type(value) is not int or value < (0 if key.endswith("_ns") else 1):
+            raise RuntimeError(f"Неверная метрика child: {key}")
+    if not rules <= result["native_rules"] <= rules + 16:
+        raise RuntimeError("Неограниченное разрастание rules")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
@@ -132,6 +163,7 @@ def main() -> None:
                         "warmup": repeat == 0,
                         **run_child(command, fixture(count), 60),
                     }
+                    require_success(row, count, rules)
                     rows.append(row)
                     (args.output / "runs.json").write_text(
                         json.dumps(rows, indent=2) + "\n"
