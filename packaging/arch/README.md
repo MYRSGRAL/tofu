@@ -54,10 +54,11 @@ Engine не входит в пакет и не скачивается при с�
 Secret Service предоставляет окружение рабочего стола (например KWallet или
 GNOME Keyring); пакет не изменяет keyring и настройки пользователя.
 
-Следующий gate — disposable Arch VM: clean build, проверка реального архива,
-install без автозапуска, sysusers и D-Bus/polkit, Qt smoke на чистом HOME,
-проверенный engine registry, update/rollback и uninstall с контрольными БД/ключами
-и чужими сетевыми ресурсами. До этой матрицы P24 остаётся частичным.
+Actual clean source build, install и Qt smoke описаны в
+`docs/validation/2026-11-11-arch-source-6cf65a4.md`; versioned package
+old→new→old→uninstall и actual guest reboot — в
+`docs/validation/2026-11-11-arch-versioned-119.md`. Эти результаты не закрывают
+полную Linux acceptance, trusted engine registry и миграцию зашифрованных данных.
 
 Notices компилируются из закреплённого source при сборке; Python объявлен в
 makedepends и устанавливается только в VM. Рецепт поставляет три Rust ELF;
@@ -72,3 +73,31 @@ Source freeze: main 6cf65a4. Незамёрженные #107 (maintenance) и #1
 Runner `tools/arch_clean_vm_build.py` использует только подписанный cache
 `local/validation/vm-base` под shared BSD lock; overlay и cloud-init принадлежат
 текущей задаче. Общий Rust slot занят только тяжёлой guest-сборкой.
+
+Проверка versioned lifecycle без повторной Rust-сборки:
+
+```sh
+python tools/arch_clean_vm_build.py \
+  --task-root /var/tmp/codex-myrs/transient/yonik-versioned-check \
+  --evidence /path/outside/ttl/versioned-check \
+  --arch-public-key /home/myrs/projects/yonik/local/validation/vm-base/arch-ci-public-key.asc \
+  --old-package /path/to/yonik-0.1.0.r20261110-2-x86_64.pkg.tar.zst \
+  --new-package /path/to/yonik-0.1.0.r20261111-1-x86_64.pkg.tar.zst
+```
+
+Этот режим принимает только два проверенных archive SHA-256 из #78/#119;
+переименование нового пакета в старый отклоняется до VM effects. Manifest
+сохраняет source revisions, package metadata, BUILDINFO и hashes ELF каждого
+архива. Rust toolchain не устанавливается, Cargo/makepkg не вызываются.
+После гостевого `-Syu` runner проверяет смену boot ID, kernel и наличие modules,
+затем устанавливает old→new→old и удаляет пакет. Реальный desktop запускается
+под builder на одном каталоге данных; smoke использует ephemeral key, без keyring.
+Fixture проверяет контрольную строку настоящей SQLite БД, hashes и права keyfile/
+preferences, installed ELF, inactive/3, Qkk и чужие nft/interface resources.
+Preferences нового формата сохраняются побайтово без замены каталога данных.
+После первого процесса следующий smoke ephemeral key отличается: на сохранённой
+зашифрованной БД проверяется фактический fail-closed `storage`, `ready=false`.
+Разбор future preferences и отказ записи именно по их схеме в этом маршруте
+не достигнуты и не заявляются. Этот сценарий не доказывает миграцию зашифрованных
+пользовательских записей с постоянным ключом. FAIL run и его artifacts сохраняются;
+чужие cache/overlay не удаляются.

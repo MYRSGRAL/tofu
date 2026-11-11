@@ -44,12 +44,120 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def archive_manifest(packages: tuple[Path, Path], evidence: Path) -> None:
+    """До VM effects фиксирует настоящие архивы и ELF; не перепаковывает их."""
+    if any(
+        (evidence / name).exists()
+        for name in ("versioned-inputs.json", "versioned-run.json")
+    ):
+        raise ValueError(
+            "Evidence уже использован; FAIL/PASS run нельзя перезаписывать"
+        )
+    rows = []
+    for path, expected, revision in zip(
+        packages,
+        (
+            "e53cb758ca1b9a2167a80c90ca50b1ab5eb4f6b67c5c8ec01c2bf0ccb856e8b0",
+            "a10f0840737b2ababc572fbd432335abfd5c232c59ec0493aa0483d749abafcc",
+        ),
+        (
+            "eec7a56b6b03f2b022a87682f9097ce78b61fa0b",
+            "6cf65a4cf9760a7df68b8eee10f012770b38604d",
+        ),
+        strict=True,
+    ):
+        actual = digest(path)
+        if actual != expected:
+            raise ValueError(f"Не совпал принятый checksum: {path}")
+        files = {}
+        for member in (
+            ".PKGINFO",
+            ".BUILDINFO",
+            "usr/bin/yonik-desktop",
+            "usr/lib/yonik/yonik-helper",
+            "usr/lib/yonik/yonik-worker",
+        ):
+            data = subprocess.check_output(["bsdtar", "-xOf", str(path), member])
+            if member.startswith("usr/") and not data.startswith(b"\x7fELF"):
+                raise ValueError("В архиве ожидался ELF")
+            files[member] = {
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "bytes": len(data),
+            }
+            if member.startswith("."):
+                files[member]["text"] = data.decode()
+        rows.append(
+            {
+                "path": str(path),
+                "sha256": actual,
+                "source_revision": revision,
+                "accepted_source_archive_sha256": {
+                    "eec7a56b6b03f2b022a87682f9097ce78b61fa0b": "71e9c347ffc363da062b42b0c5ffc6ccb0a97b0988202ce21391dd1c2553a1d3",
+                    "6cf65a4cf9760a7df68b8eee10f012770b38604d": "5a3d3d3b4a418d5208436934c3a7f1032d23fc83444d1948060d3c802087f665",
+                }[revision],
+                "members": files,
+            }
+        )
+    (evidence / "versioned-inputs.json").write_text(
+        json.dumps(
+            {
+                "archives": rows,
+                "rust_build": False,
+                "provenance": "Принятые historical #78 / checkpoint #119; archive ELF hashes не являются новым source→ELF proof",
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+    (evidence / "versioned-run.json").write_text(
+        json.dumps({"status": "PLANNED", "effects_started": False})
+    )
+
+
+def versioned_lifecycle(
+    ssh: list[str], packages: tuple[Path, Path], repo: Path, evidence: Path
+) -> None:
+    """Продолжает после reboot только с принятыми готовыми пакетами."""
+    for path, name in zip(packages, ("old", "new"), strict=True):
+        with path.open("rb") as stream:
+            subprocess.run(
+                ssh + [f"cat > /home/builder/{name}.pkg.tar.zst"],
+                stdin=stream,
+                check=True,
+            )
+    with (repo / "tools/arch_versioned_package.py").open("rb") as stream:
+        subprocess.run(
+            ssh + ["cat > /home/builder/versioned.py"], stdin=stream, check=True
+        )
+    result = "FAIL"
+    try:
+        run(ssh + ["python /home/builder/versioned.py"], evidence / "versioned.log")
+        result = "PASS"
+    finally:
+        with (evidence / "versioned-artifacts.tar").open("wb") as stream:
+            subprocess.run(
+                ssh
+                + [
+                    "tar -C /home/builder -cf - versioned-evidence versioned versioned.py"
+                ],
+                stdout=stream,
+                check=True,
+            )
+        (evidence / "versioned-run.json").write_text(
+            json.dumps({"status": result, "effects_started": True, "rust_build": False})
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-root", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--arch-public-key", type=Path, required=True)
+    parser.add_argument("--old-package", type=Path)
+    parser.add_argument("--new-package", type=Path)
     args = parser.parse_args()
+    if bool(args.old_package) != bool(args.new_package):
+        parser.error("Для versioned lifecycle нужны оба архива")
     root = args.task_root.resolve()
     evidence = args.evidence.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -57,31 +165,65 @@ def main() -> None:
         raise ValueError("Нужен новый собственный transient task root")
     if evidence.is_relative_to(root):
         raise ValueError("Evidence должен находиться вне TTL")
-    root.mkdir(mode=0o700)
     evidence.mkdir(parents=True, exist_ok=True)
+    packages = None
+    if args.old_package:
+        packages = (args.old_package.resolve(), args.new_package.resolve())
+        archive_manifest(packages, evidence)
+    root.mkdir(mode=0o700)
     lock = os.open(root, os.O_RDONLY)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        with (BASE / "manifest.json").open() as manifest:
-            if (
-                json.load(manifest)["sha256"]
-                != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
-            ):
-                raise ValueError("Изменён base manifest")
         base_lock = os.open(BASE, os.O_RDONLY)
         try:
             fcntl.flock(base_lock, fcntl.LOCK_SH)
-            execute(root, evidence, repo, args.arch_public_key)
+            with (BASE / "manifest.json").open() as manifest:
+                if (
+                    json.load(manifest)["sha256"]
+                    != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
+                ):
+                    raise ValueError("Изменён base manifest")
+            if packages:
+                (evidence / "versioned-run.json").write_text(
+                    json.dumps(
+                        {
+                            "status": "RUNNING",
+                            "effects_started": True,
+                            "task_root": str(root),
+                        }
+                    )
+                )
+            execute(root, evidence, repo, args.arch_public_key, packages)
         finally:
             os.close(base_lock)
+    except Exception as error:
+        if packages:
+            (evidence / "versioned-run.json").write_text(
+                json.dumps(
+                    {
+                        "status": "FAIL",
+                        "effects_started": True,
+                        "task_root": str(root),
+                        "error": str(error),
+                    }
+                )
+            )
+        raise
     finally:
         os.close(lock)
 
 
-def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
+def execute(
+    root: Path,
+    evidence: Path,
+    repo: Path,
+    key: Path,
+    packages: tuple[Path, Path] | None = None,
+) -> None:
     """Весь жизненный цикл одной VM под lock вызывающей функции."""
     vm = None
     ssh: list[str] = []
+    archive_success = False
     try:
         # Cache удерживается shared BSD lock до завершения VM; запись запрещена.
         for suffix in ("", ".SHA256", ".sig"):
@@ -242,12 +384,17 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
         run(
             ssh
             + [
-                "set -e; pacman -Syu --noconfirm --needed base-devel clang pkgconf rustup qt6-base qt6-declarative qt6-svg sqlite dbus polkit nftables iproute2 python"
+                "set -e; pacman -Syu --noconfirm --needed qt6-base qt6-declarative qt6-svg sqlite dbus polkit nftables iproute2 python"
+                + ("" if packages else " base-devel clang pkgconf rustup")
             ],
             evidence / "dependencies.log",
         )
         # После -Syu kernel и modules должны относиться к одной загрузке.
         before_boot = run(ssh + ["cat /proc/sys/kernel/random/boot_id"]).strip()
+        before_kernel = run(ssh + ["uname -r"]).strip()
+        (evidence / "reboot-before.json").write_text(
+            json.dumps({"boot_id": before_boot, "kernel": before_kernel})
+        )
         run(ssh + ["systemctl reboot"])
         reboot_deadline = time.monotonic() + 240
         while time.monotonic() < reboot_deadline:
@@ -264,12 +411,22 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 break
         else:
             raise TimeoutError("Гость не загрузился с согласованными kernel/modules")
+        after_kernel = run(ssh + ["uname -r"]).strip()
+        (evidence / "reboot-after.json").write_text(
+            json.dumps({"boot_id": probe.stdout.strip(), "kernel": after_kernel})
+        )
+        if packages and after_kernel == before_kernel:
+            raise ValueError("Для этого gate требуется actual kernel change")
         run(
             ssh
             + [
                 "set -e; useradd -m builder; install -d -o builder -g builder /home/builder/input /home/builder/task; echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/yonik-build"
             ]
         )
+        if packages:
+            versioned_lifecycle(ssh, packages, repo, evidence)
+            archive_success = True
+            return
         transfer = [
             "tar",
             "-C",
@@ -420,6 +577,12 @@ pacman -Q
                 ["gpgconf", "--homedir", str(root / "gnupg"), "--kill", "gpg-agent"],
                 check=False,
             )
+        if archive_success:
+            if vm is None or vm.returncode != 0:
+                raise RuntimeError(
+                    "VM завершилась нештатно; собственный overlay сохранён"
+                )
+            shutil.rmtree(root)
         # При ошибке диск сохраняется для диагностики; автоматическая очистка только после успеха.
     shutil.rmtree(root)
 
