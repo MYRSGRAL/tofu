@@ -129,13 +129,16 @@ const SEALS: SealFlags = SealFlags::WRITE
     .union(SealFlags::SHRINK)
     .union(SealFlags::SEAL);
 fn config_file() -> Result<File, WorkerError> {
-    Ok(File::from(
+    let file = File::from(
         memfd_create(
             "yonik-config",
             MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
         )
         .map_err(|_| WorkerError::Io)?,
-    ))
+    );
+    rustix::fs::fchmod(&file, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR)
+        .map_err(|_| WorkerError::Io)?;
+    Ok(file)
 }
 #[cfg(test)]
 fn sealed_config(bytes: &[u8]) -> Result<File, WorkerError> {

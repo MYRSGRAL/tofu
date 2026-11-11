@@ -274,3 +274,35 @@ fn worker_owned_config_preserves_bytes_cursor_seals_and_budget() {
     assert!(worker_owned_config(&config_file().unwrap(), &budget).is_err());
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn source_config_memfd_is_private_before_write_and_after_seal() {
+    use std::os::unix::fs::MetadataExt;
+    let mut file = config_file().unwrap();
+    assert_eq!(file.metadata().unwrap().mode() & 0o777, 0o600);
+    assert_eq!(
+        file.metadata().unwrap().uid(),
+        rustix::process::geteuid().as_raw()
+    );
+    assert_eq!(file.stream_position().unwrap(), 0);
+    assert!(
+        rustix::io::fcntl_getfd(&file)
+            .unwrap()
+            .contains(rustix::io::FdFlags::CLOEXEC)
+    );
+    let bytes = b"{\"fixture\":true}";
+    file.write_all(bytes).unwrap();
+    fcntl_add_seals(&file, SEALS).unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    validate_file(&file, bytes.len(), Hasher::digest(bytes).into()).unwrap();
+    assert_eq!(file.stream_position().unwrap(), 0);
+    assert_eq!(file.metadata().unwrap().mode() & 0o777, 0o600);
+    assert!(fcntl_get_seals(&file).unwrap().contains(SEALS));
+    assert!(file.write_all(b"changed").is_err());
+    let mut actual = [0u8; 16];
+    assert_eq!(
+        file.read_at(&mut actual[..bytes.len()], 0).unwrap(),
+        bytes.len()
+    );
+    assert_eq!(&actual[..bytes.len()], bytes);
+}
