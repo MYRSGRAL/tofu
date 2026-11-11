@@ -1,0 +1,279 @@
+//! Custody и переходы frozen ABI. Caller FD и окружение не создают authority.
+use super::{
+    broker::{Broker, Lookup, Unavailable},
+    native_wire::{self as wire, Header, Kind, Malformed, Sequence},
+};
+use std::os::fd::OwnedFd;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Phase {
+    Hello,
+    Features,
+    Ack,
+    Active,
+    Closed,
+}
+
+/// Не имеет публичного конструктора: только verified helper bootstrap может
+/// передать уже привязанный TUN и собственные endpoint роли.
+pub struct Session {
+    phase: Phase,
+    epoch: u64,
+    digest: [u8; 32],
+    nonce: [u8; 32],
+    session: [u8; 16],
+    generation: u64,
+    invocation: [u8; 16],
+    app_required: bool,
+    roles: Option<Roles>,
+    sequence: Sequence,
+}
+struct Roles {
+    tun: OwnedFd,
+    worker: OwnedFd,
+    broker: Option<Broker>,
+}
+
+impl Session {
+    /// Пока kernel/unit proof не может быть выпущен, raw caller входы
+    /// безусловно отвергаются. Этот gate не принимает fd, env или proof bytes.
+    pub fn verified_helper_bootstrap() -> Result<Self, Unavailable> {
+        Err(Unavailable::Authority)
+    }
+    pub fn close(&mut self) {
+        self.phase = Phase::Closed;
+        self.sequence.retire();
+        if let Some(mut roles) = self.roles.take() {
+            if let Some(broker) = roles.broker.as_mut() {
+                broker.revoke();
+            }
+            drop(roles);
+        }
+    }
+    /// EOF, timeout и transport error завершают все helper-owned роли.
+    pub fn eof(&mut self) {
+        self.close();
+    }
+    fn header(&self, frame: &[u8]) -> Result<Header, Malformed> {
+        let header = Header::decode(frame, 0)?;
+        if header.epoch != self.epoch || header.digest != self.digest || frame[64..96] != self.nonce
+        {
+            return Err(Malformed);
+        }
+        Ok(header)
+    }
+    fn frame(&self, kind: Kind) -> Result<Vec<u8>, Malformed> {
+        let mut bytes = vec![0; kind.fixed_bytes().ok_or(Malformed)?];
+        Header {
+            kind,
+            request_id: 0,
+            epoch: self.epoch,
+            digest: self.digest,
+        }
+        .write(&mut bytes)?;
+        bytes[64..96].copy_from_slice(&self.nonce);
+        Ok(bytes)
+    }
+    pub fn hello(&mut self) -> Result<Vec<u8>, Malformed> {
+        let result = self.hello_inner();
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
+    fn hello_inner(&mut self) -> Result<Vec<u8>, Malformed> {
+        if self.phase != Phase::Hello || self.roles.is_none() {
+            return Err(Malformed);
+        }
+        let mut bytes = self.frame(Kind::Hello)?;
+        bytes[96..112].copy_from_slice(&self.session);
+        bytes[112..120].copy_from_slice(&self.generation.to_be_bytes());
+        bytes[120..136].copy_from_slice(&self.invocation);
+        bytes[136..140].copy_from_slice(&(wire::MAX_FRAME as u32).to_be_bytes());
+        bytes[140..142].copy_from_slice(&1u16.to_be_bytes());
+        bytes[144..152].copy_from_slice(&wire::OWNER_TTL_NS.to_be_bytes());
+        bytes[152..160].copy_from_slice(&wire::BOOTSTRAP_NS.to_be_bytes());
+        bytes[160..168].copy_from_slice(&wire::FEATURES.to_be_bytes());
+        bytes[168..176].copy_from_slice(&u64::from(self.app_required).to_be_bytes());
+        Header::decode(&bytes, 0)?;
+        self.phase = Phase::Features;
+        Ok(bytes)
+    }
+    /// ATTACH metadata предоставляется только resource owner. Ровно один
+    /// duplicate создаётся здесь; при ошибке сессия целиком отзывается.
+    pub fn attach(
+        &mut self,
+        features: &[u8],
+        metadata: &[u8; 32],
+    ) -> Result<(Vec<u8>, OwnedFd), Malformed> {
+        let result = self.attach_inner(features, metadata);
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
+    fn attach_inner(
+        &mut self,
+        features: &[u8],
+        metadata: &[u8; 32],
+    ) -> Result<(Vec<u8>, OwnedFd), Malformed> {
+        if self.phase != Phase::Features || self.header(features)?.kind != Kind::Features {
+            return Err(Malformed);
+        }
+        wire::selected_features(features, self.app_required)?;
+        let mut bytes = self.frame(Kind::Attach)?;
+        bytes[96..128].copy_from_slice(metadata);
+        Header::decode(&bytes, 1)?;
+        let roles = self.roles.as_ref().ok_or(Malformed)?;
+        let fd = rustix::io::fcntl_dupfd_cloexec(&roles.tun, 0).map_err(|_| Malformed)?;
+        self.phase = Phase::Ack;
+        Ok((bytes, fd))
+    }
+    pub fn acknowledge(&mut self, bytes: &[u8]) -> Result<(), Malformed> {
+        if self.phase != Phase::Ack || self.header(bytes).map(|h| h.kind) != Ok(Kind::AttachAck) {
+            self.close();
+            return Err(Malformed);
+        }
+        self.phase = Phase::Active;
+        Ok(())
+    }
+    /// Canonical tuple передаётся существующему app-UID broker, без caller PID.
+    pub fn lookup(&mut self, bytes: &[u8]) -> Result<Lookup, Malformed> {
+        let result = self.lookup_inner(bytes);
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
+    fn lookup_inner(&mut self, bytes: &[u8]) -> Result<Lookup, Malformed> {
+        if self.phase != Phase::Active {
+            return Err(Malformed);
+        }
+        let header = self.header(bytes)?;
+        if header.kind != Kind::Lookup {
+            return Err(Malformed);
+        }
+        let flow = wire::lookup_flow(bytes)?;
+        self.sequence.begin(header.request_id)?;
+        let broker = self
+            .roles
+            .as_mut()
+            .and_then(|r| r.broker.as_mut())
+            .ok_or(Malformed)?;
+        let result = broker.lookup(flow);
+        self.sequence.complete(header.request_id)?;
+        Ok(result)
+    }
+    pub fn revoke(&mut self, bytes: &[u8]) -> Result<(), Malformed> {
+        let valid = self.header(bytes).map(|h| h.kind) == Ok(Kind::Revoke);
+        self.close();
+        if valid { Ok(()) } else { Err(Malformed) }
+    }
+}
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+impl Drop for Roles {
+    fn drop(&mut self) {
+        // shutdown затрагивает также уже выданные transport duplicates.
+        let _shutdown = rustix::net::shutdown(&self.worker, rustix::net::Shutdown::Both);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+    fn fixture() -> (Session, UnixStream) {
+        let (worker, peer) = UnixStream::pair().unwrap();
+        let tun = std::fs::File::open("/dev/null").unwrap();
+        (
+            Session {
+                phase: Phase::Hello,
+                epoch: 1,
+                digest: [2; 32],
+                nonce: [3; 32],
+                session: [4; 16],
+                generation: 1,
+                invocation: [5; 16],
+                app_required: false,
+                roles: Some(Roles {
+                    tun: tun.into(),
+                    worker: worker.into(),
+                    broker: None,
+                }),
+                sequence: Sequence::new(),
+            },
+            peer,
+        )
+    }
+    #[test]
+    fn bootstrap_never_accepts_caller_authority() {
+        assert!(matches!(
+            Session::verified_helper_bootstrap(),
+            Err(Unavailable::Authority)
+        ));
+    }
+    #[test]
+    fn closed_fixture_handshake_and_eof() {
+        let (mut s, mut peer) = fixture();
+        assert_eq!(
+            Header::decode(&s.hello().unwrap(), 0).unwrap().kind,
+            Kind::Hello
+        );
+        let mut features = s.frame(Kind::Features).unwrap();
+        features[96..104].copy_from_slice(&wire::FEATURES.to_be_bytes());
+        features[104..112].copy_from_slice(&wire::OWNED_TUN.to_be_bytes());
+        let mut metadata = [0; 32];
+        metadata[..4].copy_from_slice(&1u32.to_be_bytes());
+        metadata[4..8].copy_from_slice(&1u32.to_be_bytes());
+        metadata[8..12].copy_from_slice(&0x1001u32.to_be_bytes());
+        metadata[12..16].copy_from_slice(&1500u32.to_be_bytes());
+        metadata[16..20].copy_from_slice(b"tun0");
+        let (attach, duplicate) = s.attach(&features, &metadata).unwrap();
+        assert_eq!(Header::decode(&attach, 1).unwrap().kind, Kind::Attach);
+        drop(duplicate);
+        let mut ack = s.frame(Kind::AttachAck).unwrap();
+        ack[96..100].copy_from_slice(&1u32.to_be_bytes());
+        s.acknowledge(&ack).unwrap();
+        s.eof();
+        assert!(s.roles.is_none());
+        use std::io::Read;
+        assert_eq!(peer.read(&mut [0]).unwrap(), 0);
+    }
+    #[test]
+    fn malformed_features_retire_and_release_descriptors() {
+        let (mut s, mut peer) = fixture();
+        s.hello().unwrap();
+        assert!(s.attach(&[], &[0; 32]).is_err());
+        assert_eq!(s.phase, Phase::Closed);
+        assert!(s.roles.is_none());
+        use std::io::Read;
+        assert_eq!(peer.read(&mut [0]).unwrap(), 0);
+    }
+    #[test]
+    fn lookup_before_ack_and_bad_revoke_close_session() {
+        let (mut s, _) = fixture();
+        assert!(s.lookup(&[]).is_err());
+        assert!(s.roles.is_none());
+        let (mut s, _) = fixture();
+        assert!(s.revoke(&[]).is_err());
+        assert!(s.roles.is_none());
+    }
+    #[test]
+    fn replay_and_foreign_identity_close_roles() {
+        for foreign in [false, true] {
+            let (mut s, _) = fixture();
+            let hello = s.hello().unwrap();
+            let mut bytes = hello;
+            if foreign {
+                bytes[24..32].copy_from_slice(&2u64.to_be_bytes());
+            }
+            assert!(s.acknowledge(&bytes).is_err());
+            assert!(s.roles.is_none());
+            assert!(s.hello().is_err());
+        }
+    }
+}
