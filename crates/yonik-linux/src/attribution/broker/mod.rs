@@ -475,3 +475,7 @@ mod tests {
 #[cfg(test)]
 #[path = "receiver_tests.rs"]
 mod receiver_tests;
+
+// Test-only pending validator до согласования trusted unit proof и custody с Root/FDwriter109.
+#[cfg(test)]
+mod worker_anchor;
