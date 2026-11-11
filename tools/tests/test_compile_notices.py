@@ -79,7 +79,7 @@ class NoticesTests(unittest.TestCase):
             source.mkdir()
             (source / "yonik-notices").symlink_to(output, target_is_directory=True)
             recipe = root / "packaging/arch/PKGBUILD"
-            revision = "eec7a56b6b03f2b022a87682f9097ce78b61fa0b"
+            revision = "6cf65a4cf9760a7df68b8eee10f012770b38604d"
             (source / ("yonik-" + revision)).symlink_to(root, target_is_directory=True)
             package = output.parent / "pkg"
             (package / "usr/share/applications").mkdir(parents=True)

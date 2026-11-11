@@ -22,8 +22,8 @@ from pathlib import Path
 
 LOG = logging.getLogger(__name__)
 PRIMARY = "1B9A16984A4E8CB448712D2AE0B78BF4326C6F8F"
-IMAGE = "Arch-Linux-x86_64-cloudimg.qcow2"
-URL = "https://mirror.pkgbuild.com/images/latest/"
+IMAGE = "Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2"
+BASE = Path("/home/myrs/projects/yonik/local/validation/vm-base")
 SLOT = "/home/myrs/projects/yonik/local/orchestration/with-rust-slot"
 
 
@@ -62,7 +62,18 @@ def main() -> None:
     lock = os.open(root, os.O_RDONLY)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        execute(root, evidence, repo, args.arch_public_key)
+        with (BASE / "manifest.json").open() as manifest:
+            if (
+                json.load(manifest)["sha256"]
+                != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
+            ):
+                raise ValueError("Изменён base manifest")
+        base_lock = os.open(BASE, os.O_RDONLY)
+        try:
+            fcntl.flock(base_lock, fcntl.LOCK_SH)
+            execute(root, evidence, repo, args.arch_public_key)
+        finally:
+            os.close(base_lock)
     finally:
         os.close(lock)
 
@@ -72,23 +83,10 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
     vm = None
     ssh: list[str] = []
     try:
+        # Cache удерживается shared BSD lock до завершения VM; запись запрещена.
         for suffix in ("", ".SHA256", ".sig"):
-            run(
-                [
-                    "curl",
-                    "-4",
-                    "-fL",
-                    "--connect-timeout",
-                    "20",
-                    "--max-time",
-                    "900",
-                    "--retry",
-                    "1",
-                    URL + IMAGE + suffix,
-                    "-o",
-                    str(root / (IMAGE + suffix)),
-                ]
-            )
+            if not (BASE / (IMAGE + suffix)).is_file():
+                raise ValueError("Неполный закреплённый base cache")
         gnupg = root / "gnupg"
         gnupg.mkdir(mode=0o700)
         run(["gpg", "--homedir", str(gnupg), "--import", str(key)])
@@ -99,8 +97,8 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 str(gnupg),
                 "--status-fd=1",
                 "--verify",
-                str(root / (IMAGE + ".sig")),
-                str(root / IMAGE),
+                str(BASE / (IMAGE + ".sig")),
+                str(BASE / IMAGE),
             ],
             evidence / "image-signature.log",
         )
@@ -110,10 +108,13 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
         ):
             raise ValueError("Подпись не принадлежит закреплённому primary Arch CI")
         run(["gpgconf", "--homedir", str(gnupg), "--kill", "gpg-agent"])
-        actual = digest(root / IMAGE)
-        if actual != (root / (IMAGE + ".SHA256")).read_text().split()[0]:
+        actual = digest(BASE / IMAGE)
+        if (
+            actual != "794eb4889b39e1f0ed7d5ae998b2a1ed2137db8cf8c3476cf2962c7437ecb003"
+            or actual != (BASE / (IMAGE + ".SHA256")).read_text().split()[0]
+        ):
             raise ValueError("SHA256 образа не совпал")
-        info = json.loads(run(["qemu-img", "info", "--output=json", str(root / IMAGE)]))
+        info = json.loads(run(["qemu-img", "info", "--output=json", str(BASE / IMAGE)]))
         if (
             info["format"] != "qcow2"
             or info.get("backing-filename")
@@ -122,7 +123,14 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             raise ValueError("Внешние ссылки в официальном образе")
         (evidence / "image.json").write_text(
             json.dumps(
-                {"url": URL + IMAGE, "sha256": actual, "primary": PRIMARY}, indent=2
+                {
+                    "cache": str(BASE / IMAGE),
+                    "sha256": actual,
+                    "primary": PRIMARY,
+                    "public_key_sha256": digest(key),
+                    "signature_sha256": digest(BASE / (IMAGE + ".sig")),
+                },
+                indent=2,
             )
         )
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(root / "key")])
@@ -158,7 +166,7 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 "-F",
                 "qcow2",
                 "-b",
-                str(root / IMAGE),
+                str(BASE / IMAGE),
                 str(root / "disk.qcow2"),
                 "32G",
             ]
@@ -201,7 +209,6 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             f"user,id=n,hostfwd=tcp:127.0.0.1:{port}-:22",
             "-device",
             "virtio-net-pci,netdev=n",
-            "-no-reboot",
         ]
         (evidence / "qemu-command.json").write_text(json.dumps(command))
         with (root / "qemu.log").open("w") as output:
@@ -239,6 +246,24 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             ],
             evidence / "dependencies.log",
         )
+        # После -Syu kernel и modules должны относиться к одной загрузке.
+        before_boot = run(ssh + ["cat /proc/sys/kernel/random/boot_id"]).strip()
+        run(ssh + ["systemctl reboot"])
+        reboot_deadline = time.monotonic() + 240
+        while time.monotonic() < reboot_deadline:
+            time.sleep(5)
+            probe = subprocess.run(
+                ssh
+                + [
+                    "test -d /usr/lib/modules/$(uname -r) && cat /proc/sys/kernel/random/boot_id"
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0 and probe.stdout.strip() != before_boot:
+                break
+        else:
+            raise TimeoutError("Гость не загрузился с согласованными kernel/modules")
         run(
             ssh
             + [
@@ -253,6 +278,11 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
             str(root / "input.tar"),
             "packaging/arch/PKGBUILD",
             "tools/check_arch_package.py",
+            "tools/arch_package_lifecycle.sh",
+            "tools/compile_notices.py",
+            "tools/check_linux_notices.py",
+            "packaging/licenses",
+            "LICENSE",
             "tools/desktop_ui_smoke.py",
             "tools/desktop_smoke.py",
             "tools/engine_compile.py",
@@ -275,9 +305,15 @@ def execute(root: Path, evidence: Path, repo: Path, key: Path) -> None:
                 stdin=stream,
                 check=True,
             )
+        run(
+            ssh
+            + [
+                "su - builder -s /bin/bash -c 'rustup toolchain install 1.85.1 --profile minimal'"
+            ],
+            evidence / "toolchain.log",
+        )
         guest = """set -euo pipefail
 cd /home/builder/input/packaging/arch
-rustup toolchain install 1.85.1 --profile minimal
 export RUSTUP_TOOLCHAIN=1.85.1 CARGO_TARGET_DIR=/home/builder/task/target CARGO_BUILD_JOBS=1
 cat > /home/builder/task/makepkg.conf <<'CONF'
 source /etc/makepkg.conf
@@ -316,17 +352,9 @@ pacman -Q
         run(
             ssh
             + [
-                "set -e; cd /home/builder/input/packaging/arch; sha256sum PKGBUILD yonik-*.tar.gz *.pkg.tar.zst; bsdtar -xOf *.pkg.tar.zst .BUILDINFO; strings /home/builder/task/target/release/yonik-desktop | grep -F '0.1.0+eec7a56b6b03f2b022a87682f9097ce78b61fa0b'"
+                "set -e; cd /home/builder/input/packaging/arch; sha256sum PKGBUILD yonik-*.tar.gz *.pkg.tar.zst /home/builder/task/target/release/yonik-desktop /home/builder/task/target/release/yonik-helper /home/builder/task/target/release/yonik-worker; bsdtar -xOf *.pkg.tar.zst .BUILDINFO; strings /home/builder/task/target/release/yonik-desktop | grep -F '0.1.0+6cf65a4cf9760a7df68b8eee10f012770b38604d'"
             ],
             evidence / "binary-provenance.log",
-        )
-        run(
-            [
-                SLOT,
-                *ssh,
-                "su - builder -s /bin/bash -c 'set -e; rustup component add --toolchain 1.85.1 clippy rustfmt; cd /home/builder/input/packaging/arch/src/yonik-*/; export CARGO_TARGET_DIR=/home/builder/task/target CARGO_BUILD_JOBS=1 YONIK_BUILD_ID=0.1.0+eec7a56b6b03f2b022a87682f9097ce78b61fa0b; cargo +1.85.1 fmt --all -- --check; flock -s /home/builder/task cargo +1.85.1 clippy --locked --release --workspace --all-targets -- -D warnings'",
-            ],
-            evidence / "rust-validation.log",
         )
         run(
             ssh
@@ -334,6 +362,11 @@ pacman -Q
                 'set -e; cd /home/builder/input; python tools/check_arch_package.py packaging/arch/*.pkg.tar.zst; pacman -U --noconfirm packaging/arch/*.pkg.tar.zst; pacman -Qkk yonik; if helper_state=$(systemctl is-active yonik-helper.service); then exit 1; else test $? = 3 && test "$helper_state" = inactive; fi'
             ],
             evidence / "install.log",
+        )
+        run(
+            ssh
+            + ["bash /home/builder/input/tools/arch_package_lifecycle.sh installed"],
+            evidence / "integration.log",
         )
         run(ssh + ["install -d -m700 -o builder -g builder /home/builder/smoke-home"])
         run(
@@ -352,6 +385,10 @@ pacman -Q
                 stdout=stream,
                 check=True,
             )
+        run(
+            ssh + ["bash /home/builder/input/tools/arch_package_lifecycle.sh cycles"],
+            evidence / "lifecycle.log",
+        )
         run(
             [
                 SLOT,

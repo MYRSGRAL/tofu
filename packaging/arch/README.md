@@ -1,6 +1,6 @@
 # Arch/CachyOS x86_64
 
-Рецепт фиксирует исходники e33fa1908dfb3deb5434506341674de0b3a827b4.
+Рецепт фиксирует исходники 6cf65a4cf9760a7df68b8eee10f012770b38604d.
 SHA-256 получен скачиванием GitHub source archive, не вычислен из локального
 `git archive`. Для обновления менять revision, checksum и pkgver вместе; .SRCINFO генерировать при подготовке к публикации.
 Повторяемость здесь означает закреплённый вход и Cargo.lock; побитовая
@@ -12,7 +12,7 @@ SHA-256 получен скачиванием GitHub source archive, не выч
 mkdir -p /var/tmp/codex-myrs/transient/yonik-arch-build
 flock -s /var/tmp/codex-myrs/transient/yonik-arch-build env \
   CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/yonik-arch-build/target \
-  CARGO_BUILD_JOBS=2 makepkg --cleanbuild
+  CARGO_BUILD_JOBS=1 makepkg --cleanbuild
 ```
 
 Для переносимого архива использовать clean VM и generic x86-64 flags:
@@ -59,11 +59,16 @@ install без автозапуска, sysusers и D-Bus/polkit, Qt smoke на �
 проверенный engine registry, update/rollback и uninstall с контрольными БД/ключами
 и чужими сетевыми ресурсами. До этой матрицы P24 остаётся частичным.
 
-Изменение notices (planned): `package()` компилирует проверенный набор из
-`packaging/licenses` и устанавливает первичные bytes и inventory в
-`/usr/share/licenses/yonik`. Это изменение ещё не переводит закреплённые
-`_revision`/`sha256sums` с исторического eec7 на current main. Перед финальной
-сборкой нужны согласованные новый source archive, revision и checksum, независимый
-review нового recipe seal и functional merge. Старые ELF не являются новой сборкой.
-Генератор notices требует `python3` в build environment; согласование объявления
-этого build prerequisite в makedepends оставлено root (зависимости здесь не менялись).
+Notices компилируются из закреплённого source при сборке; Python объявлен в
+makedepends и устанавливается только в VM. Рецепт поставляет три Rust ELF;
+внешние core binaries остаются отдельной зависимостью и в архив не включены.
+`payload.list` генератора задаёт явный список license payload. Валидатор сверяет
+inventory и SHA-256 текстов с исходниками. Generated Qt resources находятся в OUT_DIR.
+
+Source freeze: main 6cf65a4. Незамёрженные #107 (maintenance) и #113 (Policy)
+исключены из этой source phase. Проверка пакета не означает полный P25 или
+финальную Linux acceptance; unresolved hashes трёх Qt archives не пересчитываются.
+
+Runner `tools/arch_clean_vm_build.py` использует только подписанный cache
+`local/validation/vm-base` под shared BSD lock; overlay и cloud-init принадлежат
+текущей задаче. Общий Rust slot занят только тяжёлой guest-сборкой.
