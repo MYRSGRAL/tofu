@@ -57,3 +57,8 @@ UI-ветка показа окна при `cleanup_failed` существова
   --features gui --all-targets -j1 -- -D warnings` (Clippy 0.1.85).
 - `clean.log`: удалены 6273 файла, 3.0 GiB. Активных ссылок процессов на task
   transient не осталось; пустой корень task удалён. Evidence и бинарник сохранены.
+
+Продолжение cleanup_failed gate на согласованном test-support backend hook:
+[отрицательный native Qt gate](2026-11-11-fr19-cleanup-negative.md).
+Отметка OPEN выше описывает frozen head 2f307ca; в продолжении Stop/Quit cleanup
+проверены, физическая Plasma-сессия по-прежнему OPEN.
