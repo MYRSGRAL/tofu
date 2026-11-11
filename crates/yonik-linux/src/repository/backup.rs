@@ -254,7 +254,38 @@ fn validate_schema(connection: &Connection, version: i64) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "backup_fault_tests.rs"]
+mod fault_tests;
+
+fn checkpoint(name: &str) -> Result<()> {
+    #[cfg(test)]
+    fault_tests::checkpoint(name)?;
+    let _ = name;
+    Ok(())
+}
+
 fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> {
+    let parent = destination.parent().ok_or(RepositoryError::UnsafePath)?;
+    if !destination.is_absolute()
+        || parent
+            .canonicalize()
+            .map_err(|_| RepositoryError::UnsafePath)?
+            != parent
+    {
+        return Err(RepositoryError::UnsafePath);
+    }
+    let meta = fs::symlink_metadata(parent).map_err(|_| RepositoryError::UnsafePath)?;
+    if meta.uid() != rustix::process::getuid().as_raw() || meta.mode() & 0o7777 != 0o700 {
+        return Err(RepositoryError::UnsafePath);
+    }
+    let directory = fs::File::open(parent).map_err(|_| RepositoryError::Storage)?;
+    rustix::fs::flock(
+        &directory,
+        rustix::fs::FlockOperation::NonBlockingLockExclusive,
+    )
+    .map_err(|_| RepositoryError::Conflict)?;
+    recover_staging(parent)?;
     if destination
         .try_exists()
         .map_err(|_| RepositoryError::UnsafePath)?
@@ -292,20 +323,6 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
     if total > BACKUP_LIMIT {
         return Err(RepositoryError::InvalidInput);
     }
-    // Проверка родителя назначения без резервирования самого публичного имени.
-    let parent = destination.parent().ok_or(RepositoryError::UnsafePath)?;
-    if !destination.is_absolute()
-        || parent
-            .canonicalize()
-            .map_err(|_| RepositoryError::UnsafePath)?
-            != parent
-    {
-        return Err(RepositoryError::UnsafePath);
-    }
-    let meta = fs::symlink_metadata(parent).map_err(|_| RepositoryError::UnsafePath)?;
-    if meta.uid() != rustix::process::getuid().as_raw() || meta.mode() & 0o7777 != 0o700 {
-        return Err(RepositoryError::UnsafePath);
-    }
     let connection = Connection::open_with_flags(
         source,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -342,6 +359,7 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         .open(&stage)
         .map_err(|_| RepositoryError::Storage)?;
     let result = (|| {
+        checkpoint("before-vacuum")?;
         // VACUUM INTO доступен без rusqlite backup feature; копирует ciphertext.
         connection
             .execute(
@@ -349,6 +367,18 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
                 [stage.to_str().ok_or(RepositoryError::UnsafePath)?],
             )
             .map_err(storage)?;
+        checkpoint("after-vacuum")?;
+        let candidate = Connection::open_with_flags(
+            &stage,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(storage)?;
+        candidate
+            .execute_batch("PRAGMA trusted_schema=OFF")
+            .map_err(storage)?;
+        validate(&candidate, key)?;
+        drop(candidate);
+        checkpoint("after-validation")?;
         let file = OpenOptions::new()
             .read(true)
             .open(&stage)
@@ -356,8 +386,10 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
         if file.metadata().map_err(|_| RepositoryError::Storage)?.len() > BACKUP_LIMIT {
             return Err(RepositoryError::InvalidInput);
         }
+        checkpoint("file-sync")?;
         file.sync_all().map_err(|_| RepositoryError::Storage)?;
         // hard_link публикует атомарно и никогда не заменяет существующий файл.
+        checkpoint("link")?;
         fs::hard_link(&stage, destination).map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 RepositoryError::Conflict
@@ -365,13 +397,39 @@ fn copy_closed(source: &Path, destination: &Path, key: &[u8; 32]) -> Result<()> 
                 RepositoryError::Storage
             }
         })?;
+        checkpoint("after-publication")?;
         Ok(())
     })();
     let cleanup = fs::remove_file(&stage).map_err(|_| RepositoryError::Storage);
     result?;
     cleanup?;
     // Ошибка здесь означает неопределённую durability уже опубликованного файла.
-    fs::File::open(parent)
-        .and_then(|f| f.sync_all())
-        .map_err(|_| RepositoryError::Storage)
+    checkpoint("directory-sync")?;
+    directory.sync_all().map_err(|_| RepositoryError::Storage)?;
+    checkpoint("after-directory-sync")
+}
+
+// Под flock каталога живой backup не может владеть staging. Удаляем только
+// зарезервированные имена и приватные regular files нашего UID; symlink не трогаем.
+fn recover_staging(parent: &Path) -> Result<()> {
+    for entry in fs::read_dir(parent).map_err(|_| RepositoryError::Storage)? {
+        let entry = entry.map_err(|_| RepositoryError::Storage)?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(nonce) = name.strip_prefix(".yonik-backup-") else {
+            continue;
+        };
+        if nonce.len() != 32 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let meta = fs::symlink_metadata(entry.path()).map_err(|_| RepositoryError::Storage)?;
+        if !meta.is_file()
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.mode() & 0o7777 != 0o600
+        {
+            return Err(RepositoryError::UnsafePath);
+        }
+        fs::remove_file(entry.path()).map_err(|_| RepositoryError::Storage)?;
+    }
+    Ok(())
 }
