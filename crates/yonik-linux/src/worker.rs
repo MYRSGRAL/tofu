@@ -129,13 +129,16 @@ const SEALS: SealFlags = SealFlags::WRITE
     .union(SealFlags::SHRINK)
     .union(SealFlags::SEAL);
 fn config_file() -> Result<File, WorkerError> {
-    Ok(File::from(
+    let file = File::from(
         memfd_create(
             "yonik-config",
             MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
         )
         .map_err(|_| WorkerError::Io)?,
-    ))
+    );
+    rustix::fs::fchmod(&file, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR)
+        .map_err(|_| WorkerError::Io)?;
+    Ok(file)
 }
 #[cfg(test)]
 fn sealed_config(bytes: &[u8]) -> Result<File, WorkerError> {
@@ -154,7 +157,7 @@ fn validate_file(file: &File, length: usize, expected: [u8; 32]) -> Result<(), W
         return Err(WorkerError::Protocol);
     }
     let mut hash = Hasher::new();
-    let mut buffer = [0; 65536];
+    let mut buffer = zeroize::Zeroizing::new([0; 65536]);
     let mut offset = 0;
     while offset < length {
         let n = file
@@ -238,9 +241,15 @@ impl WorkerPayload {
             binary.file.metadata().map_err(|_| WorkerError::Io)?.len() as usize,
             header.binary_hash,
         )?;
-        lease
-            .resize(header.length)
-            .map_err(|_| WorkerError::Limit)?;
+        let retained = header
+            .length
+            .checked_mul(if binary.engine == Engine::SingBox {
+                2
+            } else {
+                1
+            })
+            .ok_or(WorkerError::Limit)?;
+        lease.resize(retained).map_err(|_| WorkerError::Limit)?;
         Ok(Self {
             binary,
             config,
@@ -252,7 +261,7 @@ impl WorkerPayload {
         ConfigDigest::new(self.header.config_hash)
     }
     pub fn retained_bytes(&self) -> usize {
-        self.header.length
+        self._lease.bytes()
     }
     pub fn engine(&self) -> Engine {
         self.header.engine
@@ -435,6 +444,57 @@ fn receive(stream: &UnixStream, mode: WorkerMode) -> Result<(BinarySnapshot, Fil
             .map_err(|_| WorkerError::Protocol)?;
     Ok((binary, config))
 }
+struct WorkerConfig {
+    file: File,
+    _lease: Option<ByteLease>,
+}
+fn worker_owned_config(
+    source: &File,
+    budget: &crate::helper::memory::ByteBudget,
+) -> Result<WorkerConfig, WorkerError> {
+    let metadata = source.metadata().map_err(|_| WorkerError::Protocol)?;
+    let length = usize::try_from(metadata.len()).map_err(|_| WorkerError::Limit)?;
+    if !metadata.is_file()
+        || length == 0
+        || length > MAX_ARTIFACT_BYTES
+        || !fcntl_get_seals(source)
+            .map_err(|_| WorkerError::Protocol)?
+            .contains(SEALS)
+    {
+        return Err(WorkerError::Protocol);
+    }
+    let lease = budget.reserve(length).map_err(|_| WorkerError::Limit)?;
+    let mut target = BoundedConfig::new()?;
+    rustix::fs::fchmod(
+        &target.file,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .map_err(|_| WorkerError::Io)?;
+    let mut buffer = zeroize::Zeroizing::new([0u8; 65536]);
+    let mut offset = 0;
+    while offset < length {
+        let n = source
+            .read_at(&mut buffer[..65536.min(length - offset)], offset as u64)
+            .map_err(|_| WorkerError::Io)?;
+        if n == 0 {
+            return Err(WorkerError::Protocol);
+        }
+        target
+            .write_all(&buffer[..n])
+            .map_err(|_| WorkerError::Io)?;
+        offset += n;
+    }
+    let (file, copied, hash) = target.finish()?;
+    if copied != length {
+        return Err(WorkerError::Protocol);
+    }
+    validate_file(source, length, hash)?;
+    validate_file(&file, length, hash)?;
+    Ok(WorkerConfig {
+        file,
+        _lease: Some(lease),
+    })
+}
 fn command(binary: &BinarySnapshot) -> Command {
     use std::os::fd::AsRawFd;
     let mut command = Command::new(format!("/proc/self/fd/{}", binary.file.as_raw_fd()));
@@ -524,8 +584,18 @@ pub async fn serve(mode: WorkerMode) -> Result<(), WorkerError> {
 }
 async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), WorkerError> {
     let (binary, config) = receive(&stream, mode)?;
+    // Исходный FD уже проверен receive: type/seals/declared size/SHA-256.
+    // Helper удерживает отдельный global reserve до подтверждённого пустого cgroup.
+    let config = if binary.engine == Engine::SingBox {
+        worker_owned_config(&config, config_budget())?
+    } else {
+        WorkerConfig {
+            file: config,
+            _lease: None,
+        }
+    };
     if mode == WorkerMode::Check {
-        check(&binary, &config).await?;
+        check(&binary, &config.file).await?;
     }
     let mut ack = [0; 9];
     ack[..4].copy_from_slice(b"YNKA");
@@ -537,7 +607,7 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
     stream.write_all(&ack).map_err(|_| WorkerError::Io)?;
     if mode == WorkerMode::Run {
         drop(stream);
-        let error = configured(&binary, &config, false)?.exec();
+        let error = configured(&binary, &config.file, false)?.exec();
         let _ = error;
         return Err(WorkerError::Exec);
     }

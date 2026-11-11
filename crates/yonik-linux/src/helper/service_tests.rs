@@ -568,3 +568,57 @@ async fn stop_outer_wait_exposes_timeout_and_preserves_cancellation() {
         ServiceError::Cancelled
     );
 }
+
+#[test]
+fn policy_profile_closed_codec() {
+    let mut frame: serde_json::Value = serde_json::from_str(&profile_frame()).unwrap();
+    frame["mode"] = serde_json::json!("system_profile_policy");
+    frame["policy"] = serde_json::json!({"version":1,"default_action":"proxy","user_rules":[],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]});
+    let text = frame.to_string();
+    assert!(matches!(
+        parse(&prepare_message(&text)),
+        Ok(Request::PrepareProfile(_))
+    ));
+    for field in ["policy", "server"] {
+        let mut invalid = frame.clone();
+        invalid[field] = serde_json::json!([]);
+        assert!(parse(&prepare_message(&invalid.to_string())).is_err());
+    }
+    let mut extra = frame.clone();
+    extra["policy"]["unknown"] = serde_json::json!(true);
+    assert!(parse(&prepare_message(&extra.to_string())).is_err());
+    assert!(
+        parse(&prepare_message(&text.replacen(
+            "\"default_action\":",
+            "\"version\":1,\"default_action\":",
+            1
+        )))
+        .is_err()
+    );
+    frame["policy"]["user_rules"] = serde_json::json!([{"id":1,"enabled":true,"action":"direct","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":["/usr/bin/client"]}]);
+    assert!(parse(&prepare_message(&frame.to_string())).is_ok());
+    frame["policy"]["user_rules"][0]["executable_paths"] = serde_json::json!([["/usr/bin/client"]]);
+    assert!(parse(&prepare_message(&frame.to_string())).is_err());
+    assert!(parse(&prepare_message(&text.replace("proxy", &"x".repeat(65536)))).is_err());
+}
+
+#[tokio::test]
+async fn policy_profile_private_bus_roundtrip_and_one_shot() {
+    let f = Fixture::new().await;
+    let mut frame: serde_json::Value = serde_json::from_str(&profile_frame()).unwrap();
+    frame["mode"] = serde_json::json!("system_profile_policy");
+    frame["policy"] = serde_json::json!({"version":1,"default_action":"proxy","user_rules":[],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]});
+    f.allowed.store(false, Ordering::SeqCst);
+    assert!(f.call("Prepare", &frame.to_string()).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 0);
+    f.allowed.store(true, Ordering::SeqCst);
+    let prepared = f.call("Prepare", &frame.to_string()).await.unwrap();
+    let apply = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    assert!(f.call("Apply", &apply).await.is_ok());
+    assert!(f.call("Apply", &apply).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 1);
+    frame["policy"]["user_rules"] = serde_json::json!([[]]);
+    assert!(f.call("Prepare", &frame.to_string()).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 1);
+    f.shutdown().await;
+}
