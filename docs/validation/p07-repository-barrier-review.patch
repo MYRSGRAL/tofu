@@ -1,0 +1,44 @@
+--- a/crates/yonik-linux/src/repository.rs
++++ b/crates/yonik-linux/src/repository.rs
+@@ -654,7 +654,7 @@
+         let version: i64 = connection
+             .query_row("PRAGMA user_version", [], |r| r.get(0))
+             .map_err(storage)?;
+-        if version > 3 {
++        if version > 4 {
+             return Err(RepositoryError::UnsupportedVersion);
+         }
+         if version < 0 {
+@@ -2296,6 +2296,13 @@
+         }).await
+     }
+     pub async fn save_routing_draft(&self, expected: i64, payload: Vec<u8>) -> Result<i64> {
++        self.save_routing_draft_format(expected, payload, false).await
++    }
++    /// Вызывается после typed Draft V2 storage validation.
++    pub async fn save_routing_draft_v2(&self, expected: i64, payload: Vec<u8>) -> Result<i64> {
++        self.save_routing_draft_format(expected, payload, true).await
++    }
++    async fn save_routing_draft_format(&self, expected: i64, payload: Vec<u8>, v2: bool) -> Result<i64> {
+         if expected < 0 || payload.len() > 262144 {
+             return Err(RepositoryError::InvalidInput);
+         }
+@@ -2309,6 +2316,7 @@
+                 tx.execute("UPDATE routing_draft SET revision=?1,payload=?2 WHERE singleton=1 AND revision=?3", params![revision, encrypted, expected]).map_err(storage)?
+             };
+             if changed != 1 { return Err(RepositoryError::Conflict); }
++            if v2 { tx.execute_batch("PRAGMA user_version=4;").map_err(storage)?; }
+             tx.commit().map_err(storage)?;
+             Ok(revision)
+         }).await
+--- a/crates/yonik-linux/src/repository/backup.rs
++++ b/crates/yonik-linux/src/repository/backup.rs
+@@ -75,7 +75,7 @@
+     let version: i64 = connection
+         .query_row("PRAGMA user_version", [], |r| r.get(0))
+         .map_err(storage)?;
+-    if !(1..=3).contains(&version) {
++    if !(1..=4).contains(&version) {
+         return Err(RepositoryError::UnsupportedVersion);
+     }
+     validate_schema(connection, version)?;
