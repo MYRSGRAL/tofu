@@ -998,26 +998,31 @@ ApplicationWindow {
     }
     Component {
         id: aboutPanel
-        ColumnLayout {
-            spacing: 18
-            SectionTitle { text: "yonik" }
-            SmallLabel { text: window.tr("Открытый исходный код", "Open source") }
-            Rectangle {
-                Layout.fillWidth: true; implicitHeight: buildDetails.implicitHeight + 32
-                color: window.surface; radius: 16
-                ColumnLayout {
-                    id: buildDetails
-                    anchors.fill: parent; anchors.margins: 16; spacing: 8
-                    SmallLabel { text: window.tr("СБОРКА", "BUILD"); font.pixelSize: 11; font.letterSpacing: 2 }
-                    PlainLabel { objectName: "buildIdLabel"; Layout.fillWidth: true; text: window.state.build_id || window.tr("Локальная сборка", "Local build"); font.pixelSize: 13; wrapMode: Text.WrapAnywhere }
+        PanelScroll {
+            id: aboutScroll
+            ColumnLayout {
+                width: aboutScroll.availableWidth
+                spacing: 18
+                SectionTitle { text: "yonik" }
+                SmallLabel { text: window.tr("Открытый исходный код", "Open source") }
+                Rectangle {
+                    Layout.fillWidth: true; implicitHeight: buildDetails.implicitHeight + 32
+                    color: window.surface; radius: 16
+                    ColumnLayout {
+                        id: buildDetails
+                        anchors.fill: parent; anchors.margins: 16; spacing: 8
+                        SmallLabel { text: window.tr("СБОРКА", "BUILD"); font.pixelSize: 11; font.letterSpacing: 2 }
+                        PlainLabel { objectName: "buildIdLabel"; Layout.fillWidth: true; text: window.state.build_id || window.tr("Локальная сборка", "Local build"); font.pixelSize: 13; wrapMode: Text.WrapAnywhere }
+                    }
                 }
+                RowLayout {
+                    PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
+                    HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея окно остаётся открытым для управления.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, the window stays open for control.") }
+                }
+                NoticesView { Layout.fillWidth: true; english: window.state.language === "en" }
+                ActionButton { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
+                Item { Layout.fillHeight: true }
             }
-            RowLayout {
-                PlainLabel { Layout.fillWidth: true; text: window.tr("Закрытие и трей", "Window and tray") }
-                HelpButton { explanation: window.tr("С доступным треем закрытие скрывает окно; выход — в меню трея. Без трея окно остаётся открытым для управления.", "With a tray, closing hides the window; quit from the tray menu. Without a tray, the window stays open for control.") }
-            }
-            ActionButton { text: window.tr("Перечитать состояние", "Reload state"); enabled: window.state.ready && !window.state.busy; onClicked: window.send({command: "reload"}) }
-            Item { Layout.fillHeight: true }
         }
     }
     Component {

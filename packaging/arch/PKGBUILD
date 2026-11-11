@@ -32,6 +32,12 @@ build() {
 
 package() {
     cd "$srcdir/yonik-$_revision"
+    python3 tools/compile_notices.py "$srcdir/yonik-notices"
+    install -dm755 "$pkgdir/usr/share/licenses/yonik"
+    for notice in "$srcdir/yonik-notices/"*; do
+        [[ "${notice##*/}" == notices.qrc || "$notice" == *.qml ]] && continue
+        install -m644 "$notice" "$pkgdir/usr/share/licenses/yonik/"
+    done
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-desktop" "$pkgdir/usr/bin/yonik-desktop"
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-helper" "$pkgdir/usr/lib/yonik/yonik-helper"
     install -Dm755 "$CARGO_TARGET_DIR/release/yonik-worker" "$pkgdir/usr/lib/yonik/yonik-worker"

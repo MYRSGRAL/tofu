@@ -69,15 +69,27 @@ fn main() {
     {
         use cxx_qt_build::{CxxQtBuilder, QmlModule};
 
+        let output =
+            std::path::PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("notices");
+        let status = Command::new("python3")
+            .arg("../../tools/compile_notices.py")
+            .arg(&output)
+            .status()
+            .expect("Не удалось запустить генератор notices");
+        assert!(status.success(), "Не удалось проверить notices");
+        println!("cargo:rerun-if-changed=../../packaging/licenses");
+        println!("cargo:rerun-if-changed=../../tools/compile_notices.py");
         CxxQtBuilder::new_qml_module(
             QmlModule::new("cloud.highpriority.yonik")
                 .qml_file("qml/Main.qml")
                 .qml_file("qml/DiagnosticsExport.qml")
-                .qml_file("qml/LogsView.qml"),
+                .qml_file("qml/LogsView.qml")
+                .qml_file("qml/NoticesView.qml"),
         )
         .file("src/bridge.rs")
         .cpp_file("src/application.cpp")
         .qrc("resources.qrc")
+        .qrc(output.join("notices.qrc"))
         .include_dir("src")
         .qt_module("Quick")
         .qt_module("Widgets")

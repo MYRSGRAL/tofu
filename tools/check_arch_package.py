@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import json
 import shlex
 import subprocess
 import tarfile
@@ -80,6 +81,24 @@ def expected_files(root: Path) -> dict[str, tuple[int, bytes | None]]:
         (root / "crates/yonik-desktop/assets/yonik.svg").read_bytes(),
     )
     files["usr/share/applications/cloud.highpriority.yonik.desktop"] = (0o644, DESKTOP)
+    from compile_notices import collect
+
+    entries, texts = collect(root)
+    prefix = "usr/share/licenses/yonik/"
+    for digest, data in texts.items():
+        files[prefix + digest] = (0o644, data)
+    files[prefix + "index.json"] = (
+        0o644,
+        json.dumps(entries, ensure_ascii=False).encode("utf-8"),
+    )
+    for name, source in {
+        "inventory.json": "packaging/licenses/linux-inventory.json",
+        "go-sources.json": "packaging/licenses/composition/go-sources.json",
+        "SCOPE.md": "packaging/licenses/composition/P25-SCOPE.md",
+        "SOURCE-OBLIGATIONS.md": "packaging/licenses/SOURCE-OBLIGATIONS.md",
+        "LICENSE": "LICENSE",
+    }.items():
+        files[prefix + name] = (0o644, (root / source).read_bytes())
     return files
 
 
@@ -105,7 +124,7 @@ def validate_archive(path: Path, root: Path) -> None:
                 ):
                     raise ValueError(f"Недопустимый путь: {name}")
                 seen.add(name)
-                if len(seen) > 128 or entry.size > 512 * 1024 * 1024:
+                if len(seen) > len(expected) + 128 or entry.size > 512 * 1024 * 1024:
                     raise ValueError("Превышен лимит пакетного архива")
                 if entry.uid != 0 or entry.gid != 0 or entry.mode & 0o7022:
                     raise ValueError(f"Небезопасные права: {name}")
@@ -159,7 +178,7 @@ def validate_recipe(path: Path) -> None:
     функции и aliases делают такой анализ ненадёжным. Hash фиксирует целиком
     рецепт без hooks, автозапуска и сетевой установки engine.
     """
-    approved = "2cb9e296901b0f72baa230d1ec4c680e94d61ec4c453de136ddab68d6ea4be7a"
+    approved = "c69543a30b87504b314b2de38aba993cc180c54a29b19c2567eec2ed82e1ed98"
     if hashlib.sha256(path.read_bytes()).hexdigest() != approved:
         raise ValueError(
             "Изменён рецепт: требуется независимая проверка и обновление seal"
