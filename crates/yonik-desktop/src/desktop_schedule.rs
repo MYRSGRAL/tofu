@@ -50,6 +50,20 @@ impl DesktopSchedule {
             deferred: None,
         })
     }
+    pub fn replacement(&self) -> Result<Self> {
+        let mut replacement = Self::new()?;
+        replacement.policy = self.policy;
+        replacement.visible = self.visible;
+        replacement.interval = self.interval;
+        replacement
+            .runtime
+            .set_interval(self.interval)
+            .map_err(|_| DesktopError("invalid_input"))?;
+        replacement.background_enabled = self.background_enabled;
+        replacement.window_until = self.window_until;
+        replacement.next_window = self.next_window;
+        Ok(replacement)
+    }
     pub fn policy(&self) -> SubscriptionPolicy {
         SubscriptionPolicy {
             ui_visible: self.visible,
@@ -502,6 +516,60 @@ mod tests {
             .unwrap();
         service.close().await.unwrap();
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn замена_lease_сохраняет_барьер_следующего_окна() {
+        let mut owner = DesktopSchedule::new().expect("scheduler");
+        owner.interval = Duration::from_secs(172800);
+        owner
+            .runtime
+            .set_interval(owner.interval)
+            .expect("интервал");
+        owner.background_enabled = true;
+        owner.policy.online = true;
+        owner.runtime.schedule(1, 1, Duration::ZERO).expect("due");
+        owner.open_window(Duration::ZERO);
+        owner.window_until = None;
+        let mut replacement = owner.replacement().expect("новый runtime");
+        // Следующая итерация actor восстанавливает настройки, но не временной барьер.
+        replacement.background_enabled = true;
+        replacement.interval = owner.interval;
+        replacement
+            .runtime
+            .set_interval(owner.interval)
+            .expect("интервал");
+        replacement
+            .runtime
+            .schedule(2, 1, Duration::ZERO)
+            .expect("overdue");
+        assert_eq!(replacement.deadline(), Some(Duration::from_secs(172800)));
+        replacement.open_window(Duration::from_secs(61));
+        assert_eq!(replacement.window_until, None);
+    }
+
+    #[test]
+    fn замена_lease_сохраняет_настройки_и_не_продлевает_активное_окно() {
+        let mut owner = DesktopSchedule::new().expect("scheduler");
+        owner.interval = Duration::from_secs(172800);
+        owner
+            .runtime
+            .set_interval(owner.interval)
+            .expect("интервал");
+        owner.background_enabled = true;
+        owner.policy.online = true;
+        owner.runtime.schedule(1, 1, Duration::ZERO).expect("due");
+        owner.open_window(Duration::ZERO);
+        let mut replacement = owner.replacement().expect("новый runtime");
+        assert!(replacement.background_enabled);
+        assert_eq!(replacement.interval, owner.interval);
+        assert_eq!(replacement.window_until, Some(Duration::from_secs(60)));
+        replacement
+            .runtime
+            .schedule(2, 1, Duration::ZERO)
+            .expect("due");
+        replacement.open_window(Duration::from_secs(30));
+        assert_eq!(replacement.window_until, Some(Duration::from_secs(60)));
     }
 
     #[test]

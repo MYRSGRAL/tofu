@@ -50,3 +50,10 @@ final-desktop-unit.log, final-desktop-backend.log, linux-unit.log,
 linux-runtime.log, domain.log, clippy85-final.log. RED logs: red-interval.log,
 red-window.log, red-manual.log. QML успешно разобран qmlformat; GUI interaction
 и физические power/CPU/wakeup измерения не выполнялись. Полный GPOWER не заявляется.
+
+
+## Замена runtime при смене Proxy lease
+
+P2: прежняя replacement-ветка копировала только policy/visible, теряя настройки и монотонный next_window. Две unit-регрессии воспроизвели RED: потерю барьера после закрытого окна и потерю настроек/срока текущего окна. Новый DesktopSchedule::replacement переносит interval и настройку runtime, background_enabled, неизменные window_until/next_window, policy и visibility. Смена lease не продлевает общее окно и не позволяет открыть следующее раньше интервала. Новый runtime загружает актуальное persisted schedule после shutdown ACK старого.
+
+GREEN Rust1.85.1: 34 library + 36 backend, один прежний ignored; pinned Clippy all-targets desktop/linux/subscription и fmt PASS. Это unit/direct-call regression replacement-метода и проверка production branch связи, не новый реальный Proxy lease traffic gate. Ранее сохранённый private-bus acceptance не переписывался. Evidence `/home/myrs/projects/yonik/local/validation/pr102-window-replacement/`; manifest записан после проверок.

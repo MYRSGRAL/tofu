@@ -2645,11 +2645,7 @@ async fn run(
             if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
                 actor.state.command_error(true, "storage");
             }
-            let policy = scheduled.policy;
-            let visible = scheduled.visible;
-            if let Ok(mut replacement) = DesktopSchedule::new() {
-                replacement.policy = policy;
-                replacement.visible = visible;
+            if let Ok(mut replacement) = scheduled.replacement() {
                 if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await {
                     actor.state.command_error(true, error.key());
                 }
