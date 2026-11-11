@@ -30,6 +30,7 @@ use yonik_application::ConfigDigest;
 use yonik_engine::{CompiledConfig, Engine};
 
 pub mod anchor_exchange;
+pub mod role_handoff;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const HEADER_LEN: usize = 80;

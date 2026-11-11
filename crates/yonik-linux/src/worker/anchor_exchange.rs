@@ -57,6 +57,64 @@ impl Challenge {
         pid: u32,
         uid: u32,
     ) -> Result<NamespaceObservation, WorkerError> {
+        self.exchange_marker(stream, pid, uid, OFFER)
+    }
+    /// Binding формируется из уже свежего namespace challenge. Поля server остаются
+    /// наблюдением issuer до отдельного canonical PID1/kernel admission.
+    pub fn role_binding(
+        &self,
+        epoch: u64,
+        server_pid: u32,
+        server_start: u64,
+    ) -> Result<super::role_handoff::Binding, WorkerError> {
+        let binding = super::role_handoff::Binding {
+            nonce: self.bytes[8..40]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            digest: self.bytes[40..72]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            epoch,
+            session: self.bytes[72..88]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            generation: u64::from_be_bytes(
+                self.bytes[88..96]
+                    .try_into()
+                    .map_err(|_| WorkerError::Protocol)?,
+            ),
+            invocation: self.bytes[96..112]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            server_pid,
+            server_start,
+        };
+        binding.record()?;
+        Ok(binding)
+    }
+    /// Private v2 negotiation доступна только за непроизводимым production gate.
+    pub fn exchange_for_handoff(
+        self,
+        _permit: &super::role_handoff::ProductionPermit,
+        binding: &super::role_handoff::Binding,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+    ) -> Result<NamespaceObservation, WorkerError> {
+        let expected =
+            self.role_binding(binding.epoch, binding.server_pid, binding.server_start)?;
+        if expected.record()? != binding.record()? {
+            return Err(WorkerError::Protocol);
+        }
+        self.exchange_marker(stream, pid, uid, super::role_handoff::OFFER)
+    }
+    fn exchange_marker(
+        self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+        offer: &[u8; 8],
+    ) -> Result<NamespaceObservation, WorkerError> {
         use rustix::net::{AddressFamily, SocketFlags, SocketType, socketpair};
         stream
             .set_write_timeout(Some(
@@ -84,12 +142,12 @@ impl Challenge {
         }
         if sendmsg(
             stream,
-            &[IoSlice::new(OFFER)],
+            &[IoSlice::new(offer)],
             &mut ancillary,
             SendFlags::NOSIGNAL,
         )
         .map_err(|_| WorkerError::Io)?
-            != OFFER.len()
+            != offer.len()
         {
             return Err(WorkerError::Protocol);
         }
