@@ -224,3 +224,6 @@ mod tests {
 
 /// Независимая библиотека private owner receiver.
 pub mod broker;
+
+/// Production NativeBroker wire; не fixture YOB1 ABI.
+pub mod native_wire;
