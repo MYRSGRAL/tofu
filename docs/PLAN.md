@@ -7,7 +7,7 @@
 
 ## Как считаем готовность
 
-Всего **26 пунктов**: **3 готовы**, **21 частично выполнен**, **2 не начаты**.
+Всего **26 пунктов**: **3 готовы**, **21 частично выполнен**, **2 отложены (Android)**.
 Остаётся полностью закрыть **23 пункта**, включая отложенные Android P03/P26.
 Это учёт полных критериев, а не процент реализации Linux: частичные пункты
 различаются по объёму и не пересчитываются в процент готовности продукта.
@@ -23,62 +23,27 @@
 слиянием согласно действующим договорённостям. Нельзя закрыть весь план только
 по наличию GUI, количества unit-тестов или namespace-прототипа.
 
-## Текущая очередь Linux — 11 ноября 2026
+## Зафиксированный acceptance-срез: main b9e5071, 11 ноября 2026
 
-Android P03/P26 отложены пользователем. Следующий порядок относится только к Linux;
-новые Android-инструменты и зависимости не устанавливаются. Принятый main
-`d0a281b` содержит принятые ниже срезы. Открытые #83/#85/#87/#88
-в этот результат не входят.
+[Полный индекс Linux](validation/2026-11-11-linux-acceptance-index.md) связывает
+все FR, P01…P26, gates, D/A/T, P-01…P-08 и leaves исходных контрактов с evidence
+и остатком. Он имеет приоритет над исторической очередью ниже. Linux done не
+заявлен; 3/26 (11,5%) сохраняется, P20 исправлен на частичный, Android P03/P26
+отложен без изменения знаменателя.
 
-- [Системный runtime #49](validation/2026-11-10-system-session-matrix.md)
-  прошёл изолированную libtest-матрицу 12/12: оба ядра,
-  TCP/UDP IPv4/IPv6, kill switch on/off и stop/restart/worker_exit. Это отдельное
-  evidence от [production helper #73](validation/2026-11-10-production-helper-vm.md):
-  его actual 4/4 относится к Xray/VLESS с kill switch, авторизации и восстановлению.
-  GUI → production helper, полный transport обоих ядер и минимальные права ещё
-  не приняты вместе. `system_tun:false` сохраняется.
-- [Scheduler в DesktopHost](validation/2026-11-10-desktop-subscription-scheduler.md),
-  [persisted due/CAS](validation/2026-11-10-persisted-subscription-due.md) и
-  [private-bus reconnect](validation/2026-11-10-desktop-private-bus.md) реализованы.
-  Остаются фоновые окна и физическая энергоприёмка; private bus не заменяет её.
-- Каталог приложений и draft-редактор приняты, включая
-  [revision/ACK после Stop](validation/2026-11-10-routing-cancel-ack.md).
-  Нужны UI диагностики пересечений/объяснения маршрута и actual Apply.
-- [Batch GUI](validation/2026-11-10-batch-gui/unavailable-favorite.md) принят:
-  10 000 профилей, 30 000 TCP-соединений, network epoch/cancel и исчезнувшее
-  избранное. Это не измерение плавности в живой Plasma.
-- Рабочие native Real/Fake-IP и IPv6 реализованы;
-  [disabled-family oracle](validation/2026-11-11-dns-family-gate-review.md) проверен
-  отрицательной мутацией. TTL/epochs, exclusions, network reset и системный G-DNS
-  остаются открытыми. [G-APP baseline](validation/2026-11-11-g-app.md) подтверждает
-  executable-маршруты; dedicated-UID admission, упаковки/PID reuse и owner-cost
-  требуют продолжения.
-- Приняты [ru-direct snapshots/rollback](validation/2026-11-10-preset-snapshots.md),
-  [backup schema/replay checks](validation/2026-11-10-storage-backup.md),
-  [Secret Service failure matrix](validation/2026-11-10-secret-service-failures.md),
-  [active SOCKS tray](validation/2026-11-10-active-tray.md) и
-  [74-кодовый RU/EN каталог](validation/2026-11-11-p11-message-catalog.md).
-  Product wiring, настоящие failure paths, runtime log UI и live KDE gates
-  учитываются отдельно от этих срезов.
-- [Clean Arch build](validation/2026-11-10-arch-clean-build.md) доказан для source
-  `eec7a56`, который предшествует новым auth/TUN fixes. Финальная интегрированная
-  поставка требует свежей фиксированной базы и всех системных проверок.
-  Rust notices содержат 225 packages без missing license; exact ELF/Qt/Go
-  composition/provenance остаётся отдельной незавершённой приёмкой.
+Приняты #90 production CONFIG0600 12/12 на frozen 8ae373f (не #49 libtest),
+#101 OFD, #114 native DNS partial, #107 6201cbe, #117 0ca6780, #118 b9e5071.
+Открытые #109/#112/#115/#119–#123 учитываются отдельно от main; #91 остаётся
+историческим открытым snapshot. Merge/CI/hash не заменяют runtime-приёмку.
+Приоритет: integrated production Apply и domain/app provenance, полный DNS/private
+lifecycle и итоговая поставка. По уточнению пользователя после #125 узкие
+Go-интеграции обоих закреплённых ядер с Rust broker/TUN FD и локальный
+`yonik-nsfs` adapter с Cargo edge явно разрешены; ожидание этих разрешений
+больше не блокирует работу. Root возобновил #122 anchor; это не runtime proof.
+Физические G-UI/G-POWER пользователь пока отложил: они остаются недоказанными,
+без waiver или PASS; разблокировка KDE и hardware-counter permissions не заявлены.
 
-Сейчас независимы четыре направления: System GUI recovery guard (#88), production
-G-APP/helper admission, composition/notices (#85) и P-04 ресурсная матрица
-импорта/компиляции 1x/10x. Общие backend/helper/DNS контракты имеют одного writer.
-Следом после освобождения UI идут редактор diagnostics и журнал фактических событий;
-после стабилизации host/DNS — полная Linux-матрица и integrated packaging.
-Слияние каждого PR требует независимого review и зелёного CI на его точном head.
-Число слитых PR не заменяет закрытие полного Pxx или FR.
-
-## История первой очереди (10 ноября 2026)
-
-Следующий раздел сохранён как история начальной выдачи. Формулировки «следующий»,
-«ещё нужен» и Android-порядок в нём не являются текущими заданиями; актуальные
-остатки указаны выше и в таблицах P01–P26.
+## Историческая очередь (10 ноября; не текущий статус)
 
 Продолжается полное выполнение спецификации по
 [плану волн](superpowers/plans/2026-11-10-spec-completion-waves.md).
@@ -171,7 +136,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | --- | --- | --- | --- |
 | P01 | Требования и архитектурные контракты | Готов | Зафиксированы FR, сетевые инварианты, границы компонентов, Android-риски и бюджеты. Evidence: [требования](specs/requirements.md), [приёмка](specs/validation-and-roadmap.md). Реализация gates считается отдельно. |
 | P02 | Переносимая библиотека: Android compile-check | Готов | Общая Rust-часть компилируется для `aarch64-linux-android` без Linux-адаптеров; проверка включена в CI. Evidence: [snapshots](validation/2026-11-09-subscription-snapshots.md), [workflow](../.github/workflows/check.yml). Это не Android-приложение. |
-| P03 | Технический Android-host / G-ANDROID | Не начат | Оба engine через FFI, TUN FD/protect, TCP/UDP, stop/revoke, lifecycle и package callbacks; закреплённые wrappers. Остаток — runtime-host и измеренные результаты. [Контракт](specs/platforms.md). |
+| P03 | Технический Android-host / G-ANDROID | Отложен | Оба engine через FFI, TUN FD/protect, TCP/UDP, stop/revoke, lifecycle и package callbacks; закреплённые wrappers. Остаток — runtime-host и измеренные результаты. [Контракт](specs/platforms.md). |
 | P04 | Импорт URI/JSON/Base64 и ручной ввод | Частично | Есть ограниченный parser, сохранение исходника и review. Остаются все требуемые варианты ввода и табличные/property/fuzz-проверки размеров, вложенности, IDNA/IP и неизвестных опций. [Evidence](validation/2026-11-09-subscription-import.md), [тесты](../crates/yonik-import/tests). |
 | P05 | Подписки, обновления и идентичность профилей | Частично | CAS, rename/delete, отмена, HWID и последний snapshot реализованы. Завершить proxy-загрузку без скрытого DIRECT и полную матрицу изменения credentials/пустого/частичного ответа. Плановые обновления — P10. [Snapshots](validation/2026-11-09-subscription-snapshots.md), [identity](validation/2026-11-09-profile-identities.md). |
 | P06 | Зашифрованное хранение, миграции и восстановление | Частично | Приняты encrypted repository/CAS, private-bus Secret Service failure matrix и maintenance backup/restore с schema/replay validation. Остаются полный crash/fsync fault injection и реальная login-session приёмка; legacy data/key domains сохраняются. [Backup](validation/2026-11-10-storage-backup.md), [keyring](validation/2026-11-10-secret-service-failures.md). |
@@ -185,10 +150,10 @@ Arch-пакет и ранний Android gate. Завершение волны н
 
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
-| P12 | Privileged helper и владение ресурсами | Частично | Production helper executable/system bus/polkit/TUN sandbox, typed client и recovery приняты отдельными срезами. Actual Xray protected4/4 не доказывает combined GUI/оба ядра/full transport. Нужны policy-bearing admission при минимальных правах, host topology reconciliation и полная установленная сессия с cleanup. [Production evidence](validation/2026-11-10-production-helper-vm.md), [IPC](specs/helper-service.md). |
-| P13 | Системный TUN обоих ядер / G-LINUX | Частично | [SystemSessionHost](validation/2026-11-10-system-session-matrix.md) прошёл изолированную libtest-матрицу12/12 обоих ядер/kill-switch/stop/restart/worker_exit/TCPUDPv4v6. Production helper Xray4/4 — отдельный ограниченный набор. Нужны combined GUI/production worker/политика/minimal privileges и полная transport/DNS матрица; system_tun:false сохраняется. [Production границы](validation/2026-11-10-production-helper-vm.md). |
-| P14 | DNS/Fake DNS / G-DNS | Частично | Единый DnsPolicy и рабочие native Real/Fake-IP IPv4/IPv6 обоих ядер реализованы, unknown mappings и disabled-family oracle проверены. TTL/epochs, positive exclusions, network reset, private DNS runtime revocation и системный D-01…D-07 ещё не приняты. [Evidence](validation/2026-11-11-dns-family-gate-review.md). |
-| P15 | Атрибуция приложений / G-APP | Частично | Приняты реальные executable/CIDR маршруты обоих ядер в изолированном стенде. Dedicated worker UID/minimal privileges, policy admission, packaging/PID reuse и стоимость owner lookup ещё не приняты. [Evidence](validation/2026-11-11-g-app.md). |
+| P12 | Privileged helper и владение ресурсами | Частично | Авторизация, [реестр](specs/helper-trusted-registry.md), [одноразовые artifacts](specs/helper-prepared-requests.md) и [бюджет](specs/helper-memory-budget.md) существуют. [Nftables executor](specs/helper-nftables-executor.md) и [правила блокировки](specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. [IPC v1, авторизованный Apply/Unlock и cgroup fence](specs/helper-service.md) реализованы и локально проверены с actual nft; сервис ещё не установлен. [Persistent TUN executor](specs/helper-owned-tun.md) локально проверен, но ещё не связан с session. [Адреса/маршруты и compiler](specs/helper-tun-configuration.md) проверены в namespace. [RPDB executor](specs/helper-tun-rpdb.md) проверен с mark bypass и cleanup. [Установленные worker units/cgroups](validation/2026-11-10-installed-worker.md) проверены в VM с реальными ядрами. Production non-app installed helper/system bus/polkit lifecycle подтверждён #90: 12/12 на frozen 8ae373f; остаток — live topology reconciliation, production app/domain Apply и полная матрица владения. См. актуальный индекс; ранние утверждения о wiring выше исторические. [Авторизация](validation/2026-11-09-helper-authorization.md), [journal](validation/2026-11-09-network-resource-journal.md). |
+| P13 | Системный TUN обоих ядер / G-LINUX | Частично | Namespace TCP/UDP/IPv4/IPv6 пробы и persistent single-queue TUN для обоих ядер проверены; [owned TUN](validation/2026-11-10-owned-tun.md). Системный compiler и TUN→VLESS→echo проверены также через установленные systemd workers в одноразовой VM; sing-box требует pinned external-configuration adapter. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](validation/2026-11-09-tun-traffic.md). |
+| P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
+| P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |
 | P16 | Приватные VPN, LAN и изменения сети | Частично | Read-only наблюдение topology/resolver реализовано. Нужны verified binding WG, split DNS, Apply и сохранение защиты при смене VPN/сети/sleep, затем корректное восстановление. [Наблюдение](validation/2026-11-09-network-observation.md), [topology](validation/2026-11-09-network-topology.md), [resolver](validation/2026-11-09-resolver-host.md). |
 | P17 | ru-direct и комплексная Linux-приёмка | Частично | Согласованные immutable ru-direct snapshots с update/install/rollback и восстановлением при повреждении одной версии приняты. Нужны product wiring, actual приоритеты private/LAN/user и полная матрица двух ядер/Fake DNS/IPv6/MTU. [Evidence](validation/2026-11-10-preset-snapshots.md). |
 
@@ -197,14 +162,14 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | ID | Пункт | Статус | Критерий полного завершения и текущий остаток |
 | --- | --- | --- | --- |
 | P18 | Последние согласованные UI-правки и HWID | Готов | yonik, узкое окно, card+gear, центральная кнопка; нет избранного, footer-кнопок/текста, бейджа и чекбокса анимации. Opt-in HWID стабилен и зашифрован. Установлена `85b2a8e`: по 142 GUI-действия в двух размерах, 6 health-сценариев, review без findings. [UI evidence](validation/2026-11-09-home-cleanup.md), [HWID](validation/2026-11-09-hwid-ui.md). Общая продуктовая приёмка — P19/P23. |
-| P19 | Продуктовые экраны и системное подключение | Частично | Local SOCKS и persisted preferences существуют. System controller PR88 пока открыт с recovery-guard finding; fixture/Qt успешный путь не заменяет production GUI/TUN/transport acceptance. Управление версиями и полные пользовательские пути ещё нужны. [Контракт](specs/ui-backend-contract.md). |
-| P20 | Два редактора правил и каталог приложений | Частично | Приняты два представления draft Policy, каталог, encrypted CAS, revision/ACK и фиксы повторного Confirm/Stop. Нужны диагностика пересечений, объяснение маршрута, atomic actual Apply и полная A-04/A-07/A-08. [Evidence](validation/2026-11-10-routing-cancel-ack.md). |
+| P19 | Продуктовые экраны и системное подключение | Частично | Системный controller/GUI и preferences имеют component evidence; main merge не получил нового полного production GUI/TUN run. Нужны actual Apply, recovery, управление версиями и полная проверка пользовательских путей; OPEN #113/#115 не закрывают критерий. [Текущий host](validation/2026-11-09-native-desktop.md), [контракт](specs/ui-backend-contract.md). |
+| P20 | Два редактора правил и каталог приложений | Частично | Редакторы, каталог и диагностика имеют component evidence; [L15](validation/2026-11-11-editor-policy-diagnostics.md). Осталось доказать атомарный actual Apply одного поколения и полную приёмку A-04/A-07/A-08 без потери семантики. [Спецификация](specs/routing-and-tray.md). |
 | P21 | Трей и desktop lifecycle | Частично | Базовые команды и single instance есть. Пройти T-01…T-04 на KDE, restart Plasma, отсутствие трея, ошибки cleanup, закрытие окна и «Выйти и отключиться». [Evidence](validation/2026-11-09-native-desktop.md), [приёмка](specs/validation-and-roadmap.md). |
-| P22 | Пакетные проверки серверов и диагностика | Частично | Приняты batch GUI и actual 10k/30k TCP, stale source/network epoch/cancel, доступные цели при исчезнувшем избранном. HTTPS selected-outbound и полные endpoint/error/diagnostic требования проверяются отдельно. [Evidence](validation/2026-11-10-batch-gui/unavailable-favorite.md). |
-| P23 | Выбор toolkit, G-UI и G-POWER | Частично | Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../bench/ui/README.md), [бюджеты](specs/performance.md). Экран блокировки и питание без согласования не менять. |
-| P24 | Arch-поставка, обновления и откат | Частично | Принят clean Arch VM build source eec7a56 и install/Qkk/Qt smoke; package lifecycle update/rollback/uninstall проверен отдельно. Нужен свежий integrated package с production helper/registry/GUI и теми же гарантиями сохранности данных/чужих ресурсов. [Evidence](validation/2026-11-10-arch-clean-build.md). |
-| P25 | Открытая Linux-поставка и release-приёмка | Частично | Приняты Rust inventory225/0missing, строгий диагностический RU/EN каталог и standalone export. User guides PR83 и exact ELF/Qt/Go composition PR85 ещё открыты на дату снимка. Нужны окончательные notices/source obligations, actual producer failure paths, evidence всех FR и integrated frozen package. Release/deploy не разрешены. [Каталог](validation/2026-11-11-p11-message-catalog.md), [приёмка](specs/validation-and-roadmap.md). |
-| P26 | Android-приложение и поставка | Не начат | После P03: нативный UI/VpnService, встроенный WG, оба worker, protect/revoke/lifecycle/UID/package, полная матрица и измерения на физическом телефоне. [Платформы](specs/platforms.md), [этап 6](specs/validation-and-roadmap.md). |
+| P22 | Пакетные проверки серверов и диагностика | Частично | Есть HTTPS, три TCP-пробы и bounded API до 10 000 целей. Нужны пакетный GUI, endpoint/ошибки/ограничения и полная привязка результатов к поколению сети. [TCP series](validation/2026-11-09-tcp-series.md), [batch](validation/2026-11-09-tcp-batch.md). |
+| P23 | Выбор toolkit, G-UI и G-POWER | Частично | Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../bench/ui/README.md), [бюджеты](specs/performance.md). Физические G-UI/G-POWER пока отложены пользователем, без waiver/PASS; критерии и статус частичного выполнения сохранены. Экран блокировки и питание без согласования не менять. |
+| P24 | Arch-поставка, обновления и откат | Частично | Arch packaging реализован частично; OPEN #119 `6dc4658` содержит actual source build, old→new→old/uninstall, kernel upgrade и production userdata/future preferences. Нужны review/seal, интеграция и итоговая проверка поставки с trusted helper/ядрами; открытый delta не считается main. [Launcher](../tools/install_desktop.py), [платформы](specs/platforms.md). |
+| P25 | Открытая Linux-поставка и release-приёмка | Частично | GPL и README RU/EN есть. Нужны notices/SPDX и аудит условий зависимостей, пользовательские инструкции, зелёные проверки, evidence всех FR и явные ограничения. Релиз/публикация выполняются только в разрешённом объёме. [Лицензия](../LICENSE), [приёмка](specs/validation-and-roadmap.md). |
+| P26 | Android-приложение и поставка | Отложен | После P03: нативный UI/VpnService, встроенный WG, оба worker, protect/revoke/lifecycle/UID/package, полная матрица и измерения на физическом телефоне. [Платформы](specs/platforms.md), [этап 6](specs/validation-and-roadmap.md). |
 
 ## Правила дальнейшей работы
 
