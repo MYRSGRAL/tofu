@@ -1,0 +1,20 @@
+{
+  "frozen_spec_commit": "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef",
+  "frozen_sources_sha256": {
+    "docs/specs/native-broker-bootstrap-v1.md": "f3f13a798682386288518430f1a47653c6edffd29561998fc3eb99e8be17c3f7",
+    "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
+    "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
+  },
+  "patch_sha256": "e915033bc817c162a923c350185c1847f029e1578fb5726dd9445292c0eb26b3",
+  "package_files_sha256": {
+    "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
+    "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
+    "wire.go": "1fec3cea44325662f8d9b62d74ed4571193b7790464173952b1d932f9d25b283",
+    "wire_test.go": "f4e7783de6be2db9a76df97c55bc8ba55753c1dc844440b05e060695ae0cce41",
+    "frozen-vectors.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
+  },
+  "native_protocol": null,
+  "adapter_features": {},
+  "implementation": "codec-and-semantic-component-only",
+  "runtime_hooks_connected": false
+}

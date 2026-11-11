@@ -1,6 +1,7 @@
 # Внутренняя семантика proof guard
 
-Этот компонент не подключён к Xray/sing-box, не декодирует wire, не открывает FD,
+Компонент переносится патчами в Xray/sing-box и декодирует frozen wire v1.
+Он пока не подключён к runtime hooks и не открывает FD,
 не подтверждает featureack и не заменяет Rust broker. Evidence конструирует только
 будущий trusted decoder; публичный Go struct сам по себе не security authority.
 Новых зависимостей нет: тестируется стандартной библиотекой с GO111MODULE=off.

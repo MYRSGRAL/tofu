@@ -189,7 +189,14 @@ class Runner:
         return stdout.read_text(errors="replace")
 
 
-def build(root: Path, output: Path, patch: Path, engine: str = "sing-box") -> Path:
+def build(
+    root: Path,
+    output: Path,
+    patch: Path,
+    engine: str = "sing-box",
+    *,
+    native_codec: bool = False,
+) -> Path:
     """Собрать один раз; повторный запуск не сбрасывает частичные результаты."""
     if engine not in {"sing-box", "xray"}:
         raise BuildError("Неизвестное ядро")
@@ -212,13 +219,18 @@ def build(root: Path, output: Path, patch: Path, engine: str = "sing-box") -> Pa
     descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_SH)
-        return build_locked(root, output, patch, engine)
+        return build_locked(root, output, patch, engine, native_codec=native_codec)
     finally:
         os.close(descriptor)
 
 
 def build_locked(
-    root: Path, output: Path, patch: Path, engine: str = "sing-box"
+    root: Path,
+    output: Path,
+    patch: Path,
+    engine: str = "sing-box",
+    *,
+    native_codec: bool = False,
 ) -> Path:
     source_url, source_tag, source_commit = (
         (XRAY_URL, XRAY_TAG, XRAY_COMMIT)
@@ -274,6 +286,32 @@ def build_locked(
                 "feature": feature,
             }
         )
+    codec_record = None
+    if native_codec:
+        version = XRAY_TAG if engine == "xray" else SOURCE_TAG
+        codec_patch = (
+            DEFAULT_PATCH.parents[2] / engine / version / "native-broker-codec.patch"
+        )
+        metadata = json.loads(codec_patch.with_suffix(".json").read_text())
+        digest = sha256(codec_patch)
+        if digest != metadata["patch_sha256"] or metadata["runtime_hooks_connected"]:
+            raise BuildError("Некорректный component codec manifest")
+        runner.run(["git", "apply", "--check", str(codec_patch)], source)
+        runner.run(["git", "apply", str(codec_patch)], source)
+        package = source / "common/yonikbroker"
+        for name, expected in metadata["package_files_sha256"].items():
+            if sha256(package / name) != expected:
+                raise BuildError(f"Codec hash mismatch: {name}")
+        runner.run(
+            ["go", "test", "-p=1", "-mod=readonly", "./common/yonikbroker"], source
+        )
+        if modules != {name: sha256(source / name) for name in modules}:
+            raise BuildError("Codec изменил go.mod/go.sum")
+        codec_record = {
+            "patch_sha256": digest,
+            "runtime_hooks_connected": False,
+            "frozen_spec_commit": metadata["frozen_spec_commit"],
+        }
     raw_tags = (
         (source / "release/DEFAULT_BUILD_TAGS_OTHERS").read_text().strip()
         if engine == "sing-box"
@@ -308,6 +346,7 @@ def build_locked(
             for key in ("GOTOOLCHAIN", "GOENV", "GOWORK", "CGO_ENABLED", "GOMAXPROCS")
         },
         "native_protocol": None,
+        "native_codec_component": codec_record,
     }
     (runner.logs / "prebuild.json").write_text(
         json.dumps(prebuild, ensure_ascii=False, indent=2) + "\n"
@@ -334,6 +373,7 @@ def build_locked(
     manifest = {
         "prebuild_sha256": sha256(runner.logs / "prebuild.json"),
         "native_protocol": None,
+        "native_codec_component": codec_record,
         "engine": engine,
         "engine_version": source_version,
         "source_url": source_url,
@@ -374,6 +414,11 @@ def build_locked(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", choices=("sing-box", "xray"), default="sing-box")
+    parser.add_argument(
+        "--native-codec",
+        action="store_true",
+        help="Проверить component codec без runtime featureack",
+    )
     parser.add_argument("--build-root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--patch", type=Path, default=DEFAULT_PATCH)
@@ -386,7 +431,11 @@ def main() -> int:
     signal.signal(signal.SIGTERM, terminate)
     try:
         manifest = build(
-            options.build_root, options.output_dir, options.patch, options.engine
+            options.build_root,
+            options.output_dir,
+            options.patch,
+            options.engine,
+            native_codec=options.native_codec,
         )
     except (BuildError, OSError, ValueError) as error:
         LOG.error("Сборка остановлена: %s", error)

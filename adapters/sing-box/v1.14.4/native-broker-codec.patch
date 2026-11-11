@@ -1,0 +1,1093 @@
+diff --git a/common/yonikbroker/proof.go b/common/yonikbroker/proof.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/proof.go
+@@ -0,0 +1,177 @@
++// Package nativehooks задаёт внутреннюю семантику guard, без wire ABI.
++package nativehooks
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/netip"
++	"sync"
++	"time"
++)
++
++// MaxTrackedFlows ограничивает только этот fixture; production budget согласует Root.
++const MaxTrackedFlows = 4096
++
++var ErrDenied = errors.New("нет действующего broker proof")
++
++type Status uint8
++
++const (
++	Unknown Status = iota
++	Unavailable
++	Known
++)
++
++type Stage uint8
++
++const (
++	BeforeRouting Stage = iota
++	AfterDNS
++	BeforeDial
++)
++
++// Binding поступает только из trusted bootstrap, не из native config/env.
++type Binding struct {
++	Nonce        [32]byte
++	ConfigDigest [32]byte
++	Epoch        uint64
++}
++
++// Flow хранит исходный canonical tuple до DNS/sniff переписывания назначения.
++type Flow struct {
++	Protocol uint8
++	Local    netip.AddrPort
++	Remote   netip.AddrPort
++}
++
++func (f Flow) valid() bool {
++	a, b := f.Local.Addr(), f.Remote.Addr()
++	return (f.Protocol == 6 || f.Protocol == 17) && f.Local.IsValid() && f.Remote.IsValid() &&
++		f.Local.Port() != 0 && f.Remote.Port() != 0 && a.Zone() == "" && b.Zone() == "" &&
++		!a.Is4In6() && !b.Is4In6() && a.Is4() == b.Is4() && !a.IsUnspecified() && !b.IsUnspecified()
++}
++
++// Evidence — semantic input trusted broker decoder; это не публичный assertion API.
++// Строка caller path никогда не становится identity доказательством.
++type Evidence struct {
++	Flow             Flow
++	Binding          Binding
++	Status           Status
++	Observed         time.Time
++	Expires          time.Time
++	ExecutableDevice uint64
++	ExecutableInode  uint64
++	RawCallerPath    string
++}
++
++// Handle передаёт сессии владение закрытием одного flow.
++type Handle struct {
++	flow io.Closer
++	once sync.Once
++	err  error
++}
++
++func (h *Handle) close() error {
++	h.once.Do(func() { h.err = h.flow.Close() })
++	return h.err
++}
++
++// Session отзывает flows и pending I/O; положительного cache здесь нет.
++type Session struct {
++	ctx        context.Context
++	cancel     context.CancelFunc
++	mu         sync.Mutex
++	binding    Binding
++	maxTTL     time.Duration
++	revoked    bool
++	revokeDone chan struct{}
++	revokeErr  error
++	flows      map[*Handle]struct{}
++}
++
++func NewSession(binding Binding, maxTTL time.Duration) (*Session, error) {
++	if binding.Epoch == 0 || binding.Nonce == [32]byte{} || binding.ConfigDigest == [32]byte{} || maxTTL <= 0 {
++		return nil, ErrDenied
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	return &Session{ctx: ctx, cancel: cancel, binding: binding, maxTTL: maxTTL, revokeDone: make(chan struct{}), flows: make(map[*Handle]struct{})}, nil
++}
++
++func (s *Session) guard(now time.Time, stage Stage, required bool, tuple Flow, proof Evidence) error {
++	if s.revoked || stage > BeforeDial || proof.RawCallerPath != "" {
++		return ErrDenied
++	}
++	if !required {
++		return nil
++	}
++	if !tuple.valid() || proof.Flow != tuple || proof.Status != Known || proof.Binding != s.binding || proof.ExecutableInode == 0 ||
++		proof.Observed.IsZero() || now.Before(proof.Observed) || !now.Before(proof.Expires) ||
++		proof.Expires.Sub(proof.Observed) <= 0 || proof.Expires.Sub(proof.Observed) > s.maxTTL {
++		return ErrDenied
++	}
++	return nil
++}
++
++func (s *Session) Guard(now time.Time, stage Stage, required bool, tuple Flow, proof Evidence) error {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	return s.guard(now, stage, required, tuple, proof)
++}
++
++// Track атомарно относительно revoke регистрирует flow до его публикации.
++// Ошибка передаёт закрытие flow вызывающему коду; после успеха сессия владеет close.
++func (s *Session) Track(now time.Time, required bool, tuple Flow, proof Evidence, flow io.Closer) (*Handle, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if flow == nil || len(s.flows) >= MaxTrackedFlows {
++		return nil, ErrDenied
++	}
++	if err := s.guard(now, BeforeDial, required, tuple, proof); err != nil {
++		return nil, err
++	}
++	handle := &Handle{flow: flow}
++	s.flows[handle] = struct{}{}
++	return handle, nil
++}
++
++// Release закрывает flow и снимает регистрацию, не удерживая mutex во время I/O.
++func (s *Session) Release(flow *Handle) error {
++	s.mu.Lock()
++	_, exists := s.flows[flow]
++	s.mu.Unlock()
++	if !exists {
++		return nil
++	}
++	err := flow.close()
++	s.mu.Lock()
++	delete(s.flows, flow)
++	s.mu.Unlock()
++	return err
++}
++
++// Revoke вызывается также на EOF/broker death/cancel; повтор безопасен.
++func (s *Session) Revoke() error {
++	s.mu.Lock()
++	if s.revoked {
++		done := s.revokeDone
++		s.mu.Unlock()
++		<-done
++		return s.revokeErr
++	}
++	s.revoked = true
++	s.cancel()
++	flows := s.flows
++	s.flows = make(map[*Handle]struct{})
++	s.mu.Unlock()
++	var result error
++	for flow := range flows {
++		result = errors.Join(result, flow.close())
++	}
++	s.revokeErr = result
++	close(s.revokeDone)
++	return result
++}
++
++// Context передаётся каждому DNS/dial ожиданию, чтобы revoke отменял и pending I/O.
++func (s *Session) Context() context.Context { return s.ctx }
+diff --git a/common/yonikbroker/proof_test.go b/common/yonikbroker/proof_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/proof_test.go
+@@ -0,0 +1,152 @@
++package nativehooks
++
++import (
++	"io"
++	"net"
++	"net/netip"
++	"testing"
++	"time"
++)
++
++func fixture(t *testing.T) (*Session, Evidence, time.Time) {
++	t.Helper()
++	now := time.Now()
++	binding := Binding{Nonce: [32]byte{1}, ConfigDigest: [32]byte{2}, Epoch: 3}
++	session, err := NewSession(binding, 20*time.Millisecond)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return session, Evidence{Flow: Flow{Protocol: 6, Local: netip.MustParseAddrPort("127.0.0.1:1234"), Remote: netip.MustParseAddrPort("127.0.0.2:443")}, Binding: binding, Status: Known, Observed: now, Expires: now.Add(20 * time.Millisecond), ExecutableInode: 4}, now
++}
++
++func TestProofMatrix(t *testing.T) {
++	cases := []struct {
++		name    string
++		change  func(*Evidence)
++		elapsed time.Duration
++		deny    bool
++	}{
++		{name: "known"},
++		{name: "other-flow", change: func(p *Evidence) { p.Flow.Remote = netip.MustParseAddrPort("127.0.0.3:443") }, deny: true},
++		{name: "expiry", elapsed: 20 * time.Millisecond, deny: true},
++		{name: "unknown", change: func(p *Evidence) { p.Status = Unknown }, deny: true},
++		{name: "unavailable", change: func(p *Evidence) { p.Status = Unavailable }, deny: true},
++		{name: "nonce", change: func(p *Evidence) { p.Binding.Nonce[0]++ }, deny: true},
++		{name: "digest", change: func(p *Evidence) { p.Binding.ConfigDigest[0]++ }, deny: true},
++		{name: "epoch", change: func(p *Evidence) { p.Binding.Epoch++ }, deny: true},
++		{name: "caller-path", change: func(p *Evidence) { p.RawCallerPath = "/usr/bin/trusted" }, deny: true},
++		{name: "long-ttl", change: func(p *Evidence) { p.Expires = p.Expires.Add(time.Millisecond) }, deny: true},
++		{name: "future", change: func(p *Evidence) { p.Observed = p.Observed.Add(time.Millisecond) }, deny: true},
++		{name: "missing-identity", change: func(p *Evidence) { p.ExecutableInode = 0 }, deny: true},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			s, p, now := fixture(t)
++			tuple := p.Flow
++			if c.change != nil {
++				c.change(&p)
++			}
++			for _, stage := range []Stage{BeforeRouting, AfterDNS, BeforeDial} {
++				if err := s.Guard(now.Add(c.elapsed), stage, true, tuple, p); (err != nil) != c.deny {
++					t.Fatalf("stage=%d err=%v", stage, err)
++				}
++			}
++		})
++	}
++}
++
++func TestDNSWaitRequiresFreshProof(t *testing.T) {
++	s, p, now := fixture(t)
++	if err := s.Guard(now, BeforeRouting, true, p.Flow, p); err != nil {
++		t.Fatal(err)
++	}
++	for _, stage := range []Stage{AfterDNS, BeforeDial} {
++		if s.Guard(now.Add(21*time.Millisecond), stage, true, p.Flow, p) == nil {
++			t.Fatal("просроченный proof допущен")
++		}
++	}
++	if err := s.Guard(now, BeforeRouting, false, Flow{}, Evidence{}); err != nil {
++		t.Fatal("non-app control", err)
++	}
++}
++
++func TestRevokeClosesTCPUDPFlows(t *testing.T) {
++	for _, reason := range []string{"revoke", "EOF", "cancel", "broker-death"} {
++		t.Run(reason, func(t *testing.T) {
++			s, p, now := fixture(t)
++			tcp, peer := net.Pipe()
++			defer peer.Close()
++			udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			for _, flow := range []io.Closer{tcp, udp} {
++				if _, err := s.Track(now, true, p.Flow, p, flow); err != nil {
++					t.Fatal(err)
++				}
++			}
++			if err := s.Revoke(); err != nil {
++				t.Fatal(err)
++			}
++			if _, err := tcp.Write([]byte{1}); err == nil {
++				t.Fatal("TCP остался открыт")
++			}
++			if _, err := udp.WriteTo([]byte{1}, udp.LocalAddr()); err == nil {
++				t.Fatal("UDP остался открыт")
++			}
++			if s.Context().Err() == nil {
++				t.Fatal("pending I/O не отменён")
++			}
++			if s.Guard(now, BeforeDial, true, p.Flow, p) == nil {
++				t.Fatal("revoke не блокирует dial")
++			}
++			if err := s.Revoke(); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
++}
++
++func TestCanonicalTCPUDPv4v6(t *testing.T) {
++	for _, protocol := range []uint8{6, 17} {
++		for _, pair := range [][2]string{{"192.0.2.1:1234", "192.0.2.2:443"}, {"[2001:db8::1]:1234", "[2001:db8::2]:443"}} {
++			s, p, now := fixture(t)
++			p.Flow = Flow{Protocol: protocol, Local: netip.MustParseAddrPort(pair[0]), Remote: netip.MustParseAddrPort(pair[1])}
++			if err := s.Guard(now, BeforeDial, true, p.Flow, p); err != nil {
++				t.Fatal(protocol, pair, err)
++			}
++		}
++	}
++	for _, pair := range [][2]string{{"[::ffff:192.0.2.1]:1234", "[::ffff:192.0.2.2]:443"}, {"192.0.2.1:0", "192.0.2.2:443"}, {"192.0.2.1:1234", "[2001:db8::2]:443"}} {
++		s, p, now := fixture(t)
++		p.Flow = Flow{Protocol: 6, Local: netip.MustParseAddrPort(pair[0]), Remote: netip.MustParseAddrPort(pair[1])}
++		if s.Guard(now, BeforeDial, true, p.Flow, p) == nil {
++			t.Fatal("неканонический tuple допущен", pair)
++		}
++	}
++}
++
++func TestTrackAfterRevokeDeniedAndReleaseIdempotent(t *testing.T) {
++	s, p, now := fixture(t)
++	tcp, peer := net.Pipe()
++	defer peer.Close()
++	handle, err := s.Track(now, true, p.Flow, p, tcp)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Release(handle); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Release(handle); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Revoke(); err != nil {
++		t.Fatal(err)
++	}
++	next, other := net.Pipe()
++	defer next.Close()
++	defer other.Close()
++	if _, err := s.Track(now, true, p.Flow, p, next); err == nil {
++		t.Fatal("flow опубликован после revoke")
++	}
++}
+diff --git a/common/yonikbroker/wire.go b/common/yonikbroker/wire.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/wire.go
+@@ -0,0 +1,348 @@
++package nativehooks
++
++import (
++	"encoding/binary"
++	"errors"
++	"net/netip"
++	"strings"
++	"time"
++	"unicode/utf8"
++)
++
++// FrozenSpec — единственный источник wire bytes; fixture136 не участвует.
++const FrozenSpec = "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef"
++const (
++	HeaderBytes              = 64
++	MaxFrameBytes            = 768
++	MaxPathBytes             = 512
++	OwnerTTL                 = 20 * time.Millisecond
++	BootstrapTTL             = time.Second
++	OwnedTUN          uint64 = 1
++	OwnerLookup       uint64 = 2
++	StrictAppRequired uint64 = 4
++	AllFeatures              = OwnedTUN | OwnerLookup | StrictAppRequired
++)
++
++var ErrMalformed = errors.New("некорректный YNKBROK1 frame")
++
++type Kind uint16
++
++const (
++	HelloKind     Kind = 1
++	FeaturesKind  Kind = 2
++	AttachKind    Kind = 3
++	AttachACKKind Kind = 4
++	LookupKind    Kind = 16
++	ReplyKind     Kind = 17
++	RevokeKind    Kind = 32
++)
++
++type Header struct {
++	Kind      Kind
++	RequestID uint64
++	Epoch     uint64
++	Digest    [32]byte
++}
++type HelloBody struct {
++	Session     [16]byte
++	Generation  uint64
++	Invocation  [16]byte
++	OwnerTTL    time.Duration
++	Deadline    time.Duration
++	Supported   uint64
++	AppRequired bool
++}
++type AttachBody struct {
++	Ifindex uint32
++	Flags   uint32
++	MTU     uint32
++	Name    string
++}
++
++// ReplyBody.Cookie информационный: никогда не входит в EncodeLookup.
++type ReplyBody struct {
++	Status           Status
++	Reason           uint8
++	TTL              time.Duration
++	Cookie           uint64
++	PID              uint32
++	Starttime        uint64
++	ExecutableDevice uint64
++	ExecutableInode  uint64
++	Path             string
++}
++type Frame struct {
++	Header       Header
++	Nonce        [32]byte
++	Hello        HelloBody
++	Supported    uint64
++	Selected     uint64
++	Attach       AttachBody
++	Lookup       Flow
++	Reply        ReplyBody
++	RevokeReason uint32
++}
++
++var be = binary.BigEndian
++
++func zero(b []byte) bool {
++	for _, v := range b {
++		if v != 0 {
++			return false
++		}
++	}
++	return true
++}
++func u16(b []byte, n int) uint16                       { return be.Uint16(b[n : n+2]) }
++func u32(b []byte, n int) uint32                       { return be.Uint32(b[n : n+4]) }
++func u64(b []byte, n int) uint64                       { return be.Uint64(b[n : n+8]) }
++func boundedDuration(n uint64, max time.Duration) bool { return n > 0 && n <= uint64(max) }
++func validPath(b []byte) bool {
++	return len(b) > 0 && len(b) <= MaxPathBytes && b[0] == '/' && !strings.ContainsRune(string(b), 0) &&
++		!strings.HasSuffix(string(b), " (deleted)") && utf8.Valid(b)
++}
++func interfaceName(b []byte) (string, error) {
++	n := 0
++	for n < len(b) && b[n] != 0 {
++		v := b[n]
++		if !(v >= 'a' && v <= 'z' || v >= 'A' && v <= 'Z' || v >= '0' && v <= '9' || v == '_' || v == '.' || v == '-') {
++			return "", ErrMalformed
++		}
++		n++
++	}
++	if n == 0 || n == len(b) || !zero(b[n:]) {
++		return "", ErrMalformed
++	}
++	return string(b[:n]), nil
++}
++
++// DecodeFrame проверяет bytes/count, но НЕ credentials, pidfd или unit authority.
++// Полученные FD принадлежат transport и закрываются им при любой ошибке.
++func DecodeFrame(b []byte, fdCount int) (Frame, error) {
++	fail := func() (Frame, error) { return Frame{}, ErrMalformed }
++	if len(b) < HeaderBytes || len(b) > MaxFrameBytes || string(b[:8]) != "YNKBROK1" || u16(b, 8) != 1 || uint64(u32(b, 12)) != uint64(len(b)) {
++		return fail()
++	}
++	kind := Kind(u16(b, 10))
++	size := 0
++	fds := 0
++	switch kind {
++	case HelloKind:
++		size = 176
++	case FeaturesKind:
++		size = 112
++	case AttachKind:
++		size = 128
++		fds = 1
++	case AttachACKKind, RevokeKind:
++		size = 104
++	case LookupKind:
++		size = 144
++	case ReplyKind:
++		if len(b) < 160 || len(b) > 160+MaxPathBytes {
++			return fail()
++		}
++	default:
++		return fail()
++	}
++	if fdCount != fds || size != 0 && len(b) != size {
++		return fail()
++	}
++	id, epoch := u64(b, 16), u64(b, 24)
++	if ((kind == LookupKind || kind == ReplyKind) != (id != 0)) || epoch == 0 || zero(b[32:64]) || zero(b[64:96]) {
++		return fail()
++	}
++	f := Frame{Header: Header{Kind: kind, RequestID: id, Epoch: epoch}}
++	copy(f.Header.Digest[:], b[32:64])
++	copy(f.Nonce[:], b[64:96])
++	switch kind {
++	case HelloKind:
++		ttl, deadline, supported, flags := u64(b, 144), u64(b, 152), u64(b, 160), u64(b, 168)
++		if zero(b[96:112]) || u64(b, 112) == 0 || zero(b[120:136]) || u32(b, 136) != MaxFrameBytes || u16(b, 140) != 1 || !zero(b[142:144]) ||
++			!boundedDuration(ttl, OwnerTTL) || !boundedDuration(deadline, BootstrapTTL) || supported & ^AllFeatures != 0 || supported&OwnedTUN == 0 || flags & ^uint64(1) != 0 || flags != 0 && supported&AllFeatures != AllFeatures {
++			return fail()
++		}
++		copy(f.Hello.Session[:], b[96:112])
++		copy(f.Hello.Invocation[:], b[120:136])
++		f.Hello.Generation = u64(b, 112)
++		f.Hello.OwnerTTL = time.Duration(ttl)
++		f.Hello.Deadline = time.Duration(deadline)
++		f.Hello.Supported = supported
++		f.Hello.AppRequired = flags != 0
++	case FeaturesKind:
++		f.Supported = u64(b, 96)
++		f.Selected = u64(b, 104)
++		if f.Supported & ^AllFeatures != 0 || f.Selected & ^f.Supported != 0 || f.Selected&OwnedTUN == 0 {
++			return fail()
++		}
++	case AttachKind:
++		name, err := interfaceName(b[112:128])
++		mtu := u32(b, 108)
++		if err != nil || u32(b, 96) != 1 || u32(b, 100) == 0 || u32(b, 104) != 0x1001 || mtu < 68 || mtu > 65535 {
++			return fail()
++		}
++		f.Attach = AttachBody{Ifindex: u32(b, 100), Flags: u32(b, 104), MTU: mtu, Name: name}
++	case AttachACKKind:
++		if u32(b, 96) != 1 || !zero(b[100:104]) {
++			return fail()
++		}
++	case LookupKind:
++		if (b[96] != 4 && b[96] != 6) || (b[97] != 6 && b[97] != 17) || !zero(b[98:100]) || !zero(b[136:144]) || u16(b, 100) == 0 || u16(b, 102) == 0 {
++			return fail()
++		}
++		var local, remote netip.Addr
++		if b[96] == 4 {
++			if !zero(b[108:120]) || !zero(b[124:136]) {
++				return fail()
++			}
++			local = netip.AddrFrom4([4]byte(b[104:108]))
++			remote = netip.AddrFrom4([4]byte(b[120:124]))
++		} else {
++			local = netip.AddrFrom16([16]byte(b[104:120]))
++			remote = netip.AddrFrom16([16]byte(b[120:136]))
++		}
++		f.Lookup = Flow{Protocol: b[97], Local: netip.AddrPortFrom(local, u16(b, 100)), Remote: netip.AddrPortFrom(remote, u16(b, 102))}
++		if !f.Lookup.valid() {
++			return fail()
++		}
++	case ReplyKind:
++		n := int(u16(b, 100))
++		status, reason := b[96], b[97]
++		if len(b) != 160+n || n > MaxPathBytes || !zero(b[98:100]) || !zero(b[102:104]) || !zero(b[124:128]) || !zero(b[152:160]) {
++			return fail()
++		}
++		switch {
++		case status == 1 && reason == 0:
++			if !boundedDuration(u64(b, 104), OwnerTTL) || u32(b, 120) == 0 || u64(b, 128) == 0 || !validPath(b[160:]) {
++				return fail()
++			}
++			f.Reply = ReplyBody{Status: Known, TTL: time.Duration(u64(b, 104)), Cookie: u64(b, 112), PID: u32(b, 120), Starttime: u64(b, 128), ExecutableDevice: u64(b, 136), ExecutableInode: u64(b, 144), Path: string(b[160:])}
++		case status == 2 && reason == 0, status == 3 && reason >= 1 && reason <= 7:
++			if n != 0 || !zero(b[104:152]) {
++				return fail()
++			}
++			f.Reply.Status = Unknown
++			if status == 3 {
++				f.Reply.Status = Unavailable
++			}
++			f.Reply.Reason = reason
++		default:
++			return fail()
++		}
++	case RevokeKind:
++		f.RevokeReason = u32(b, 96)
++		if f.RevokeReason < 1 || f.RevokeReason > 7 || !zero(b[100:104]) {
++			return fail()
++		}
++	}
++	return f, nil
++}
++
++func (f Frame) CheckBinding(expected Binding, requestID uint64) error {
++	if f.Header.Epoch != expected.Epoch || f.Header.Digest != expected.ConfigDigest || f.Nonce != expected.Nonce || f.Header.RequestID != requestID {
++		return ErrMalformed
++	}
++	return nil
++}
++func (f Frame) SelectedFeatures(appRequired bool, offered uint64) (uint64, error) {
++	required := OwnedTUN
++	if appRequired {
++		required = AllFeatures
++	}
++	if f.Header.Kind != FeaturesKind || offered & ^AllFeatures != 0 || f.Selected & ^offered != 0 || f.Selected&required != required {
++		return 0, ErrMalformed
++	}
++	return f.Selected, nil
++}
++func makeFrame(kind Kind, id uint64, binding Binding, size int) []byte {
++	b := make([]byte, size)
++	copy(b, "YNKBROK1")
++	be.PutUint16(b[8:], 1)
++	be.PutUint16(b[10:], uint16(kind))
++	be.PutUint32(b[12:], uint32(size))
++	be.PutUint64(b[16:], id)
++	be.PutUint64(b[24:], binding.Epoch)
++	copy(b[32:64], binding.ConfigDigest[:])
++	copy(b[64:96], binding.Nonce[:])
++	return b
++}
++
++// EncodeLookup намеренно не принимает cookie/flags, PID/UID/path.
++func EncodeLookup(binding Binding, id uint64, tuple Flow) ([]byte, error) {
++	if !tuple.valid() {
++		return nil, ErrMalformed
++	}
++	b := makeFrame(LookupKind, id, binding, 144)
++	b[96] = 6
++	if tuple.Local.Addr().Is4() {
++		b[96] = 4
++	}
++	b[97] = tuple.Protocol
++	be.PutUint16(b[100:], tuple.Local.Port())
++	be.PutUint16(b[102:], tuple.Remote.Port())
++	copy(b[104:120], tuple.Local.Addr().AsSlice())
++	copy(b[120:136], tuple.Remote.Addr().AsSlice())
++	if _, err := DecodeFrame(b, 0); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++func EncodeFeatures(binding Binding, selected uint64, appRequired bool, offered uint64) ([]byte, error) {
++	b := makeFrame(FeaturesKind, 0, binding, 112)
++	be.PutUint64(b[96:], AllFeatures)
++	be.PutUint64(b[104:], selected)
++	f, err := DecodeFrame(b, 0)
++	if err != nil {
++		return nil, err
++	}
++	if _, err = f.SelectedFeatures(appRequired, offered); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++func EncodeAttachACK(binding Binding) ([]byte, error) {
++	b := makeFrame(AttachACKKind, 0, binding, 104)
++	be.PutUint32(b[96:], 1)
++	if _, err := DecodeFrame(b, 0); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++
++// EffectiveReplyTTL вычитает полный monotonic RTT; ноль означает Unavailable.
++func EffectiveReplyTTL(ttl time.Duration, sent, received time.Time) time.Duration {
++	if ttl <= 0 || ttl > OwnerTTL || received.Before(sent) {
++		return 0
++	}
++	rtt := received.Sub(sent)
++	if rtt >= ttl {
++		return 0
++	}
++	return ttl - rtt
++}
++
++// Sequence вызывается только единственным transport owner, без параллельных обменов.
++type Sequence struct {
++	last    uint64
++	pending uint64
++	retired bool
++}
++
++func (s *Sequence) Begin(id uint64) error {
++	if s.retired || s.pending != 0 || id == 0 || id <= s.last {
++		s.Retire()
++		return ErrMalformed
++	}
++	s.last = id
++	s.pending = id
++	return nil
++}
++func (s *Sequence) Complete(id uint64) error {
++	if s.retired || s.pending == 0 || s.pending != id {
++		s.Retire()
++		return ErrMalformed
++	}
++	s.pending = 0
++	return nil
++}
++func (s *Sequence) Retire() { s.pending = 0; s.retired = true }
+diff --git a/common/yonikbroker/wire_test.go b/common/yonikbroker/wire_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/wire_test.go
+@@ -0,0 +1,256 @@
++package nativehooks
++
++import (
++	"bytes"
++	"encoding/hex"
++	"encoding/json"
++	"math"
++	"os"
++	"testing"
++	"time"
++)
++
++type golden struct {
++	Name        string `json:"name"`
++	Hex         string `json:"hex"`
++	FDCount     int    `json:"fd_count"`
++	HeaderOK    bool   `json:"header_ok"`
++	AppRequired *bool  `json:"app_required"`
++	FeaturesOK  bool   `json:"features_ok"`
++}
++
++func vectors(t *testing.T) []golden {
++	t.Helper()
++	b, err := os.ReadFile("frozen-vectors.json")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var data struct {
++		Contract string   `json:"contract"`
++		Vectors  []golden `json:"vectors"`
++	}
++	if err := json.Unmarshal(b, &data); err != nil {
++		t.Fatal(err)
++	}
++	if data.Contract != "YNKBROK1-v1" {
++		t.Fatal(data.Contract)
++	}
++	return data.Vectors
++}
++func wireBytes(t *testing.T, g golden) []byte {
++	t.Helper()
++	b, err := hex.DecodeString(g.Hex)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b
++}
++func TestFrozenRustGolden(t *testing.T) {
++	for _, g := range vectors(t) {
++		t.Run(g.Name, func(t *testing.T) {
++			b := wireBytes(t, g)
++			f, err := DecodeFrame(b, g.FDCount)
++			if (err == nil) != g.HeaderOK {
++				t.Fatalf("decode=%v expected=%v", err, g.HeaderOK)
++			}
++			if g.AppRequired != nil {
++				_, err := f.SelectedFeatures(*g.AppRequired, AllFeatures)
++				if (err == nil) != g.FeaturesOK {
++					t.Fatal("feature mismatch", err)
++				}
++			}
++			if g.HeaderOK {
++				binding := Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}
++				if f.CheckBinding(binding, f.Header.RequestID) != nil {
++					t.Fatal("binding")
++				}
++				binding.Nonce[0] ^= 1
++				if f.CheckBinding(binding, f.Header.RequestID) == nil {
++					t.Fatal("nonce mismatch accepted")
++				}
++				for n := 0; n < len(b); n++ {
++					if _, err := DecodeFrame(b[:n], g.FDCount); err == nil {
++						t.Fatalf("prefix %d accepted", n)
++					}
++				}
++				for _, count := range []int{-1, 0, 1, 2, 3} {
++					if count != g.FDCount {
++						if _, err := DecodeFrame(b, count); err == nil {
++							t.Fatalf("FD count %d accepted", count)
++						}
++					}
++				}
++				var encoded []byte
++				switch f.Header.Kind {
++				case LookupKind:
++					encoded, err = EncodeLookup(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}, f.Header.RequestID, f.Lookup)
++				case FeaturesKind:
++					encoded, err = EncodeFeatures(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}, f.Selected, false, AllFeatures)
++				case AttachACKKind:
++					encoded, err = EncodeAttachACK(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch})
++				}
++				if encoded != nil && (err != nil || !bytes.Equal(encoded, b)) {
++					t.Fatal("encoder differs from Rust golden", err)
++				}
++			}
++		})
++	}
++}
++func TestCookieNeverBecomesRequestFilter(t *testing.T) {
++	for _, g := range vectors(t) {
++		if g.Name == "known_observed_projection" {
++			b := wireBytes(t, g)
++			first, err := DecodeFrame(b, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			be.PutUint64(b[112:], first.Reply.Cookie+1)
++			second, err := DecodeFrame(b, 0)
++			if err != nil || second.Reply.Cookie == first.Reply.Cookie {
++				t.Fatal(err)
++			}
++			_, proof, _ := fixture(t)
++			binding := Binding{Nonce: first.Nonce, Epoch: first.Header.Epoch, ConfigDigest: first.Header.Digest}
++			request, err := EncodeLookup(binding, 1, proof.Flow)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !zero(request[98:100]) || !zero(request[136:144]) {
++				t.Fatal("reply cookie leaked into request")
++			}
++		}
++	}
++}
++func TestSelectedFeatureMatrix(t *testing.T) {
++	_, proof, _ := fixture(t)
++	for selected := uint64(0); selected < 16; selected++ {
++		for _, app := range []bool{false, true} {
++			_, err := EncodeFeatures(proof.Binding, selected, app, AllFeatures)
++			want := selected < 8 && selected&OwnedTUN != 0 && (!app || selected == AllFeatures)
++			if (err == nil) != want {
++				t.Fatal(selected, app, err)
++			}
++		}
++	}
++	if _, err := EncodeFeatures(proof.Binding, AllFeatures, true, OwnedTUN); err == nil {
++		t.Fatal("offer downgrade")
++	}
++}
++func TestSequenceRetires(t *testing.T) {
++	for _, failure := range []string{"outstanding", "reuse", "late", "wrap", "timeout"} {
++		t.Run(failure, func(t *testing.T) {
++			var s Sequence
++			id := uint64(1)
++			if failure == "wrap" {
++				id = math.MaxUint64
++			}
++			if s.Begin(id) != nil {
++				t.Fatal("begin")
++			}
++			switch failure {
++			case "outstanding":
++				if s.Begin(2) == nil {
++					t.Fatal("second request")
++				}
++			case "late":
++				if s.Complete(2) == nil {
++					t.Fatal("late reply")
++				}
++			case "timeout":
++				s.Retire()
++			default:
++				if s.Complete(id) != nil {
++					t.Fatal("complete")
++				}
++				if s.Begin(1) == nil {
++					t.Fatal("id reuse/wrap")
++				}
++			}
++			if s.Begin(3) == nil || s.Complete(id) == nil {
++				t.Fatal("retired endpoint reused")
++			}
++		})
++	}
++	var s Sequence
++	if s.Complete(0) == nil {
++		t.Fatal("unsolicited reply")
++	}
++}
++func TestFullRTTTTL(t *testing.T) {
++	now := time.Now()
++	for _, c := range []struct{ ttl, rtt, want time.Duration }{{OwnerTTL, time.Millisecond, 19 * time.Millisecond}, {OwnerTTL, OwnerTTL, 0}, {OwnerTTL, OwnerTTL + 1, 0}, {OwnerTTL + 1, 0, 0}, {0, 0, 0}, {OwnerTTL, -1, 0}} {
++		if got := EffectiveReplyTTL(c.ttl, now, now.Add(c.rtt)); got != c.want {
++			t.Fatal(c, got)
++		}
++	}
++}
++func TestMalformedReservedPathAndBounds(t *testing.T) {
++	for _, g := range vectors(t) {
++		if !g.HeaderOK {
++			continue
++		}
++		base := wireBytes(t, g)
++		for _, n := range []int{769, 1024} {
++			bad := make([]byte, n)
++			copy(bad, base)
++			be.PutUint32(bad[12:], uint32(n))
++			if _, err := DecodeFrame(bad, g.FDCount); err == nil {
++				t.Fatal("oversized")
++			}
++		}
++		offsets := []int{8, 12, 24, 64}
++		switch Kind(u16(base, 10)) {
++		case HelloKind:
++			offsets = append(offsets, 142)
++		case AttachACKKind, RevokeKind:
++			offsets = append(offsets, 100)
++		case LookupKind:
++			offsets = append(offsets, 98, 99, 136, 143)
++		case ReplyKind:
++			offsets = append(offsets, 98, 102, 124, 152)
++		}
++		for _, at := range offsets {
++			bad := bytes.Clone(base)
++			switch at {
++			case 24:
++				clear(bad[24:32])
++			case 64:
++				clear(bad[64:96])
++			default:
++				bad[at] ^= 1
++			}
++			if _, err := DecodeFrame(bad, g.FDCount); err == nil {
++				t.Fatalf("%s offset %d", g.Name, at)
++			}
++		}
++	}
++	for _, p := range [][]byte{nil, []byte("relative"), []byte("/bad\x00path"), []byte("/bad (deleted)"), {'/', 255}, bytes.Repeat([]byte{'/'}, 513)} {
++		if validPath(p) {
++			t.Fatal("path accepted", p)
++		}
++	}
++}
++
++func TestLookupRejectsNoncanonicalAddresses(t *testing.T) {
++	for _, g := range vectors(t) {
++		b := wireBytes(t, g)
++		if !g.HeaderOK || Kind(u16(b, 10)) != LookupKind {
++			continue
++		}
++		clear(b[104:120])
++		if _, err := DecodeFrame(b, 0); err == nil {
++			t.Fatal("unspecified source accepted")
++		}
++	}
++}
++
++func FuzzDecodeFrame(f *testing.F) {
++	f.Add([]byte("YNKBROK1"), 0)
++	f.Add(make([]byte, MaxFrameBytes), 1)
++	f.Fuzz(func(t *testing.T, b []byte, fds int) {
++		frame, err := DecodeFrame(b, fds)
++		if err == nil && frame.Header.Kind == LookupKind && !frame.Lookup.valid() {
++			t.Fatal("неканонический tuple принят декодером")
++		}
++	})
++}
+diff --git a/common/yonikbroker/frozen-vectors.json b/common/yonikbroker/frozen-vectors.json
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/frozen-vectors.json
+@@ -0,0 +1,135 @@
++{
++  "contract": "YNKBROK1-v1",
++  "vectors": [
++    {
++      "name": "lookup_v4_cookie_absent",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "lookup_forbidden_cookie_98",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406010004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_99",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000104d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_136",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000100000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_143",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000001",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_v6",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030606000004d201bb20010db800000000000000000000000120010db80000000000000000000000020000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "v4_noncanonical_padding",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001010000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_extra_fd",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 1,
++      "header_ok": false
++    },
++    {
++      "name": "features_required_all",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000007",
++      "fd_count": 0,
++      "header_ok": true,
++      "app_required": true,
++      "features_ok": true
++    },
++    {
++      "name": "features_cannot_downgrade_app",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000001",
++      "fd_count": 0,
++      "header_ok": true,
++      "app_required": true,
++      "features_ok": false
++    },
++    {
++      "name": "features_zero_invalid",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "attach_one_owned_tun",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 1,
++      "header_ok": true
++    },
++    {
++      "name": "attach_zero_fds",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "attach_extra_fd",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 2,
++      "header_ok": false
++    },
++    {
++      "name": "hello_app_required",
++      "hex": "594e4b42524f4b3100010001000000b000000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030404040404040404040404040404040400000000000000010505050505050505050505050505050500000300000100000000000001312d00000000003b9aca0000000000000000070000000000000001",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "attach_ack",
++      "hex": "594e4b42524f4b31000100040000006800000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030000000100000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "known_observed_projection",
++      "hex": "594e4b42524f4b3100010011000000ad000000000000000100000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030301000000000d00000000000001312d0000000000000000ea0000007b00000000000000000000000c0000000000000004000000000000003800000000000000002f7573722f62696e2f74657374",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "known_ttl_cannot_extend",
++      "hex": "594e4b42524f4b3100010011000000ad000000000000000100000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030301000000000d00000000000001312d0100000000000000ea0000007b00000000000000000000000c0000000000000004000000000000003800000000000000002f7573722f62696e2f74657374",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "unknown_zero_projection",
++      "hex": "594e4b42524f4b3100010011000000a0000000000000000200000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030302000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "unavailable_proofgap",
++      "hex": "594e4b42524f4b3100010011000000a0000000000000000200000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030303010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "revoke",
++      "hex": "594e4b42524f4b31000100200000006800000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030000000200000000",
++      "fd_count": 0,
++      "header_ok": true
++    }
++  ]
++}

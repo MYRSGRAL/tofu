@@ -133,6 +133,30 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(command[-1], "./main")
         self.assertFalse(any(argv[:2] == ["git", "apply"] for argv in self.commands))
 
+    def test_codec_component_is_verified_without_feature_ack(self) -> None:
+        original = self.fake_run
+
+        def run(runner: builder.Runner, argv: list[str], cwd: Path) -> str:
+            if argv[:2] == ["git", "apply"] and "native-broker-codec.patch" in argv[-1]:
+                subprocess.run(argv, cwd=cwd, check=True, capture_output=True)
+            return original(runner, argv, cwd)
+
+        with (
+            patch.object(builder.Runner, "run", autospec=True, side_effect=run),
+            patch.object(builder, "EXTRA_PATCHES", tuple(self.extra_patches)),
+        ):
+            result = builder.build(
+                self.root, self.output, self.patch_file, native_codec=True
+            )
+        manifest = json.loads(result.read_text())
+        self.assertFalse(manifest["native_codec_component"]["runtime_hooks_connected"])
+        self.assertIsNone(manifest["native_protocol"])
+        self.assertNotIn("native_broker", manifest["adapter_features"])
+        self.assertIn(
+            ["go", "test", "-p=1", "-mod=readonly", "./common/yonikbroker"],
+            self.commands,
+        )
+
     def test_unknown_engine_is_rejected_before_commands(self) -> None:
         with self.assertRaises(builder.BuildError):
             builder.build(self.root, self.output, self.patch_file, "other")
