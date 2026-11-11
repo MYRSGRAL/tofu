@@ -1,5 +1,8 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
+use crate::diagnostics::context::{Cause, Contexts, Slot};
 
+#[path = "backend_startup.rs"]
+mod backend_startup;
 #[path = "batch_diagnostics.rs"]
 mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
@@ -7,6 +10,8 @@ mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
 use crate::maintenance;
+use backend_startup::StartupObserver;
+pub use backend_startup::StartupPhase;
 #[path = "maintenance_job.rs"]
 mod maintenance_job;
 use crate::preferences::{Preferences, SaveOutcome, Store};
@@ -49,6 +54,7 @@ pub struct HostConfig {
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
+    startup_observer: StartupObserver,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
@@ -62,9 +68,19 @@ impl HostConfig {
             listen_port: None,
             system_subscription_policy: true,
             schedule_observer: None,
+            startup_observer: StartupObserver::default(),
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
         }
+    }
+    /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
+    #[cfg(feature = "startup-diagnostics")]
+    pub fn with_startup_observer(
+        mut self,
+        observer: impl Fn(StartupPhase) + Send + Sync + 'static,
+    ) -> Self {
+        self.startup_observer = StartupObserver::new(observer);
+        self
     }
     /// Только доверенный отрицательный Rust-стенд с отдельной ephemeral БД.
     #[cfg(feature = "test-support")]
@@ -423,6 +439,7 @@ impl DesktopHost {
         std::thread::Builder::new()
             .name("yonik-backend".into())
             .spawn(move || {
+                config.startup_observer.emit(StartupPhase::RuntimeBuild);
                 match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -437,8 +454,8 @@ impl DesktopHost {
                     Err(_) => {
                         let mut snapshot = Snapshot::new(config.ephemeral_key.is_some());
                         snapshot.port = config.listen_port.map_or(0, NonZeroU16::get);
-                        snapshot.error = Some("startup");
-                        snapshot.connection_error = Some("startup");
+                        snapshot
+                            .contextual_error(false, ContextFailure::new(Cause::RuntimePanicked));
                         snapshot.closed = true;
                         snapshot.emit(&callback);
                         worker_control.closed();
@@ -753,6 +770,15 @@ enum RoutingMutation {
 struct Snapshot {
     maintenance_available: bool,
     maintenance_ack: Option<maintenance::Ack>,
+    #[serde(skip)]
+    error_contexts: Contexts,
+    error_generation: u64,
+    helper_generation: Option<u64>,
+    routing_generation: u64,
+    maintenance_generation: u64,
+    logs_generation: u64,
+    command_generation: u64,
+    logs_channel: Option<Slot>,
     logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
@@ -829,6 +855,14 @@ impl Snapshot {
             routing_explanation: serde_json::Value::Null,
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
+            error_contexts: Contexts::default(),
+            error_generation: 0,
+            helper_generation: None,
+            routing_generation: 0,
+            maintenance_generation: 0,
+            logs_generation: 0,
+            command_generation: 0,
+            logs_channel: None,
             routing_ack: None,
             source_change_ack: None,
             routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
@@ -892,6 +926,7 @@ impl Snapshot {
         }
     }
     fn begin_command(&mut self, command: &Command) {
+        self.error_contexts.clear(Slot::Error);
         self.error = None;
         if command.is_source_operation() {
             if matches!(
@@ -905,18 +940,73 @@ impl Snapshot {
                     | Command::ApproveRefresh
                     | Command::DiscardRefresh
             ) {
+                self.error_contexts
+                    .clear(crate::diagnostics::context::Slot::Source);
                 self.source_error = None;
             }
         } else {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             self.connection_error = None;
         }
     }
     fn command_error(&mut self, source: bool, error: &'static str) {
+        self.error_contexts.clear(Slot::Error);
         self.error = Some(error);
         if source {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Source);
             self.source_error = Some(error);
         } else {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             self.connection_error = Some(error);
+        }
+    }
+    fn contextual_error(&mut self, source: bool, failure: ContextFailure) {
+        self.command_error(source, failure.error.key());
+        self.error_contexts.set(Slot::Error, failure.cause, None);
+        self.error_contexts.set(
+            if source {
+                Slot::Source
+            } else {
+                Slot::Connection
+            },
+            failure.cause,
+            None,
+        );
+    }
+    fn session_error(&mut self, cause: Cause, generation: u64) {
+        self.contextual_error(false, ContextFailure::new(cause));
+        self.error_contexts
+            .set_generation(Slot::Error, cause, Some(generation));
+        self.error_contexts
+            .set_generation(Slot::Connection, cause, Some(generation));
+    }
+    fn clear_logs_contexts(&mut self) {
+        self.error_contexts.clear(Slot::LogsRead);
+        self.error_contexts.clear(Slot::LogsSave);
+    }
+    fn logs_key(&self) -> Option<&'static str> {
+        match self.logs.status {
+            "busy" => Some("busy"),
+            "refused" => Some("logs_save_failed"),
+            "saved_durability_unknown" => Some("logs_save_durability_unknown"),
+            "cancelled" => Some("cancelled"),
+            _ => None,
+        }
+    }
+    fn set_logs_context(&mut self, slot: Slot, cause: Option<logs::Failure>) {
+        self.clear_logs_contexts();
+        self.logs_channel = Some(slot);
+        if let (Some(cause), Ok(request_id)) = (
+            cause.and_then(logs::Failure::context),
+            self.logs.request_id.parse::<u64>(),
+        ) {
+            if request_id.to_string() == self.logs.request_id {
+                self.error_contexts
+                    .set_ack(slot, cause, request_id, self.logs_generation);
+            }
         }
     }
     fn emit(&self, callback: &Callback) {
@@ -925,9 +1015,39 @@ impl Snapshot {
             #[serde(flatten)]
             snapshot: &'a Snapshot,
             listen_address: String,
+            error_contexts: Vec<crate::diagnostics::context::ErrorContext>,
         }
         let view = View {
             snapshot: self,
+            error_contexts: [
+                self.error_contexts.matching(Slot::Error, self.error, None),
+                self.error_contexts
+                    .matching(Slot::Connection, self.connection_error, None),
+                self.error_contexts
+                    .matching(Slot::Source, self.source_error, None),
+                self.error_contexts.matching(
+                    Slot::RoutingAck,
+                    self.routing_ack.as_ref().and_then(|ack| ack.error),
+                    self.routing_ack.as_ref().map(|ack| ack.request_id),
+                ),
+                self.error_contexts.matching(
+                    Slot::MaintenanceAck,
+                    self.maintenance_ack.as_ref().and_then(|ack| ack.error),
+                    self.maintenance_ack.as_ref().map(|ack| ack.request_id),
+                ),
+                self.logs_channel
+                    .filter(|slot| matches!(slot, Slot::LogsRead | Slot::LogsSave))
+                    .and_then(|slot| {
+                        self.error_contexts.matching(
+                            slot,
+                            self.logs_key(),
+                            self.logs.request_id.parse::<u64>().ok(),
+                        )
+                    }),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             listen_address: format!("127.0.0.1:{}", self.port),
         };
         if let Ok(json) = serde_json::to_string(&view) {
@@ -956,59 +1076,110 @@ fn available_port(requested: u16) -> Result<NonZeroU16> {
     Err(DesktopError("listen_port_busy"))
 }
 
-fn private_directory(path: &Path) -> Result<(PathBuf, File)> {
+#[derive(Debug)]
+struct ContextFailure {
+    error: DesktopError,
+    cause: Cause,
+}
+impl ContextFailure {
+    fn new(cause: Cause) -> Self {
+        let context = crate::diagnostics::context::ErrorContext::new(Slot::Error, cause, None);
+        Self {
+            error: DesktopError(context.message_key),
+            cause,
+        }
+    }
+}
+
+fn private_directory(path: &Path) -> std::result::Result<(PathBuf, File), ContextFailure> {
     if !path.is_absolute() {
-        return Err(DesktopError("storage"));
+        return Err(ContextFailure::new(Cause::DataDirectoryRelative));
     }
     match DirBuilder::new().recursive(true).mode(0o700).create(path) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
-        Err(_) => return Err(DesktopError("storage")),
+        Err(_) => return Err(ContextFailure::new(Cause::DataDirectoryCreate)),
     }
-    let metadata = fs::symlink_metadata(path).map_err(|_| DesktopError("storage"))?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || metadata.uid() != rustix::process::getuid().as_raw()
-        || metadata.mode() & 0o7777 != 0o700
-    {
-        return Err(DesktopError("storage"));
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryMetadata))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(ContextFailure::new(Cause::DataDirectoryType));
     }
-    let canonical = path.canonicalize().map_err(|_| DesktopError("storage"))?;
+    if metadata.uid() != rustix::process::getuid().as_raw() {
+        return Err(ContextFailure::new(Cause::DataDirectoryOwner));
+    }
+    if metadata.mode() & 0o7777 != 0o700 {
+        return Err(ContextFailure::new(Cause::DataDirectoryPermissions));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryCanonicalize))?;
     let directory = OpenOptions::new()
         .read(true)
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::DIRECTORY).bits() as i32)
         .open(&canonical)
-        .map_err(|_| DesktopError("storage"))?;
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryOpen))?;
     rustix::fs::flock(
         &directory,
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     )
-    .map_err(|_| DesktopError("busy"))?;
+    .map_err(|_| ContextFailure::new(Cause::DataDirectoryLock))?;
     Ok((canonical, directory))
 }
 
 async fn open(
     config: &mut HostConfig,
-) -> Result<(SubscriptionService, File, EncryptedSubscriptionRepository)> {
+) -> std::result::Result<(SubscriptionService, File, EncryptedSubscriptionRepository), ContextFailure>
+{
     let path = config.data_dir.clone();
-    let (directory, lock) = tokio::task::spawn_blocking(move || private_directory(&path))
-        .await
-        .map_err(|_| DesktopError("storage"))??;
+    config.startup_observer.emit(StartupPhase::DirectoryQueued);
+    let observer = config.startup_observer.clone();
+    let (directory, lock) = tokio::task::spawn_blocking(move || {
+        observer.emit(StartupPhase::DirectoryLock);
+        let result = private_directory(&path);
+        observer.emit(StartupPhase::DirectoryReturned);
+        result
+    })
+    .await
+    .map_err(|_| ContextFailure::new(Cause::StorageTaskFailed))??;
     let path = directory.join("subscriptions.sqlite");
+    config.startup_observer.emit(StartupPhase::Credential);
     let key = match config.ephemeral_key.take() {
         Some(key) => key,
         None => subscription_master_key(!path.exists())
             .await
             .map_err(|error| {
-                DesktopError(match error {
-                    CredentialError::Missing => "keyring_missing",
-                    _ => "keyring_locked",
+                ContextFailure::new(match error {
+                    CredentialError::Missing => Cause::KeyringMissing,
+                    CredentialError::Locked => Cause::KeyringLocked,
+                    CredentialError::Unavailable => Cause::KeyringUnavailable,
+                    CredentialError::Ambiguous => Cause::KeyringAmbiguous,
+                    CredentialError::InvalidKey => Cause::KeyringInvalidKey,
+                    CredentialError::Random => Cause::KeyringRandom,
+                    CredentialError::Timeout => Cause::KeyringTimeout,
+                    CredentialError::Busy => Cause::KeyringBusy,
                 })
             })?,
     };
+    config.startup_observer.emit(StartupPhase::RepositoryOpen);
     let repo = EncryptedSubscriptionRepository::open(path, key)
         .await
-        .map_err(|_| DesktopError("storage"))?;
+        .map_err(|error| {
+            ContextFailure::new(match error {
+                yonik_linux::RepositoryError::InvalidInput => Cause::RepositoryOpenInvalidInput,
+                yonik_linux::RepositoryError::UnsafePath => Cause::RepositoryOpenUnsafePath,
+                yonik_linux::RepositoryError::UnsupportedVersion => {
+                    Cause::RepositoryOpenUnsupportedVersion
+                }
+                yonik_linux::RepositoryError::Corrupt => Cause::RepositoryOpenCorrupt,
+                yonik_linux::RepositoryError::Storage => Cause::RepositoryOpenStorage,
+                yonik_linux::RepositoryError::Conflict => Cause::RepositoryOpenConflict,
+                yonik_linux::RepositoryError::NotFound => Cause::RepositoryOpenNotFound,
+            })
+        })?;
+    config
+        .startup_observer
+        .emit(StartupPhase::RepositoryReturned);
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
@@ -1042,7 +1213,11 @@ impl Actor {
             .expect("online dispatch требует repository slot")
     }
 
-    async fn save_routing(&mut self, candidate: crate::editor::Draft) -> Result<()> {
+    async fn save_routing(
+        &mut self,
+        candidate: crate::editor::Draft,
+        request_id: u64,
+    ) -> Result<()> {
         candidate.policy().map_err(DesktopError)?;
         let expected = self
             .routing_revision
@@ -1052,6 +1227,16 @@ impl Actor {
             .save_routing_draft(expected, candidate.json().into_bytes())
             .await
             .map_err(|error| {
+                self.state.error_contexts.set_ack(
+                    Slot::RoutingAck,
+                    if error == yonik_linux::RepositoryError::Conflict {
+                        Cause::RoutingRepositoryConflict
+                    } else {
+                        Cause::RoutingRepositoryFailed
+                    },
+                    request_id,
+                    self.state.routing_generation,
+                );
                 DesktopError(if error == yonik_linux::RepositoryError::Conflict {
                     "routing_stale"
                 } else {
@@ -1072,18 +1257,22 @@ impl Actor {
         request_id: u64,
         mutation: RoutingMutation,
     ) -> Result<()> {
+        self.state.error_contexts.clear(Slot::RoutingAck);
+        let mut routing_cause = None;
         let saved_id = match &mutation {
             RoutingMutation::Put { rule, .. } => Some(rule.id),
             _ => None,
         };
         let result = async {
             if request_id == 0 || request_id > 9_007_199_254_740_991 {
+                routing_cause = Some(Cause::RoutingRequestIdentity);
                 return Err(DesktopError("invalid_input"));
             }
             let current = self
                 .routing_revision
                 .ok_or(DesktopError("routing_storage"))?;
             if expected_revision != current {
+                routing_cause = Some(Cause::RoutingRevisionStale);
                 return Err(DesktopError("routing_stale"));
             }
             let mut candidate = self.state.routing.clone();
@@ -1095,12 +1284,14 @@ impl Actor {
                 } => {
                     let exists = candidate.rules.iter().any(|r| r.id == rule.id);
                     if exists == create {
+                        routing_cause = Some(Cause::RoutingRuleIdentity);
                         return Err(DesktopError("id"));
                     }
                     candidate.put(rule, confirm_broad).map_err(DesktopError)?;
                 }
                 RoutingMutation::Order(ids) => {
                     if ids.len() != candidate.rules.len() {
+                        routing_cause = Some(Cause::RoutingRuleIdentity);
                         return Err(DesktopError("id"));
                     }
                     let mut available: std::collections::HashMap<_, _> =
@@ -1120,7 +1311,7 @@ impl Actor {
                 }
                 RoutingMutation::Default(action) => candidate.default_action = action,
             }
-            self.save_routing(candidate).await
+            self.save_routing(candidate, request_id).await
         }
         .await;
         if result
@@ -1132,19 +1323,49 @@ impl Actor {
                 serde_json::json!({"incomplete":true,"stale":true,"warnings":[]});
             self.state.routing_explanation = serde_json::Value::Null;
         }
+        let pending_context = self.state.error_contexts.matching(
+            Slot::RoutingAck,
+            result.as_ref().err().map(|error| error.key()),
+            Some(request_id),
+        );
+        self.state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::RoutingAck);
         self.state.routing_ack = Some(RoutingAck {
             request_id,
             saved_id: if result.is_ok() { saved_id } else { None },
             error: result.as_ref().err().map(|e| e.key()),
         });
+        if let Some(cause) = routing_cause.or(pending_context.map(|context| context.reason)) {
+            self.state.error_contexts.set_ack(
+                Slot::RoutingAck,
+                cause,
+                request_id,
+                self.state.routing_generation,
+            );
+        }
         result
     }
 
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        let outcome = self
-            .preferences_store
-            .save(&preferences)
-            .map_err(|_| DesktopError("preferences_write"))?;
+        let outcome = self.preferences_store.save(&preferences).map_err(|error| {
+            let cause = match error.kind() {
+                std::io::ErrorKind::PermissionDenied => Some(Cause::PreferencesIoPermissionDenied),
+                std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
+                std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
+                std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
+                std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
+                _ => None,
+            };
+            if let Some(cause) = cause {
+                self.state.error_contexts.set_generation(
+                    Slot::Error,
+                    cause,
+                    Some(self.state.command_generation),
+                );
+            }
+            DesktopError("preferences_write")
+        })?;
         self.state.preferences_durability_warning =
             outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
@@ -1356,6 +1577,9 @@ impl Actor {
                 } else {
                     "busy"
                 };
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
                 self.state.maintenance_ack = Some(maintenance::Ack {
                     request_id,
                     phase: maintenance::Phase::Failed,
@@ -1364,6 +1588,9 @@ impl Actor {
                 Ok(())
             }
             Command::MaintenanceCancel { request_id } => {
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
                 self.state.maintenance_ack = Some(maintenance::Ack {
                     request_id,
                     phase: maintenance::Phase::Failed,
@@ -1387,11 +1614,14 @@ impl Actor {
                     destination,
                     request_id.clone(),
                 );
+                self.state.clear_logs_contexts();
                 self.state.logs = logs::Page {
                     request_id,
                     status,
                     ..Default::default()
                 };
+                self.state
+                    .set_logs_context(Slot::LogsSave, self.logs_save.cause);
                 Ok(())
             }
             Command::LogsRead {
@@ -1399,12 +1629,15 @@ impl Actor {
                 source,
                 request_id,
             } => {
+                self.state.clear_logs_contexts();
                 self.state.logs = logs::Page::read(
                     &self.event_log,
                     after.parse().map_err(|_| DesktopError("invalid_input"))?,
                     source,
                     request_id,
                 );
+                self.state
+                    .set_logs_context(Slot::LogsRead, self.state.logs.cause);
                 Ok(())
             }
             Command::RoutingExplain {
@@ -1423,6 +1656,9 @@ impl Actor {
                     }
                     Err(_) => serde_json::Value::Null,
                 };
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::RoutingAck);
                 self.state.routing_ack = Some(RoutingAck {
                     request_id,
                     saved_id: None,
@@ -1439,8 +1675,24 @@ impl Actor {
                     crate::editor::catalog(processes, &query, offset)
                 })
                 .await
-                .map_err(|_| DesktopError("catalog"))?
-                .map_err(DesktopError)?;
+                .map_err(|_| {
+                    self.state.error_contexts.set_generation(
+                        Slot::Error,
+                        Cause::CatalogTaskFailed,
+                        Some(self.state.command_generation),
+                    );
+                    DesktopError("catalog")
+                })?
+                .map_err(|key| {
+                    if key == "catalog" {
+                        self.state.error_contexts.set_generation(
+                            Slot::Error,
+                            Cause::CatalogQueryFailed,
+                            Some(self.state.command_generation),
+                        );
+                    }
+                    DesktopError(key)
+                })?;
                 Ok(())
             }
             Command::EditRouting {
@@ -1874,6 +2126,8 @@ fn map_subscription(error: SubscriptionError) -> DesktopError {
 struct SessionUpdate {
     status: &'static str,
     error: Option<&'static str>,
+    context: Option<Cause>,
+    generation: Option<u64>,
     probe_result: Option<HealthResultDto>,
     network_stamp: Option<NetworkStamp>,
 }
@@ -1891,16 +2145,51 @@ fn apply_session_update(
     update: SessionUpdate,
     network: Option<NetworkSnapshot>,
 ) {
+    if update
+        .generation
+        .is_some_and(|generation| generation != state.error_generation)
+    {
+        return;
+    }
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     if update.network_stamp.is_some() && !network_matches(network, update.network_stamp) {
         state.status = "Limited";
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::Error);
         state.error = Some("network_changed");
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::Connection);
         state.connection_error = Some("network_changed");
         state.probe_result = None;
         return;
     }
     state.status = update.status;
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
     state.error = update.error;
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     state.connection_error = update.error;
+    if let Some(cause) = update.context.filter(|cause| {
+        crate::diagnostics::context::ErrorContext::new(Slot::Error, *cause, None).message_key
+            == update.error.unwrap_or("")
+    }) {
+        state
+            .error_contexts
+            .set_generation(Slot::Error, cause, update.generation);
+        state
+            .error_contexts
+            .set_generation(Slot::Connection, cause, update.generation);
+    }
     if let Some(result) = update.probe_result {
         state.probe_result = Some(result);
     }
@@ -1921,7 +2210,13 @@ fn synchronize_network(state: &mut Snapshot, network: Option<NetworkSnapshot>) {
         state.probe_result = None;
         if matches!(state.status, "Checking" | "Connected" | "Limited") {
             state.status = "Limited";
+            state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Error);
             state.error = Some("network_changed");
+            state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             state.connection_error = Some("network_changed");
         }
     }
@@ -2135,6 +2430,8 @@ mod error_scope_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Connected",
                 error: None,
                 probe_result: None,
@@ -2157,6 +2454,8 @@ mod error_scope_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Disconnected",
                 error: Some("engine_missing"),
                 probe_result: None,
@@ -2222,6 +2521,8 @@ mod network_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Connected",
                 error: None,
                 probe_result: Some(ProbeResult::Timeout.into()),
@@ -2552,14 +2853,17 @@ async fn session(
     updates: (
         mpsc::Sender<SessionUpdate>,
         yonik_linux::event_log::EventLog,
+        u64,
     ),
     mut network: Option<NetworkWatch>,
     #[cfg(feature = "test-support")] cleanup_fault: Option<Arc<AtomicBool>>,
 ) -> std::result::Result<(), LocalSession> {
-    let (updates, event_log) = updates;
+    let (updates, event_log, generation) = updates;
     let Ok(session) = LocalSession::new() else {
         let _ = updates
             .send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Error",
                 error: Some("engine_failed"),
                 probe_result: None,
@@ -2573,6 +2877,7 @@ async fn session(
     if let Some(fault) = cleanup_fault {
         session = session.with_cleanup_fault(fault);
     }
+    let mut operation_cause = None;
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -2607,6 +2912,7 @@ async fn session(
                 }
             })?;
         session.start(checked, &mut cancel).await.map_err(|e| {
+            operation_cause = Some(if e == HostError::EngineExited { Cause::EngineStartExited } else { Cause::EngineStartFailed });
             if e == HostError::Cancelled {
                 "cancelled"
             } else {
@@ -2617,6 +2923,8 @@ async fn session(
         let mut network_stamp = checked_network.map(|network| network.stamp);
         let _ = updates
             .send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Checking",
                 error: None,
                 probe_result: None,
@@ -2653,6 +2961,8 @@ async fn session(
             proof.network_epoch = network_stamp.map(|stamp| stamp.to_string());
             proof.network_observed = checked_network.is_some_and(NetworkSnapshot::fully_observed);
             let _ = updates.send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: if passed { "Connected" } else { "Limited" },
                 error,
                 probe_result: Some(proof),
@@ -2661,6 +2971,8 @@ async fn session(
         } else {
             session.invalidate_check().map_err(|_| "check_failed")?;
             let _ = updates.send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Limited",
                 error: Some("network_changed"),
                 probe_result: None,
@@ -2672,6 +2984,7 @@ async fn session(
             tokio::select! {
                 biased;
                 result = session.wait_exit(&mut cancel) => return result.map_err(|e| {
+                    operation_cause = (e == HostError::EngineExited).then_some(Cause::EngineExited);
                     if e == HostError::Cancelled { "cancelled" } else { "engine_failed" }
                 }),
                 _ = network_changed(&mut network) => {
@@ -2679,6 +2992,8 @@ async fn session(
                         session.invalidate_check().map_err(|_| "check_failed")?;
                         network_stamp = network.as_ref().map(|watch| watch.current().stamp);
                         let _ = updates.send(SessionUpdate {
+                            context: None,
+                            generation: Some(generation),
                             status: "Limited",
                             error: Some("network_changed"),
                             probe_result: None,
@@ -2693,6 +3008,8 @@ async fn session(
     if session.stop().await.is_err() {
         let _ = updates
             .send(SessionUpdate {
+                context: Some(Cause::CleanupFailed),
+                generation: Some(generation),
                 status: "CleanupError",
                 error: Some("cleanup_failed"),
                 probe_result: None,
@@ -2704,6 +3021,8 @@ async fn session(
     let error = operation.err().filter(|key| *key != "cancelled");
     let _ = updates
         .send(SessionUpdate {
+            context: operation_cause.filter(|_| error.is_some()),
+            generation: Some(generation),
             status: if error.is_some() {
                 "Error"
             } else {
@@ -2730,6 +3049,9 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
     if let Command::MaintenanceStart { request_id, .. }
     | Command::MaintenanceCancel { request_id } = command
     {
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::MaintenanceAck);
         state.maintenance_ack = Some(maintenance::Ack {
             request_id: *request_id,
             phase: maintenance::Phase::Failed,
@@ -2737,6 +3059,9 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
         });
     }
     if let Some(request_id) = command.routing_request_id() {
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::RoutingAck);
         state.routing_ack = Some(RoutingAck {
             request_id,
             saved_id: None,
@@ -2744,6 +3069,7 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
         });
     }
     if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = command {
+        state.clear_logs_contexts();
         state.logs = logs::Page {
             request_id: request_id.clone(),
             status: if error == "busy" { "busy" } else { "error" },
@@ -2788,6 +3114,9 @@ async fn run(
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
+    config
+        .startup_observer
+        .emit(StartupPhase::SignalRegistration);
     // Обработчики регистрируются до любого spawn ядра.
     let signals = match (
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
@@ -2803,8 +3132,7 @@ async fn run(
         _ => {
             // Без обработчиков завершения не разрешаем запуск дочернего ядра.
             state.busy = false;
-            state.error = Some("startup");
-            state.connection_error = Some("startup");
+            state.contextual_error(false, ContextFailure::new(Cause::SignalsUnavailable));
             state.emit(&callback);
             wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
@@ -2813,18 +3141,19 @@ async fn run(
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::PortSelection);
     let opened = match config.listen_port.map_or_else(|| available_port(0), Ok) {
         Ok(port) => {
             state.port = port.get();
             open(&mut config).await
         }
-        Err(error) => Err(error),
+        Err(_) => Err(ContextFailure::new(Cause::ListenPortUnavailable)),
     };
     state.busy = false;
     let (service, _lock, routing_repository) = match opened {
         Ok(opened) => opened,
         Err(error) => {
-            state.command_error(false, error.key());
+            state.contextual_error(false, error);
             state.emit(&callback);
             wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
@@ -2836,6 +3165,7 @@ async fn run(
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::Preferences);
     let (preferences_store, mut preferences, warning) = Store::open(&config.data_dir);
     if let Some(port) = config.listen_port {
         preferences.port = Some(port);
@@ -2857,7 +3187,11 @@ async fn run(
     state.probe_expected_status = preferences.probe_status;
     state.maintenance_available = true;
     state.ready = true;
+    config
+        .startup_observer
+        .emit(StartupPhase::NetworkInitialization);
     let network_monitor = NetworkMonitor::start().ok();
+    config.startup_observer.emit(StartupPhase::NetworkReturned);
     let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();
@@ -2890,11 +3224,19 @@ async fn run(
             }
             None => {
                 actor.routing_revision = None;
+                actor
+                    .state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::Error);
                 actor.state.error = Some("routing_storage");
             }
         },
         Err(_) => {
             actor.routing_revision = None;
+            actor
+                .state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Error);
             actor.state.error = Some("routing_storage");
         }
     }
@@ -3068,14 +3410,14 @@ async fn run(
                         scheduled = replacement;
                     }
                 }
-                actor.state.connection_error = None;
+                actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Connection); actor.state.connection_error = None;
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
-                    if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
+                    if session.stop().await.is_err() { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 }
                 if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() {
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
@@ -3110,7 +3452,10 @@ async fn run(
                                     },
                                     Err(error) => {
                                         record_system(&mut actor.state, SystemState::Unknown);
-                                        actor.state.command_error(false, system_error(error));
+                                        actor.state.contextual_error(false, ContextFailure { error: DesktopError(system_error(error)), cause: helper_cause(error) });
+                                        actor.state.helper_generation = Some(flight.generation);
+                                        actor.state.error_contexts.set_generation(Slot::Error, helper_cause(error), Some(flight.generation));
+                                        actor.state.error_contexts.set_generation(Slot::Connection, helper_cause(error), Some(flight.generation));
                                     }
                                 }
                             }
@@ -3279,7 +3624,7 @@ async fn run(
             }
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
                 running = None;
-                if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
+                if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 if failed_session.is_none() { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
                 // Финальный event может ожидать в канале; сначала применяем его.
                 while let Ok(update) = events.try_recv() { actor.update(update); }
@@ -3290,7 +3635,7 @@ async fn run(
                 actor.state.busy = false;
                 actor.state.refresh_source_id = None;
                 actor.state.refresh_token = None;
-                if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.source_error = None; }
+                if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Source); actor.state.source_error = None; }
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting && !*cancel.borrow() {
                     let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
@@ -3302,7 +3647,8 @@ async fn run(
             completion = actor.logs_save.complete(), if actor.logs_save.active() => {
                 if let Some((request_id, status)) = completion {
                     if actor.state.logs.request_id == request_id && actor.state.logs.status == "saving" {
-                        actor.state.logs = logs::Page { request_id, status, ..Default::default() };
+                        actor.state.clear_logs_contexts(); actor.state.logs = logs::Page { request_id, status, ..Default::default() };
+                        actor.state.set_logs_context(Slot::LogsSave, actor.logs_save.cause);
                         actor.emit();
                     }
                 }
@@ -3318,15 +3664,15 @@ async fn run(
                         actor.emit();
                     }
                     if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
-                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
                         actor.emit();
                     }
                     if let Some(request_id) = envelope.command.routing_request_id() {
-                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::RoutingAck); actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
                     if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = envelope.command {
-                        actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
+                        actor.state.clear_logs_contexts(); actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }
                     continue;
@@ -3335,23 +3681,23 @@ async fn run(
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
                     let live = config.data_dir.join("subscriptions.sqlite");
                     if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
-                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
                         actor.emit(); continue;
                     }
                     if let Err(error) = maintenance_controller.begin(&request, &live, actor.state.revision) {
-                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
                         actor.emit(); continue;
                     }
-                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
+                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
                     let owner = std::mem::replace(&mut scheduled, replacement);
                     let request_id = request.request_id;
                     let cancellation = yonik_linux::MaintenanceControl::default();
                     let mut job = tokio::spawn(maintenance_job::run(service, repository, owner, refreshing.take(), request, cancellation.clone(), origin.elapsed()));
                     actor.state.ready = false;
                     actor.state.busy = true;
-                    actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Draining, error: None });
+                    actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Draining, error: None });
                     actor.emit();
                     let outcome = loop {
                         tokio::select! {
@@ -3362,7 +3708,7 @@ async fn run(
                                 quitting |= action.shutdown;
                                 cancellation.cancel();
                                 maintenance_controller.cancel(request_id);
-                                actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                 actor.emit();
                             }
                             result = &mut job => break result,
@@ -3372,13 +3718,13 @@ async fn run(
                                     Command::MaintenanceCancel { request_id: id } if *id == request_id => {
                                         cancellation.cancel();
                                         maintenance_controller.cancel(request_id);
-                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                     }
                                     Command::MaintenanceStart { request_id: id, .. } if *id == request_id => {
-                                        actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                     }
                                     Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
-                                        actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
                                     }
                                     _ => reject_unavailable_command(&mut actor.state, &command.command, "busy"),
                                 }
@@ -3387,8 +3733,10 @@ async fn run(
                         }
                     };
                     let mut result = Err("cleanup_failed");
+                    let mut job_context = None;
                     let mut job_drained = false;
                     if let Ok(outcome) = outcome {
+                        job_context = outcome.cause.map(maintenance_job::Failure::context);
                         job_drained = outcome.drained;
                         result = outcome.result;
                         if let Some((service, repository, owner)) = outcome.handles {
@@ -3400,7 +3748,9 @@ async fn run(
                     // Completion принадлежит единственному join handle этого request;
                     // внешние callbacks не могут завершить следующую generation.
                     if job_drained { maintenance_controller.drained(request_id, result); }
-                    actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
+                    actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
+                    actor.state.maintenance_generation = envelope.generation;
+                    if let Some(cause) = job_context { actor.state.error_contexts.set_ack(Slot::MaintenanceAck, cause, request_id, envelope.generation); }
                     actor.state.ready = online && !quitting;
                     actor.state.maintenance_available = online && !quitting;
                     actor.state.busy = false;
@@ -3427,6 +3777,7 @@ async fn run(
                     if quitting { break; }
                     continue;
                 }
+
                 let source_change = match &envelope.command {
                     Command::SourceChange { request_id, id, .. } => Some((*request_id, *id)),
                     _ => None,
@@ -3458,6 +3809,11 @@ async fn run(
                         actor.state.pending = None;
                     }
                 }
+
+                if matches!(&envelope.command, Command::LogsRead { .. } | Command::LogsSave { .. }) { actor.state.logs_generation = envelope.generation; }
+                let context_request_id = envelope.command.routing_request_id();
+                if context_request_id.is_some() { actor.state.routing_generation = envelope.generation; actor.state.error_contexts.clear(Slot::RoutingAck); }
+
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
@@ -3492,6 +3848,7 @@ async fn run(
                     if let Some(batch) = batch_running.as_mut() { batch.stop(); }
                     actor.state.batch.invalidate();
                 }
+                actor.state.command_generation = envelope.generation;
                 actor.state.begin_command(&envelope.command);
                 let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
                 if matches!(envelope.command, Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Reload | Command::ApproveRefresh) {
@@ -3639,8 +3996,8 @@ async fn run(
                                     (Some(compiled), Ok(target)) => {
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
-                                        session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
+                                        session_generation = session_generation.saturating_add(1); actor.state.error_generation = session_generation;
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone(), session_generation), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -3668,12 +4025,22 @@ async fn run(
                         }
                     }
                 }
+
                 if source_change.is_some() {
                     if let Some(ack) = actor.state.source_change_ack.as_mut() {
                         ack.error = outcome.as_ref().err().map(|error| error.key());
                     }
                 }
-                if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }
+
+                if let Err(error) = outcome {
+                    let context = context_request_id.and_then(|id| actor.state.error_contexts.matching(Slot::RoutingAck, Some(error.key()), Some(id))).or_else(|| actor.state.error_contexts.matching(Slot::Error, Some(error.key()), None));
+                    actor.state.command_error(source_operation, error.key());
+                    if let Some(context) = context {
+                        actor.state.error_contexts.set_generation(Slot::Error, context.reason, context.generation);
+                        actor.state.error_contexts.set_generation(if source_operation { Slot::Source } else { Slot::Connection }, context.reason, context.generation);
+                    }
+                }
+
                 actor.state.system_busy = system_flight.is_some();
                 actor.emit();
             }
@@ -3754,7 +4121,9 @@ async fn run(
         {
             if failed_session.is_some() || system_active {
                 quitting = false;
-                actor.state.command_error(false, "cleanup_failed");
+                actor
+                    .state
+                    .session_error(Cause::CleanupFailed, session_generation);
                 actor.emit();
                 continue;
             }
@@ -3791,7 +4160,15 @@ async fn run(
     actor.state.busy = false;
     actor.state.can_connect = false;
     actor.state.closed = closed;
+    actor
+        .state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
     actor.state.error = if closed { None } else { Some("cleanup_failed") };
+    actor
+        .state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     actor.state.connection_error = actor.state.error;
     actor.state.emit(&actor.callback);
     if closed {
@@ -4091,6 +4468,23 @@ fn record_system(snapshot: &mut Snapshot, state: SystemState) {
     }
     snapshot.can_unlock = snapshot.system_recovery_pending;
 }
+fn helper_cause(error: ClientError) -> Cause {
+    match error {
+        ClientError::Unsupported => Cause::HelperUnsupported,
+        ClientError::Denied => Cause::HelperDenied,
+        ClientError::Cancelled => Cause::HelperCancelled,
+        ClientError::Busy => Cause::HelperBusy,
+        ClientError::OwnerLost => Cause::HelperOwnerLost,
+        ClientError::Deadline => Cause::HelperDeadline,
+        ClientError::Timeout => Cause::HelperTimeout,
+        ClientError::InvalidRequest => Cause::HelperInvalidRequest,
+        ClientError::InvalidHandle => Cause::HelperInvalidHandle,
+        ClientError::Stale => Cause::HelperStale,
+        ClientError::Protocol => Cause::HelperProtocol,
+        ClientError::Unavailable => Cause::HelperUnavailable,
+    }
+}
+
 fn system_error(error: ClientError) -> &'static str {
     match error {
         ClientError::Unsupported => "system_unsupported",
@@ -4220,3 +4614,146 @@ mod system_recovery_tests {
 #[cfg(test)]
 #[path = "maintenance_command_tests.rs"]
 mod maintenance_command_tests;
+
+#[cfg(test)]
+mod error_context_tests {
+    use super::*;
+
+    #[test]
+    fn replacement_and_late_session_update_do_not_keep_context() {
+        let mut state = Snapshot::new(true);
+        state.contextual_error(false, ContextFailure::new(Cause::DataDirectoryPermissions));
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_some()
+        );
+        state.command_error(false, "storage");
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_none()
+        );
+        state.error_generation = 9;
+        state.contextual_error(false, ContextFailure::new(Cause::RepositoryOpenStorage));
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Error",
+                error: Some("engine_failed"),
+                context: Some(Cause::EngineExited),
+                generation: Some(8),
+                probe_result: None,
+                network_stamp: None,
+            },
+            None,
+        );
+        assert_eq!(state.error, Some("storage"));
+        assert_eq!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, state.connection_error, None)
+                .expect("текущий контекст")
+                .reason,
+            Cause::RepositoryOpenStorage
+        );
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Disconnected",
+                error: None,
+                context: None,
+                generation: Some(9),
+                probe_result: None,
+                network_stamp: None,
+            },
+            None,
+        );
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn actual_directory_guard_has_specific_typed_cause() {
+        let root = std::env::temp_dir().join(format!("p11-context-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o755)
+            .create(&root)
+            .expect("собственный каталог");
+        fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("права");
+        let failure = private_directory(&root).expect_err("guard отказал");
+        fs::remove_dir(&root).expect("очистка");
+        assert_eq!(failure.cause, Cause::DataDirectoryPermissions);
+        assert_eq!(failure.error.key(), "storage");
+    }
+}
+
+#[cfg(test)]
+mod maintenance_context_tests {
+    use super::*;
+    #[test]
+    fn actual_backup_conflict_is_bound_to_ack_and_v1_is_unchanged() {
+        let root = std::env::temp_dir().join(format!("p11-maint-context-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .expect("собственный каталог");
+        let destination = root.join("existing.sqlite");
+        fs::write(&destination, b"previous").expect("существующий файл");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let host = DesktopHost::start(
+            HostConfig::new(root.join("data"), root.join("engines")).with_ephemeral_key([19; 32]),
+            move |raw| {
+                let _ = sender.send(raw);
+            },
+        )
+        .expect("host");
+        let wait = |predicate: &dyn Fn(&serde_json::Value) -> bool| -> serde_json::Value {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                let raw = receiver
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("snapshot deadline");
+                let value: serde_json::Value = serde_json::from_str(&raw).expect("JSON");
+                if predicate(&value) {
+                    return value;
+                }
+            }
+        };
+        let ready = wait(&|value| value["ready"] == true);
+        host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":77,"operation":"backup","destination":destination,"revision":ready["revision"]}).to_string()).expect("Start");
+        let state = wait(&|value| {
+            value["maintenance_ack"]["request_id"] == 77
+                && value["maintenance_ack"]["phase"] == "failed"
+        });
+        let export = crate::diagnostics::export_snapshot_v2(&state.to_string()).expect("actual V2");
+        let metadata: serde_json::Value = serde_json::from_str(&export).expect("JSON");
+        assert_eq!(metadata["errors"][0]["reason"], "maintenance_copy_conflict");
+        assert_eq!(metadata["errors"][0]["request_id"], "77");
+        let mut sibling = state.clone();
+        sibling["maintenance_ack"]["request_id"] = serde_json::json!(78);
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        let legacy = crate::diagnostics::export_snapshot(&state.to_string()).expect("V1");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&legacy).expect("JSON"),
+            serde_json::json!({"schema_version":1,"platform":"linux","errors":[]})
+        );
+        host.shutdown();
+        assert!(host.wait_closed(Duration::from_secs(10)));
+        drop(host);
+        assert_eq!(fs::read(&destination).expect("исходник"), b"previous");
+        fs::remove_file(destination).expect("очистка");
+        for entry in fs::read_dir(root.join("data")).expect("данные") {
+            fs::remove_file(entry.expect("файл").path()).expect("очистка данных");
+        }
+        fs::remove_dir(root.join("data")).expect("очистка data");
+        fs::remove_dir(root).expect("очистка root");
+    }
+}

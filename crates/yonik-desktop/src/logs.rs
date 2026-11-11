@@ -1,4 +1,5 @@
 //! Одна явная страница журнала: только коды и числа из доверенного core.
+use crate::diagnostics::context::Cause;
 use serde::{Deserialize, Serialize};
 use yonik_linux::event_log::{EventLog, EventSource, LogFilter, MAX_PAGE};
 
@@ -12,6 +13,8 @@ pub(crate) enum Source {
 
 #[derive(Default, Serialize)]
 pub(crate) struct Page {
+    #[serde(skip)]
+    pub cause: Option<Failure>,
     pub request_id: String,
     pub status: &'static str,
     pub cursor: String,
@@ -44,11 +47,13 @@ impl Page {
             return Self {
                 request_id,
                 status: "busy",
+                cause: Some(Failure::ReadBusy),
                 ..Self::default()
             };
         };
         let page = &scoped.page;
         Self {
+            cause: None,
             request_id,
             status: if page.events.is_empty() {
                 "empty"
@@ -246,9 +251,37 @@ mod save_tests {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Failure {
+    ReadBusy,
+    SaveBusy,
+    PageIdentity,
+    PageUnavailable,
+    DurabilityUnknown,
+    Io(std::io::ErrorKind),
+}
+impl Failure {
+    pub fn context(self) -> Option<Cause> {
+        Some(match self {
+            Self::ReadBusy => Cause::LogsReadBusy,
+            Self::SaveBusy => Cause::LogsSaveBusy,
+            Self::PageIdentity => Cause::LogsPageIdentity,
+            Self::PageUnavailable => Cause::LogsPageUnavailable,
+            Self::DurabilityUnknown => Cause::LogsDurabilityUnknown,
+            Self::Io(std::io::ErrorKind::PermissionDenied) => Cause::LogsIoPermissionDenied,
+            Self::Io(std::io::ErrorKind::AlreadyExists) => Cause::LogsIoAlreadyExists,
+            Self::Io(std::io::ErrorKind::NotFound) => Cause::LogsIoNotFound,
+            Self::Io(std::io::ErrorKind::InvalidInput) => Cause::LogsIoInvalidInput,
+            Self::Io(std::io::ErrorKind::Other) => Cause::LogsIoOther,
+            Self::Io(_) => return None,
+        })
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SaveJob {
-    pending: Option<tokio::sync::oneshot::Receiver<(String, &'static str)>>,
+    pub cause: Option<Failure>,
+    pending: Option<tokio::sync::oneshot::Receiver<(String, &'static str, Option<Failure>)>>,
 }
 impl SaveJob {
     pub fn active(&self) -> bool {
@@ -261,24 +294,28 @@ impl SaveJob {
         destination: String,
         request_id: String,
     ) -> &'static str {
+        self.cause = None;
         if self.active() {
+            self.cause = Some(Failure::SaveBusy);
             return "busy";
         }
         if page.request_id != page_id || !matches!(page.status, "ready" | "empty") {
+            self.cause = Some(Failure::PageIdentity);
             return "refused";
         }
         let Some(export) = page.export.clone().filter(|s| s.len() <= 65536) else {
+            self.cause = Some(Failure::PageUnavailable);
             return "refused";
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.pending = Some(receiver);
         tokio::task::spawn_blocking(move || {
-            let status = match publish(&destination, export.as_bytes()) {
-                Ok(true) => "saved",
-                Ok(false) => "saved_durability_unknown",
-                Err(_) => "refused",
+            let (status, cause) = match publish(&destination, export.as_bytes()) {
+                Ok(true) => ("saved", None),
+                Ok(false) => ("saved_durability_unknown", Some(Failure::DurabilityUnknown)),
+                Err(error) => ("refused", Some(Failure::Io(error.kind()))),
             };
-            let _ = sender.send((request_id, status));
+            let _ = sender.send((request_id, status, cause));
         });
         "saving"
     }
@@ -288,7 +325,10 @@ impl SaveJob {
             None => std::future::pending().await,
         };
         self.pending = None;
-        result
+        result.map(|(request_id, status, cause)| {
+            self.cause = cause;
+            (request_id, status)
+        })
     }
 }
 
@@ -309,5 +349,45 @@ mod job_tests {
         );
         assert_eq!(job.complete().await, Some(("2".into(), "refused")));
         assert!(!job.active());
+    }
+}
+
+#[cfg(test)]
+mod companion_tests {
+    use super::*;
+    #[tokio::test]
+    async fn actual_save_conflict_preserves_typed_io_kind() {
+        let root = std::env::temp_dir().join(format!("p11-log-save-{}", std::process::id()));
+        std::fs::create_dir(&root).expect("собственный каталог");
+        let destination = root.join("existing");
+        std::fs::write(&destination, b"previous").expect("существующий файл");
+        let page = Page::read(&EventLog::new(), 0, Source::All, "31".into());
+        let mut job = SaveJob::default();
+        assert_eq!(
+            job.start(
+                &page,
+                "31",
+                destination.to_string_lossy().into(),
+                "37".into()
+            ),
+            "saving"
+        );
+        assert_eq!(job.complete().await, Some(("37".into(), "refused")));
+        assert!(matches!(
+            job.cause,
+            Some(Failure::Io(std::io::ErrorKind::AlreadyExists))
+        ));
+        assert_eq!(
+            job.cause.and_then(Failure::context),
+            Some(Cause::LogsIoAlreadyExists)
+        );
+        assert!(
+            Failure::Io(std::io::ErrorKind::Unsupported)
+                .context()
+                .is_none()
+        );
+        assert_eq!(std::fs::read(&destination).expect("файл"), b"previous");
+        std::fs::remove_file(destination).expect("очистка");
+        std::fs::remove_dir(root).expect("очистка каталога");
     }
 }
