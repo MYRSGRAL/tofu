@@ -157,7 +157,20 @@ pub struct SystemWorkerSupervisor {
     transfer: Option<JoinHandle<Result<WorkerAck>>>,
     current: Option<WorkerTicket>,
     clean: bool,
+    retained_copy: Option<Arc<WorkerPayload>>,
     fence: Box<dyn WorkerFence>,
+}
+impl Drop for SystemWorkerSupervisor {
+    fn drop(&mut self) {
+        if !self.clean {
+            if let Some(payload) = self.retained_copy.take() {
+                // Без empty-cgroup proof нельзя освободить global reserve:
+                // он остаётся в карантине до выхода helper, ограничен ByteBudget.
+                // BindsTo прекращает worker при завершении helper unit.
+                std::mem::forget(payload);
+            }
+        }
+    }
 }
 impl SystemWorkerSupervisor {
     pub async fn system() -> Result<Self> {
@@ -195,6 +208,7 @@ impl SystemWorkerSupervisor {
                 transfer: None,
                 current: None,
                 clean: false,
+                retained_copy: None,
                 fence: Box::new(SystemFence),
             };
             supervisor.validate_contract().await?;
@@ -323,6 +337,9 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<WorkerAck> {
+        if payload.engine() == yonik_engine::Engine::SingBox {
+            self.retained_copy = Some(Arc::clone(&payload));
+        }
         let stream = bounded(cancel, deadline, async {
             tokio::net::UnixStream::connect(mode.channel())
                 .await
@@ -383,6 +400,7 @@ impl SystemWorkerSupervisor {
                 self.pending = None;
                 self.current = None;
                 self.clean = true;
+                self.retained_copy = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {

@@ -296,6 +296,7 @@ impl Fixture {
             transfer: None,
             current: None,
             clean: false,
+            retained_copy: None,
             fence: Box::new(FakeFence(Arc::clone(&state))),
         };
         Self {
@@ -604,4 +605,58 @@ fn missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown() {
     );
     std::fs::remove_dir(path.join(WorkerMode::Run.service())).unwrap();
     std::fs::remove_dir(path).unwrap();
+}
+
+#[tokio::test]
+async fn copy_reservation_survives_cancel_and_populated_cgroup_until_empty() {
+    use sha2::Digest;
+    let mut fixture = Fixture::new().await;
+    let path = std::path::Path::new("/usr/bin/true");
+    let bytes = std::fs::read(path).unwrap();
+    let binary = crate::BinarySnapshot::load(
+        path,
+        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
+        yonik_engine::Engine::SingBox,
+    )
+    .unwrap();
+    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    let config = yonik_engine::compile(
+        &server,
+        yonik_engine::Engine::SingBox,
+        std::num::NonZeroU16::new(10808).unwrap(),
+    )
+    .unwrap();
+    let payload = Arc::new(WorkerPayload::new(binary, config).unwrap());
+    let weak = Arc::downgrade(&payload);
+    fixture.supervisor.retained_copy = Some(payload);
+    fixture.state.lock().unwrap().populated = true;
+    let (signal, mut cancelled) = Cancellation::new();
+    signal.send_replace(true);
+    assert!(
+        fixture
+            .supervisor
+            .cleanup(&mut cancelled, Instant::now() + Duration::from_secs(1))
+            .await
+            .is_err()
+    );
+    assert!(weak.upgrade().is_some());
+    let (_keep, mut cancel) = Cancellation::new();
+    assert!(
+        fixture
+            .supervisor
+            .cleanup(&mut cancel, Instant::now() + Duration::from_millis(80))
+            .await
+            .is_err()
+    );
+    assert!(weak.upgrade().is_some());
+    fixture.state.lock().unwrap().populated = false;
+    fixture
+        .supervisor
+        .cleanup(&mut cancel, Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert!(weak.upgrade().is_none());
 }

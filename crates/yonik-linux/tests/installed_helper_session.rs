@@ -286,3 +286,173 @@ fn host_without_opt_in_is_rejected() {
         assert!(guard().is_err());
     }
 }
+
+#[tokio::test]
+#[ignore = "Только собственная production VM; app case запускает отдельный разрешённый UID"]
+async fn production_helper_policy_admission() -> Result {
+    guard()?;
+    let app = std::env::var("YONIK_POLICY_APP").as_deref() == Ok("1");
+    require(
+        app != rustix::process::geteuid().is_root(),
+        "Неверный UID для VM case",
+    )?;
+    let _lock = if app { None } else { Some(vm_lock::acquire()?) };
+    let connection = zbus::Connection::system().await?;
+    let empty = json!({"version":1});
+    let imported = yonik_import::import_bytes(
+        b"vless://00112233-4455-6677-8899-aabbccddeeff@10.203.0.2:24443?security=none".to_vec(),
+    )?;
+    let selected = std::env::var("YONIK_POLICY_ENGINE").ok();
+    require(
+        selected
+            .as_deref()
+            .is_none_or(|engine| matches!(engine, "xray" | "sing-box")),
+        "Неизвестное ядро fixture",
+    )?;
+    for engine in ["xray", "sing-box"] {
+        if selected
+            .as_deref()
+            .is_some_and(|selected| selected != engine)
+        {
+            continue;
+        }
+
+        require(
+            call(&connection, "State", empty.clone()).await?["state"] == "no_managed_policy",
+            "Нечистый исходный State",
+        )?;
+        let rules = if app {
+            json!([{"id":1,"enabled":true,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":["/usr/bin/python3"]}])
+        } else {
+            json!([])
+        };
+        let request = json!({"version":1,"mode":"system_profile_policy","engine":engine,"kill_switch":false,
+            "server":yonik_import::ServerIntent::from_server(&imported.servers[0])?,
+            "policy":{"version":1,"default_action":"proxy","user_rules":rules,"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}});
+        let result = call(&connection, "Prepare", request).await;
+        if app {
+            let error = result
+                .err()
+                .ok_or_else(|| io::Error::other("App policy была допущена"))?;
+            require(
+                error.to_string().to_lowercase().contains("unsupported"),
+                "Требуется Unsupported, не auth/timeout",
+            )?;
+            for name in ["yonik-worker", "yonik-worker-check"] {
+                let path = format!("/sys/fs/cgroup/system.slice/{name}.service/cgroup.procs");
+                match fs::read_to_string(path) {
+                    Ok(value) => require(value.trim().is_empty(), "App denial запустил worker")?,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        } else {
+            let prepared = result?;
+            require(
+                call(
+                    &connection,
+                    "Apply",
+                    json!({"version":1,"handle":prepared["handle"]}),
+                )
+                .await?["state"]
+                    == "tunnel_starting",
+                "Non-app policy Apply",
+            )?;
+            let main = Command::new("/usr/bin/systemctl")
+                .args([
+                    "show",
+                    "--property=MainPID",
+                    "--value",
+                    "yonik-worker.service",
+                ])
+                .output()?;
+            require(main.status.success(), "Worker MainPID")?;
+            let pid: u32 = std::str::from_utf8(&main.stdout)?.trim().parse()?;
+            require(pid > 1, "Worker отсутствует после Apply")?;
+            let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+            require(
+                status
+                    .lines()
+                    .any(|line| line == "CapEff:\t0000000000001000"),
+                "Worker capabilities",
+            )?;
+            require(
+                status.lines().any(|line| line == "NoNewPrivs:\t1"),
+                "Worker NoNewPrivileges",
+            )?;
+            println!("Production worker {engine}: {status}");
+            call(&connection, "Stop", empty.clone()).await?;
+            call(&connection, "Unlock", empty.clone()).await?;
+        }
+        require(
+            call(&connection, "State", empty.clone()).await?["state"] == "no_managed_policy",
+            "Остались эффекты",
+        )?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Только production VM, настоящий helper/worker и registry; stdin control без TUN"]
+async fn production_singbox_worker_owned_stdin() -> Result {
+    use std::sync::Arc;
+    use yonik_linux::{
+        Cancellation,
+        helper::{SystemWorkerSupervisor, TrustedRegistry},
+        worker::WorkerPayload,
+    };
+    guard()?;
+    require(
+        rustix::process::geteuid().is_root(),
+        "Нужен root VM controller",
+    )?;
+    let _lock = vm_lock::acquire()?;
+    helper_pid()?;
+    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())?
+        .servers
+        .remove(0);
+    let config = yonik_engine::compile(
+        &server,
+        yonik_engine::Engine::SingBox,
+        std::num::NonZeroU16::new(10808).ok_or_else(|| io::Error::other("port"))?,
+    )?;
+    let registry = TrustedRegistry::system()?;
+    let payload = Arc::new(WorkerPayload::new(
+        registry.snapshot(yonik_engine::Engine::SingBox)?,
+        config,
+    )?);
+    let mut supervisor = SystemWorkerSupervisor::system().await?;
+    let (_keep, mut cancel) = Cancellation::new();
+    let result: Result = async {
+        supervisor.check(Arc::clone(&payload), &mut cancel).await?;
+        let ticket = supervisor.start(Arc::clone(&payload), &mut cancel).await?;
+        let file = fs::File::open(format!("/proc/{}/fd/0", ticket.pid()))?;
+        let metadata = file.metadata()?;
+        require(
+            metadata.uid() != 0 && metadata.mode() & 0o777 == 0o600,
+            "Config не принадлежит worker/mode0600",
+        )?;
+        require(
+            rustix::fs::fcntl_get_seals(&file)?.contains(
+                rustix::fs::SealFlags::WRITE
+                    | rustix::fs::SealFlags::GROW
+                    | rustix::fs::SealFlags::SHRINK
+                    | rustix::fs::SealFlags::SEAL,
+            ),
+            "Config не sealed",
+        )?;
+        println!(
+            "SingBox production stdin: UID={}, mode=0600, sealed, bytes={}",
+            metadata.uid(),
+            metadata.len()
+        );
+        supervisor.stop(&ticket, &mut cancel).await?;
+        Ok(())
+    }
+    .await;
+    let (_keep_cleanup, mut cleanup) = Cancellation::new();
+    let recovered = supervisor.recover(&mut cleanup).await;
+    result?;
+    recovered?;
+    Ok(())
+}
