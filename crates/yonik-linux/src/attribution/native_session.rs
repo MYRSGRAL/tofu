@@ -155,12 +155,10 @@ impl Session {
         }
         let flow = wire::lookup_flow(bytes)?;
         self.sequence.begin(header.request_id)?;
-        let broker = self
-            .roles
-            .as_mut()
-            .and_then(|r| r.broker.as_mut())
-            .ok_or(Malformed)?;
-        let result = broker.lookup(flow);
+        let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
+            Some(broker) => broker.lookup(flow),
+            None => Lookup::MechanismUnavailable(Unavailable::Authority),
+        };
         self.sequence.complete(header.request_id)?;
         Ok(result)
     }
@@ -170,6 +168,11 @@ impl Session {
         if valid { Ok(()) } else { Err(Malformed) }
     }
 }
+// Транспорт не создаёт authority: Session по-прежнему выпускает только helper.
+mod transport;
+#[cfg(test)]
+pub(super) use transport::tests::known_roundtrip;
+
 impl Drop for Session {
     fn drop(&mut self) {
         self.close();
@@ -186,7 +189,7 @@ impl Drop for Roles {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
-    fn fixture() -> (Session, UnixStream) {
+    pub(super) fn fixture() -> (Session, UnixStream) {
         let (worker, peer) = UnixStream::pair().unwrap();
         let tun = std::fs::File::open("/dev/null").unwrap();
         (
