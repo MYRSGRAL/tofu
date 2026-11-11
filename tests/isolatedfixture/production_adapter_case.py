@@ -442,7 +442,7 @@ def helper_identity() -> dict:
     return {"pid": pid, "exe_sha256": digest, "restarts": int(data["NRestarts"])}
 
 
-def end_and_observe(ending: str) -> dict:
+def end_and_observe(ending: str, kill_switch: bool) -> dict:
     before = helper_identity()
     assert ending in {"restart", "worker_exit"}
     unit = "yonik-helper.service" if ending == "restart" else "yonik-worker.service"
@@ -460,10 +460,19 @@ def end_and_observe(ending: str) -> dict:
             )
             journal = json.loads(Path("/run/yonik/network/journal.json").read_text())
             empty = all(value in {"0", "absent"} for value in groups().values())
+            retained = journal["records"]
+            expected_records = (
+                len(retained) == 1
+                and retained[0].get("scope") == "PublicBlock"
+                and retained[0].get("state") == "Confirmed"
+                and journal.get("public_policy") is not None
+                if kill_switch
+                else not retained and journal.get("public_policy") is None
+            )
             if (
                 valid
                 and empty
-                and not journal["records"]
+                and expected_records
                 and journal.get("session_recovery") is None
             ):
                 if ending == "restart":
@@ -476,6 +485,7 @@ def end_and_observe(ending: str) -> dict:
                     "helper_before": before,
                     "helper_after": after,
                     "automatic_worker_and_network_cleanup": True,
+                    "retained_public_block": kill_switch,
                 }
         except (AssertionError, FileNotFoundError, KeyError, json.JSONDecodeError):
             pass
@@ -543,7 +553,7 @@ def coordinator(
                     log.write(line + "\n")
                     log.flush()
                     if event.get("event") == "ending":
-                        data = end_and_observe(ending)
+                        data = end_and_observe(ending, kill_switch)
                         (output / (label + "-ending.json")).write_text(
                             json.dumps(data, indent=2)
                         )
