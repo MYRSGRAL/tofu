@@ -275,6 +275,10 @@ ApplicationWindow {
             + row.position + ": " + (reason ? tr(reason[0], reason[1]) : tr("Требует проверки", "Review required"))
             + (field ? " (" + tr(field[0], field[1]) + ")" : "")
     }
+    function isUnsupportedSelector(reason) {
+        return reason === "unsupported_selector"
+    }
+
     function errorText(key) {
         const messages = {
             listen_port_busy: ["Порт занят. Повторите подключение.", "Port is busy. Try connecting again."],
@@ -323,6 +327,8 @@ ApplicationWindow {
         const editorMessages = {
             action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
             format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
+            duplicate_parameter: ["Повторяющийся параметр", "Duplicate parameter"],
+            unsupported_option: ["Опция не поддерживается", "Unsupported option"],
             routing_stale: ["Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.", "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one."],
             routing_ack_identity: ["Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.", "Save response did not match the rule. Input is preserved; check the draft."],
             routing_storage: ["Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.", "Draft not saved: damaged database or conflict. Original preserved; restart the application."],
@@ -875,7 +881,7 @@ ApplicationWindow {
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
                 SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: window.tr("Ограниченная диагностика сохранённой ревизии ", "Limited diagnostics for saved revision ") + window.state.routing_revision + window.tr(". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены.", ". No warnings does not prove compatibility. VPN/LAN are not configured here.") }
-                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.error === "unsupported_selector" ? window.tr("Правило #", "Rule #") + window.state.routing_diagnostics.rule_id + window.tr(": селектор неприменим на Linux", ": selector is unsupported on Linux") : window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? window.tr("Отчёт устарел: черновик изменился. Требуется актуальный снимок.", "Report is stale: the draft changed. A current snapshot is required.") : window.tr("Анализ неполный: достигнут лимит или вход не поддерживается.", "Analysis is incomplete: a limit was reached or input is unsupported.") }
+                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.isUnsupportedSelector(window.state.routing_diagnostics.error) ? window.tr("Правило #", "Rule #") + window.state.routing_diagnostics.rule_id + window.tr(": селектор неприменим на Linux", ": selector is unsupported on Linux") : window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? window.tr("Отчёт устарел: черновик изменился. Требуется актуальный снимок.", "Report is stale: the draft changed. A current snapshot is required.") : window.tr("Анализ неполный: достигнут лимит или вход не поддерживается.", "Analysis is incomplete: a limit was reached or input is unsupported.") }
                 Repeater {
                     model: window.state.routing_diagnostics ? window.state.routing_diagnostics.warnings : []
                     delegate: SmallLabel {
@@ -891,7 +897,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     property var explanation: window.state.routing_explanation
                     visible: !!explanation && explanation.revision === window.state.routing_revision && explanation.request_id === window.routingRequestId
-                    text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : explanation.result.reason === "unsupported_selector" ? window.tr("неприменимый селектор правила #", "unsupported selector in rule #") + explanation.result.rule_id : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
+                    text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : window.isUnsupportedSelector(explanation.result.reason) ? window.tr("неприменимый селектор правила #", "unsupported selector in rule #") + explanation.result.rule_id : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
                 }
                 RowLayout {
                     objectName: "routingDefaultRow"

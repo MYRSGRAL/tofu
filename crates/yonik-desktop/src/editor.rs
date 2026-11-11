@@ -188,7 +188,7 @@ impl Draft {
         let mut rules = Vec::with_capacity(self.rules.len());
         for input in &self.rules {
             if (self.version == 2) != input.platform_sources.is_some() {
-                return Err("version");
+                return Err("format");
             }
             let sources = input.platform_sources.as_deref().unwrap_or_default();
             if sources.len() > 16 {
@@ -204,7 +204,7 @@ impl Draft {
                 .len()
                 != platform_sources.len()
             {
-                return Err("duplicate");
+                return Err("duplicate_parameter");
             }
 
             if input.id == 0 || input.id > 9_007_199_254_740_991 || !ids.insert(input.id) {
