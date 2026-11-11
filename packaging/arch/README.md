@@ -58,3 +58,12 @@ GNOME Keyring); пакет не изменяет keyring и настройки �
 install без автозапуска, sysusers и D-Bus/polkit, Qt smoke на чистом HOME,
 проверенный engine registry, update/rollback и uninstall с контрольными БД/ключами
 и чужими сетевыми ресурсами. До этой матрицы P24 остаётся частичным.
+
+Изменение notices (planned): `package()` компилирует проверенный набор из
+`packaging/licenses` и устанавливает первичные bytes и inventory в
+`/usr/share/licenses/yonik`. Это изменение ещё не переводит закреплённые
+`_revision`/`sha256sums` с исторического eec7 на current main. Перед финальной
+сборкой нужны согласованные новый source archive, revision и checksum, независимый
+review нового recipe seal и functional merge. Старые ELF не являются новой сборкой.
+Генератор notices требует `python3` в build environment; согласование объявления
+этого build prerequisite в makedepends оставлено root (зависимости здесь не менялись).
