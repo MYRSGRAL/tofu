@@ -24,3 +24,14 @@ MSRV 1.85.1: clippy -p yonik-import -p yonik-engine --all-targets -- -D warnings
 WS path с query явно запрещён существующим Intent; multi_mode не поддерживается
 и отвергается, семантика не подменяется. Проверка трафика, Android и физические
 G-UI/G-POWER не выполнялись. Прежние 12 TCP native checks не повторялись.
+
+## Независимый oracle compiled identity
+
+После review добавлены проверки protocol, адреса, порта и credentials каждого
+скомпилированного outbound относительно фиксированных ожидаемых значений,
+независимо от равенства двух вызовов компилятора. На каждой из 12 конфигураций
+четыре независимые мутации этих полей отвергаются oracle: 48 negative controls.
+Повторный parser/Intent/compile/native config-check: 12/12 PASS.
+Evidence, source/binary/core SHA256 и актуальный acceptance binary:
+`/home/myrs/projects/yonik/local/evidence/pr127-oracle/`. Первая неуспешная
+попытка проверки форматирования сохранена отдельно; она не считается PASS.

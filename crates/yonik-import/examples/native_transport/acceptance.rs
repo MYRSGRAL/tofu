@@ -4,6 +4,74 @@ use std::{num::NonZeroU16, path::Path, process::Command};
 use yonik_engine::{Engine, compile};
 use yonik_import::{ServerIntent, import_bytes};
 
+fn identity_is_exact(outbound: &Value, engine: &str, protocol: &str) -> bool {
+    let password = "synthetic-native-password";
+    let uuid = "00112233-4455-6677-8899-aabbccddeeff";
+    if engine == "xray" {
+        let target = if protocol == "trojan" {
+            &outbound["settings"]["servers"][0]
+        } else {
+            &outbound["settings"]["vnext"][0]
+        };
+        outbound["protocol"] == protocol
+            && target["address"] == "origin.example.test"
+            && target["port"] == 8443
+            && if protocol == "trojan" {
+                target["password"] == password
+            } else {
+                target["users"][0]["id"] == uuid
+            }
+    } else {
+        outbound["type"] == protocol
+            && outbound["server"] == "origin.example.test"
+            && outbound["server_port"] == 8443
+            && if protocol == "trojan" {
+                outbound["password"] == password
+            } else {
+                outbound["uuid"] == uuid
+            }
+    }
+}
+
+fn check_identity_oracle(outbound: &Value, engine: &str, protocol: &str) {
+    assert!(identity_is_exact(outbound, engine, protocol));
+    let fields = if engine == "xray" {
+        if protocol == "trojan" {
+            [
+                "/protocol",
+                "/settings/servers/0/address",
+                "/settings/servers/0/port",
+                "/settings/servers/0/password",
+            ]
+        } else {
+            [
+                "/protocol",
+                "/settings/vnext/0/address",
+                "/settings/vnext/0/port",
+                "/settings/vnext/0/users/0/id",
+            ]
+        }
+    } else if protocol == "trojan" {
+        ["/type", "/server", "/server_port", "/password"]
+    } else {
+        ["/type", "/server", "/server_port", "/uuid"]
+    };
+    for (index, field) in fields.iter().enumerate() {
+        let mut changed = outbound.clone();
+        *changed
+            .pointer_mut(field)
+            .expect("поле скомпилированного outbound") = if index == 2 {
+            json!(8444)
+        } else {
+            json!("different-valid-value")
+        };
+        assert!(
+            !identity_is_exact(&changed, engine, protocol),
+            "oracle пропустил изменение {field}"
+        );
+    }
+}
+
 fn main() {
     let output = std::env::args().nth(1).expect("Каталог evidence");
     let output = Path::new(&output);
@@ -82,6 +150,7 @@ fn main() {
                 assert_eq!(bytes, original_bytes);
                 let native: Value = serde_json::from_slice(&bytes).unwrap();
                 let outbound = &native["outbounds"][0];
+                check_identity_oracle(outbound, name, protocol);
                 if name == "xray" {
                     let stream = &outbound["streamSettings"];
                     assert_eq!(stream["security"], "tls");
