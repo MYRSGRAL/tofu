@@ -76,3 +76,8 @@ bytes совпали с финальным `tools/arch_versioned_package.py`.
 VM exit0, свой overlay/cloud-init/SSH key удалены; никаких Cargo targets в
 этом продолжении не создавалось. Base cache сохранён. Десять Arch tests и Ruff
 проходят. Оба FAIL run оставлены как evidence, без подмены статусов успехом.
+
+Production userdata gate продолжен и закрыт отдельным actual Secret Service GUI
+маршрутом без ephemeral key: см.
+`docs/validation/2026-11-11-arch-production-custody.md`.
+Исторические ограничения этого ephemeral run не выдаются за его собственный PASS.

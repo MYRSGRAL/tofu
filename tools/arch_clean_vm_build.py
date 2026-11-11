@@ -115,7 +115,11 @@ def archive_manifest(packages: tuple[Path, Path], evidence: Path) -> None:
 
 
 def versioned_lifecycle(
-    ssh: list[str], packages: tuple[Path, Path], repo: Path, evidence: Path
+    ssh: list[str],
+    packages: tuple[Path, Path],
+    repo: Path,
+    evidence: Path,
+    production_custody: bool = False,
 ) -> None:
     """Продолжает после reboot только с принятыми готовыми пакетами."""
     for path, name in zip(packages, ("old", "new"), strict=True):
@@ -125,10 +129,22 @@ def versioned_lifecycle(
                 stdin=stream,
                 check=True,
             )
-    with (repo / "tools/arch_versioned_package.py").open("rb") as stream:
+    fixture = (
+        "arch_production_custody.py"
+        if production_custody
+        else "arch_versioned_package.py"
+    )
+    with (repo / "tools" / fixture).open("rb") as stream:
         subprocess.run(
             ssh + ["cat > /home/builder/versioned.py"], stdin=stream, check=True
         )
+    if production_custody:
+        with (repo / "tools/arch_production_route.py").open("rb") as stream:
+            subprocess.run(
+                ssh + ["cat > /home/builder/production-route.py"],
+                stdin=stream,
+                check=True,
+            )
     result = "FAIL"
     try:
         run(ssh + ["python /home/builder/versioned.py"], evidence / "versioned.log")
@@ -138,7 +154,9 @@ def versioned_lifecycle(
             subprocess.run(
                 ssh
                 + [
-                    "tar -C /home/builder -cf - versioned-evidence versioned versioned.py"
+                    "tar -C /home/builder -cf - production-evidence versioned.py production-route.py"
+                    if production_custody
+                    else "tar -C /home/builder -cf - versioned-evidence versioned versioned.py"
                 ],
                 stdout=stream,
                 check=True,
@@ -155,9 +173,12 @@ def main() -> None:
     parser.add_argument("--arch-public-key", type=Path, required=True)
     parser.add_argument("--old-package", type=Path)
     parser.add_argument("--new-package", type=Path)
+    parser.add_argument("--production-custody", action="store_true")
     args = parser.parse_args()
     if bool(args.old_package) != bool(args.new_package):
         parser.error("Для versioned lifecycle нужны оба архива")
+    if args.production_custody and not args.old_package:
+        parser.error("Production custody требует обоих готовых архивов")
     root = args.task_root.resolve()
     evidence = args.evidence.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -193,7 +214,14 @@ def main() -> None:
                         }
                     )
                 )
-            execute(root, evidence, repo, args.arch_public_key, packages)
+            execute(
+                root,
+                evidence,
+                repo,
+                args.arch_public_key,
+                packages,
+                args.production_custody,
+            )
         finally:
             os.close(base_lock)
     except Exception as error:
@@ -219,6 +247,7 @@ def execute(
     repo: Path,
     key: Path,
     packages: tuple[Path, Path] | None = None,
+    production_custody: bool = False,
 ) -> None:
     """Весь жизненный цикл одной VM под lock вызывающей функции."""
     vm = None
@@ -386,6 +415,11 @@ def execute(
             + [
                 "set -e; pacman -Syu --noconfirm --needed qt6-base qt6-declarative qt6-svg sqlite dbus polkit nftables iproute2 python"
                 + ("" if packages else " base-devel clang pkgconf rustup")
+                + (
+                    " gnome-keyring xorg-server-xvfb xdotool imagemagick tesseract tesseract-data-eng tesseract-data-rus stalonetray"
+                    if production_custody
+                    else ""
+                )
             ],
             evidence / "dependencies.log",
         )
@@ -424,7 +458,7 @@ def execute(
             ]
         )
         if packages:
-            versioned_lifecycle(ssh, packages, repo, evidence)
+            versioned_lifecycle(ssh, packages, repo, evidence, production_custody)
             archive_success = True
             return
         transfer = [

@@ -101,3 +101,15 @@ Preferences нового формата сохраняются побайтов�
 не достигнуты и не заявляются. Этот сценарий не доказывает миграцию зашифрованных
 пользовательских записей с постоянным ключом. FAIL run и его artifacts сохраняются;
 чужие cache/overlay не удаляются.
+
+Для userdata acceptance добавьте к той же команде `--production-custody`.
+Этот режим использует установленный desktop без `--smoke-test`, собственные
+Xvfb/tray и private D-Bus/gnome-keyring внутри VM. Старый GUI создаёт encrypted
+profile и preferences; новый читает их с тем же production Secret Service key,
+создаёт preferences нового формата; rollback старого GUI читает профиль и
+явно отказывает записи неподдерживаемых preferences без их перезаписи.
+Проверяется persistence Secret Service при restart provider и сохранность после
+uninstall. Raw key, keyring password и содержимое keyring не экспортируются;
+evidence содержит metadata, hashes, encrypted SQLite snapshots и screenshots.
+VM-only пакеты стенда не добавляются в зависимости дистрибутивного пакета.
+Подробности: `docs/validation/2026-11-11-arch-production-custody.md`.
