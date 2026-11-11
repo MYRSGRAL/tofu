@@ -187,3 +187,6 @@ mod tests {
         );
     }
 }
+
+/// Независимая библиотека private owner receiver.
+pub mod broker;
