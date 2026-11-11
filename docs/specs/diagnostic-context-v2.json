@@ -1,0 +1,871 @@
+{
+  "data_directory_relative": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_create": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_metadata": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_type": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_owner": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_permissions": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_canonicalize": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_open": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "storage_task_failed": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "data_directory_lock": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_missing": {
+    "code": "KEYRING_MISSING",
+    "message_key": "keyring_missing",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_locked": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "listen_port_unavailable": {
+    "code": "LISTEN_PORT_BUSY",
+    "message_key": "listen_port_busy",
+    "stage": "startup",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "engine_start_failed": {
+    "code": "ENGINE_FAILED",
+    "message_key": "engine_failed",
+    "stage": "engine_start",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "engine_exited": {
+    "code": "ENGINE_FAILED",
+    "message_key": "engine_failed",
+    "stage": "engine_run",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "cleanup_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "cleanup",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_unsupported": {
+    "code": "SYSTEM_UNSUPPORTED",
+    "message_key": "system_unsupported",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_denied": {
+    "code": "SYSTEM_DENIED",
+    "message_key": "system_denied",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_cancelled": {
+    "code": "CANCELLED",
+    "message_key": "cancelled",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_busy": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_owner_lost": {
+    "code": "SYSTEM_OWNER_LOST",
+    "message_key": "system_owner_lost",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_deadline": {
+    "code": "SYSTEM_TIMEOUT",
+    "message_key": "system_timeout",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_timeout": {
+    "code": "SYSTEM_TIMEOUT",
+    "message_key": "system_timeout",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_unavailable": {
+    "code": "SYSTEM_UNAVAILABLE",
+    "message_key": "system_unavailable",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_invalid_request": {
+    "code": "SYSTEM_UNAVAILABLE",
+    "message_key": "system_unavailable",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_invalid_handle": {
+    "code": "SYSTEM_UNAVAILABLE",
+    "message_key": "system_unavailable",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_stale": {
+    "code": "SYSTEM_UNAVAILABLE",
+    "message_key": "system_unavailable",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "helper_protocol": {
+    "code": "SYSTEM_UNAVAILABLE",
+    "message_key": "system_unavailable",
+    "stage": "helper_rpc",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "routing_request_identity": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "routing_revision_stale": {
+    "code": "ROUTING_STALE",
+    "message_key": "routing_stale",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "routing_rule_identity": {
+    "code": "ID",
+    "message_key": "id",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "routing_repository_missing": {
+    "code": "ROUTING_STORAGE",
+    "message_key": "routing_storage",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "routing_repository_conflict": {
+    "code": "ROUTING_STALE",
+    "message_key": "routing_stale",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "routing_repository_failed": {
+    "code": "ROUTING_STORAGE",
+    "message_key": "routing_storage",
+    "stage": "routing_save",
+    "slots": [
+      "error",
+      "connection",
+      "routing_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_invalid_input": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_unsafe_path": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_conflict": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_copy_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_invalid_input": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_unsafe_path": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_conflict": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_reopen_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_invalid_input": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_unsafe_path": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_conflict": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_access_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_cancelled": {
+    "code": "CANCELLED",
+    "message_key": "cancelled",
+    "stage": "maintenance_copy",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "logs_read_busy": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "logs_read",
+    "slots": [
+      "logs_read"
+    ],
+    "generation_required": true
+  },
+  "logs_save_busy": {
+    "code": "BUSY",
+    "message_key": "busy",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_page_identity": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_page_unavailable": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_durability_unknown": {
+    "code": "LOGS_SAVE_DURABILITY_UNKNOWN",
+    "message_key": "logs_save_durability_unknown",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_io_permission_denied": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_io_already_exists": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_io_not_found": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_io_invalid_input": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "logs_io_other": {
+    "code": "LOGS_SAVE_FAILED",
+    "message_key": "logs_save_failed",
+    "stage": "logs_save",
+    "slots": [
+      "logs_save"
+    ],
+    "generation_required": true
+  },
+  "engine_start_exited": {
+    "code": "ENGINE_FAILED",
+    "message_key": "engine_failed",
+    "stage": "engine_start",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "runtime_panicked": {
+    "code": "STARTUP",
+    "message_key": "startup",
+    "stage": "startup",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "signals_unavailable": {
+    "code": "STARTUP",
+    "message_key": "startup",
+    "stage": "startup",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "catalog_task_failed": {
+    "code": "CATALOG",
+    "message_key": "catalog",
+    "stage": "catalog_read",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "catalog_query_failed": {
+    "code": "CATALOG",
+    "message_key": "catalog",
+    "stage": "catalog_read",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "preferences_io_permission_denied": {
+    "code": "PREFERENCES_WRITE",
+    "message_key": "preferences_write",
+    "stage": "storage_write",
+    "slots": [
+      "error",
+      "connection",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "preferences_io_already_exists": {
+    "code": "PREFERENCES_WRITE",
+    "message_key": "preferences_write",
+    "stage": "storage_write",
+    "slots": [
+      "error",
+      "connection",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "preferences_io_not_found": {
+    "code": "PREFERENCES_WRITE",
+    "message_key": "preferences_write",
+    "stage": "storage_write",
+    "slots": [
+      "error",
+      "connection",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "preferences_io_invalid_input": {
+    "code": "PREFERENCES_WRITE",
+    "message_key": "preferences_write",
+    "stage": "storage_write",
+    "slots": [
+      "error",
+      "connection",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "preferences_io_other": {
+    "code": "PREFERENCES_WRITE",
+    "message_key": "preferences_write",
+    "stage": "storage_write",
+    "slots": [
+      "error",
+      "connection",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "repository_open_invalid_input": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_unsafe_path": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_conflict": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "repository_open_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_unavailable": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_ambiguous": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_invalid_key": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_random": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_timeout": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
+  "keyring_busy": {
+    "code": "KEYRING_LOCKED",
+    "message_key": "keyring_locked",
+    "stage": "storage_open",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  }
+}

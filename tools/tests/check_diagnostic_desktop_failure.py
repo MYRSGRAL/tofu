@@ -25,6 +25,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("task", type=Path)
+    parser.add_argument("--v2", action="store_true")
     args = parser.parse_args()
     if os.environ.get("QT_QPA_PLATFORM") != "offscreen" or not os.environ.get(
         "DBUS_SESSION_BUS_ADDRESS"
@@ -87,6 +88,26 @@ ApplicationWindow {
 }
 """
     )
+    if args.v2:
+        qml = qml.replace("backend.copy_diagnostics()", "backend.copy_diagnostics_v2()")
+        qml = qml.replace(
+            "metadata.errors.length === 1", "metadata.errors.length === 2"
+        )
+        qml = qml.replace(
+            'metadata.errors[0].stage === "operation"',
+            'metadata.schema_version === 2 && metadata.errors[0].stage === "storage_open" && metadata.errors[0].reason === "data_directory_permissions"',
+        )
+        qml = qml.replace(
+            "const previous = clipboard()",
+            """const previous = clipboard()
+   for (let [field, canary] of [["reason", "CANARY\\u001b"], ["params", {url:"https://secret:CANARY@example.invalid"}], ["extra", true], ["request_id", "01"], ["generation", "18446744073709551616"]]) {
+     const bad = JSON.parse(JSON.stringify(state))
+     bad.error_contexts[0][field] = canary
+     backend.snapshot_json = JSON.stringify(bad)
+     require(!backend.copy_diagnostics_v2() && clipboard() === previous, "V2 canary changed clipboard")
+   }
+""",
+        )
     fixture = task / "desktop-failure.qml"
     fixture.write_text(qml)
     source = task / "interpose.cpp"
