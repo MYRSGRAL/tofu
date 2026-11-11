@@ -55,3 +55,21 @@ session binding. KnownOwner допускается только в предел�
 unavailable, EOF, revoke, timeout, cancel, broker death, stale epoch/digest/proof;
 реальный helper VM и отсутствие native setup/update/close effects. Контрольная
 сборка и Python tests эту матрицу не доказывают. FR20/system_tun не объявляются.
+
+## Per-flow DNS context
+
+В private patch добавлен optional `dns.ContextClient.LookupIPWithContext`;
+legacy `Client.LookupIP` сохранён для non-flow callers. Session routing context
+передаёт исходный `context.Context` в `ResolvableContext`: managed lookup без
+optional API закрывается отказом. Serial и parallel `QueryIP` получают caller
+context; parallel await отслеживает отмену и не использует `WithoutCancel`.
+Перед выдачей результата (включая hosts/cache) требуется новый broker proof на
+стадии `AfterDNS`. Повторная выдача routing cache тоже проверяет authority.
+Managed Lua DNS отклоняется: upstream script API не принимает context.
+
+`TestNativeDNSAfterReply` использует настоящий native TCP DNS client и routing
+`ResolvableContext`, controlled loopback exchanger и private query/reply.
+Для serial/parallel проверены Known success, cancel, Unknown и смена epoch
+между началом exchange и выпуском reply; отказные случаи дают downstream=0.
+Это покрывает этот routing leaf; freedom UDP resolver и второй core требуют
+отдельной реализации и приёмки. Production issuer остаётся закрытым.

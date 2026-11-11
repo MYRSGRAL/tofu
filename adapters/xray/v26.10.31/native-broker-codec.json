@@ -5,7 +5,7 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "87f03f49f856c06e8ed51bcccc070f74cb98e61c5e1b434962eb8237924ddf24",
+  "patch_sha256": "6de0c858ecada2f278394fa3895237cb691d89f5be30489628faf93c42c834b3",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
@@ -14,13 +14,14 @@
     "frozen-vectors.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216",
     "bootstrap_linux.go": "70b989f474fe79739e898fd37eae62a922680efed8302cd33400dc3d2fbef139",
     "bootstrap_linux_test.go": "b6f0b01e824737449928a9f2fac4153d8a5d2dbc93f54ce2d30bfab77718d575",
-    "routing.go": "57ace1d2edbd367d281a5e158555a06754dd1f4c57d94967dd84ad695ba59838",
+    "routing.go": "b7dd51227230a646045e1446a9cf3ff5b53ebc649d74dec35710bf4c040d1170",
     "routing_test.go": "e69f550bbf0e4d1868bd5f9cb53af3c77ec74b92f4af84a5f0919b85cd50e388",
     "closed_tun_linux.go": "c33e0626f8eddb075144efa35943416d38e5f69e0f8d4130d30f31aa1140ec6c",
     "closed_tun_linux_test.go": "ffaba7cf72f3c007bf43de50bd0659de1d62b52e30ebe7707acc240024058cb7",
-    "export_test.go": "b9f1b5c7027c3a8e7ede633bea719e511fc140335c9e3fb6213956a7342b5aaf",
+    "export_test.go": "447ad800bf1fcedcf1ffbe966b45ce8cd9abf4514ca99da2afc79e822bcec855",
     "tun_callsite_test.go": "a205f169b157bb9f7cf7914c3079a8d72adc73bf2e61f8efdc9ef7997d8145f4",
-    "dial_callsite_test.go": "a1bb76a2e3f946501ee372d1a78bf8baf955a62df752003c5d44f4d37409cadf"
+    "dial_callsite_test.go": "a1bb76a2e3f946501ee372d1a78bf8baf955a62df752003c5d44f4d37409cadf",
+    "dns_callsite_test.go": "d10adad3f8d5bd3901c9bff8125021910c9efa58b2e8e45bde88e285506498eb"
   },
   "native_protocol": null,
   "adapter_features": {},
@@ -35,7 +36,11 @@
     "proxy/tun/worker_other.go": "bcc42ef31b50decc61d4993c38abbff906366f095f3ac8dfcad09f3f76dcbc98",
     "transport/internet/dialer.go": "c8c4d13ee86307995dcc52e62affa18a8798f72205a2b27b18af89fb03b3135a",
     "transport/internet/system_dialer.go": "28b9f24a7341e36323fc37d12cba936e43650eb2e45f94a3b1cee59c87f3ad01",
-    "transport/internet/happy_eyeballs.go": "bb978d7f79838033f39af8f4e560784f4688cce163e9a9886b512af3d34f36f4"
+    "transport/internet/happy_eyeballs.go": "bb978d7f79838033f39af8f4e560784f4688cce163e9a9886b512af3d34f36f4",
+    "app/dns/dns.go": "bb0cbaac7504d2797a17dd77b7068b1702ee7c631b7025a8abeeddcc35b55a4b",
+    "features/dns/client.go": "7023f9b955820769c3773da1ce8e189a8599437c9087fe612b2eb07bf19349d9",
+    "features/routing/dns/context.go": "c92fcd6f281006bd22010e01c34f55894ff0627727cdce3bcd265ad5554976e2",
+    "features/routing/session/context.go": "d4e46e3029880331f47493574697b3903c0e0760daa2a8fb2fc59266cc2cacaa"
   },
   "owned_tun_constructor_connected": true
 }

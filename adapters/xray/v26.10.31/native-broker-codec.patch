@@ -1485,10 +1485,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
-index 0000000..660548c
+index 0000000..f210eac
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,98 @@
 +package nativehooks
 +
 +import (
@@ -1523,6 +1523,9 @@ index 0000000..660548c
 +func RoutingEntry(ctx context.Context) error {
 +	return guardEntry(ctx, BeforeRouting)
 +}
++
++// AfterDNS требует новый proof после ответа resolver.
++func CheckAfterDNS(ctx context.Context) error { return guardEntry(ctx, AfterDNS) }
 +
 +// BeforeSocketDial получает новый proof исходного flow после DNS и ожиданий.
 +func BeforeSocketDial(ctx context.Context) error {
@@ -2397,10 +2400,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
-index 0000000..6eb169f
+index 0000000..7a70fa5
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,95 @@
 +package nativehooks
 +
 +import (
@@ -2461,6 +2464,40 @@ index 0000000..6eb169f
 +		return context.Background(), calls
 +	}
 +	return ctx, calls
++}
++
++// ClosedDNSFixture меняет ответ broker только после начала controlled exchange.
++func ClosedDNSFixture(t *testing.T) (context.Context, func(string)) {
++	s, p, _ := fixture(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(cancel)
++	t.Cleanup(func() { _ = s.Revoke() })
++	c := &routingConsumer{session: s, required: true, flow: p.Flow}
++	mode := "known"
++	c.lookup = func(context.Context, Flow) (Evidence, error) {
++		reply := p
++		reply.Observed = time.Now()
++		reply.Expires = reply.Observed.Add(20 * time.Millisecond)
++		if mode == "unknown" {
++			reply.Status = Unknown
++		}
++		if mode == "epoch" {
++			reply.Binding.Epoch++
++		}
++		return reply, nil
++	}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal(err)
++	}
++	return ctx, func(next string) {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		mode = next
++		if next == "cancel" {
++			cancel()
++		}
++	}
 +}
 diff --git a/proxy/tun/worker_other.go b/proxy/tun/worker_other.go
 new file mode 100644
@@ -2622,3 +2659,315 @@ index f881a20..c9f48c6 100644
 +	}
 +	return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
 +}
+diff --git a/app/dns/dns.go b/app/dns/dns.go
+index e452bda..ae03818 100644
+--- a/app/dns/dns.go
++++ b/app/dns/dns.go
+@@ -5,6 +5,7 @@ import (
+ 	"context"
+ 	go_errors "errors"
+ 	"fmt"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"sort"
+ 	"strings"
+ 	"sync"
+@@ -253,6 +254,25 @@ func (s *DNS) MayUseSystemResolver() bool {
+ 
+ // LookupIP implements dns.Client.
+ func (s *DNS) LookupIP(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++	return s.lookupIP(s.ctx, domain, option)
++}
++
++// LookupIPWithContext проверяет свежую authority после любого результата DNS.
++func (s *DNS) LookupIPWithContext(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++	if ctx == nil || ctx.Err() != nil {
++		return nil, 0, hooks.ErrDenied
++	}
++	if s.script != nil {
++		return nil, 0, hooks.ErrDenied
++	}
++	ips, ttl, err := s.lookupIP(ctx, domain, option)
++	if guardErr := hooks.CheckAfterDNS(ctx); guardErr != nil {
++		return nil, 0, guardErr
++	}
++	return ips, ttl, err
++}
++
++func (s *DNS) lookupIP(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	// Normalize the FQDN form query
+ 	domain = strings.TrimSuffix(domain, ".")
+ 	if domain == "" {
+@@ -300,9 +320,9 @@ func (s *DNS) LookupIP(domain string, option dns.IPOption) ([]net.IP, uint32, er
+ 		return s.script.query(domain, option)
+ 	}
+ 	if s.enableParallelQuery {
+-		return s.parallelQuery(domain, option)
++		return s.parallelQuery(ctx, domain, option)
+ 	} else {
+-		return s.serialQuery(domain, option)
++		return s.serialQuery(ctx, domain, option)
+ 	}
+ }
+ 
+@@ -402,7 +422,7 @@ func mergeQueryErrors(domain string, errs []error) error {
+ 	return errors.New("returning nil for domain ", domain).Base(noRNF)
+ }
+ 
+-func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++func (s *DNS) serialQuery(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	var errs []error
+ 	for _, client := range s.sortClients(domain) {
+ 		if !option.FakeEnable && strings.EqualFold(client.Name(), "FakeDNS") {
+@@ -410,7 +430,10 @@ func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32,
+ 			continue
+ 		}
+ 
+-		ips, ttl, err := client.QueryIP(s.ctx, domain, option)
++		if ctx.Err() != nil {
++			return nil, 0, ctx.Err()
++		}
++		ips, ttl, err := client.QueryIP(ctx, domain, option)
+ 
+ 		if len(ips) > 0 {
+ 			return ips, ttl, nil
+@@ -425,11 +448,11 @@ func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32,
+ 	return nil, 0, mergeQueryErrors(domain, errs)
+ }
+ 
+-func (s *DNS) parallelQuery(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++func (s *DNS) parallelQuery(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	var errs []error
+ 	clients := s.sortClients(domain)
+ 
+-	resultsChan := asyncQueryAll(domain, option, clients, s.ctx)
++	resultsChan := asyncQueryAll(domain, option, clients, ctx)
+ 
+ 	groups, groupOf := makeGroups( /*s.ctx,*/ clients)
+ 	results := make([]*queryResult, len(clients))
+@@ -440,7 +463,12 @@ func (s *DNS) parallelQuery(domain string, option dns.IPOption) ([]net.IP, uint3
+ 
+ 	nextGroup := 0
+ 	for range clients {
+-		result := <-resultsChan
++		var result queryResult
++		select {
++		case <-ctx.Done():
++			return nil, 0, ctx.Err()
++		case result = <-resultsChan:
++		}
+ 		results[result.index] = &result
+ 
+ 		gi := groupOf[result.index]
+@@ -504,7 +532,7 @@ func asyncQueryAll(domain string, option dns.IPOption, clients []*Client, ctx co
+ 		go func(i int, c *Client) {
+ 			qctx := ctx
+ 			if !c.server.IsDisableCache() {
+-				nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeoutMs*2)
++				nctx, cancel := context.WithTimeout(ctx, c.timeoutMs*2)
+ 				qctx = nctx
+ 				defer cancel()
+ 			}
+diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
+new file mode 100644
+index 0000000..25071cb
+--- /dev/null
++++ b/common/yonikbroker/dns_callsite_test.go
+@@ -0,0 +1,80 @@
++package nativehooks_test
++
++import (
++	mdns "github.com/miekg/dns"
++	"github.com/xtls/xray-core/app/dispatcher"
++	appdns "github.com/xtls/xray-core/app/dns"
++	"github.com/xtls/xray-core/app/policy"
++	"github.com/xtls/xray-core/app/proxyman"
++	_ "github.com/xtls/xray-core/app/proxyman/outbound"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/serial"
++	"github.com/xtls/xray-core/common/session"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	fdns "github.com/xtls/xray-core/features/dns"
++	rdns "github.com/xtls/xray-core/features/routing/dns"
++	rsession "github.com/xtls/xray-core/features/routing/session"
++	"net"
++	"testing"
++	"time"
++)
++
++func TestNativeDNSAfterReply(t *testing.T) {
++	for _, parallel := range []bool{false, true} {
++		for _, mode := range []string{"known", "cancel", "unknown", "epoch"} {
++			t.Run(map[bool]string{false: "serial", true: "parallel"}[parallel]+"/"+mode, func(t *testing.T) {
++				listener, err := net.Listen("tcp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				entered, release := make(chan struct{}), make(chan struct{})
++				server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					close(entered)
++					<-release
++					reply := new(mdns.Msg)
++					reply.SetReply(q)
++					rr, _ := mdns.NewRR("private.test. 60 IN A 192.0.2.17")
++					reply.Answer = []mdns.RR{rr}
++					_ = w.WriteMsg(reply)
++				})}
++				go server.ActivateAndServe()
++				t.Cleanup(func() { _ = server.Shutdown() })
++				cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, DisableCache: true, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + listener.Addr().String()))}}}}
++				instance, err := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer instance.Close()
++				ctx, change := hooks.ClosedDNSFixture(t)
++				ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++				route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(ctx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++				result := make(chan []xnet.IP, 1)
++				go func() { result <- route.GetTargetIPs() }()
++				select {
++				case <-entered:
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS exchange не начался")
++				}
++				change(mode)
++				close(release)
++				select {
++				case ips := <-result:
++					downstream := 0
++					if len(ips) > 0 {
++						downstream++
++					}
++					if mode == "known" {
++						if downstream != 1 || !ips[0].Equal(net.ParseIP("192.0.2.17")) {
++							t.Fatalf("private reply: %v", ips)
++						}
++					} else if downstream != 0 {
++						t.Fatalf("downstream=%d", downstream)
++					}
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS await завис")
++				}
++			})
++		}
++	}
++}
+diff --git a/features/dns/client.go b/features/dns/client.go
+index 6eb4bd0..b564907 100644
+--- a/features/dns/client.go
++++ b/features/dns/client.go
+@@ -1,6 +1,7 @@
+ package dns
+ 
+ import (
++	"context"
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
+ 	"github.com/xtls/xray-core/common/serial"
+@@ -24,6 +25,11 @@ type Client interface {
+ 	LookupIP(domain string, option IPOption) ([]net.IP, uint32, error)
+ }
+ 
++// ContextClient передаёт контекст конкретного flow без изменения legacy Client.
++type ContextClient interface {
++	LookupIPWithContext(context.Context, string, IPOption) ([]net.IP, uint32, error)
++}
++
+ // ClientType returns the type of Client interface. Can be used for implementing common.HasType.
+ //
+ // xray:api:beta
+diff --git a/features/routing/dns/context.go b/features/routing/dns/context.go
+index 2cf9d26..43a15d1 100644
+--- a/features/routing/dns/context.go
++++ b/features/routing/dns/context.go
+@@ -2,6 +2,7 @@ package dns
+ 
+ import (
+ 	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
+@@ -19,7 +20,15 @@ type ResolvableContext struct {
+ 
+ // GetTargetIPs overrides original routing.Context's implementation.
+ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
++	flow, managed := ctx.Context.(interface{ FlowContext() context.Context })
++	if managed && (flow.FlowContext() == nil || flow.FlowContext().Err() != nil) {
++		ctx.hasError = true
++		return nil
++	}
+ 	if len(ctx.cacheIPs) > 0 {
++		if managed && hooks.CheckAfterDNS(flow.FlowContext()) != nil {
++			return nil
++		}
+ 		return ctx.cacheIPs
+ 	}
+ 
+@@ -28,11 +37,27 @@ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
+ 	}
+ 
+ 	if domain := ctx.GetTargetDomain(); len(domain) != 0 {
+-		ips, _, err := ctx.dnsClient.LookupIP(domain, dns.IPOption{
++		option := dns.IPOption{
+ 			IPv4Enable: true,
+ 			IPv6Enable: true,
+ 			FakeEnable: false,
+-		})
++		}
++		var ips []net.IP
++		var err error
++		if managed {
++			client, ok := ctx.dnsClient.(dns.ContextClient)
++			if !ok {
++				ctx.hasError = true
++				return nil
++			}
++			ips, _, err = client.LookupIPWithContext(flow.FlowContext(), domain, option)
++			if err != nil {
++				ctx.hasError = true
++				return nil
++			}
++		} else {
++			ips, _, err = ctx.dnsClient.LookupIP(domain, option)
++		}
+ 		if err == nil {
+ 			ctx.cacheIPs = ips
+ 			return ips
+diff --git a/features/routing/session/context.go b/features/routing/session/context.go
+index e331c43..6002655 100644
+--- a/features/routing/session/context.go
++++ b/features/routing/session/context.go
+@@ -10,11 +10,15 @@ import (
+ 
+ // Context is an implementation of routing.Context, which is a wrapper of context.context with session info.
+ type Context struct {
+-	Inbound  *session.Inbound
+-	Outbound *session.Outbound
+-	Content  *session.Content
++	flowContext context.Context
++	Inbound     *session.Inbound
++	Outbound    *session.Outbound
++	Content     *session.Content
+ }
+ 
++// FlowContext сохраняет закрытую authority исходного flow.
++func (ctx *Context) FlowContext() context.Context { return ctx.flowContext }
++
+ // GetInboundTag implements routing.Context.
+ func (ctx *Context) GetInboundTag() string {
+ 	if ctx.Inbound == nil {
+@@ -156,8 +160,9 @@ func AsRoutingContext(ctx context.Context) routing.Context {
+ 	outbounds := session.OutboundsFromContext(ctx)
+ 	ob := outbounds[len(outbounds)-1]
+ 	return &Context{
+-		Inbound:  session.InboundFromContext(ctx),
+-		Outbound: ob,
+-		Content:  session.ContentFromContext(ctx),
++		flowContext: ctx,
++		Inbound:     session.InboundFromContext(ctx),
++		Outbound:    ob,
++		Content:     session.ContentFromContext(ctx),
+ 	}
+ }
