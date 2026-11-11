@@ -881,6 +881,7 @@ ApplicationWindow {
                     text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
                 }
                 RowLayout {
+                    objectName: "routingDefaultRow"
                     PlainLabel { text: window.tr("Остальной трафик", "Other traffic") }
                     ComboBox { model: ["Proxy", "Direct", "Block"]; currentIndex: window.state.routing ? ["proxy", "direct", "block"].indexOf(window.state.routing.default_action) : 0; onActivated: window.sendRouting({command: "routing_default", action: ["proxy", "direct", "block"][currentIndex]}) }
                 }

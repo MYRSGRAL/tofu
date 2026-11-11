@@ -48,6 +48,34 @@ class TranslationTests(unittest.TestCase):
         # Вне оговорённых границ этот gate не претендует на покрытие.
         checker.check_scoped_ui(source + '\nLabel { text: "Вне scope" }')
 
+    def test_p11_nested_layout_cannot_hide_untranslated_explanation(self) -> None:
+        source = (ROOT / checker.CATALOG).read_text()
+        header = '                PlainLabel {\n                    objectName: "routingExplanation"'
+        pair = 'window.tr("причина недоступна", "reason unavailable")'
+        self.assertIn(header, source)
+        self.assertIn(pair, source)
+        changed = source.replace(header, "                RowLayout {}\n" + header)
+        changed = changed.replace(pair, '"Причина только по-русски"')
+        with self.assertRaises(checker.CatalogError):
+            checker.check_scoped_ui(changed)
+        with (
+            patch.object(sys, "argv", ["check_translations", "--root", str(ROOT)]),
+            patch.object(
+                checker, "qml_inventory", return_value=[ROOT / checker.CATALOG]
+            ),
+            patch.object(checker, "read_source", return_value=changed),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as error,
+        ):
+            checker.main()
+        self.assertEqual(error.exception.code, 1)
+
+    def test_p11_required_explanation_cannot_disappear_from_scope(self) -> None:
+        source = (ROOT / checker.CATALOG).read_text()
+        changed = source.replace('objectName: "routingExplanation"', 'objectName: ""')
+        with self.assertRaises(checker.CatalogError):
+            checker.check_scoped_ui(changed)
+
     def test_tray_pairs(self) -> None:
         source = (ROOT / "crates/yonik-desktop/src/application.cpp").read_text()
         self.assertEqual(checker.check_cpp_source(source), 9)

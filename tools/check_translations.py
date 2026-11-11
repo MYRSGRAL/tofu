@@ -198,9 +198,18 @@ SCOPED_UI = (
     ('SettingsRow { objectName: "settingsScheduleButton"', "\n"),
     (
         '                SmallLabel { objectName: "routingDiagnosticsScope"',
-        "                RowLayout {",
+        '                RowLayout {\n                    objectName: "routingDefaultRow"',
     ),
     ("        id: schedulePanel", "        id: appearancePanel"),
+)
+SCOPED_ROUTING_ELEMENTS = frozenset(
+    {
+        "routingDiagnosticsScope",
+        "routingDiagnosticsIncomplete",
+        "routingExplainTarget",
+        "routingExplainButton",
+        "routingExplanation",
+    }
 )
 # Технические objectName, enum/command IDs, разделители и цвет. Пользовательские
 # предложения вне tr запрещены на обоих языках, включая только латинские строки.
@@ -240,11 +249,22 @@ def check_scoped_ui(source: str) -> int:
     for start, end in SCOPED_UI:
         if source.count(start) != 1:
             raise CatalogError(f"P11: граница отсутствует или неоднозначна: {start}")
+        if end != "\n" and source.count(end) != 1:
+            raise CatalogError(f"P11: конечная граница неоднозначна: {end}")
         offset = source.index(start)
         stop = source.find(end, offset + len(start))
         if stop < 0:
             raise CatalogError(f"P11: конечная граница отсутствует: {end}")
         ts = tokens(source[offset:stop])
+        if "routingDiagnosticsScope" in start:
+            names = [
+                literal(ts[i + 2])
+                for i in range(len(ts) - 2)
+                if ts[i : i + 2] == ["objectName", ":"]
+                and ts[i + 2].startswith(('"', "'"))
+            ]
+            if any(names.count(name) != 1 for name in SCOPED_ROUTING_ELEMENTS):
+                raise CatalogError("P11: обязательные элементы Routing вышли из scope")
         index = 0
         while index < len(ts):
             if ts[index : index + 2] == ["tr", "("]:
