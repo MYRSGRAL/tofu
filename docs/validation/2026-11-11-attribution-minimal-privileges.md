@@ -26,12 +26,18 @@ GPG подписью primary `1B9A16984A4E8CB448712D2AE0B78BF4326C6F8F`.
 Host network/packages/keyring не менялись. Старые VM artifacts PR73 и baseline
 64/64 PR86 не выданы за новые production доказательства.
 
-Actual system bus/polkitd: app-policy клиента `yonik-vm-allowed` UID 968 для обоих
-ядер получает именно Unsupported; State остаётся пустым, worker/check cgroups
-не создаются. Actual Xray non-app policy проходит новый Prepare→Apply→Stop→Unlock;
+Исправление по independent review: earlier `actual-app-negative.log` имеет PASS
+для dirty snapshot на базе 95e8847 (helper dbdd4aee…, worker a678a76e…, gate
+fd649656…). Это не clean committed head. Финальный `actual-final-app-negative.log`
+с helper 39164032…, worker 2ad61c76…, gate 62d9e823… имеет FAIL на initial
+State=unknown, до Prepare/denial. Для app admission head 340ccf4 actual PASS не
+установлен; есть static/code evidence. Равные snapshots не доказывают denial,
+если сам case не дошёл до него. Raw logs сохранены неизменными.
+
+Actual Xray non-app policy проходит новый Prepare→Apply→Stop→Unlock;
 живой production worker имеет UID/GID 969, все Cap masks=0x1000,
-NoNewPrivs=1, TracerPid=0. Sing-box non-app TUN остаётся отдельным baseline blocker,
-описанным ниже. Это не положительный FR20.
+NoNewPrivs=1, TracerPid=0. Sing-box non-app TUN в этом run отклонён из-за выбора stock вместо adapter; различие
+описано ниже. Это не положительный FR20.
 
 `attribution_unit_privileges.py` отдельно повторяет security properties production
 worker unit, меняя только ExecStart/socket wiring/logging для read-only witness.
@@ -50,7 +56,7 @@ Evidence вне TTL:
 production gate; `additional-gate-manifest-before.json` — дополнительный exact test
 binary/source. `final-vm-state.log` подтверждает hashes установленных executable/unit.
 `app-no-effects.json` подтверждает побайтовое равенство snapshots link/rule/route/nft
-и worker state до/после отказа app-policy обоих ядер. Source Linux v6.12 —
+и worker state до/после неуспешного final case. Это не подтверждение denial. Source Linux v6.12 —
 объяснение проверки ptrace, не заявление об exact source установленного kernel.
 
 ## Admission и контракты
@@ -108,7 +114,7 @@ Readlink exe/ReadDir fd. NET_ADMIN не предоставляет ptrace read a
    добавлены. Путь с privileged broker потребует отдельного решения о правах;
    текущий helper с NET_ADMIN не является таким broker.
 
-## Sing-box: два независимых production дефекта
+## Sing-box: stdin defect и неверный выбор adapter в fixture
 
 Actual differential proof `stdin-negative-proof.log`: root-owned sealed memfd с
 `{}` и mode0600 не может быть повторно открыт sing-box через `/dev/stdin` от
@@ -122,18 +128,23 @@ Xray stdin path прежний. Отдельный production-unit stdin control
 путь без TUN; его успех не объявляется успешным sing-box TUN Apply. Actual Check→Run→Stop
 этого control прошёл: stdin UID=969, mode0600, sealed, 236 bytes.
 
-После этого исправления обнаружен следующий независимый baseline blocker:
+Первоначально этот отказ был неверно описан как отсутствие необходимого adapter.
+Bounded audit установил различие артефактов: PR90 поставил stock binary 1264361b…,
+а старый c758 gate использовал существующий adapter 4c31db07…. На одном и том же
+сохранённом config adapter check=0, stock check=1. Следующий факт относится к stock:
 `compile_system_policy` передаёт `inbounds[].external_configuration=true`, а
 pinned sing-box 1.14.4 возвращает `json: unknown field "external_configuration"`.
-Дефект уже присутствует в `95e8847:crates/yonik-engine/src/system_tun.rs:129`.
+Поле намеренно присутствует в `95e8847:crates/yonik-engine/src/system_tun.rs:129`:
+это существующий adapter-specific contract, а не доказанный дефект compiler.
 `sing-policy-native-check.log` содержит exact error, `sing-policy-control.json` —
 синтетический config, source/native hashes сохранены. Pinned
 [option/tun.go 1.14.4](https://github.com/SagerNet/sing-box/blob/v1.14.4/option/tun.go)
 не объявляет это поле. Удаление поля без adapter решения нарушило бы контракт
 helper-owned конфигурации TUN. Engine TUN adapter/Go здесь не менялся.
-Для решения root нужен native adapter API: использовать уже открытый TUN и
-не выполнять link/address/route/DNS конфигурацию, с явным version/capability ack
-до Prepare/Apply. Это отдельный контракт, не неявное принятие unknown JSON поля.
+Для восстановления прежнего contract нужен правильный pinned adapter, не новый
+TUN Go-патч и не удаление поля. Более сильный owned-FD/no-link-effects ABI и
+version/capability ack остаются отдельным предложением; существующий adapter
+оставляет MTU/up/offload операции. См. [bounded audit/план](2026-11-11-native-adapter-broker-plan.md).
 
 ## Измерения и пределы приёмки
 
@@ -157,8 +168,8 @@ Manifest source/binary/config/unit записывается **до** каждо�
 app plan к потере механизма перед Apply actual не достижим: Prepare уже отказал.
 Повторная проверка в Apply остаётся защитой контракта; tests проверяют PID/starttime
 и immutable requirements. Для положительного FR20 нужен отдельный root-approved
-broker/native hook. Sing-box TUN non-app Apply остаётся Unsupported из-за adapter
-blocker, поэтому full dual-core production acceptance не объявляется. PR draft.
+broker/native hook. Sing-box TUN non-app Apply этого run остаётся Unsupported из-за неверного выбора
+binary (существующий adapter принят в #49 и в offline config control), поэтому full dual-core production acceptance не объявляется. PR draft.
 
 ## Проверки и завершение fixture
 
@@ -166,9 +177,10 @@ Engine library: 2/2; Linux library: 366 passed, 24 ignored. Общий all-targe
 engine/Linux прошёл до отдельного worker fix; после fix выполнены полный library
 прогон, сборка actual ignored gate и pinned Clippy 1.85.1 всех targets с -D warnings.
 Cargo fmt --check и Ruff check/format проходят. Actual final cases: app denial обоих
-ядер от UID 968 — PASS; Xray policy Prepare→Apply→Stop→Unlock — PASS; sing-box
+ядер от UID 968 — FAIL initial State=unknown (denial не достигнут); earlier dirty
+snapshot denial PASS не перенесён на final head. Xray policy Prepare→Apply→Stop→Unlock — PASS; sing-box
 worker-owned stdin Check→Run→Stop — PASS. Полный dual-core TUN non-app gate — FAIL
-на существующем sing-box external_configuration blocker, не замаскированный PASS.
+из-за выбора stock вместо existing patched adapter; повторный VM gate не запускался.
 
 В source evidence сохранены pinned libbox PlatformInterface 1.14.4: OpenTun и
 FindConnectionOwner — существующие точки для обсуждения adapter/hook, а не готовое
