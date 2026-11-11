@@ -193,10 +193,7 @@ def client(
     bus = Bus()
     stage = "initial_state"
     try:
-        initial = bus.call("State", {"version": 1})
-        assert initial.get("state") == "no_managed_policy", (
-            "initial State != no_managed_policy"
-        )
+        wait_state(bus, "no_managed_policy")
         stage = "prepare"
         prepared = bus.call("Prepare", request(engine, app, kill_switch))
         if app:
@@ -262,18 +259,9 @@ def client(
                 assert sys.stdin.readline().strip() == "READY", (
                     "Crash/recovery inspection failed"
                 )
-                # Только read-only State может быть Busy во время safety sweep.
-                # Unknown/неожиданный state не скрываются повторением.
-                expected = "recovery_required" if kill_switch else "no_managed_policy"
-                for attempt in range(20):
-                    observed = bus.call("State", {"version": 1})
-                    if observed.get("error") != "busy":
-                        assert observed.get("state") == expected, (
-                            "Recovery State mismatch"
-                        )
-                        break
-                    assert attempt < 19, "Recovery State Busy deadline"
-                    time.sleep(0.25)
+                wait_state(
+                    bus, "recovery_required" if kill_switch else "no_managed_policy"
+                )
             else:
                 stage = "stop"
                 assert bus.call("Stop", {"version": 1}).get("state") == (
@@ -442,6 +430,50 @@ def helper_identity() -> dict:
     return {"pid": pid, "exe_sha256": digest, "restarts": int(data["NRestarts"])}
 
 
+def recovery_complete(journal: dict, worker_groups: dict, kill_switch: bool) -> bool:
+    if (
+        not worker_groups
+        or any(value not in {"0", "absent"} for value in worker_groups.values())
+        or journal.get("session_recovery") is not None
+    ):
+        return False
+    retained = journal["records"]
+    public = journal.get("public_policy")
+    if not kill_switch:
+        return not retained and public is None
+    if (
+        len(retained) != 1
+        or retained[0].get("scope") != "PublicBlock"
+        or retained[0].get("state") != "Confirmed"
+        or not isinstance(public, dict)
+        or public.get("id") != retained[0].get("id")
+    ):
+        return False
+    phase = public.get("phase", {})
+    policy = phase.get("policy", {})
+    return (
+        phase.get("phase") == "Stable"
+        and policy.get("loopback_ifindex", 0) > 0
+        and policy.get("tun_ifindex") is None
+        and all(
+            policy.get(field) == []
+            for field in ["private_routes", "lan", "transport", "bootstrap_dns"]
+        )
+    )
+
+
+def wait_state(bus: Bus, expected: str) -> None:
+    for attempt in range(20):
+        observed = bus.call("State", {"version": 1})
+        if observed.get("error") != "busy":
+            assert (
+                observed.get("error") is None and observed.get("state") == expected
+            ), "Unexpected fresh State"
+            return
+        assert attempt < 19, "Fresh State Busy deadline"
+        time.sleep(0.25)
+
+
 def end_and_observe(ending: str, kill_switch: bool) -> dict:
     before = helper_identity()
     assert ending in {"restart", "worker_exit"}
@@ -459,22 +491,7 @@ def end_and_observe(ending: str, kill_switch: bool) -> dict:
                 else after["pid"] == before["pid"]
             )
             journal = json.loads(Path("/run/yonik/network/journal.json").read_text())
-            empty = all(value in {"0", "absent"} for value in groups().values())
-            retained = journal["records"]
-            expected_records = (
-                len(retained) == 1
-                and retained[0].get("scope") == "PublicBlock"
-                and retained[0].get("state") == "Confirmed"
-                and journal.get("public_policy") is not None
-                if kill_switch
-                else not retained and journal.get("public_policy") is None
-            )
-            if (
-                valid
-                and empty
-                and expected_records
-                and journal.get("session_recovery") is None
-            ):
+            if valid and recovery_complete(journal, groups(), kill_switch):
                 if ending == "restart":
                     assert after["restarts"] > before["restarts"]
                 else:
