@@ -279,6 +279,7 @@ class Child:
             self.log.close()
             raise
         self.stopped = False
+        self.reservation_lost = False
         self.closing = False
         self.selector: selectors.BaseSelector | None = None
         self.buffer = bytearray()
@@ -340,11 +341,17 @@ class Child:
 
     def exit_code(self) -> int | None:
         """Наблюдаем exit без reap: PID резервирует числовой PGID до cleanup."""
+        if self.reservation_lost:
+            raise BenchmarkError("Лидер уже reap: reservation PGID потеряна")
         if self.stopped:
             return self.process.returncode
-        status = os.waitid(
-            os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
-        )
+        try:
+            status = os.waitid(
+                os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+            )
+        except ChildProcessError as error:
+            self.reservation_lost = True
+            raise BenchmarkError("Внешний reap: reservation PGID потеряна") from error
         if status is None:
             return None
         return (
@@ -434,11 +441,12 @@ class Child:
             return
         self.closing = True
         try:
-            if self.process.returncode is not None:
+            if self.process.returncode is not None or self.reservation_lost:
                 self.stopped = True
                 raise BenchmarkError("Лидер уже reap: reservation PGID потеряна")
             try:
                 try:
+                    self.exit_code()
                     os.killpg(self.process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
@@ -447,13 +455,15 @@ class Child:
                 time.sleep(1)
             finally:
                 try:
+                    self.exit_code()
                     os.killpg(self.process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 finally:
                     # До reap запрещаем повторные сигналы, в том числе при unwind.
                     self.stopped = True
-                    self.process.wait(timeout=3)
+                    if not self.reservation_lost:
+                        self.process.wait(timeout=3)
         finally:
             if self.selector is not None:
                 self.selector.close()

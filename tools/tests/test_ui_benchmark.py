@@ -163,6 +163,23 @@ class ChildTests(unittest.TestCase):
         killpg.assert_not_called()
         child.close()
 
+    def test_external_waitpid_without_popen_returncode_forbids_signals(self) -> None:
+        for observe_first in (False, True):
+            with self.subTest(observe_first=observe_first):
+                child = self.spawn("pass")
+                os.waitpid(child.process.pid, 0)
+                self.assertIsNone(child.process.returncode)
+                with patch.object(bench.os, "killpg") as killpg:
+                    if observe_first:
+                        with self.assertRaisesRegex(
+                            bench.BenchmarkError, "reservation"
+                        ):
+                            child.alive()
+                    with self.assertRaisesRegex(bench.BenchmarkError, "reservation"):
+                        child.close()
+                    child.close()
+                killpg.assert_not_called()
+
     def test_signal_oracle_rejects_reaped_leader_without_real_signal(self) -> None:
         child = self.spawn("pass")
         child.close()
