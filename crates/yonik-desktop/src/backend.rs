@@ -47,6 +47,8 @@ pub struct HostConfig {
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
+    #[cfg(feature = "test-support")]
+    cleanup_fault: Option<Arc<AtomicBool>>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -57,7 +59,18 @@ impl HostConfig {
             listen_port: None,
             system_subscription_policy: true,
             schedule_observer: None,
+            #[cfg(feature = "test-support")]
+            cleanup_fault: None,
         }
+    }
+    /// Только доверенный отрицательный Rust-стенд с отдельной ephemeral БД.
+    #[cfg(feature = "test-support")]
+    pub fn with_cleanup_fault(mut self, fault: Arc<AtomicBool>) -> Result<Self> {
+        if self.ephemeral_key.is_none() {
+            return Err(DesktopError("invalid_input"));
+        }
+        self.cleanup_fault = Some(fault);
+        Ok(self)
     }
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
@@ -2258,6 +2271,7 @@ struct TcpRunning {
     task: tokio::task::JoinHandle<std::result::Result<TcpProbeSeriesResult, HostError>>,
 }
 
+#[cfg_attr(feature = "test-support", allow(clippy::too_many_arguments))]
 async fn session(
     config: yonik_engine::CompiledConfig,
     engine_dir: PathBuf,
@@ -2269,6 +2283,7 @@ async fn session(
         yonik_linux::event_log::EventLog,
     ),
     mut network: Option<NetworkWatch>,
+    #[cfg(feature = "test-support")] cleanup_fault: Option<Arc<AtomicBool>>,
 ) -> std::result::Result<(), LocalSession> {
     let (updates, event_log) = updates;
     let Ok(session) = LocalSession::new() else {
@@ -2283,6 +2298,10 @@ async fn session(
         return Ok(());
     };
     let mut session = session.with_event_log(event_log);
+    #[cfg(feature = "test-support")]
+    if let Some(fault) = cleanup_fault {
+        session = session.with_cleanup_fault(fault);
+    }
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -3125,7 +3144,7 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone()));
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone()), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())

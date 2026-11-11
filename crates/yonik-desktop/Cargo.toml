@@ -7,6 +7,7 @@ license-file.workspace = true
 
 [features]
 default = []
+test-support = ["yonik-linux/test-support"]
 gui = ["dep:cxx", "dep:cxx-qt", "dep:cxx-qt-lib", "dep:cxx-qt-build", "dep:cxx-gen"]
 
 [[bin]]
@@ -49,3 +50,8 @@ yonik-linux = { path = "../yonik-linux", features = ["test-support"] }
 name = "p10_gate"
 path = "tests/p10_gate.rs"
 harness = false
+
+[[example]]
+name = "tray_cleanup_negative"
+path = "tests/support/tray_cleanup_negative.rs"
+required-features = ["gui", "test-support"]
