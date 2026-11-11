@@ -3560,7 +3560,11 @@ async fn run(
                                 Ok(job) => { actor.invalidate_preset(); preset_job = Some(job); actor.state.presets.busy = true; actor.state.presets.active_request_id = Some(request_id); actor.state.presets.ack = None; Ok(()) },
                                 Err(error) => { actor.state.presets.ack = Some(presets::Ack { request_id, error: Some(error) }); Ok(()) },
                             }
-                        } else { Err(DesktopError("storage")) }
+                        } else {
+                            actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("storage") });
+                            actor.state.presets.operation_error = Some("storage");
+                            Ok(())
+                        }
                     }
                     Command::PresetCancel { request_id } => {
                         if let Some(job) = &preset_job {

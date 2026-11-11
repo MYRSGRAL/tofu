@@ -30,8 +30,13 @@ class Source(BaseHTTPRequestHandler):
         """Тест не журналирует URL ресурсов."""
 
 
-def run(binary: Path, output: Path) -> None:
+def run(binary: Path, output: Path, *, unavailable: bool = False) -> None:
     output.mkdir(parents=True, exist_ok=False)
+    if unavailable:
+        data = output / "data"
+        data.mkdir(mode=0o700)
+        (data / "presets").mkdir(mode=0o755)
+        (data / "presets").chmod(0o755)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Source)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
@@ -106,6 +111,19 @@ def run(binary: Path, output: Path) -> None:
             "command": {"command": "shutdown"},
         },
     ]
+    if unavailable:
+        steps = steps[:11] + [
+            ui(
+                "click",
+                "presetConfigure",
+                expect={
+                    "presetPanel": {"pendingRequest": 0},
+                    "presetFeedback": {"text": "Хранилище недоступно"},
+                },
+                capture="unavailable-controller.png",
+            ),
+            {"when": {}, "command": {"command": "shutdown"}},
+        ]
     try:
         execute(binary.resolve(), output, steps, output, "1")
     finally:
@@ -117,4 +135,8 @@ def run(binary: Path, output: Path) -> None:
 
 
 if __name__ == "__main__":
-    run(Path(sys.argv[1]), Path(sys.argv[2]).resolve())
+    run(
+        Path(sys.argv[1]),
+        Path(sys.argv[2]).resolve(),
+        unavailable="--unavailable-controller" in sys.argv[3:],
+    )

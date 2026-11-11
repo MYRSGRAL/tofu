@@ -1,6 +1,9 @@
 //! Продуктовая проекция snapshots без URL и персональных правил.
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 use tokio::sync::watch;
 use yonik_linux::presets::{Error, Metadata, Store};
 
@@ -260,9 +263,40 @@ mod tests {
     }
 }
 
+/// CAS задаёт порядок cancel/admission. После admission отмена не подменяет I/O outcome.
+#[derive(Default)]
+struct Publication(AtomicU8);
+impl Publication {
+    const PENDING: u8 = 0;
+    const CANCELLED: u8 = 1;
+    const ADMITTED: u8 = 2;
+    fn cancel(&self) {
+        let _ = self.0.compare_exchange(
+            Self::PENDING,
+            Self::CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+    fn admit(&self, valid: bool) -> bool {
+        if !valid {
+            self.cancel();
+            return false;
+        }
+        self.0
+            .compare_exchange(
+                Self::PENDING,
+                Self::ADMITTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
 pub struct Job {
     pub request_id: u64,
     cancel: watch::Sender<bool>,
+    publication: Option<Arc<Publication>>,
     task: tokio::task::JoinHandle<Result<(), &'static str>>,
 }
 impl Job {
@@ -276,6 +310,8 @@ impl Job {
     ) -> Result<Self, &'static str> {
         yonik_linux::presets::validate_metadata(&metadata).map_err(|_| "invalid_input")?;
         let (cancel, receiver) = watch::channel(false);
+        let publication = Arc::new(Publication::default());
+        let admission = publication.clone();
         let task = tokio::spawn(async move {
             use yonik_linux::SubscriptionFetch;
             let mut bodies = Vec::with_capacity(2);
@@ -314,8 +350,18 @@ impl Job {
                 }
                 controller
                     .store
-                    .install(metadata, domains, ips)
+                    .install_admitted(metadata, domains, ips, || {
+                        // Read guard сериализует lease revocation с CAS admission;
+                        // guard освобождается до файлового I/O rename/fsync.
+                        let current = host.current.borrow();
+                        let valid = (!host.proxy_used.load(Ordering::Acquire)
+                            || (*current == host.lease && host.current.has_changed().is_ok()))
+                            && !*receiver.borrow()
+                            && receiver.has_changed().is_ok();
+                        admission.admit(valid)
+                    })
                     .map_err(store_error)
+                    .and_then(|outcome| outcome.ok_or("cancelled"))
                     .and_then(|outcome| match outcome {
                         yonik_linux::presets::PublishOutcome::Durable => Ok(()),
                         yonik_linux::presets::PublishOutcome::PublishedDurabilityUnknown => {
@@ -329,6 +375,7 @@ impl Job {
         Ok(Self {
             request_id,
             cancel,
+            publication: Some(publication),
             task,
         })
     }
@@ -380,10 +427,14 @@ impl Job {
         Self {
             request_id,
             cancel,
+            publication: None,
             task,
         }
     }
     pub fn stop(&self) {
+        if let Some(publication) = &self.publication {
+            publication.cancel();
+        }
         self.cancel.send_replace(true);
     }
     pub async fn complete(&mut self) -> Ack {
@@ -396,6 +447,12 @@ impl Job {
             request_id: self.request_id,
             error,
         }
+    }
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -463,6 +520,108 @@ mod job_tests {
         assert_eq!(controller.status().current.expect("snapshot").version, "v1");
         server.await.expect("server joined");
         drop(job);
+        drop(controller);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[tokio::test]
+    async fn cancel_after_install_entry_before_index_publication_preserves_current() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listen");
+        let metadata = metadata(listener.local_addr().expect("address"));
+        let server = tokio::spawn(async move {
+            for body in ["example.org\n", "0.0.0.0/0\n"] {
+                let (mut stream, _) = listener.accept().await.expect("accept");
+                let mut request = [0; 4096];
+                assert!(stream.read(&mut request).await.expect("request") > 0);
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.expect("response");
+            }
+        });
+        let (controller, path) = controller();
+        for version in ["old1", "old2"] {
+            let mut previous = metadata.clone();
+            previous.version = version.into();
+            previous.domains.revision = version.into();
+            previous.ips.revision = version.into();
+            controller
+                .store
+                .install(previous, b"example.org\n".to_vec(), b"0.0.0.0/0\n".to_vec())
+                .expect("previous snapshot");
+        }
+        let index_before = std::fs::read(path.join("index")).expect("index");
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let hook_entered = entered.clone();
+        let hook_release = release.clone();
+        let store = Store::open(&path)
+            .expect("store")
+            .with_before_publish(Arc::new(move || {
+                hook_entered.notify_one();
+                let (lock, cv) = &*hook_release;
+                let guard = lock.lock().expect("gate");
+                let (_guard, timeout) = cv
+                    .wait_timeout_while(guard, std::time::Duration::from_secs(10), |released| {
+                        !*released
+                    })
+                    .expect("gate wait");
+                assert!(!timeout.timed_out());
+            }));
+        drop(controller);
+        let controller = Arc::new(Controller { store });
+        let (lease, _) = watch::channel(None);
+        let mut job = Job::start(
+            controller.clone(),
+            super::super::DesktopFetch::new(&lease, None),
+            metadata,
+            yonik_linux::FetchRoute::Direct,
+            true,
+            19,
+        )
+        .expect("job");
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
+            .await
+            .expect("inside install");
+        job.stop();
+        let (lock, cv) = &*release;
+        *lock.lock().expect("release") = true;
+        cv.notify_all();
+        let ack = job.complete().await;
+        server.await.expect("server joined");
+        let preserved = std::fs::read(path.join("index")).expect("index") == index_before;
+        assert_eq!(
+            controller.status().current.expect("current").version,
+            "old2"
+        );
+        assert_eq!(
+            controller.status().previous.expect("previous").version,
+            "old1"
+        );
+        drop(job);
+        drop(controller);
+        std::fs::remove_dir_all(path).expect("fixture");
+        assert_eq!(ack.error, Some("cancelled"));
+        assert!(preserved);
+    }
+    #[test]
+    fn cancellation_after_admission_keeps_truthful_publication_result() {
+        let (controller, path) = controller();
+        let admission = Publication::default();
+        let outcome = controller
+            .store
+            .install_admitted(
+                metadata("127.0.0.1:1".parse().expect("address")),
+                b"example.org\n".to_vec(),
+                b"0.0.0.0/0\n".to_vec(),
+                || {
+                    let permitted = admission.admit(true);
+                    assert!(permitted);
+                    admission.cancel();
+                    permitted
+                },
+            )
+            .expect("publication result");
+        assert_eq!(outcome, Some(yonik_linux::presets::PublishOutcome::Durable));
+        assert!(controller.status().current.is_some());
         drop(controller);
         std::fs::remove_dir_all(path).expect("fixture");
     }
