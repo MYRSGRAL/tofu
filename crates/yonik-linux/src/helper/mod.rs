@@ -373,6 +373,26 @@ impl PeerAuthorizer {
             .ok_or(AuthorizationError::PeerGone)
     }
 
+    async fn peer_pid(&self, name: &str, uid: u32) -> Result<u32, AuthorizationError> {
+        let reply = self.daemon_call("GetConnectionCredentials", name).await?;
+        let body = reply.body();
+        let (credentials,): (HashMap<&str, Value<'_>>,) = body
+            .deserialize()
+            .map_err(|_| AuthorizationError::InvalidReply)?;
+        if credentials
+            .get("UnixUserID")
+            .and_then(|v| u32::try_from(v).ok())
+            != Some(uid)
+        {
+            return Err(AuthorizationError::PeerGone);
+        }
+        credentials
+            .get("ProcessID")
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|pid| *pid != 0)
+            .ok_or(AuthorizationError::PeerGone)
+    }
+
     async fn owner(&self) -> Result<String, AuthorizationError> {
         let reply = self.daemon_call("GetNameOwner", AUTHORITY).await?;
         let body = reply.body();

@@ -99,14 +99,14 @@ where
             ),
         >,
 {
+    let started = std::time::Instant::now();
     if let Some((_, sender, task, _, _)) = refresh {
         sender.send_replace(true);
         // Join — подтверждение освобождения service clone, включая commit ACK.
         let _result = task.await;
     }
     let schedule_closed = schedule.runtime.shutdown(now).await.is_ok();
-    let policy = schedule.policy;
-    let visible = schedule.visible;
+    let replacement = schedule.replacement();
     drop(schedule);
     let access = repository.maintenance_access().await;
     let service_closed = service.close().await.is_ok();
@@ -129,11 +129,11 @@ where
     match access.reopen().await {
         Ok(repository) => {
             let service = SubscriptionService::new(repository.clone());
-            match DesktopSchedule::new() {
+            match replacement {
                 Ok(mut schedule) => {
-                    schedule.policy = policy;
-                    schedule.visible = visible;
-                    let loaded = schedule.load(&service, now).await;
+                    let loaded = schedule
+                        .load(&service, now.saturating_add(started.elapsed()))
+                        .await;
                     Outcome {
                         drained: true,
                         handles: Some((service, repository, schedule)),
@@ -232,6 +232,19 @@ mod tests {
             if state["maintenance_ack"]["request_id"] == 2 {
                 break;
             }
+        }
+        for command in [
+            serde_json::json!({"command":"logs_read","after":"0","source":"all","request_id":"71"}),
+            serde_json::json!({"command":"logs_save","page_request_id":"71","destination":directory.join("report.json"),"request_id":"72"}),
+        ] {
+            host.dispatch(&command.to_string())
+                .expect("команда журнала");
+            let state = receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("logs ACK");
+            assert_eq!(state["logs"]["request_id"], command["request_id"]);
+            assert_eq!(state["logs"]["status"], "busy");
+            assert!(state["logs"]["export"].is_null());
         }
         host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":1,"operation":"backup","destination":destination,"revision":ready["revision"]}).to_string()).expect("повтор Start");
         let repeated = receiver
@@ -382,7 +395,14 @@ mod tests {
                 .await
                 .expect("БД");
         let service = SubscriptionService::new(repository.clone());
-        let schedule = DesktopSchedule::new().expect("scheduler");
+        let mut schedule = DesktopSchedule::new().expect("scheduler");
+        schedule.interval = Duration::from_secs(172800);
+        schedule
+            .runtime
+            .set_interval(schedule.interval)
+            .expect("интервал");
+        schedule.background_enabled = true;
+        schedule.window_until = Some(Duration::from_secs(60));
         let request = maintenance::Request {
             request_id: 1,
             operation: maintenance::Operation::Backup,
@@ -423,6 +443,9 @@ mod tests {
         let outcome = task.await.expect("join");
         assert_eq!(outcome.result, Err("cancelled"));
         let (service, repository, mut schedule) = outcome.handles.expect("reopen после drain");
+        assert_eq!(schedule.interval, Duration::from_secs(172800));
+        assert!(schedule.background_enabled);
+        assert_eq!(schedule.window_until, Some(Duration::from_secs(60)));
         schedule
             .runtime
             .shutdown(Duration::ZERO)

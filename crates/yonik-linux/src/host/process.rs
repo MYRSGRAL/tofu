@@ -146,10 +146,13 @@ pub(crate) async fn terminate_logged(
     terminate(child).await?;
     if let Some(log) = log {
         if let Ok(Some(status)) = child.try_wait() {
+            use std::os::unix::process::ExitStatusExt;
             log.record(
                 crate::event_log::EventSource::Engine,
                 crate::event_log::EventCode::ProcessExited,
-                status.code(),
+                status
+                    .code()
+                    .or_else(|| status.signal().map(|signal| -signal)),
             );
         } else {
             log.reject();

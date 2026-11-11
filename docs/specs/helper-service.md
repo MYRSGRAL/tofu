@@ -75,3 +75,29 @@ RuntimeDirectory сохраняется и после Stop: иначе journal �
 и безопасный LAN/VPN. Полный system-service integration и install/uninstall
 остаются отдельными критериями. [План](../PLAN.md),
 [evidence текущего среза](../validation/2026-11-10-helper-service.md).
+
+### Additive `system_profile_policy` (RPCv1)
+
+Prepare принимает отдельный mode `system_profile_policy`: обязательные `version=1`,
+`mode`, `engine`, `kill_switch`, `server`, `policy`. Legacy `system_profile`
+сохраняет пять полей и прежнюю компиляцию. Новый метод SystemClient —
+`prepare_profile_policy`; GUI пока использует legacy метод.
+
+`policy` — закрытый объект: `version=1`, `default_action`, `user_rules`,
+`preset_rules`, `lan`, `private_networks`, `private_domains`. Правило — закрытый
+объект с обязательными `id`, `enabled`, `action`, `domain`, `domain_suffix`,
+`ip_cidr`, `executable_paths`; порядок массивов соответствует domain Policy.
+Action — `direct|proxy|block`. Private network: `cidr,vpn,available`; private
+suffix: `suffix,vpn,available`. Это плоская wire-форма существующих domain типов,
+не native JSON/DSL. Существующие constructors и compiler capability checks
+остаются обязательными. Массив вместо объекта, дубликаты и неизвестные поля
+отвергаются. Всего не более 128 правил; весь Prepare ограничен 64 KiB и пятью
+вложенными контейнерами, включая внешний объект. Selectors array достигает
+ровно depth=5; `conditions` дополнительным объектом не передаётся.
+
+Нужность process attribution вычисляется только из enabled правил той policy,
+которая передаётся compile_system_policy. Helper-private immutable artifact
+сохраняет это требование вместе с sealed config и его digest; повторная проверка
+выполняется перед Apply effects. Отсутствие работоспособного механизма приводит
+к `Unsupported`, а неизвестный владелец отдельного flow не является доказательством
+отсутствия механизма. Права production worker этим протоколом не расширяются.

@@ -82,4 +82,6 @@ pub mod presets;
 pub mod system_client;
 
 #[cfg(target_os = "linux")]
+pub mod attribution;
+#[cfg(target_os = "linux")]
 pub mod event_log;

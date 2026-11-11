@@ -64,6 +64,14 @@ def main() -> None:
                             ui("click", "settingsDiagnosticsButton"),
                             ui("click", "logsRefresh"),
                             ui("key", "logsRefresh", key="Tab", expect={"logsRows": {"count": 5}, "logsExportText": {"text": {"contains": "CleanupConfirmed"}}}, capture="logs.png"),
+                            ui("text", "logsDestination", value=str(work / "events.txt")),
+                            ui("click", "logsSave"),
+                            ui("key", "logsRefresh", key="Tab", expect={"logsSave": {"enabled": True}}),
+                            ui("click", "logsRefresh"),
+                            ui("clipboard", value="save-refusal-canary"),
+                            ui("click", "logsSave", expect={"logsCopy": {"enabled": True}}),
+                            ui("key", "logsRefresh", key="Tab", expect={"logsSave": {"enabled": True}, "clipboard": {"text": "save-refusal-canary"}}),
+                            ui("click", "logsRefresh"),
                             ui("clipboard", value="FR16 clipboard canary"),
                             {"when": {}, "command": {"command": "logs_read", "after": "SECRET-invalid", "source": "all", "request_id": "99"}},
                             ui("key", "logsRefresh", key="Tab", expect={"clipboard": {"text": "FR16 clipboard canary"}}),
@@ -99,6 +107,11 @@ def main() -> None:
                             {"when": {}, "command": {"command": "shutdown"}},
                         ]
                         execute(binary, work, steps, evidence, "1", engines=engines)
+                        exported = (work / "events.txt").read_text()
+                        assert "CleanupConfirmed" in exported
+                        assert (work / "events.txt").stat().st_mode & 0o777 == 0o600
+                        assert len(exported) < 65536
+                        (evidence / "events.txt").write_text(exported)
                 finally:
                     server.shutdown()
                     server.server_close()
