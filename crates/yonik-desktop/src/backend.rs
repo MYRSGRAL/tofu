@@ -125,6 +125,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    #[cfg(feature = "test-support")]
+    #[serde(skip)]
+    LogsTest {
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    },
+    LogsSave {
+        page_request_id: String,
+        destination: String,
+        request_id: String,
+    },
     LogsRead {
         after: String,
         source: logs::Source,
@@ -421,6 +431,19 @@ impl DesktopHost {
         self.control.subscription_policy.send_replace(policy);
         Ok(())
     }
+    #[cfg(feature = "test-support")]
+    pub fn test_event_log(
+        &self,
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    ) -> Result<()> {
+        self.commands
+            .try_send(Envelope {
+                command: Command::LogsTest { reply },
+                generation: self.control.generation.load(Ordering::SeqCst),
+                tcp_generation: *self.control.tcp_priority.borrow(),
+            })
+            .map_err(|_| DesktopError("busy"))
+    }
     pub fn dispatch(&self, request: &str) -> Result<()> {
         if request.len() > 16 * 1024 {
             return Err(DesktopError("invalid_input"));
@@ -506,6 +529,15 @@ fn validate(command: &Command) -> Result<()> {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsSave {
+            page_request_id,
+            destination,
+            request_id,
+        } => {
+            logs::valid_number(page_request_id)
+                && logs::valid_number(request_id)
+                && text(destination, 4096)
+        }
         Command::LogsRead {
             after, request_id, ..
         } => logs::valid_number(after) && logs::valid_number(request_id),
@@ -904,6 +936,7 @@ async fn open(
 }
 
 struct Actor {
+    logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: EncryptedSubscriptionRepository,
     routing_revision: Option<i64>,
@@ -1210,6 +1243,29 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            #[cfg(feature = "test-support")]
+            Command::LogsTest { reply } => {
+                let _ = reply.send(self.state.ephemeral.then(|| self.event_log.clone()));
+                Ok(())
+            }
+            Command::LogsSave {
+                page_request_id,
+                destination,
+                request_id,
+            } => {
+                let status = self.logs_save.start(
+                    &self.state.logs,
+                    &page_request_id,
+                    destination,
+                    request_id.clone(),
+                );
+                self.state.logs = logs::Page {
+                    request_id,
+                    status,
+                    ..Default::default()
+                };
+                Ok(())
+            }
             Command::LogsRead {
                 after,
                 source,
@@ -1802,6 +1858,7 @@ mod settings_tests {
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
             event_log: yonik_linux::event_log::EventLog::new(),
+            logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository,
             routing_revision: Some(0),
             preferences_store,
@@ -2584,6 +2641,7 @@ async fn run(
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
         event_log: yonik_linux::event_log::EventLog::new(),
+        logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository,
         routing_revision: Some(0),
         preferences_store,
@@ -3011,6 +3069,14 @@ async fn run(
                 }
                 actor.emit();
             }
+            completion = actor.logs_save.complete(), if actor.logs_save.active() => {
+                if let Some((request_id, status)) = completion {
+                    if actor.state.logs.request_id == request_id && actor.state.logs.status == "saving" {
+                        actor.state.logs = logs::Page { request_id, status, ..Default::default() };
+                        actor.emit();
+                    }
+                }
+            }
             Some(update) = events.recv() => {
                 actor.update(update); actor.emit();
             }
@@ -3021,7 +3087,7 @@ async fn run(
                         actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
                         actor.emit();
                     }
-                    if let Command::LogsRead { request_id, .. } = envelope.command {
+                    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = envelope.command {
                         actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }
@@ -3307,6 +3373,7 @@ async fn run(
             actor.emit();
         }
         if quitting
+            && !actor.logs_save.active()
             && system_flight.is_none()
             && !system_stop
             && batch_running.is_none()
@@ -3385,6 +3452,7 @@ mod routing_regressions {
         (
             Actor {
                 event_log: yonik_linux::event_log::EventLog::new(),
+                logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository,
                 routing_revision: Some(0),
                 preferences_store,

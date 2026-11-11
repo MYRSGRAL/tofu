@@ -1996,3 +1996,62 @@ fn closed_snapshot_has_released_last_database_handle() {
         })
     );
 }
+
+#[test]
+fn logs_save_uses_only_accepted_page_and_never_replaces_destination() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    let path = directory.0.join("events.txt");
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"1"}));
+    let page = app.wait(|v| v["logs"]["request_id"] == "1");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"9", "destination":path, "request_id":"2"}),
+    );
+    let refused = app.wait(|v| v["logs"]["request_id"] == "2");
+    assert_eq!(refused["logs"]["status"], "refused");
+    assert!(!path.exists());
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"3"}));
+    app.wait(|v| v["logs"]["request_id"] == "3");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"3", "destination":path, "request_id":"4"}),
+    );
+    let saved = app.wait(|v| v["logs"]["request_id"] == "4" && v["logs"]["status"] != "saving");
+    assert_eq!(saved["logs"]["status"], "saved");
+    assert!(saved["logs"]["export"].is_null());
+    let original = fs::read(&path).expect("экспорт");
+    assert_eq!(
+        original,
+        page["logs"]["export"]
+            .as_str()
+            .expect("страница")
+            .as_bytes()
+    );
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"5"}));
+    app.wait(|v| v["logs"]["request_id"] == "5");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"5", "destination":path, "request_id":"6"}),
+    );
+    let refused = app.wait(|v| v["logs"]["request_id"] == "6" && v["logs"]["status"] != "saving");
+    assert_eq!(refused["logs"]["status"], "refused");
+    assert_eq!(fs::read(path).expect("исходный файл"), original);
+    app.close();
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn logs_trusted_control_is_not_deserializable_from_ui() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    assert!(app.host.dispatch(r#"{"command":"logs_test"}"#).is_err());
+    let (sender, receiver) = mpsc::channel();
+    app.host.test_event_log(sender).expect("Rust control");
+    assert!(
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("ответ")
+            .is_some()
+    );
+    app.close();
+}
