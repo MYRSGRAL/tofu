@@ -1,0 +1,622 @@
+{
+  "base_head": "5452555100ee10569ff5f8af9cedd7df01968ba9",
+  "scope": "Native fixtures; full G-DNS OPEN; production integration NOT_TESTED",
+  "actual_exclusions": [
+    {
+      "engine": "xray",
+      "qtype": 1,
+      "answers": {
+        "exact.excluded.test": [
+          "192.0.2.10"
+        ],
+        "suffix.excluded.test": [
+          "192.0.2.10"
+        ],
+        "child.suffix.excluded.test": [
+          "192.0.2.10"
+        ],
+        "child.exact.excluded.test": [
+          "198.19.56.239"
+        ],
+        "notsuffix.excluded.test": [
+          "198.19.56.240"
+        ],
+        "name-0.fakeip.test": [
+          "198.19.56.241"
+        ]
+      },
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "suffix.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "child.suffix.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ]
+    },
+    {
+      "engine": "xray",
+      "qtype": 28,
+      "answers": {
+        "exact.excluded.test": [
+          "2001:db8::10"
+        ],
+        "suffix.excluded.test": [
+          "2001:db8::10"
+        ],
+        "child.suffix.excluded.test": [
+          "2001:db8::10"
+        ],
+        "child.exact.excluded.test": [
+          "fc00::1a1:c8c7:39c9"
+        ],
+        "notsuffix.excluded.test": [
+          "fc00::1a1:c8c7:39ca"
+        ],
+        "name-0.fakeip.test": [
+          "fc00::1a1:c8c7:39cb"
+        ]
+      },
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "suffix.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "child.suffix.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ]
+    },
+    {
+      "engine": "sing-box",
+      "qtype": 1,
+      "answers": {
+        "exact.excluded.test": [
+          "192.0.2.10"
+        ],
+        "suffix.excluded.test": [
+          "192.0.2.10"
+        ],
+        "child.suffix.excluded.test": [
+          "192.0.2.10"
+        ],
+        "child.exact.excluded.test": [
+          "198.18.0.2"
+        ],
+        "notsuffix.excluded.test": [
+          "198.18.0.3"
+        ],
+        "name-0.fakeip.test": [
+          "198.18.0.4"
+        ]
+      },
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "suffix.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "child.suffix.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ]
+    },
+    {
+      "engine": "sing-box",
+      "qtype": 28,
+      "answers": {
+        "exact.excluded.test": [
+          "2001:db8::10"
+        ],
+        "suffix.excluded.test": [
+          "2001:db8::10"
+        ],
+        "child.suffix.excluded.test": [
+          "2001:db8::10"
+        ],
+        "child.exact.excluded.test": [
+          "fc00::2"
+        ],
+        "notsuffix.excluded.test": [
+          "fc00::3"
+        ],
+        "name-0.fakeip.test": [
+          "fc00::4"
+        ]
+      },
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "suffix.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "child.suffix.excluded.test",
+          "qtype": 28,
+          "rcode": 0,
+          "addresses": [
+            "2001:db8::10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ]
+    }
+  ],
+  "actual_loopback_reset": [
+    {
+      "engine": "xray",
+      "same_pid": 49,
+      "netns_inode": 4026533594,
+      "lo_before": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00"
+        }
+      ],
+      "lo_down": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "DOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00"
+        }
+      ],
+      "real_before": [
+        "192.0.2.10"
+      ],
+      "real_after": [
+        "192.0.2.11"
+      ],
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.11"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ],
+      "old_fake": [
+        "198.19.210.153"
+      ],
+      "old_mapping_after_reset": "M00",
+      "fresh_fake": [
+        "198.19.210.160"
+      ],
+      "markers": [
+        "M00",
+        "M00",
+        "M01"
+      ],
+      "production_stamp": null,
+      "production_epoch_fence": "NOT_TESTED"
+    },
+    {
+      "engine": "sing-box",
+      "same_pid": 108,
+      "netns_inode": 4026533594,
+      "lo_before": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00"
+        }
+      ],
+      "lo_down": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "DOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00"
+        }
+      ],
+      "real_before": [
+        "192.0.2.10"
+      ],
+      "real_after": [
+        "192.0.2.11"
+      ],
+      "actual_upstream_records": [
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        },
+        {
+          "name": "exact.excluded.test",
+          "qtype": 1,
+          "rcode": 0,
+          "addresses": [
+            "192.0.2.11"
+          ],
+          "drop": false,
+          "ttl": 2,
+          "opcode": 0,
+          "reserved": false,
+          "cname": null,
+          "soa": null
+        }
+      ],
+      "old_fake": [
+        "198.18.0.2"
+      ],
+      "old_mapping_after_reset": "M00",
+      "fresh_fake": [
+        "198.18.0.3"
+      ],
+      "markers": [
+        "M00",
+        "M00",
+        "M01"
+      ],
+      "production_stamp": null,
+      "production_epoch_fence": "NOT_TESTED"
+    }
+  ],
+  "actual_real_ttl_wait": [
+    {
+      "engine": "xray",
+      "pid": 96,
+      "netns_inode": 4026533537,
+      "wire_ttl": 1,
+      "elapsed": 1.2003017640017788,
+      "old_ip": "198.18.17.58",
+      "after_link_reset_marker": "M00",
+      "after_ttl_marker": "M00",
+      "fresh_after_reset": [
+        "198.18.17.129"
+      ],
+      "renewed_after_ttl": [
+        "198.18.17.58"
+      ],
+      "markers": [
+        "M00",
+        "M00",
+        "M01",
+        "M00",
+        "M00"
+      ],
+      "production_stamp": null,
+      "custody_context": "native fixture, same PID/config/netns; production fence не проверен"
+    },
+    {
+      "engine": "sing-box",
+      "pid": 200,
+      "netns_inode": 4026533537,
+      "wire_ttl": 600,
+      "elapsed": 600.2002731829998,
+      "old_ip": "198.18.0.2",
+      "after_link_reset_marker": "M00",
+      "after_ttl_marker": "M00",
+      "fresh_after_reset": [
+        "198.18.0.3"
+      ],
+      "renewed_after_ttl": [
+        "198.18.0.2"
+      ],
+      "markers": [
+        "M00",
+        "M00",
+        "M01",
+        "M00",
+        "M00"
+      ],
+      "production_stamp": null,
+      "custody_context": "native fixture, same PID/config/netns; production fence не проверен"
+    }
+  ],
+  "native_exclusion_mutants": [
+    {
+      "engine": "xray",
+      "ipv6": false,
+      "rejected": "Exclusion не получил real answer: exact.excluded.test"
+    },
+    {
+      "engine": "xray",
+      "ipv6": true,
+      "rejected": "Exclusion не получил real answer: exact.excluded.test"
+    },
+    {
+      "engine": "sing-box",
+      "ipv6": false,
+      "rejected": "Exclusion не получил real answer: exact.excluded.test"
+    },
+    {
+      "engine": "sing-box",
+      "ipv6": true,
+      "rejected": "Exclusion не получил real answer: exact.excluded.test"
+    }
+  ],
+  "long_run_functions_ast_equivalence": {
+    "configuration": true,
+    "exclusions": true,
+    "wait_ttl": true,
+    "lifecycle": true
+  },
+  "source_sha256": {
+    "tools/dns_pinned_controls.py": "e6b06231d9c632243fb51461015b8dc8119f56ffe509a22f4872af69257633f5",
+    "tools/dns_pinned_lease_blocker.py": "85a8a49534c9ba865f9d396d72459f4d7dfd8bab15e1cd066f735d773a5beced",
+    "tools/tests/test_dns_pinned_controls.py": "4deb7a5193011b66a25dcc336fec38f436a840c5bd6023a59b151a99b5f09b1a",
+    "tools/tests/test_dns_pinned_lease_blocker.py": "d9f027082c006e01a32437b3bc0c23f8878dfc9c100196eb24abcec464cb4dba",
+    "tools/dns_fixture.py": "271eb3c5862fe6e336122467c2f911aba5a64455fd222da40128ff5f0003c33b",
+    "tools/fakeip_epoch_gap.py": "5d6d3672a23006ef35cf3284e80162f5ce69cc3ad80e80af551cd7e578032f9b",
+    "tools/engine_smoke.py": "8d23004f00c66bd7b27a92131f742416c9dc20b358e8c3b0551d64a5b93a545f",
+    "docs/validation/2026-11-11-dns-pinned-lease-blocker.md": "22625f643ca2c1c36c60c13a3f94a89bed0bdc691aae14eeaa3f99b0ef32e359"
+  },
+  "raw_artifact_sha256": {
+    "dns-pinned-controls-v2-5452555/partial.json": "c85fb1c7f454b3a5d933fa2396eaac596223e87ce0cc25123bc737f00b8cf8fa",
+    "dns-pinned-controls-v2-5452555/result.json": "67cbf8cabcdc9fa53b7d18c672d868063fcc61a04f053584eccbdbd84cb376cf",
+    "dns-pinned-controls-v2-5452555/sing-box-exclusions-False/sing-box.json": "2f97b9189bd4f1ab587c0dfcab6afa4088eda2da05fd046509125c32bde03d59",
+    "dns-pinned-controls-v2-5452555/sing-box-exclusions-False/sing-box.log": "b6ab8d7246fb61f08f2627f0c9c66b7e2119d0cc6da18169a3ed15356fd19405",
+    "dns-pinned-controls-v2-5452555/sing-box-exclusions-True/sing-box.json": "a21b47b466ec007bbff4d6c4216c1728333438dedd57a6286df5933636e6a77a",
+    "dns-pinned-controls-v2-5452555/sing-box-exclusions-True/sing-box.log": "deee81c6364532b77738597ae4bee6e6c050064f14a535572f923ed98d46875b",
+    "dns-pinned-controls-v2-5452555/sing-box-lifecycle/sing-box.json": "2f97b9189bd4f1ab587c0dfcab6afa4088eda2da05fd046509125c32bde03d59",
+    "dns-pinned-controls-v2-5452555/sing-box-lifecycle/sing-box.log": "01f87f427def671a8b1a815aa930e5d7851352a3ebb1d395d693fd6fa3ca82f5",
+    "dns-pinned-controls-v2-5452555/source/dns_pinned_controls.py": "bf7849ee8e78d6406271ff36ba39f56d6083454a9c8bcaa86df9ca2bd6ac1565",
+    "dns-pinned-controls-v2-5452555/source-equivalence.json": "b48b415a953061f07485a2d6e1e116069751465a292a52732a394d04d9d05e31",
+    "dns-pinned-controls-v2-5452555/xray-exclusions-False/xray.json": "068a9a0819d4074d0c18ef2d7570daf19d120206e21be5e983ed763e6fc3981a",
+    "dns-pinned-controls-v2-5452555/xray-exclusions-False/xray.log": "8fb2ebbc2f3211afed10c07f2eb46f22ae516c1ea4491a9116f907106cd641f3",
+    "dns-pinned-controls-v2-5452555/xray-exclusions-True/xray.json": "811e19d273be6e274822767cc6414cf82b1e395ba13928d8dfeca7284627f4ba",
+    "dns-pinned-controls-v2-5452555/xray-exclusions-True/xray.log": "20a26d905e2c78c4480ff61f4aa0a641188e2b60c36a69ba8e46bc2f31cfe29a",
+    "dns-pinned-controls-v2-5452555/xray-lifecycle/xray.json": "068a9a0819d4074d0c18ef2d7570daf19d120206e21be5e983ed763e6fc3981a",
+    "dns-pinned-controls-v2-5452555/xray-lifecycle/xray.log": "e9f66802931d0b63e5a0b9ece4bc14f33e1b01f2fade300dd20409186ac41ad8",
+    "dns-pinned-controls-final-exclusions/partial.json": "91e8dc39f1aafb557a1bd4fb565341a52f71a92a3b9d77106c5de70b52552820",
+    "dns-pinned-controls-final-exclusions/result.json": "91e8dc39f1aafb557a1bd4fb565341a52f71a92a3b9d77106c5de70b52552820",
+    "dns-pinned-controls-final-exclusions/sing-box-exclusions-False/sing-box.json": "2f97b9189bd4f1ab587c0dfcab6afa4088eda2da05fd046509125c32bde03d59",
+    "dns-pinned-controls-final-exclusions/sing-box-exclusions-False/sing-box.log": "f8f8b9f88235c036a6ebdcdeacc2e9c1353799ee92bf0066392813f8e1e8422a",
+    "dns-pinned-controls-final-exclusions/sing-box-exclusions-True/sing-box.json": "a21b47b466ec007bbff4d6c4216c1728333438dedd57a6286df5933636e6a77a",
+    "dns-pinned-controls-final-exclusions/sing-box-exclusions-True/sing-box.log": "d573f9f6797900e33a95fdb4d7e75c88013e813606bb8857a282b08f710e2b77",
+    "dns-pinned-controls-final-exclusions/xray-exclusions-False/xray.json": "068a9a0819d4074d0c18ef2d7570daf19d120206e21be5e983ed763e6fc3981a",
+    "dns-pinned-controls-final-exclusions/xray-exclusions-False/xray.log": "dcb4c4cd4e5abbcdc6c3d9b5319cfb1c2c8ceedd79a54a44eec943b4497760db",
+    "dns-pinned-controls-final-exclusions/xray-exclusions-True/xray.json": "811e19d273be6e274822767cc6414cf82b1e395ba13928d8dfeca7284627f4ba",
+    "dns-pinned-controls-final-exclusions/xray-exclusions-True/xray.log": "56576079cfa2a1ac2d7575f62142bbdbcec7e4aba1d9affb8a87442dbb0e433d",
+    "dns-pinned-controls-final-reset/result.json": "a12c115cba96f4dfa9582bf81042aa2ad1be4712642422fe255d757516ccc388",
+    "dns-pinned-controls-final-reset/sing-box-reset/sing-box.json": "2f97b9189bd4f1ab587c0dfcab6afa4088eda2da05fd046509125c32bde03d59",
+    "dns-pinned-controls-final-reset/sing-box-reset/sing-box.log": "4fe8c3d41e628967b2cd8dd115b45f2751294bf1b59f13b29c7a67c34473e438",
+    "dns-pinned-controls-final-reset/xray-reset/xray.json": "068a9a0819d4074d0c18ef2d7570daf19d120206e21be5e983ed763e6fc3981a",
+    "dns-pinned-controls-final-reset/xray-reset/xray.log": "ab54c3c15e9028ba32bbcdb370dee05824c7cc2a05487848489afb9da50227d2",
+    "dns-pinned-controls-checks/bundle.py": "61b505cdc041da53dcb2e3fa285344accac4119ac7eae3fd229b40f0dba1b85e",
+    "dns-pinned-controls-checks/final-ruff.log": "4bd8248f4985e327cd636d5b563aa46d1d34db2021498c8d8b37613b35f181d1",
+    "dns-pinned-controls-checks/final-unit.log": "1c9d099d8f0a05d301e0c20484ce98093b198c74628273b5263dcbe6ad19e0de",
+    "dns-pinned-controls-checks/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dns-pinned-controls-checks/mutant-sing-box-False/sing-box.json": "7cde4386dae04af74790940f7a73e70f2ba250f6aad6f2613d0dd1bbc8e3d7a8",
+    "dns-pinned-controls-checks/mutant-sing-box-False/sing-box.log": "14f0d854238b2f6e2c5d4bafd538c9039b341f901fcaab5673083f44adb66357",
+    "dns-pinned-controls-checks/mutant-sing-box-True/sing-box.json": "70bc47b70d6d944a57c0a51550f446c3049462ec4deff4b1a02d53ece215d610",
+    "dns-pinned-controls-checks/mutant-sing-box-True/sing-box.log": "e3f94abfe304f8a877b930461dc740d4e9836e289171000a82b0641687bdab81",
+    "dns-pinned-controls-checks/mutant-xray-False/xray.json": "9eb0a230517dbb652ae42c4c8f167e21d233fb8ebcbcfc7c3934310ee8e247af",
+    "dns-pinned-controls-checks/mutant-xray-False/xray.log": "07fc2b0119b080ceb981fb2f9f3b7c83168e2090e7feb05ecf812e35be2f1818",
+    "dns-pinned-controls-checks/mutant-xray-True/xray.json": "559b68fea38d5e1e2eb867e9b56425c31d4237020d97b504ea66c05df594f764",
+    "dns-pinned-controls-checks/mutant-xray-True/xray.log": "fdbcc6f33cf56472260de066d78b5a6396a7d140f0a92ccb66d9874dd1fd514b",
+    "dns-pinned-controls-checks/native-negative.json": "53e7a9523df5eb4bda051f21b6052aaf8d005a7bdd0ad718520908e4a3706872",
+    "dns-pinned-controls-checks/negative.py": "8cab1a51fd807c7987b259679ae423e85c81f2d1472d270f07bde031754547ca",
+    "dns-pinned-controls-checks/pr-body.md": "2d6ab3d75f912c3e703eb283e31e4584274f0f554fcb655e026ad3d21a850223",
+    "dns-pinned-controls-checks/ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "dns-pinned-controls-checks/unit.log": "703b78d121b0614331d56ddd1818949639763c02e120eb02779f32d7a902d656",
+    "dns-pinned-controls-checks/wrapper-cleanup.log": "e158ad6ff57ad30d93053b475baaa30bf4e809631829fe186c2dee737619b4f2",
+    "dns-pinned-controls-v2-run.log": "67fb605533c0400f04b56acf9fdd2c673aace58831219adcb4a0dca45b832778"
+  },
+  "checks": {
+    "unit": "14 passed",
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "msrv_fmt": "1.85.1 passed",
+    "clippy": "not rerun; Rust source unchanged"
+  },
+  "limits": [
+    "No production Stamp/custody/context",
+    "No production epoch fence claim",
+    "No stale real RRset claim",
+    "No cache performance claim",
+    "Compiler exclusions/lease remain Unsupported(DnsContract)"
+  ]
+}
