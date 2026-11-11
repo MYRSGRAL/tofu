@@ -14,8 +14,17 @@ import time
 from pathlib import Path
 
 BASE = Path("/home/myrs/projects/yonik/local/validation/vm-base")
-ROOT = Path("/var/tmp/codex-myrs/transient/credentiallife-5b952cef")
-EVIDENCE = Path("/home/myrs/projects/yonik/local/validation/credentiallife")
+ROOT = Path(
+    os.environ.get(
+        "YONIK_VM_ROOT", "/var/tmp/codex-myrs/transient/credentiallife-118-c2"
+    )
+)
+EVIDENCE = Path(
+    os.environ.get(
+        "YONIK_VM_EVIDENCE",
+        "/home/myrs/projects/yonik/local/validation/credentiallife/candidate2",
+    )
+)
 IMAGE = "Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2"
 FINGERPRINT = "1B9A16984A4E8CB448712D2AE0B78BF4326C6F8F"
 
@@ -37,10 +46,27 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def verify_results(results: dict[str, object]) -> None:
+    failures = [
+        name
+        for name, value in results.items()
+        if isinstance(value, dict) and value.get("passed") is False
+    ]
+    failures.extend(
+        name
+        for name, value in results.items()
+        if name.startswith("profile_") and value != "profile_verified"
+    )
+    if failures:
+        raise RuntimeError("Не прошли VM gates: " + ", ".join(failures))
+
+
 def execute() -> None:
+    ROOT.mkdir(mode=0o700, exist_ok=True)
+    EVIDENCE.mkdir(exist_ok=True)
     root_fd = os.open(ROOT, os.O_RDONLY | os.O_DIRECTORY)
     base_fd = os.open(BASE, os.O_RDONLY | os.O_DIRECTORY)
-    fcntl.flock(root_fd, fcntl.LOCK_SH)
+    fcntl.flock(root_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     fcntl.flock(base_fd, fcntl.LOCK_SH)
     provenance = json.loads((BASE / "manifest.json").read_text())
     assert provenance["primary_fingerprint"] == FINGERPRINT
@@ -81,13 +107,17 @@ def execute() -> None:
     info = json.loads(run(["qemu-img", "info", "--output=json", str(BASE / IMAGE)]))
     assert not info.get("backing-filename")
     binary = EVIDENCE / "credential_lifecycle"
+    probe = EVIDENCE / "credential_probe"
     manifest = {
+        "probe_sha256": digest(probe),
         "base": provenance,
         "head": run(["git", "rev-parse", "HEAD"]).strip(),
         "binary_sha256": digest(binary),
         "sources": {
             p: digest(Path(p))
-            for p in run(["git", "ls-files"]).splitlines()
+            for p in run(
+                ["git", "ls-files", "--cached", "--others", "--exclude-standard"]
+            ).splitlines()
             if Path(p).is_file()
         },
         "fixture_sha256": digest(Path(__file__)),
@@ -95,7 +125,9 @@ def execute() -> None:
             Path("crates/yonik-desktop/examples/credential_lifecycle.rs")
         ),
     }
-    (EVIDENCE / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    # Исторический прогон нельзя перезаписать повторным запуском.
+    with (EVIDENCE / "manifest.json").open("x") as stream:
+        json.dump(manifest, stream, indent=2)
     if not (ROOT / "key").exists():
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(ROOT / "key")])
     seed = ROOT / "seed"
@@ -224,6 +256,16 @@ def execute() -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        subprocess.run(
+            ssh
+            + [
+                "cat > /usr/local/bin/credential_probe; chmod 755 /usr/local/bin/credential_probe"
+            ],
+            input=probe.read_bytes(),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         guest = Path(__file__).with_name("credential_vm_guest.py").read_text()
         subprocess.run(
             ssh
@@ -236,7 +278,17 @@ def execute() -> None:
             stderr=subprocess.DEVNULL,
         )
         try:
-            result = run(ssh + ["runuser -u fixture -- python /home/fixture/guest.py"])
+            result = run(
+                ssh
+                + [
+                    "runuser -u fixture -- python /home/fixture/guest.py "
+                    + (
+                        "unlock"
+                        if os.environ.get("YONIK_VM_FOCUS") == "unlock"
+                        else "all"
+                    )
+                ]
+            )
         except subprocess.CalledProcessError:
             partial = run(ssh + ["cat /home/fixture/results.json"])
             (EVIDENCE / "partial-service.json").write_text(
@@ -246,6 +298,7 @@ def execute() -> None:
         # Guest stdout содержит только публичные результаты, никогда D-Bus payload.
         parsed = json.loads(result)
         (EVIDENCE / "actual-service.json").write_text(json.dumps(parsed, indent=2))
+        verify_results(parsed)
     finally:
         try:
             run(ssh + ["poweroff"])
