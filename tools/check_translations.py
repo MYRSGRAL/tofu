@@ -50,7 +50,7 @@ def validate_pair(key: str, ru: str, en: str) -> None:
         raise CatalogError(f"{key}: несовпадение placeholders RU/EN")
 
 
-def check_source(source: str) -> tuple[int, int]:
+def check_source(source: str, require_catalog: bool = True) -> tuple[int, int]:
     """Разбирает tr-вызовы и карты объявлений; неизвестные формы отклоняет."""
     ts = tokens(source)
     inline = 0
@@ -116,9 +116,22 @@ def check_source(source: str) -> tuple[int, int]:
                 raise CatalogError(f"Неподдерживаемый динамический tr: {args}")
             index = end
         index += 1
-    if not inline or not maps or not keys:
+    if require_catalog and (not inline or not maps or not keys):
         raise CatalogError("Пустой каталог или изменён механизм переводов")
     return inline, keys
+
+
+def check_cpp_source(source: str) -> int:
+    """Проверяет существующие QStringLiteral-пары tray, не пользовательские имена."""
+    pattern = re.compile(
+        r'english\s*\?\s*QStringLiteral\(("(?:\\.|[^"\\])*")\)\s*:\s*QStringLiteral\(("(?:\\.|[^"\\])*")\)'
+    )
+    matches = list(pattern.finditer(source))
+    if not matches or len(matches) != len(re.findall(r"\benglish\s*\?", source)):
+        raise CatalogError("Неизвестная форма RU/EN tray")
+    for index, match in enumerate(matches):
+        validate_pair(f"tray #{index}", literal(match[2]), literal(match[1]))
+    return len(matches)
 
 
 def main() -> int:
@@ -128,6 +141,19 @@ def main() -> int:
     args = parser.parse_args()
     try:
         inline, keys = check_source((args.root / CATALOG).read_text(encoding="utf-8"))
+        for path in sorted((args.root / CATALOG.parent).glob("*.qml")):
+            if path == args.root / CATALOG:
+                continue
+            pairs, entries = check_source(
+                path.read_text(encoding="utf-8"), path.name == "Main.qml"
+            )
+            inline += pairs
+            keys += entries
+        check_cpp_source(
+            (args.root / "crates/yonik-desktop/src/application.cpp").read_text(
+                encoding="utf-8"
+            )
+        )
     except (OSError, ValueError, IndexError) as error:
         parser.exit(1, f"Ошибка переводов: {error}\n")
     print(f"RU/EN: проверено {inline} inline-пар и {keys} ключей карт")

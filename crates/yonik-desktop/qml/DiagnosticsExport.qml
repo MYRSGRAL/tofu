@@ -6,17 +6,18 @@ ColumnLayout {
     id: root
     required property var backend
     property bool english: false
+    function tr(ru, en) { return root.english ? en : ru }
     Label {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
-        text: root.english ? "Copy safe diagnostic metadata for support." : "Скопируйте безопасные метаданные диагностики для поддержки."
+        text: tr("Скопируйте безопасные метаданные диагностики для поддержки.", "Copy safe diagnostic metadata for support.")
     }
     Button {
         objectName: "copyDiagnosticsButton"
-        text: root.english ? "Copy diagnostics" : "Копировать диагностику"
+        text: tr("Копировать диагностику", "Copy diagnostics")
         onClicked: result.text = root.backend.copy_diagnostics()
-            ? (root.english ? "Copied" : "Скопировано")
-            : (root.english ? "Export unavailable: unknown error." : "Экспорт недоступен: неизвестная ошибка.")
+            ? (tr("Скопировано", "Copied"))
+            : (tr("Экспорт недоступен: неизвестная ошибка.", "Export unavailable: unknown error."))
     }
     Label { id: result; objectName: "diagnosticsExportResult"; Layout.fillWidth: true; wrapMode: Text.Wrap }
 }

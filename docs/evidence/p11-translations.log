@@ -1,0 +1,15 @@
+test_corruptions (test_check_translations.TranslationTests.test_corruptions) ... ok
+test_current_catalog (test_check_translations.TranslationTests.test_current_catalog) ... ok
+test_empty_catalog (test_check_translations.TranslationTests.test_empty_catalog) ... ok
+test_escaped_and_comments (test_check_translations.TranslationTests.test_escaped_and_comments) ... ok
+test_other_declarations_are_checked (test_check_translations.TranslationTests.test_other_declarations_are_checked) ... ok
+test_owned_component (test_check_translations.TranslationTests.test_owned_component) ... ok
+test_placeholder_multiplicity (test_check_translations.TranslationTests.test_placeholder_multiplicity) ... ok
+test_single_quoted_keys_are_rejected (test_check_translations.TranslationTests.test_single_quoted_keys_are_rejected) ... ok
+test_tray_pairs (test_check_translations.TranslationTests.test_tray_pairs) ... ok
+test_wrapped_maps_are_rejected (test_check_translations.TranslationTests.test_wrapped_maps_are_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.012s
+
+OK

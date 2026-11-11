@@ -334,6 +334,7 @@ fn legacy_ss(source: &str, body: &str) -> Result<ParsedServer, RecordError> {
     if !value.username().is_empty()
         || value.password().is_some()
         || value.query().is_some()
+        || value.fragment().is_some()
         || !value.path().is_empty()
     {
         return Err((IssueCode::MalformedUri, Field::Endpoint));
