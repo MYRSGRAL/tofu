@@ -114,3 +114,54 @@ fn fixture_и_контекст_конфига() {
     let deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
     assert!(import_bytes(deep.into_bytes()).is_err());
 }
+
+#[test]
+fn mixed_dispatch_и_неизвестные_ws_headers_не_дают_intent() {
+    for change in [
+        json!({"protocol":"vless"}),
+        json!({"protocol":"trojan"}),
+        json!({"type":123}),
+        json!({"transport":{"type":"grpc","service_name":"exact-service","multi_mode":true}}),
+        json!({"type":"unknown"}),
+        json!({"transport":{"type":"ws","headers":{"Host":"edge.test","Authorization":"synthetic-secret-header"}}}),
+        json!({"transport":{"type":"ws","headers":{"Host":42}}}),
+        json!({"transport":{"type":"grpc","service_name":42}}),
+    ] {
+        let mut node = узел("vless");
+        for (key, value) in change.as_object().unwrap() {
+            node[key] = value.clone();
+        }
+        let report = import_bytes(json!({"outbounds":[node]}).to_string().into_bytes()).unwrap();
+        assert!(
+            report
+                .servers
+                .iter()
+                .all(|server| ServerIntent::from_server(server).is_err())
+        );
+        assert!(!report.servers.is_empty() || !report.issues.is_empty());
+    }
+}
+
+#[test]
+fn native_credentials_скрыты_в_диагностике() {
+    for protocol in ["vless", "vmess", "trojan", "shadowsocks", "http", "socks"] {
+        let mut node = узел(protocol);
+        node["transport"] =
+            json!({"type":"ws","headers":{"Authorization":"synthetic-secret-header"}});
+        let report = import_bytes(json!({"outbounds":[node]}).to_string().into_bytes()).unwrap();
+        let mut diagnostic = format!("{report:?}");
+        for server in &report.servers {
+            diagnostic.push_str(&format!("{server:?}"));
+            let error = ServerIntent::from_server(server).unwrap_err();
+            diagnostic.push_str(&format!("{error:?} {error}"));
+        }
+        for secret in [
+            "test-password",
+            "test-user",
+            "00112233-4455-6677-8899-aabbccddeeff",
+            "synthetic-secret-header",
+        ] {
+            assert!(!diagnostic.contains(secret), "{protocol}");
+        }
+    }
+}
