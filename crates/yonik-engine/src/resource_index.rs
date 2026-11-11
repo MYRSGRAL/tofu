@@ -13,6 +13,14 @@ fn bad() -> io::Error {
 }
 impl RuleSetIndex {
     pub fn parse(source: &[u8], kind: ResourceKind, count: u64) -> io::Result<Self> {
+        Self::parse_cancellable(source, kind, count, &|| false)
+    }
+    pub fn parse_cancellable(
+        source: &[u8],
+        kind: ResourceKind,
+        count: u64,
+        cancel: &impl Fn() -> bool,
+    ) -> io::Result<Self> {
         if source.len() > 128 * 1024 * 1024
             || count == 0
             || count > 1_500_000
@@ -28,6 +36,12 @@ impl RuleSetIndex {
         };
         let mut actual = 0;
         for line in source[..source.len() - 1].split(|b| *b == b'\n') {
+            if cancel() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Индексация ресурсов отменена",
+                ));
+            }
             if line.len() > 299 {
                 return Err(bad());
             }

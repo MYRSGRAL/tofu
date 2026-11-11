@@ -3,6 +3,33 @@ use super::*;
 
 const BACKUP_LIMIT: u64 = 256 * 1024 * 1024;
 
+/// Единственный владелец flock; унаследованный дубликат не продлевает операцию.
+struct BackupDirectoryLock(fs::File);
+
+impl std::ops::Deref for BackupDirectoryLock {
+    type Target = fs::File;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for BackupDirectoryLock {
+    fn drop(&mut self) {
+        loop {
+            match rustix::fs::flock(&self.0, rustix::fs::FlockOperation::Unlock) {
+                Ok(()) => break,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => {
+                    // Drop не возвращает ошибку: штатное закрытие File остаётся
+                    // fallback; CLOEXEC-дубликат ребёнка закроется при exec.
+                    break;
+                }
+            }
+        }
+    }
+}
+
 impl EncryptedSubscriptionRepository {
     /// Вызывается после закрытия всех handles. Возвращает Conflict при занятой БД.
     /// Копия содержит исходные ciphertext, домены и версию; ключ в неё не входит.
@@ -309,6 +336,9 @@ pub(super) fn copy_controlled(
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     )
     .map_err(|_| RepositoryError::Conflict)?;
+    let directory = BackupDirectoryLock(directory);
+    #[cfg(test)]
+    fault_tests::directory_locked(&directory)?;
     let meta = fs::symlink_metadata(source).map_err(|_| RepositoryError::UnsafePath)?;
     if meta.len() == 0 || meta.len() > BACKUP_LIMIT {
         return Err(RepositoryError::InvalidInput);

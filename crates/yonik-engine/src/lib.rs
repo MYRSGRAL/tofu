@@ -11,7 +11,9 @@ mod system_tun;
 pub use routing::{
     PolicyCapability, PolicyCompileError, PolicyMode, ProbeAccess, ProbeCredentials, compile_policy,
 };
-pub use system_tun::{SystemTun, SystemTunAddress, compile_system, compile_system_policy};
+pub use system_tun::{
+    SystemTun, SystemTunAddress, compile_system, compile_system_bound_policy, compile_system_policy,
+};
 
 use std::{
     fmt,

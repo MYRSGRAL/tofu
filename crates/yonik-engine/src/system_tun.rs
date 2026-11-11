@@ -115,6 +115,31 @@ pub fn compile_system_policy(
     )
     .map_err(PolicyCompileError::Server)
 }
+/// SystemTUN bound resources сохраняют IP-only gates и существующий native routing.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_system_bound_policy<C: crate::resource_bundle::VerifiedCatalog>(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    bound: &crate::resource_bundle::BoundPolicy<'_, C>,
+    revision: u64,
+    identity: &[u8],
+    tun: &SystemTun,
+) -> Result<CompiledConfig, PolicyCompileError> {
+    bound
+        .validate_revision(revision, identity)
+        .map_err(|_| PolicyCompileError::InvalidPolicy)?;
+    if bound.manifest().iter().any(|r| r.engine != engine) {
+        return Err(PolicyCompileError::InvalidPolicy);
+    }
+    attach(
+        crate::routing::compile_tun_policy_resources(server, engine, port, probe_port, bound)?,
+        tun,
+    )
+    .map_err(PolicyCompileError::Server)
+}
+
 fn attach(mut config: CompiledConfig, tun: &SystemTun) -> Result<CompiledConfig, CompileError> {
     let addresses: Vec<_> = tun
         .addresses

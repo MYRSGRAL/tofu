@@ -1,6 +1,6 @@
 # План завершения yonik
 
-Начальная инвентаризация: 10 ноября 2026, UI `85b2a8e`. Текущие изменения отмечены ниже. Цель — пройти весь порядок из
+Начальная инвентаризация: 10 ноября 2026, UI `85b2a8e`. Статусы актуализированы 11 ноября 2026 по принятому main `d0a281b`. Цель — пройти весь порядок из
 [спецификации](specs/validation-and-roadmap.md): рабочий Linux-продукт,
 проверенная поставка, затем Android. Пункты и критерии ниже уточняют порядок
 исполнения, не заменяя требования FR и обязательные матрицы приёмки.
@@ -8,8 +8,9 @@
 ## Как считаем готовность
 
 Всего **26 пунктов**: **3 готовы**, **21 частично выполнен**, **2 отложены (Android)**.
-Остаётся полностью закрыть **23 пункта**. По числу полностью принятых пунктов:
-**3 / 26 = 11,5%**. Это показатель закрытия критериев; задачи различаются по объёму.
+Остаётся полностью закрыть **23 пункта**, включая отложенные Android P03/P26.
+Это учёт полных критериев, а не процент реализации Linux: частичные пункты
+различаются по объёму и не пересчитываются в процент готовности продукта.
 Частичные результаты учитываются в описаниях, но не получают условные 50–90%.
 
 Ранние G-LINUX/G-DNS/G-APP включены в соответствующие сетевые пункты, поэтому
@@ -22,7 +23,7 @@
 слиянием согласно действующим договорённостям. Нельзя закрыть весь план только
 по наличию GUI, количества unit-тестов или namespace-прототипа.
 
-## Актуальный acceptance-срез: main b9e5071, 11 ноября 2026
+## Зафиксированный acceptance-срез: main b9e5071, 11 ноября 2026
 
 [Полный индекс Linux](validation/2026-11-11-linux-acceptance-index.md) связывает
 все FR, P01…P26, gates, D/A/T, P-01…P-08 и leaves исходных контрактов с evidence
@@ -138,12 +139,12 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P03 | Технический Android-host / G-ANDROID | Отложен | Оба engine через FFI, TUN FD/protect, TCP/UDP, stop/revoke, lifecycle и package callbacks; закреплённые wrappers. Остаток — runtime-host и измеренные результаты. [Контракт](specs/platforms.md). |
 | P04 | Импорт URI/JSON/Base64 и ручной ввод | Частично | Есть ограниченный parser, сохранение исходника и review. Остаются все требуемые варианты ввода и табличные/property/fuzz-проверки размеров, вложенности, IDNA/IP и неизвестных опций. [Evidence](validation/2026-11-09-subscription-import.md), [тесты](../crates/yonik-import/tests). |
 | P05 | Подписки, обновления и идентичность профилей | Частично | CAS, rename/delete, отмена, HWID и последний snapshot реализованы. Завершить proxy-загрузку без скрытого DIRECT и полную матрицу изменения credentials/пустого/частичного ответа. Плановые обновления — P10. [Snapshots](validation/2026-11-09-subscription-snapshots.md), [identity](validation/2026-11-09-profile-identities.md). |
-| P06 | Зашифрованное хранение, миграции и восстановление | Частично | SQLite/Secret Service, миграции и CAS есть. Остаток — полная приёмка backup/recovery, сбоя транзакции, повреждения snapshot и закрытого keyring. Сохранить legacy data/key domains. [Код](../crates/yonik-linux/src/repository.rs), [identity](validation/2026-11-09-profile-identities.md). |
+| P06 | Зашифрованное хранение, миграции и восстановление | Частично | Приняты encrypted repository/CAS, private-bus Secret Service failure matrix и maintenance backup/restore с schema/replay validation. Остаются полный crash/fsync fault injection и реальная login-session приёмка; legacy data/key domains сохраняются. [Backup](validation/2026-11-10-storage-backup.md), [keyring](validation/2026-11-10-secret-service-failures.md). |
 | P07 | Общая модель политик и семантика представлений | Частично | Доменная модель и приоритеты протестированы. Завершить полную матрицу AND/OR, стабильных ID, неподдерживаемых селекторов и сохранения семантики при преобразованиях; GUI редакторов — P20. [Код](../crates/yonik-domain/src/policy.rs), [evidence](validation/2026-11-09-policy-routing.md). |
 | P08 | Capabilities и компиляторы обоих ядер | Частично | Есть config-check закреплённых ядер и явные отказы для части опций. Закрыть весь заявленный набор профилей/правил, включая ограничения смешанного DNS, без игнорирования параметров. [Evidence](validation/2026-11-09-engine-compiler.md), [routing](../crates/yonik-engine/src/routing.rs). |
 | P09 | Lifecycle сессии и PreparedPlan | Частично | Reducer и поколения реализованы. Завершить host-интеграцию: конкурирующие Connect, отмена Validate/Apply, поздние события, повтор Stop, потеря host и подтверждённый cleanup. [Тесты](../crates/yonik-application/tests/session.rs), [evidence](validation/2026-11-09-prepared-plan.md). |
-| P10 | Scheduler фоновых обновлений | Частично | Переносимая bounded модель с передаваемым временем, backoff, отменой и stale-защитой влита PR #44. [Evidence](validation/2026-11-10-subscription-scheduler.md). Нужны исполнение через SubscriptionService, подключение UI/политик сети и питания, фоновые окна и полная приёмка. [Приёмка](specs/validation-and-roadmap.md). |
-| P11 | Ошибки и переводы RU/EN | Частично | Есть безопасная диагностика и переводы экранов. Завершить общий набор message-key, автоматическую проверку полноты обоих языков и отсутствие credentials/управляющих последовательностей в экспорте. [Контракты](specs/data-and-contracts.md), [GUI](validation/2026-11-09-native-desktop.md). |
+| P10 | Scheduler фоновых обновлений | Частично | Переносимый scheduler, DesktopHost dispatch/review/cancel, событийная NM/UPower policy, persisted due/retry budget и private-bus restart/reopen реализованы. Остаются фоновые окна и полная энергоприёмка. [Evidence](validation/2026-11-10-desktop-private-bus.md). |
+| P11 | Ошибки и переводы RU/EN | Частично | Принят общий закрытый каталог 74 code/key, RU/EN QML/tray checks и explicit clipboard export. Controlled snapshot не подтверждает все реальные actor failures; System UI, catalog fallback и полная продуктовая приёмка остаются. [Evidence](validation/2026-11-11-p11-message-catalog.md). |
 
 ## Linux-сеть
 
@@ -154,7 +155,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P14 | DNS/Fake DNS / G-DNS | Частично | Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](validation/2026-11-09-native-dns-contracts.md), [pinning](validation/2026-11-09-resolution-pin.md). |
 | P15 | Атрибуция приложений / G-APP | Частично | Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](validation/2026-11-09-process-routing.md). |
 | P16 | Приватные VPN, LAN и изменения сети | Частично | Read-only наблюдение topology/resolver реализовано. Нужны verified binding WG, split DNS, Apply и сохранение защиты при смене VPN/сети/sleep, затем корректное восстановление. [Наблюдение](validation/2026-11-09-network-observation.md), [topology](validation/2026-11-09-network-topology.md), [resolver](validation/2026-11-09-resolver-host.md). |
-| P17 | ru-direct и комплексная Linux-приёмка | Частично | Policy-модель есть. Нужны обновляемые согласованные snapshots с rollback, реальные приоритеты и матрица двух ядер/Fake DNS, включая IPv6, MTU и сбои. [Evidence](validation/2026-11-09-policy-routing.md), [матрицы](specs/validation-and-roadmap.md). |
+| P17 | ru-direct и комплексная Linux-приёмка | Частично | Согласованные immutable ru-direct snapshots с update/install/rollback и восстановлением при повреждении одной версии приняты. Нужны product wiring, actual приоритеты private/LAN/user и полная матрица двух ядер/Fake DNS/IPv6/MTU. [Evidence](validation/2026-11-10-preset-snapshots.md). |
 
 ## Приложение и поставка
 

@@ -337,7 +337,16 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<WorkerAck> {
-        if payload.engine() == yonik_engine::Engine::SingBox {
+        if payload.needs_tmpfs_assets() {
+            let properties = bounded(
+                cancel,
+                deadline,
+                self.properties(mode.service(), SERVICE_IFACE),
+            )
+            .await?;
+            validate_private_assets(&properties)?;
+        }
+        if payload.engine() == yonik_engine::Engine::SingBox || payload.has_resources() {
             self.retained_copy = Some(Arc::clone(&payload));
         }
         let stream = bounded(cancel, deadline, async {
@@ -589,6 +598,71 @@ fn array(p: &Properties, k: &str) -> Result<Vec<u8>> {
         .and_then(|v| Vec::<u8>::try_from(v).ok())
         .ok_or(WorkerSupervisorError::Untrusted)
 }
+fn validate_private_assets(p: &Properties) -> Result<()> {
+    let mounts: Vec<(String, String)> = p
+        .get("TemporaryFileSystem")
+        .and_then(|v| v.try_clone().ok())
+        .and_then(|v| Vec::try_from(v).ok())
+        .ok_or(WorkerSupervisorError::Untrusted)?;
+    let entries = mounts
+        .iter()
+        .filter(|(path, _)| path == "/dev/shm")
+        .collect::<Vec<_>>();
+    if entries.len() != 1 || mounts.len() != 1 {
+        return Err(WorkerSupervisorError::Untrusted);
+    }
+    let mut flags = std::collections::HashSet::new();
+    let (mut mode, mut size, mut inodes) = (None, None, None);
+    for option in entries[0].1.split(',') {
+        if !flags.insert(option) {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
+        if let Some(n) = option.strip_prefix("mode=") {
+            mode = u32::from_str_radix(n, 8).ok();
+        } else if let Some(n) = option.strip_prefix("size=") {
+            let n = n
+                .strip_suffix('B')
+                .or_else(|| n.strip_suffix('b'))
+                .unwrap_or(n);
+            let n = n
+                .strip_suffix('i')
+                .or_else(|| n.strip_suffix('I'))
+                .unwrap_or(n);
+            let unit = n.as_bytes().last().copied();
+            let multiplier = match unit {
+                Some(b'k' | b'K') => 1024,
+                Some(b'm' | b'M') => 1024 * 1024,
+                Some(b'g' | b'G') => 1024 * 1024 * 1024,
+                _ => 1,
+            };
+            let number = if multiplier == 1 {
+                n
+            } else {
+                &n[..n.len() - 1]
+            };
+            size = number
+                .parse::<u64>()
+                .ok()
+                .and_then(|n| n.checked_mul(multiplier));
+        } else if let Some(n) = option.strip_prefix("nr_inodes=") {
+            inodes = n.parse::<u64>().ok();
+        } else if !["rw", "nosuid", "nodev", "noexec"].contains(&option) {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
+    }
+    if !["rw", "nosuid", "nodev", "noexec"]
+        .iter()
+        .all(|n| flags.contains(n))
+        || flags.len() != 7
+        || mode != Some(0o1777)
+        || size != Some(64 * 1024 * 1024)
+        || inodes != Some(128)
+    {
+        return Err(WorkerSupervisorError::Untrusted);
+    }
+    Ok(())
+}
+
 fn validate_service(p: &Properties, mode: WorkerMode) -> Result<()> {
     let caps = if mode == WorkerMode::Check {
         0
