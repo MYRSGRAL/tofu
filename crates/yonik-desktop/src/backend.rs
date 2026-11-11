@@ -1,5 +1,7 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
 
+#[path = "backend_startup.rs"]
+mod backend_startup;
 #[path = "batch_diagnostics.rs"]
 mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
@@ -7,6 +9,8 @@ mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
 use crate::maintenance;
+use backend_startup::StartupObserver;
+pub use backend_startup::StartupPhase;
 #[path = "maintenance_job.rs"]
 mod maintenance_job;
 use crate::preferences::{Preferences, SaveOutcome, Store};
@@ -49,6 +53,7 @@ pub struct HostConfig {
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
+    startup_observer: StartupObserver,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
@@ -62,9 +67,19 @@ impl HostConfig {
             listen_port: None,
             system_subscription_policy: true,
             schedule_observer: None,
+            startup_observer: StartupObserver::default(),
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
         }
+    }
+    /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
+    #[cfg(feature = "startup-diagnostics")]
+    pub fn with_startup_observer(
+        mut self,
+        observer: impl Fn(StartupPhase) + Send + Sync + 'static,
+    ) -> Self {
+        self.startup_observer = StartupObserver::new(observer);
+        self
     }
     /// Только доверенный отрицательный Rust-стенд с отдельной ephemeral БД.
     #[cfg(feature = "test-support")]
@@ -411,6 +426,7 @@ impl DesktopHost {
         std::thread::Builder::new()
             .name("yonik-backend".into())
             .spawn(move || {
+                config.startup_observer.emit(StartupPhase::RuntimeBuild);
                 match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -954,10 +970,18 @@ async fn open(
     config: &mut HostConfig,
 ) -> Result<(SubscriptionService, File, EncryptedSubscriptionRepository)> {
     let path = config.data_dir.clone();
-    let (directory, lock) = tokio::task::spawn_blocking(move || private_directory(&path))
-        .await
-        .map_err(|_| DesktopError("storage"))??;
+    config.startup_observer.emit(StartupPhase::DirectoryQueued);
+    let observer = config.startup_observer.clone();
+    let (directory, lock) = tokio::task::spawn_blocking(move || {
+        observer.emit(StartupPhase::DirectoryLock);
+        let result = private_directory(&path);
+        observer.emit(StartupPhase::DirectoryReturned);
+        result
+    })
+    .await
+    .map_err(|_| DesktopError("storage"))??;
     let path = directory.join("subscriptions.sqlite");
+    config.startup_observer.emit(StartupPhase::Credential);
     let key = match config.ephemeral_key.take() {
         Some(key) => key,
         None => subscription_master_key(!path.exists())
@@ -969,9 +993,13 @@ async fn open(
                 })
             })?,
     };
+    config.startup_observer.emit(StartupPhase::RepositoryOpen);
     let repo = EncryptedSubscriptionRepository::open(path, key)
         .await
         .map_err(|_| DesktopError("storage"))?;
+    config
+        .startup_observer
+        .emit(StartupPhase::RepositoryReturned);
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
@@ -2704,6 +2732,9 @@ async fn run(
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
+    config
+        .startup_observer
+        .emit(StartupPhase::SignalRegistration);
     // Обработчики регистрируются до любого spawn ядра.
     let signals = match (
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
@@ -2729,6 +2760,7 @@ async fn run(
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::PortSelection);
     let opened = match config.listen_port.map_or_else(|| available_port(0), Ok) {
         Ok(port) => {
             state.port = port.get();
@@ -2752,6 +2784,7 @@ async fn run(
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::Preferences);
     let (preferences_store, mut preferences, warning) = Store::open(&config.data_dir);
     if let Some(port) = config.listen_port {
         preferences.port = Some(port);
@@ -2773,7 +2806,11 @@ async fn run(
     state.probe_expected_status = preferences.probe_status;
     state.maintenance_available = true;
     state.ready = true;
+    config
+        .startup_observer
+        .emit(StartupPhase::NetworkInitialization);
     let network_monitor = NetworkMonitor::start().ok();
+    config.startup_observer.emit(StartupPhase::NetworkReturned);
     let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();

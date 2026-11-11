@@ -12,16 +12,34 @@ impl Drop for Fixture {
         let _ = self.0.wait();
     }
 }
-fn pair() -> (OwnedFd, OwnedFd) {
-    let (a, b) = socketpair(
+fn raw_pair() -> (OwnedFd, OwnedFd) {
+    socketpair(
         AddressFamily::UNIX,
         SocketType::SEQPACKET,
         SocketFlags::CLOEXEC,
         None,
     )
-    .unwrap();
+    .unwrap()
+}
+fn prepare_pair((a, b): (OwnedFd, OwnedFd)) -> (OwnedFd, OwnedFd) {
+    // Linux удваивает запрошенный SO_*BUF; fixture не зависит от sysctl defaults.
+    for socket in [&a, &b] {
+        rustix::net::sockopt::set_socket_recv_buffer_size(socket, 64 * 1024).unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(socket, 64 * 1024).unwrap();
+        assert!(
+            rustix::net::sockopt::socket_recv_buffer_size(socket).unwrap()
+                <= super::MAX_SOCKET_BUFFER
+        );
+        assert!(
+            rustix::net::sockopt::socket_send_buffer_size(socket).unwrap()
+                <= super::MAX_SOCKET_BUFFER
+        );
+    }
     rustix::net::sockopt::set_socket_passcred(&a, true).unwrap();
     (a, b)
+}
+fn pair() -> (OwnedFd, OwnedFd) {
+    prepare_pair(raw_pair())
 }
 fn receive(fd: &OwnedFd) -> rustix::net::UCred {
     let end = Instant::now() + Duration::from_secs(2);
@@ -155,26 +173,63 @@ fn actual_foreign_uid_credentials_and_admission() {
 
 #[test]
 fn rejected_rights_and_truncation_release_every_received_fd() {
+    const CHILD: &str = "YONIK_TEST_BROKER_RIGHTS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // В FD oracle не должны попадать файлы соседних libtest-потоков.
+        let mut child = Fixture(
+            Command::new(std::env::current_exe().expect("libtest"))
+                .args([
+                    "--exact",
+                    "attribution::broker::receiver_tests::rejected_rights_and_truncation_release_every_received_fd",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .spawn()
+                .expect("изолированный FD oracle"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.0.try_wait().expect("статус FD oracle") {
+                assert!(status.success(), "FD oracle: {status}");
+                return;
+            }
+            assert!(Instant::now() < deadline, "таймаут FD oracle");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
     use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, sendmsg};
     use std::{io::IoSlice, mem::MaybeUninit, os::fd::AsFd};
-    let (rx, tx) = pair();
-    let file = std::fs::File::open("/dev/null").unwrap();
-    let fds = || std::fs::read_dir("/proc/self/fd").unwrap().count();
-    let baseline = fds();
-    for _ in 0..256 {
-        let rights = [file.as_fd(); 4];
-        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(4))];
-        let mut ancillary = SendAncillaryBuffer::new(&mut space);
-        assert!(ancillary.push(SendAncillaryMessage::ScmRights(&rights)));
-        sendmsg(
-            &tx,
-            &[IoSlice::new(&[0; FRAME_BYTES])],
-            &mut ancillary,
-            SendFlags::empty(),
-        )
-        .unwrap();
-        assert!(matches!(receive_frame(&rx), Err(Unavailable::Malformed)));
-        assert_eq!(fds(), baseline, "SCM_RIGHTS leak");
+    for enlarged_default in [false, true] {
+        let raw = raw_pair();
+        if enlarged_default {
+            // Моделируем большие kernel defaults только на собственной паре.
+            rustix::net::sockopt::set_socket_recv_buffer_size(&raw.0, 1024 * 1024)
+                .expect("увеличить собственную очередь");
+            assert!(
+                rustix::net::sockopt::socket_recv_buffer_size(&raw.0).unwrap()
+                    > super::MAX_SOCKET_BUFFER
+            );
+        }
+        let (rx, tx) = prepare_pair(raw);
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let fds = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let baseline = fds();
+        for _ in 0..256 {
+            let rights = [file.as_fd(); 4];
+            let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(4))];
+            let mut ancillary = SendAncillaryBuffer::new(&mut space);
+            assert!(ancillary.push(SendAncillaryMessage::ScmRights(&rights)));
+            sendmsg(
+                &tx,
+                &[IoSlice::new(&[0; FRAME_BYTES])],
+                &mut ancillary,
+                SendFlags::empty(),
+            )
+            .unwrap();
+            let result = receive_frame(&rx);
+            assert!(matches!(result, Err(Unavailable::Malformed)), "{result:?}");
+            assert_eq!(fds(), baseline, "SCM_RIGHTS leak");
+        }
     }
 }
 
