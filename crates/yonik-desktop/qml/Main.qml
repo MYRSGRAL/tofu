@@ -763,19 +763,24 @@ ApplicationWindow {
                 SectionTitle { text: window.tr("Настройки", "Settings") }
                 PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_warning; text: window.tr("Файл настроек повреждён или имеет неизвестный формат. Применены значения по умолчанию; исходник preferences.json сохранён, запись заблокирована.", "Settings are damaged or unsupported. Defaults are active; the original preferences.json is preserved and writes are blocked.") }
                 PlainLabel { objectName: "preferencesDurabilityWarning"; Layout.fillWidth: true; wrapMode: Text.Wrap; visible: !!window.state.preferences_durability_warning; color: "#e6bc83"; text: window.tr("Настройки применены, файл обновлён. Не удалось подтвердить синхронизацию каталога: сохранность при сбое питания неизвестна. Откат не выполнен.", "Settings were applied and the file was updated. Directory synchronization could not be confirmed: durability after power loss is unknown. No rollback was performed.") }
-                ColumnLayout {
+                ScrollView {
+                    id: settingsIndexScroll
+                    objectName: "settingsIndexScroll"
                     visible: window.settingsSection === ""
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    spacing: 10
-                    SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
-                    SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
-                    SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
-                    SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
-                    SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
-                    SettingsRow { objectName: "settingsScheduleButton"; text: "Обновления подписок"; description: "Интервал и фоновое окно"; symbol: "↻"; onClicked: window.settingsSection = "schedule" }
-                    SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
-                    SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
-                    Item { Layout.fillHeight: true }
+                    clip: true
+                    ColumnLayout {
+                        width: settingsIndexScroll.availableWidth
+                        spacing: 10
+                        SmallLabel { text: window.tr("ПАРАМЕТРЫ", "PREFERENCES"); font.letterSpacing: 2; font.pixelSize: 11; Layout.bottomMargin: 4 }
+                        SettingsRow { objectName: "settingsRoutingButton"; text: window.tr("Маршрутизация", "Routing"); description: window.tr("Сохранённые личные правила", "Saved personal rules"); symbol: "⇄"; onClicked: window.settingsSection = "routing" }
+                        SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
+                        SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
+                        SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
+                        SettingsRow { objectName: "settingsScheduleButton"; text: "Обновления подписок"; description: "Интервал и фоновое окно"; symbol: "↻"; onClicked: window.settingsSection = "schedule" }
+                        SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
+                        SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
+                    }
                 }
                 Loader {
                     id: settingsPanel
