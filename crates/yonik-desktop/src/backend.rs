@@ -1,9 +1,19 @@
 //! Отдельный владелец БД и локальной SOCKS-сессии; UI получает только DTO.
+use crate::diagnostics::context::{Cause, Contexts, Slot};
 
+#[path = "backend_startup.rs"]
+mod backend_startup;
 #[path = "batch_diagnostics.rs"]
 mod batch_diagnostics;
 #[path = "desktop_schedule.rs"]
 mod desktop_schedule;
+#[path = "logs.rs"]
+mod logs;
+use crate::maintenance;
+use backend_startup::StartupObserver;
+pub use backend_startup::StartupPhase;
+#[path = "maintenance_job.rs"]
+mod maintenance_job;
 use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
@@ -44,7 +54,10 @@ pub struct HostConfig {
     ephemeral_key: Option<Zeroizing<[u8; 32]>>,
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
+    startup_observer: StartupObserver,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
+    #[cfg(feature = "test-support")]
+    cleanup_fault: Option<Arc<AtomicBool>>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -55,7 +68,28 @@ impl HostConfig {
             listen_port: None,
             system_subscription_policy: true,
             schedule_observer: None,
+            startup_observer: StartupObserver::default(),
+            #[cfg(feature = "test-support")]
+            cleanup_fault: None,
         }
+    }
+    /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
+    #[cfg(feature = "startup-diagnostics")]
+    pub fn with_startup_observer(
+        mut self,
+        observer: impl Fn(StartupPhase) + Send + Sync + 'static,
+    ) -> Self {
+        self.startup_observer = StartupObserver::new(observer);
+        self
+    }
+    /// Только доверенный отрицательный Rust-стенд с отдельной ephemeral БД.
+    #[cfg(feature = "test-support")]
+    pub fn with_cleanup_fault(mut self, fault: Arc<AtomicBool>) -> Result<Self> {
+        if self.ephemeral_key.is_none() {
+            return Err(DesktopError("invalid_input"));
+        }
+        self.cleanup_fault = Some(fault);
+        Ok(self)
     }
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
@@ -110,6 +144,31 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    MaintenanceStart {
+        request_id: u64,
+        operation: maintenance::Operation,
+        source: Option<PathBuf>,
+        destination: PathBuf,
+        revision: i64,
+    },
+    MaintenanceCancel {
+        request_id: u64,
+    },
+    #[cfg(feature = "test-support")]
+    #[serde(skip)]
+    LogsTest {
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    },
+    LogsSave {
+        page_request_id: String,
+        destination: String,
+        request_id: String,
+    },
+    LogsRead {
+        after: String,
+        source: logs::Source,
+        request_id: String,
+    },
     RoutingExplain {
         expected_revision: i64,
         request_id: u64,
@@ -201,6 +260,10 @@ enum Command {
     SelectProfile {
         id: i64,
         revision: i64,
+    },
+    SetSubscriptionSchedule {
+        interval_seconds: u32,
+        background: bool,
     },
     SetLanguage {
         language: String,
@@ -364,6 +427,7 @@ impl DesktopHost {
         std::thread::Builder::new()
             .name("yonik-backend".into())
             .spawn(move || {
+                config.startup_observer.emit(StartupPhase::RuntimeBuild);
                 match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -378,8 +442,8 @@ impl DesktopHost {
                     Err(_) => {
                         let mut snapshot = Snapshot::new(config.ephemeral_key.is_some());
                         snapshot.port = config.listen_port.map_or(0, NonZeroU16::get);
-                        snapshot.error = Some("startup");
-                        snapshot.connection_error = Some("startup");
+                        snapshot
+                            .contextual_error(false, ContextFailure::new(Cause::RuntimePanicked));
                         snapshot.closed = true;
                         snapshot.emit(&callback);
                         worker_control.closed();
@@ -396,6 +460,19 @@ impl DesktopHost {
             .store(true, Ordering::Release);
         self.control.subscription_policy.send_replace(policy);
         Ok(())
+    }
+    #[cfg(feature = "test-support")]
+    pub fn test_event_log(
+        &self,
+        reply: std::sync::mpsc::Sender<Option<yonik_linux::event_log::EventLog>>,
+    ) -> Result<()> {
+        self.commands
+            .try_send(Envelope {
+                command: Command::LogsTest { reply },
+                generation: self.control.generation.load(Ordering::SeqCst),
+                tcp_generation: *self.control.tcp_priority.borrow(),
+            })
+            .map_err(|_| DesktopError("busy"))
     }
     pub fn dispatch(&self, request: &str) -> Result<()> {
         if request.len() > 16 * 1024 {
@@ -478,10 +555,45 @@ impl Drop for DesktopHost {
 fn validate(command: &Command) -> Result<()> {
     let text = |s: &str, max| s.len() <= max && !s.chars().any(char::is_control);
     let valid = match command {
+        Command::MaintenanceStart {
+            request_id,
+            operation,
+            source,
+            destination,
+            revision,
+        } => {
+            let path = |value: &Path| {
+                value.is_absolute() && value.to_str().is_some_and(|value| text(value, 4096))
+            };
+            *request_id > 0
+                && *request_id <= 9_007_199_254_740_991
+                && *revision >= 0
+                && path(destination)
+                && match (operation, source) {
+                    (maintenance::Operation::Backup, None) => true,
+                    (maintenance::Operation::Restore, Some(source)) => path(source),
+                    _ => false,
+                }
+        }
+        Command::MaintenanceCancel { request_id } => {
+            *request_id > 0 && *request_id <= 9_007_199_254_740_991
+        }
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
         Command::RenameSource { id, name } => *id > 0 && !name.trim().is_empty() && text(name, 512),
+        Command::LogsSave {
+            page_request_id,
+            destination,
+            request_id,
+        } => {
+            logs::valid_number(page_request_id)
+                && logs::valid_number(request_id)
+                && text(destination, 4096)
+        }
+        Command::LogsRead {
+            after, request_id, ..
+        } => logs::valid_number(after) && logs::valid_number(request_id),
         Command::Query { search, offset, .. } => text(search, 512) && *offset <= 40_000,
         Command::BatchPage { offset } => *offset <= 10_000,
         Command::SourcePage { offset } => *offset <= 40_000,
@@ -621,6 +733,18 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    maintenance_available: bool,
+    maintenance_ack: Option<maintenance::Ack>,
+    #[serde(skip)]
+    error_contexts: Contexts,
+    error_generation: u64,
+    helper_generation: Option<u64>,
+    routing_generation: u64,
+    maintenance_generation: u64,
+    logs_generation: u64,
+    command_generation: u64,
+    logs_channel: Option<Slot>,
+    logs: logs::Page,
     routing_revision: Option<i64>,
     routing_ack: Option<RoutingAck>,
     routing_catalog: serde_json::Value,
@@ -628,6 +752,8 @@ struct Snapshot {
     routing_explanation: serde_json::Value,
     routing: crate::editor::Draft,
     language: String,
+    subscription_interval_seconds: u32,
+    subscription_background: bool,
     preferences_warning: bool,
     preferences_durability_warning: bool,
     build_id: &'static str,
@@ -686,13 +812,26 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            maintenance_available: false,
+            maintenance_ack: None,
+            logs: logs::Page::default(),
             routing_diagnostics: crate::editor::Draft::default().diagnostics(),
             routing_explanation: serde_json::Value::Null,
             routing: crate::editor::Draft::default(),
             routing_revision: Some(0),
+            error_contexts: Contexts::default(),
+            error_generation: 0,
+            helper_generation: None,
+            routing_generation: 0,
+            maintenance_generation: 0,
+            logs_generation: 0,
+            command_generation: 0,
+            logs_channel: None,
             routing_ack: None,
             routing_catalog: serde_json::json!({"items":[],"total":0,"offset":0,"incomplete":false}),
             language: "ru".into(),
+            subscription_interval_seconds: 86400,
+            subscription_background: false,
             preferences_warning: false,
             preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
@@ -750,6 +889,7 @@ impl Snapshot {
         }
     }
     fn begin_command(&mut self, command: &Command) {
+        self.error_contexts.clear(Slot::Error);
         self.error = None;
         if command.is_source_operation() {
             if matches!(
@@ -763,18 +903,73 @@ impl Snapshot {
                     | Command::ApproveRefresh
                     | Command::DiscardRefresh
             ) {
+                self.error_contexts
+                    .clear(crate::diagnostics::context::Slot::Source);
                 self.source_error = None;
             }
         } else {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             self.connection_error = None;
         }
     }
     fn command_error(&mut self, source: bool, error: &'static str) {
+        self.error_contexts.clear(Slot::Error);
         self.error = Some(error);
         if source {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Source);
             self.source_error = Some(error);
         } else {
+            self.error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             self.connection_error = Some(error);
+        }
+    }
+    fn contextual_error(&mut self, source: bool, failure: ContextFailure) {
+        self.command_error(source, failure.error.key());
+        self.error_contexts.set(Slot::Error, failure.cause, None);
+        self.error_contexts.set(
+            if source {
+                Slot::Source
+            } else {
+                Slot::Connection
+            },
+            failure.cause,
+            None,
+        );
+    }
+    fn session_error(&mut self, cause: Cause, generation: u64) {
+        self.contextual_error(false, ContextFailure::new(cause));
+        self.error_contexts
+            .set_generation(Slot::Error, cause, Some(generation));
+        self.error_contexts
+            .set_generation(Slot::Connection, cause, Some(generation));
+    }
+    fn clear_logs_contexts(&mut self) {
+        self.error_contexts.clear(Slot::LogsRead);
+        self.error_contexts.clear(Slot::LogsSave);
+    }
+    fn logs_key(&self) -> Option<&'static str> {
+        match self.logs.status {
+            "busy" => Some("busy"),
+            "refused" => Some("logs_save_failed"),
+            "saved_durability_unknown" => Some("logs_save_durability_unknown"),
+            "cancelled" => Some("cancelled"),
+            _ => None,
+        }
+    }
+    fn set_logs_context(&mut self, slot: Slot, cause: Option<logs::Failure>) {
+        self.clear_logs_contexts();
+        self.logs_channel = Some(slot);
+        if let (Some(cause), Ok(request_id)) = (
+            cause.and_then(logs::Failure::context),
+            self.logs.request_id.parse::<u64>(),
+        ) {
+            if request_id.to_string() == self.logs.request_id {
+                self.error_contexts
+                    .set_ack(slot, cause, request_id, self.logs_generation);
+            }
         }
     }
     fn emit(&self, callback: &Callback) {
@@ -783,9 +978,39 @@ impl Snapshot {
             #[serde(flatten)]
             snapshot: &'a Snapshot,
             listen_address: String,
+            error_contexts: Vec<crate::diagnostics::context::ErrorContext>,
         }
         let view = View {
             snapshot: self,
+            error_contexts: [
+                self.error_contexts.matching(Slot::Error, self.error, None),
+                self.error_contexts
+                    .matching(Slot::Connection, self.connection_error, None),
+                self.error_contexts
+                    .matching(Slot::Source, self.source_error, None),
+                self.error_contexts.matching(
+                    Slot::RoutingAck,
+                    self.routing_ack.as_ref().and_then(|ack| ack.error),
+                    self.routing_ack.as_ref().map(|ack| ack.request_id),
+                ),
+                self.error_contexts.matching(
+                    Slot::MaintenanceAck,
+                    self.maintenance_ack.as_ref().and_then(|ack| ack.error),
+                    self.maintenance_ack.as_ref().map(|ack| ack.request_id),
+                ),
+                self.logs_channel
+                    .filter(|slot| matches!(slot, Slot::LogsRead | Slot::LogsSave))
+                    .and_then(|slot| {
+                        self.error_contexts.matching(
+                            slot,
+                            self.logs_key(),
+                            self.logs.request_id.parse::<u64>().ok(),
+                        )
+                    }),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             listen_address: format!("127.0.0.1:{}", self.port),
         };
         if let Ok(json) = serde_json::to_string(&view) {
@@ -814,68 +1039,121 @@ fn available_port(requested: u16) -> Result<NonZeroU16> {
     Err(DesktopError("listen_port_busy"))
 }
 
-fn private_directory(path: &Path) -> Result<(PathBuf, File)> {
+#[derive(Debug)]
+struct ContextFailure {
+    error: DesktopError,
+    cause: Cause,
+}
+impl ContextFailure {
+    fn new(cause: Cause) -> Self {
+        let context = crate::diagnostics::context::ErrorContext::new(Slot::Error, cause, None);
+        Self {
+            error: DesktopError(context.message_key),
+            cause,
+        }
+    }
+}
+
+fn private_directory(path: &Path) -> std::result::Result<(PathBuf, File), ContextFailure> {
     if !path.is_absolute() {
-        return Err(DesktopError("storage"));
+        return Err(ContextFailure::new(Cause::DataDirectoryRelative));
     }
     match DirBuilder::new().recursive(true).mode(0o700).create(path) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
-        Err(_) => return Err(DesktopError("storage")),
+        Err(_) => return Err(ContextFailure::new(Cause::DataDirectoryCreate)),
     }
-    let metadata = fs::symlink_metadata(path).map_err(|_| DesktopError("storage"))?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || metadata.uid() != rustix::process::getuid().as_raw()
-        || metadata.mode() & 0o7777 != 0o700
-    {
-        return Err(DesktopError("storage"));
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryMetadata))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(ContextFailure::new(Cause::DataDirectoryType));
     }
-    let canonical = path.canonicalize().map_err(|_| DesktopError("storage"))?;
+    if metadata.uid() != rustix::process::getuid().as_raw() {
+        return Err(ContextFailure::new(Cause::DataDirectoryOwner));
+    }
+    if metadata.mode() & 0o7777 != 0o700 {
+        return Err(ContextFailure::new(Cause::DataDirectoryPermissions));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryCanonicalize))?;
     let directory = OpenOptions::new()
         .read(true)
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::DIRECTORY).bits() as i32)
         .open(&canonical)
-        .map_err(|_| DesktopError("storage"))?;
+        .map_err(|_| ContextFailure::new(Cause::DataDirectoryOpen))?;
     rustix::fs::flock(
         &directory,
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     )
-    .map_err(|_| DesktopError("busy"))?;
+    .map_err(|_| ContextFailure::new(Cause::DataDirectoryLock))?;
     Ok((canonical, directory))
 }
 
 async fn open(
     config: &mut HostConfig,
-) -> Result<(SubscriptionService, File, EncryptedSubscriptionRepository)> {
+) -> std::result::Result<(SubscriptionService, File, EncryptedSubscriptionRepository), ContextFailure>
+{
     let path = config.data_dir.clone();
-    let (directory, lock) = tokio::task::spawn_blocking(move || private_directory(&path))
-        .await
-        .map_err(|_| DesktopError("storage"))??;
+    config.startup_observer.emit(StartupPhase::DirectoryQueued);
+    let observer = config.startup_observer.clone();
+    let (directory, lock) = tokio::task::spawn_blocking(move || {
+        observer.emit(StartupPhase::DirectoryLock);
+        let result = private_directory(&path);
+        observer.emit(StartupPhase::DirectoryReturned);
+        result
+    })
+    .await
+    .map_err(|_| ContextFailure::new(Cause::StorageTaskFailed))??;
     let path = directory.join("subscriptions.sqlite");
+    config.startup_observer.emit(StartupPhase::Credential);
     let key = match config.ephemeral_key.take() {
         Some(key) => key,
         None => subscription_master_key(!path.exists())
             .await
             .map_err(|error| {
-                DesktopError(match error {
-                    CredentialError::Missing => "keyring_missing",
-                    _ => "keyring_locked",
+                ContextFailure::new(match error {
+                    CredentialError::Missing => Cause::KeyringMissing,
+                    CredentialError::Locked => Cause::KeyringLocked,
+                    CredentialError::Unavailable => Cause::KeyringUnavailable,
+                    CredentialError::Ambiguous => Cause::KeyringAmbiguous,
+                    CredentialError::InvalidKey => Cause::KeyringInvalidKey,
+                    CredentialError::Random => Cause::KeyringRandom,
+                    CredentialError::Timeout => Cause::KeyringTimeout,
+                    CredentialError::Busy => Cause::KeyringBusy,
                 })
             })?,
     };
+    config.startup_observer.emit(StartupPhase::RepositoryOpen);
     let repo = EncryptedSubscriptionRepository::open(path, key)
         .await
-        .map_err(|_| DesktopError("storage"))?;
+        .map_err(|error| {
+            ContextFailure::new(match error {
+                yonik_linux::RepositoryError::InvalidInput => Cause::RepositoryOpenInvalidInput,
+                yonik_linux::RepositoryError::UnsafePath => Cause::RepositoryOpenUnsafePath,
+                yonik_linux::RepositoryError::UnsupportedVersion => {
+                    Cause::RepositoryOpenUnsupportedVersion
+                }
+                yonik_linux::RepositoryError::Corrupt => Cause::RepositoryOpenCorrupt,
+                yonik_linux::RepositoryError::Storage => Cause::RepositoryOpenStorage,
+                yonik_linux::RepositoryError::Conflict => Cause::RepositoryOpenConflict,
+                yonik_linux::RepositoryError::NotFound => Cause::RepositoryOpenNotFound,
+            })
+        })?;
+    config
+        .startup_observer
+        .emit(StartupPhase::RepositoryReturned);
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
 struct Actor {
-    routing_repository: EncryptedSubscriptionRepository,
+    logs_save: logs::SaveJob,
+    event_log: yonik_linux::event_log::EventLog,
+    routing_repository: Option<EncryptedSubscriptionRepository>,
     routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
-    service: SubscriptionService,
+    service: Option<SubscriptionService>,
     state: Snapshot,
     callback: Callback,
     selected: Option<ResolvedProfile>,
@@ -885,16 +1163,43 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
-    async fn save_routing(&mut self, candidate: crate::editor::Draft) -> Result<()> {
+    // Внешний цикл и методы Actor работают только online. Supervisor полностью
+    // перехватывает dispatch между take slots и возвратом handles после join.
+    fn service(&self) -> &SubscriptionService {
+        self.service
+            .as_ref()
+            .expect("online dispatch требует service slot")
+    }
+    fn routing_repository(&self) -> &EncryptedSubscriptionRepository {
+        self.routing_repository
+            .as_ref()
+            .expect("online dispatch требует repository slot")
+    }
+
+    async fn save_routing(
+        &mut self,
+        candidate: crate::editor::Draft,
+        request_id: u64,
+    ) -> Result<()> {
         candidate.policy().map_err(DesktopError)?;
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
         let revision = self
-            .routing_repository
+            .routing_repository()
             .save_routing_draft(expected, candidate.json().into_bytes())
             .await
             .map_err(|error| {
+                self.state.error_contexts.set_ack(
+                    Slot::RoutingAck,
+                    if error == yonik_linux::RepositoryError::Conflict {
+                        Cause::RoutingRepositoryConflict
+                    } else {
+                        Cause::RoutingRepositoryFailed
+                    },
+                    request_id,
+                    self.state.routing_generation,
+                );
                 DesktopError(if error == yonik_linux::RepositoryError::Conflict {
                     "routing_stale"
                 } else {
@@ -915,18 +1220,22 @@ impl Actor {
         request_id: u64,
         mutation: RoutingMutation,
     ) -> Result<()> {
+        self.state.error_contexts.clear(Slot::RoutingAck);
+        let mut routing_cause = None;
         let saved_id = match &mutation {
             RoutingMutation::Put { rule, .. } => Some(rule.id),
             _ => None,
         };
         let result = async {
             if request_id == 0 || request_id > 9_007_199_254_740_991 {
+                routing_cause = Some(Cause::RoutingRequestIdentity);
                 return Err(DesktopError("invalid_input"));
             }
             let current = self
                 .routing_revision
                 .ok_or(DesktopError("routing_storage"))?;
             if expected_revision != current {
+                routing_cause = Some(Cause::RoutingRevisionStale);
                 return Err(DesktopError("routing_stale"));
             }
             let mut candidate = self.state.routing.clone();
@@ -938,12 +1247,14 @@ impl Actor {
                 } => {
                     let exists = candidate.rules.iter().any(|r| r.id == rule.id);
                     if exists == create {
+                        routing_cause = Some(Cause::RoutingRuleIdentity);
                         return Err(DesktopError("id"));
                     }
                     candidate.put(rule, confirm_broad).map_err(DesktopError)?;
                 }
                 RoutingMutation::Order(ids) => {
                     if ids.len() != candidate.rules.len() {
+                        routing_cause = Some(Cause::RoutingRuleIdentity);
                         return Err(DesktopError("id"));
                     }
                     let mut available: std::collections::HashMap<_, _> =
@@ -963,7 +1274,7 @@ impl Actor {
                 }
                 RoutingMutation::Default(action) => candidate.default_action = action,
             }
-            self.save_routing(candidate).await
+            self.save_routing(candidate, request_id).await
         }
         .await;
         if result
@@ -975,19 +1286,49 @@ impl Actor {
                 serde_json::json!({"incomplete":true,"stale":true,"warnings":[]});
             self.state.routing_explanation = serde_json::Value::Null;
         }
+        let pending_context = self.state.error_contexts.matching(
+            Slot::RoutingAck,
+            result.as_ref().err().map(|error| error.key()),
+            Some(request_id),
+        );
+        self.state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::RoutingAck);
         self.state.routing_ack = Some(RoutingAck {
             request_id,
             saved_id: if result.is_ok() { saved_id } else { None },
             error: result.as_ref().err().map(|e| e.key()),
         });
+        if let Some(cause) = routing_cause.or(pending_context.map(|context| context.reason)) {
+            self.state.error_contexts.set_ack(
+                Slot::RoutingAck,
+                cause,
+                request_id,
+                self.state.routing_generation,
+            );
+        }
         result
     }
 
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        let outcome = self
-            .preferences_store
-            .save(&preferences)
-            .map_err(|_| DesktopError("preferences_write"))?;
+        let outcome = self.preferences_store.save(&preferences).map_err(|error| {
+            let cause = match error.kind() {
+                std::io::ErrorKind::PermissionDenied => Some(Cause::PreferencesIoPermissionDenied),
+                std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
+                std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
+                std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
+                std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
+                _ => None,
+            };
+            if let Some(cause) = cause {
+                self.state.error_contexts.set_generation(
+                    Slot::Error,
+                    cause,
+                    Some(self.state.command_generation),
+                );
+            }
+            DesktopError("preferences_write")
+        })?;
         self.state.preferences_durability_warning =
             outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
@@ -1020,13 +1361,13 @@ impl Actor {
         let identity = SubscriptionIdentity {
             id,
             generation: self
-                .service
+                .service()
                 .schedule_generation(id)
                 .await
                 .map_err(map_subscription)?
                 .ok_or(DesktopError("source_required"))?,
         };
-        let service = self.service.clone();
+        let service = self.service().clone();
         let (cancel, receiver) = watch::channel(false);
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1036,6 +1377,12 @@ impl Actor {
             .reserve_manual_schedule(identity, wall)
             .await
             .map_err(map_subscription)?;
+        extend_schedule_interval(
+            &service,
+            identity,
+            Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
+        )
+        .await?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -1072,7 +1419,8 @@ impl Actor {
         );
     }
     fn emit(&mut self) {
-        self.state.can_connect = self.selected.is_some()
+        self.state.can_connect = self.state.ready
+            && self.selected.is_some()
             && !self.state.can_stop
             && !self.state.system_busy
             && !self.state.busy
@@ -1095,7 +1443,7 @@ impl Actor {
     }
     async fn sources(&mut self) -> Result<()> {
         let page = self
-            .service
+            .service()
             .sources_page(self.state.sources_offset)
             .await
             .map_err(map_subscription)?;
@@ -1122,14 +1470,14 @@ impl Actor {
             return Ok(());
         };
         let summary = self
-            .service
+            .service()
             .source_summary(id)
             .await
             .map_err(map_subscription)?;
         self.state.source_hwid_enabled = summary.hwid_enabled;
         self.state.source_name = Some(summary.name);
         let page = self
-            .service
+            .service()
             .profiles(
                 id,
                 ProfileQuery {
@@ -1170,6 +1518,91 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::MaintenanceStart {
+                request_id,
+                operation,
+                source,
+                destination,
+                revision,
+            } => {
+                // Supervisor допускает job; обычный dispatch сохраняет matching refusal ACK.
+                let request = maintenance::Request {
+                    request_id,
+                    operation,
+                    source,
+                    destination,
+                    revision,
+                };
+                let error = if request.operation == maintenance::Operation::Backup
+                    && request.source.is_some()
+                {
+                    "invalid_input"
+                } else {
+                    "busy"
+                };
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some(error),
+                });
+                Ok(())
+            }
+            Command::MaintenanceCancel { request_id } => {
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
+                self.state.maintenance_ack = Some(maintenance::Ack {
+                    request_id,
+                    phase: maintenance::Phase::Failed,
+                    error: Some("busy"),
+                });
+                Ok(())
+            }
+            #[cfg(feature = "test-support")]
+            Command::LogsTest { reply } => {
+                let _ = reply.send(self.state.ephemeral.then(|| self.event_log.clone()));
+                Ok(())
+            }
+            Command::LogsSave {
+                page_request_id,
+                destination,
+                request_id,
+            } => {
+                let status = self.logs_save.start(
+                    &self.state.logs,
+                    &page_request_id,
+                    destination,
+                    request_id.clone(),
+                );
+                self.state.clear_logs_contexts();
+                self.state.logs = logs::Page {
+                    request_id,
+                    status,
+                    ..Default::default()
+                };
+                self.state
+                    .set_logs_context(Slot::LogsSave, self.logs_save.cause);
+                Ok(())
+            }
+            Command::LogsRead {
+                after,
+                source,
+                request_id,
+            } => {
+                self.state.clear_logs_contexts();
+                self.state.logs = logs::Page::read(
+                    &self.event_log,
+                    after.parse().map_err(|_| DesktopError("invalid_input"))?,
+                    source,
+                    request_id,
+                );
+                self.state
+                    .set_logs_context(Slot::LogsRead, self.state.logs.cause);
+                Ok(())
+            }
             Command::RoutingExplain {
                 expected_revision,
                 request_id,
@@ -1186,6 +1619,9 @@ impl Actor {
                     }
                     Err(_) => serde_json::Value::Null,
                 };
+                self.state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::RoutingAck);
                 self.state.routing_ack = Some(RoutingAck {
                     request_id,
                     saved_id: None,
@@ -1202,8 +1638,24 @@ impl Actor {
                     crate::editor::catalog(processes, &query, offset)
                 })
                 .await
-                .map_err(|_| DesktopError("catalog"))?
-                .map_err(DesktopError)?;
+                .map_err(|_| {
+                    self.state.error_contexts.set_generation(
+                        Slot::Error,
+                        Cause::CatalogTaskFailed,
+                        Some(self.state.command_generation),
+                    );
+                    DesktopError("catalog")
+                })?
+                .map_err(|key| {
+                    if key == "catalog" {
+                        self.state.error_contexts.set_generation(
+                            Slot::Error,
+                            Cause::CatalogQueryFailed,
+                            Some(self.state.command_generation),
+                        );
+                    }
+                    DesktopError(key)
+                })?;
                 Ok(())
             }
             Command::EditRouting {
@@ -1275,7 +1727,7 @@ impl Actor {
                 )
                 .and_then(|source| source.with_hwid(hwid_enabled))
                 .map_err(map_subscription)?;
-                let id = self.service.add(source).await.map_err(map_subscription)?;
+                let id = self.service().add(source).await.map_err(map_subscription)?;
                 self.state.source_id = Some(id);
                 self.state.offset = 0;
                 self.pending = None;
@@ -1284,7 +1736,7 @@ impl Actor {
                 self.reload().await
             }
             Command::RenameSource { id, name } => {
-                self.service
+                self.service()
                     .rename_source(id, name.clone())
                     .await
                     .map_err(map_subscription)?;
@@ -1300,7 +1752,7 @@ impl Actor {
                 if self.pending.is_some() {
                     return Err(DesktopError("busy"));
                 }
-                self.service
+                self.service()
                     .delete_source(id)
                     .await
                     .map_err(map_subscription)?;
@@ -1319,7 +1771,7 @@ impl Actor {
                     .state
                     .source_id
                     .ok_or(DesktopError("source_required"))?;
-                self.service
+                self.service()
                     .set_source_hwid(id, enabled)
                     .await
                     .map_err(map_subscription)?;
@@ -1343,7 +1795,7 @@ impl Actor {
                 let pending = self.pending.take().ok_or(DesktopError("review_required"))?;
                 let identity = pending.identity();
                 self.state.pending = None;
-                self.service
+                self.service()
                     .commit(pending.approve_after_review())
                     .await
                     .map_err(map_subscription)?;
@@ -1379,7 +1831,7 @@ impl Actor {
                 self.page().await
             }
             Command::Favorite { id, value } => {
-                self.service
+                self.service()
                     .set_favorite(id, value)
                     .await
                     .map_err(map_subscription)?;
@@ -1387,7 +1839,7 @@ impl Actor {
             }
             Command::SelectProfile { id, revision } => {
                 let profile = self
-                    .service
+                    .service()
                     .select_profile(id, revision)
                     .await
                     .map_err(|_| DesktopError("profile_unavailable"))?;
@@ -1402,6 +1854,21 @@ impl Actor {
                 self.state.selected_profile = Some(id);
                 self.state.selected_name = Some(profile.profile.name.clone());
                 self.selected = Some(profile);
+                Ok(())
+            }
+            Command::SetSubscriptionSchedule {
+                interval_seconds,
+                background,
+            } => {
+                if interval_seconds < 86400 {
+                    return Err(DesktopError("invalid_input"));
+                }
+                let mut preferences = self.preferences.clone();
+                preferences.subscription_interval_seconds = interval_seconds;
+                preferences.subscription_background = background;
+                self.save_preferences(preferences)?;
+                self.state.subscription_interval_seconds = interval_seconds;
+                self.state.subscription_background = background;
                 Ok(())
             }
             Command::SetProxyFetchDns { upstream } => {
@@ -1527,7 +1994,7 @@ impl Actor {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.service
+        self.service()
             .record_schedule_completion(identity, success, wall)
             .await
             .map_err(map_subscription)
@@ -1548,7 +2015,7 @@ impl Actor {
                         self.pending = Some(pending);
                         Ok(())
                     } else {
-                        self.service
+                        self.service()
                             .commit(pending.accept_clean().map_err(map_subscription)?)
                             .await
                             .map_err(map_subscription)?;
@@ -1583,6 +2050,8 @@ fn map_subscription(error: SubscriptionError) -> DesktopError {
 struct SessionUpdate {
     status: &'static str,
     error: Option<&'static str>,
+    context: Option<Cause>,
+    generation: Option<u64>,
     probe_result: Option<HealthResultDto>,
     network_stamp: Option<NetworkStamp>,
 }
@@ -1600,16 +2069,51 @@ fn apply_session_update(
     update: SessionUpdate,
     network: Option<NetworkSnapshot>,
 ) {
+    if update
+        .generation
+        .is_some_and(|generation| generation != state.error_generation)
+    {
+        return;
+    }
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     if update.network_stamp.is_some() && !network_matches(network, update.network_stamp) {
         state.status = "Limited";
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::Error);
         state.error = Some("network_changed");
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::Connection);
         state.connection_error = Some("network_changed");
         state.probe_result = None;
         return;
     }
     state.status = update.status;
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
     state.error = update.error;
+    state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     state.connection_error = update.error;
+    if let Some(cause) = update.context.filter(|cause| {
+        crate::diagnostics::context::ErrorContext::new(Slot::Error, *cause, None).message_key
+            == update.error.unwrap_or("")
+    }) {
+        state
+            .error_contexts
+            .set_generation(Slot::Error, cause, update.generation);
+        state
+            .error_contexts
+            .set_generation(Slot::Connection, cause, update.generation);
+    }
     if let Some(result) = update.probe_result {
         state.probe_result = Some(result);
     }
@@ -1630,7 +2134,13 @@ fn synchronize_network(state: &mut Snapshot, network: Option<NetworkSnapshot>) {
         state.probe_result = None;
         if matches!(state.status, "Checking" | "Connected" | "Limited") {
             state.status = "Limited";
+            state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Error);
             state.error = Some("network_changed");
+            state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Connection);
             state.connection_error = Some("network_changed");
         }
     }
@@ -1733,11 +2243,13 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
-            routing_repository,
+            event_log: yonik_linux::event_log::EventLog::new(),
+            logs_save: crate::backend::logs::SaveJob::default(),
+            routing_repository: Some(routing_repository),
             routing_revision: Some(0),
             preferences_store,
             preferences,
-            service,
+            service: Some(service),
             state: Snapshot::new(true),
             callback: Arc::new(|_| {}),
             selected: None,
@@ -1809,7 +2321,13 @@ mod settings_tests {
         assert_eq!(actor.preferences.language, "en");
         assert!(actor.state.preferences_durability_warning);
         assert_eq!(Store::open(&directory.0).1.language, "en");
-        actor.service.close().await.expect("закрытие БД");
+        actor
+            .service
+            .take()
+            .expect("online service перед закрытием")
+            .close()
+            .await
+            .expect("закрытие БД");
     }
 }
 
@@ -1836,6 +2354,8 @@ mod error_scope_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Connected",
                 error: None,
                 probe_result: None,
@@ -1858,6 +2378,8 @@ mod error_scope_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Disconnected",
                 error: Some("engine_missing"),
                 probe_result: None,
@@ -1923,6 +2445,8 @@ mod network_tests {
         apply_session_update(
             &mut state,
             SessionUpdate {
+                context: None,
+                generation: None,
                 status: "Connected",
                 error: None,
                 probe_result: Some(ProbeResult::Timeout.into()),
@@ -2033,6 +2557,44 @@ impl From<ProbeResult> for HealthResultDto {
         }
     }
 }
+/// Сохраняет настроенный интервал поверх legacy reservation/completion, не меняя
+/// API ручного refresh. Retry due и новое поколение не перезаписываются.
+async fn extend_schedule_interval(
+    service: &SubscriptionService,
+    identity: SubscriptionIdentity,
+    interval: Duration,
+) -> Result<()> {
+    if interval <= Duration::from_secs(86400) {
+        return Ok(());
+    }
+    let Some(token) = service
+        .schedule_metadata(identity.id)
+        .await
+        .map_err(map_subscription)?
+    else {
+        return Err(DesktopError("storage"));
+    };
+    if token.generation != identity.generation {
+        return Err(DesktopError("storage"));
+    }
+    let Some(state) = token
+        .state
+        .filter(|state| state.due_wall == state.recorded_wall.checked_add(86400))
+    else {
+        return Ok(());
+    };
+    service
+        .persist_schedule(
+            token,
+            yonik_linux::ScheduleState {
+                due_wall: state.recorded_wall.checked_add(interval.as_secs()),
+                ..state
+            },
+        )
+        .await
+        .map_err(map_subscription)
+}
+
 /// Completion старого ресурса не отменяет очередь/review нового поколения.
 async fn reconcile_manual_schedule(
     scheduled: &mut DesktopSchedule,
@@ -2051,6 +2613,7 @@ async fn reconcile_manual_schedule(
     }
     scheduled.cancel(identity.id, &clock).await?;
     if !storage_failed {
+        extend_schedule_interval(service, identity, scheduled.interval).await?;
         scheduled.reload_id(service, identity.id, clock()).await?;
     }
     Ok(())
@@ -2204,18 +2767,27 @@ struct TcpRunning {
     task: tokio::task::JoinHandle<std::result::Result<TcpProbeSeriesResult, HostError>>,
 }
 
+#[cfg_attr(feature = "test-support", allow(clippy::too_many_arguments))]
 async fn session(
     config: yonik_engine::CompiledConfig,
     engine_dir: PathBuf,
     engine: Engine,
     target: ProbeTarget,
     mut cancel: Cancellation,
-    updates: mpsc::Sender<SessionUpdate>,
+    updates: (
+        mpsc::Sender<SessionUpdate>,
+        yonik_linux::event_log::EventLog,
+        u64,
+    ),
     mut network: Option<NetworkWatch>,
+    #[cfg(feature = "test-support")] cleanup_fault: Option<Arc<AtomicBool>>,
 ) -> std::result::Result<(), LocalSession> {
-    let Ok(mut session) = LocalSession::new() else {
+    let (updates, event_log, generation) = updates;
+    let Ok(session) = LocalSession::new() else {
         let _ = updates
             .send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Error",
                 error: Some("engine_failed"),
                 probe_result: None,
@@ -2224,6 +2796,12 @@ async fn session(
             .await;
         return Ok(());
     };
+    let mut session = session.with_event_log(event_log);
+    #[cfg(feature = "test-support")]
+    if let Some(fault) = cleanup_fault {
+        session = session.with_cleanup_fault(fault);
+    }
+    let mut operation_cause = None;
     let operation = async {
         let (relative, digest) = match engine {
             Engine::Xray => (
@@ -2258,6 +2836,7 @@ async fn session(
                 }
             })?;
         session.start(checked, &mut cancel).await.map_err(|e| {
+            operation_cause = Some(if e == HostError::EngineExited { Cause::EngineStartExited } else { Cause::EngineStartFailed });
             if e == HostError::Cancelled {
                 "cancelled"
             } else {
@@ -2268,6 +2847,8 @@ async fn session(
         let mut network_stamp = checked_network.map(|network| network.stamp);
         let _ = updates
             .send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Checking",
                 error: None,
                 probe_result: None,
@@ -2304,6 +2885,8 @@ async fn session(
             proof.network_epoch = network_stamp.map(|stamp| stamp.to_string());
             proof.network_observed = checked_network.is_some_and(NetworkSnapshot::fully_observed);
             let _ = updates.send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: if passed { "Connected" } else { "Limited" },
                 error,
                 probe_result: Some(proof),
@@ -2312,6 +2895,8 @@ async fn session(
         } else {
             session.invalidate_check().map_err(|_| "check_failed")?;
             let _ = updates.send(SessionUpdate {
+                context: None,
+                generation: Some(generation),
                 status: "Limited",
                 error: Some("network_changed"),
                 probe_result: None,
@@ -2323,6 +2908,7 @@ async fn session(
             tokio::select! {
                 biased;
                 result = session.wait_exit(&mut cancel) => return result.map_err(|e| {
+                    operation_cause = (e == HostError::EngineExited).then_some(Cause::EngineExited);
                     if e == HostError::Cancelled { "cancelled" } else { "engine_failed" }
                 }),
                 _ = network_changed(&mut network) => {
@@ -2330,6 +2916,8 @@ async fn session(
                         session.invalidate_check().map_err(|_| "check_failed")?;
                         network_stamp = network.as_ref().map(|watch| watch.current().stamp);
                         let _ = updates.send(SessionUpdate {
+                            context: None,
+                            generation: Some(generation),
                             status: "Limited",
                             error: Some("network_changed"),
                             probe_result: None,
@@ -2344,6 +2932,8 @@ async fn session(
     if session.stop().await.is_err() {
         let _ = updates
             .send(SessionUpdate {
+                context: Some(Cause::CleanupFailed),
+                generation: Some(generation),
                 status: "CleanupError",
                 error: Some("cleanup_failed"),
                 probe_result: None,
@@ -2355,6 +2945,8 @@ async fn session(
     let error = operation.err().filter(|key| *key != "cancelled");
     let _ = updates
         .send(SessionUpdate {
+            context: operation_cause.filter(|_| error.is_some()),
+            generation: Some(generation),
             status: if error.is_some() {
                 "Error"
             } else {
@@ -2368,6 +2960,65 @@ async fn session(
     Ok(())
 }
 
+fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'static str) {
+    state.maintenance_available = false;
+    if let Command::MaintenanceStart { request_id, .. }
+    | Command::MaintenanceCancel { request_id } = command
+    {
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::MaintenanceAck);
+        state.maintenance_ack = Some(maintenance::Ack {
+            request_id: *request_id,
+            phase: maintenance::Phase::Failed,
+            error: Some(error),
+        });
+    }
+    if let Some(request_id) = command.routing_request_id() {
+        state
+            .error_contexts
+            .clear(crate::diagnostics::context::Slot::RoutingAck);
+        state.routing_ack = Some(RoutingAck {
+            request_id,
+            saved_id: None,
+            error: Some(error),
+        });
+    }
+    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = command {
+        state.clear_logs_contexts();
+        state.logs = logs::Page {
+            request_id: request_id.clone(),
+            status: if error == "busy" { "busy" } else { "error" },
+            ..Default::default()
+        };
+    }
+    #[cfg(feature = "test-support")]
+    if let Command::LogsTest { reply } = command {
+        let _sent = reply.send(None);
+    }
+    state.command_error(false, error);
+}
+
+async fn wait_startup_shutdown(
+    state: &mut Snapshot,
+    commands: &mut mpsc::Receiver<Envelope>,
+    priority: &mut watch::Receiver<Priority>,
+    callback: &Callback,
+) {
+    let mut commands_open = true;
+    while !priority.borrow_and_update().shutdown {
+        tokio::select! {
+            changed = priority.changed() => if changed.is_err() { break; },
+            command = commands.recv(), if commands_open => {
+                if let Some(command) = command {
+                    reject_unavailable_command(state, &command.command, "startup");
+                    state.emit(callback);
+                } else { commands_open = false; }
+            }
+        }
+    }
+}
+
 async fn run(
     mut config: HostConfig,
     mut commands: mpsc::Receiver<Envelope>,
@@ -2379,6 +3030,9 @@ async fn run(
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
+    config
+        .startup_observer
+        .emit(StartupPhase::SignalRegistration);
     // Обработчики регистрируются до любого spawn ядра.
     let signals = match (
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
@@ -2394,41 +3048,30 @@ async fn run(
         _ => {
             // Без обработчиков завершения не разрешаем запуск дочернего ядра.
             state.busy = false;
-            state.error = Some("startup");
-            state.connection_error = Some("startup");
+            state.contextual_error(false, ContextFailure::new(Cause::SignalsUnavailable));
             state.emit(&callback);
-            while !priority.borrow_and_update().shutdown {
-                if priority.changed().await.is_err() {
-                    break;
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::PortSelection);
     let opened = match config.listen_port.map_or_else(|| available_port(0), Ok) {
         Ok(port) => {
             state.port = port.get();
             open(&mut config).await
         }
-        Err(error) => Err(error),
+        Err(_) => Err(ContextFailure::new(Cause::ListenPortUnavailable)),
     };
     state.busy = false;
     let (service, _lock, routing_repository) = match opened {
         Ok(opened) => opened,
         Err(error) => {
-            state.command_error(false, error.key());
+            state.contextual_error(false, error);
             state.emit(&callback);
-            loop {
-                if priority.borrow_and_update().shutdown {
-                    break;
-                }
-                if priority.changed().await.is_err() {
-                    break;
-                }
-            }
+            wait_startup_shutdown(&mut state, &mut commands, &mut priority, &callback).await;
             state.closed = true;
             state.emit(&callback);
             control.closed();
@@ -2438,6 +3081,7 @@ async fn run(
             return;
         }
     };
+    config.startup_observer.emit(StartupPhase::Preferences);
     let (preferences_store, mut preferences, warning) = Store::open(&config.data_dir);
     if let Some(port) = config.listen_port {
         preferences.port = Some(port);
@@ -2451,22 +3095,31 @@ async fn run(
         state.port = port.get();
     }
     state.language = preferences.language.clone();
+    state.subscription_interval_seconds = preferences.subscription_interval_seconds;
+    state.subscription_background = preferences.subscription_background;
     state.proxy_fetch_dns = preferences.proxy_fetch_dns;
     state.preferences_warning = warning;
     state.probe_custom = preferences.probe_url != DEFAULT_PROBE_URL;
     state.probe_expected_status = preferences.probe_status;
+    state.maintenance_available = true;
     state.ready = true;
+    config
+        .startup_observer
+        .emit(StartupPhase::NetworkInitialization);
     let network_monitor = NetworkMonitor::start().ok();
+    config.startup_observer.emit(StartupPhase::NetworkReturned);
     let mut network = network_monitor.as_ref().map(NetworkMonitor::watch);
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
-        routing_repository,
+        event_log: yonik_linux::event_log::EventLog::new(),
+        logs_save: crate::backend::logs::SaveJob::default(),
+        routing_repository: Some(routing_repository),
         routing_revision: Some(0),
         preferences_store,
         preferences,
-        service,
+        service: Some(service),
         state,
         callback,
         selected: None,
@@ -2475,7 +3128,7 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
-    match actor.routing_repository.routing_draft().await {
+    match actor.routing_repository().routing_draft().await {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
             .ok()
@@ -2487,11 +3140,19 @@ async fn run(
             }
             None => {
                 actor.routing_revision = None;
+                actor
+                    .state
+                    .error_contexts
+                    .clear(crate::diagnostics::context::Slot::Error);
                 actor.state.error = Some("routing_storage");
             }
         },
         Err(_) => {
             actor.routing_revision = None;
+            actor
+                .state
+                .error_contexts
+                .clear(crate::diagnostics::context::Slot::Error);
             actor.state.error = Some("routing_storage");
         }
     }
@@ -2534,7 +3195,13 @@ async fn run(
         Err(error) => {
             actor.state.command_error(true, error.key());
             actor.state.ready = false;
-            actor.state.closed = actor.service.close().await.is_ok();
+            actor.state.closed = actor
+                .service
+                .take()
+                .expect("online service перед закрытием")
+                .close()
+                .await
+                .is_ok();
             actor.state.emit(&actor.callback);
             control.closed();
             return;
@@ -2543,7 +3210,7 @@ async fn run(
     scheduled.policy = *subscription_policy.borrow_and_update();
     scheduled.visible = *subscription_visible.borrow_and_update();
     let mut schedule_loaded = false;
-    if let Err(error) = scheduled.load(&actor.service, origin.elapsed()).await {
+    if let Err(error) = scheduled.load(actor.service(), origin.elapsed()).await {
         actor.state.command_error(true, error.key());
         actor.emit();
     } else {
@@ -2553,7 +3220,27 @@ async fn run(
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
     let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+    let mut maintenance_controller = maintenance::Controller::default();
     loop {
+        scheduled.interval =
+            Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
+        scheduled.background_enabled = actor.preferences.subscription_background;
+        if scheduled.runtime.set_interval(scheduled.interval).is_err() {
+            actor.state.command_error(true, "invalid_input");
+        }
+        let now = origin.elapsed();
+        let policy = scheduled.policy();
+        if scheduled.window_until.is_some_and(|until| now >= until)
+            || (scheduled.window_until.is_some()
+                && (!scheduled.background_enabled
+                    || !policy.online
+                    || policy.metered
+                    || policy.battery_saver))
+        {
+            if let Err(error) = scheduled.close_window(actor.service(), now).await {
+                actor.state.command_error(true, error.key());
+            }
+        }
         if let Some(observer) = &config.schedule_observer {
             observer(scheduled.policy(), schedule_loaded);
         }
@@ -2590,12 +3277,8 @@ async fn run(
             if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
                 actor.state.command_error(true, "storage");
             }
-            let policy = scheduled.policy;
-            let visible = scheduled.visible;
-            if let Ok(mut replacement) = DesktopSchedule::new() {
-                replacement.policy = policy;
-                replacement.visible = visible;
-                if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await {
+            if let Ok(mut replacement) = scheduled.replacement() {
+                if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor.state.command_error(true, error.key());
                 }
                 scheduled = replacement;
@@ -2606,7 +3289,11 @@ async fn run(
             && refreshing.is_none()
             && actor.pending.is_none()
             && scheduled.review.is_none();
-        let deadline = if allowed { scheduled.deadline() } else { None };
+        let work_deadline = if allowed { scheduled.deadline() } else { None };
+        let deadline = work_deadline
+            .into_iter()
+            .chain(scheduled.window_until)
+            .min();
 
         tokio::select! {
             biased;
@@ -2635,18 +3322,18 @@ async fn run(
                     let visible = scheduled.visible;
                     if let Ok(mut replacement) = DesktopSchedule::new() {
                         replacement.policy = policy; replacement.visible = visible;
-                        if let Err(error) = replacement.load(&actor.service, origin.elapsed()).await { actor.state.command_error(true, error.key()); }
+                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.command_error(true, error.key()); }
                         scheduled = replacement;
                     }
                 }
-                actor.state.connection_error = None;
+                actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Connection); actor.state.connection_error = None;
                 actor.pending = None; actor.state.pending = None;
                 if let Some((_, cancel, _, _, _)) = refreshing.as_ref() { cancel.send_replace(true); }
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
                 if let Some(mut session) = failed_session.take() {
-                    if session.stop().await.is_err() { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
+                    if session.stop().await.is_err() { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 }
                 if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() {
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
@@ -2681,7 +3368,10 @@ async fn run(
                                     },
                                     Err(error) => {
                                         record_system(&mut actor.state, SystemState::Unknown);
-                                        actor.state.command_error(false, system_error(error));
+                                        actor.state.contextual_error(false, ContextFailure { error: DesktopError(system_error(error)), cause: helper_cause(error) });
+                                        actor.state.helper_generation = Some(flight.generation);
+                                        actor.state.error_contexts.set_generation(Slot::Error, helper_cause(error), Some(flight.generation));
+                                        actor.state.error_contexts.set_generation(Slot::Connection, helper_cause(error), Some(flight.generation));
                                     }
                                 }
                             }
@@ -2745,11 +3435,13 @@ async fn run(
                     None => std::future::pending::<()>().await,
                 }
             } => {
-                {
+                // На границе окна сначала closing ACK в начале следующей итерации.
+                if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
                     schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
                     let host = &schedule_host;
+                    scheduled.open_window(origin.elapsed());
                     let policy = scheduled.policy();
-                    match scheduled.runtime.dispatch(origin.elapsed(), policy, &actor.service, host.clone()) {
+                    match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
                         Err(_) => actor.state.command_error(true, "storage"),
                     }
@@ -2848,7 +3540,7 @@ async fn run(
             }
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
                 running = None;
-                if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.command_error(false, "cleanup_failed"); }
+                if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 if failed_session.is_none() { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
                 // Финальный event может ожидать в канале; сначала применяем его.
                 while let Ok(update) = events.try_recv() { actor.update(update); }
@@ -2859,14 +3551,23 @@ async fn run(
                 actor.state.busy = false;
                 actor.state.refresh_source_id = None;
                 actor.state.refresh_token = None;
-                if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.source_error = None; }
+                if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Source); actor.state.source_error = None; }
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting && !*cancel.borrow() {
                     let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 actor.emit();
+            }
+            completion = actor.logs_save.complete(), if actor.logs_save.active() => {
+                if let Some((request_id, status)) = completion {
+                    if actor.state.logs.request_id == request_id && actor.state.logs.status == "saving" {
+                        actor.state.clear_logs_contexts(); actor.state.logs = logs::Page { request_id, status, ..Default::default() };
+                        actor.state.set_logs_context(Slot::LogsSave, actor.logs_save.cause);
+                        actor.emit();
+                    }
+                }
             }
             Some(update) = events.recv() => {
                 actor.update(update); actor.emit();
@@ -2874,12 +3575,123 @@ async fn run(
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
+                        actor.emit();
+                    }
                     if let Some(request_id) = envelope.command.routing_request_id() {
-                        actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::RoutingAck); actor.state.routing_ack = Some(RoutingAck { request_id, saved_id: None, error: Some("cancelled") });
+                        actor.emit();
+                    }
+                    if let Command::LogsRead { request_id, .. } | Command::LogsSave { request_id, .. } = envelope.command {
+                        actor.state.clear_logs_contexts(); actor.state.logs = logs::Page { request_id, status: "cancelled", ..Default::default() };
                         actor.emit();
                     }
                     continue;
                 }
+                if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
+                    let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
+                    let live = config.data_dir.join("subscriptions.sqlite");
+                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                        actor.emit(); continue;
+                    }
+                    if let Err(error) = maintenance_controller.begin(&request, &live, actor.state.revision) {
+                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
+                        actor.emit(); continue;
+                    }
+                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
+                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
+                    let owner = std::mem::replace(&mut scheduled, replacement);
+                    let request_id = request.request_id;
+                    let cancellation = yonik_linux::MaintenanceControl::default();
+                    let mut job = tokio::spawn(maintenance_job::run(service, repository, owner, refreshing.take(), request, cancellation.clone(), origin.elapsed()));
+                    actor.state.ready = false;
+                    actor.state.busy = true;
+                    actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: maintenance::Phase::Draining, error: None });
+                    actor.emit();
+                    let outcome = loop {
+                        tokio::select! {
+                            biased;
+                            changed = priority.changed() => {
+                                if changed.is_err() { quitting = true; }
+                                let action = *priority.borrow_and_update();
+                                quitting |= action.shutdown;
+                                cancellation.cancel();
+                                maintenance_controller.cancel(request_id);
+                                actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                actor.emit();
+                            }
+                            result = &mut job => break result,
+                            command = commands.recv(), if !quitting => {
+                                let Some(command) = command else { quitting = true; cancellation.cancel(); continue; };
+                                match &command.command {
+                                    Command::MaintenanceCancel { request_id: id } if *id == request_id => {
+                                        cancellation.cancel();
+                                        maintenance_controller.cancel(request_id);
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                    }
+                                    Command::MaintenanceStart { request_id: id, .. } if *id == request_id => {
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
+                                    }
+                                    Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
+                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                    }
+                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy"),
+                                }
+                                actor.emit();
+                            }
+                        }
+                    };
+                    let mut result = Err("cleanup_failed");
+                    let mut job_context = None;
+                    let mut job_drained = false;
+                    if let Ok(outcome) = outcome {
+                        job_context = outcome.cause.map(maintenance_job::Failure::context);
+                        job_drained = outcome.drained;
+                        result = outcome.result;
+                        if let Some((service, repository, owner)) = outcome.handles {
+                            actor.service = Some(service); actor.routing_repository = Some(repository); scheduled = owner;
+                        }
+                    }
+                    let online = actor.service.is_some() && actor.routing_repository.is_some();
+
+                    // Completion принадлежит единственному join handle этого request;
+                    // внешние callbacks не могут завершить следующую generation.
+                    if job_drained { maintenance_controller.drained(request_id, result); }
+                    actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id, phase: if result.is_ok() { maintenance::Phase::Complete } else { maintenance::Phase::Failed }, error: result.err() });
+                    actor.state.maintenance_generation = envelope.generation;
+                    if let Some(cause) = job_context { actor.state.error_contexts.set_ack(Slot::MaintenanceAck, cause, request_id, envelope.generation); }
+                    actor.state.ready = online && !quitting;
+                    actor.state.maintenance_available = online && !quitting;
+                    actor.state.busy = false;
+                    actor.emit();
+                    if !online {
+                        // Неизвестный drain не разрешает Closed и освобождение lock.
+                        // Reopen failure с подтверждённым drain ждёт явный Shutdown.
+                        let mut commands_open = true;
+                        while !quitting || !job_drained {
+                            tokio::select! {
+                                changed = priority.changed() => {
+                                    quitting = changed.is_err() || priority.borrow_and_update().shutdown;
+                                }
+                                command = commands.recv(), if commands_open => {
+                                    if let Some(command) = command {
+                                        reject_unavailable_command(&mut actor.state, &command.command, "busy");
+                                        actor.emit();
+                                    } else { quitting = true; commands_open = false; }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    if quitting { break; }
+                    continue;
+                }
+                if matches!(&envelope.command, Command::LogsRead { .. } | Command::LogsSave { .. }) { actor.state.logs_generation = envelope.generation; }
+                let context_request_id = envelope.command.routing_request_id();
+                if context_request_id.is_some() { actor.state.routing_generation = envelope.generation; actor.state.error_contexts.clear(Slot::RoutingAck); }
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
@@ -2902,7 +3714,7 @@ async fn run(
                         actor.state.command_error(true, error.key()); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
-                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
+                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         } else { actor.state.command_error(true, "busy"); }
                         actor.emit(); continue;
@@ -2913,6 +3725,7 @@ async fn run(
                     if let Some(batch) = batch_running.as_mut() { batch.stop(); }
                     actor.state.batch.invalidate();
                 }
+                actor.state.command_generation = envelope.generation;
                 actor.state.begin_command(&envelope.command);
                 let manual_review_completion = if scheduled.review.is_none() && matches!(envelope.command, Command::ApproveRefresh | Command::DiscardRefresh) { actor.pending.as_ref().map(|pending| pending.identity()) } else { None };
                 if matches!(envelope.command, Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Reload | Command::ApproveRefresh) {
@@ -2926,7 +3739,7 @@ async fn run(
                         let approve = matches!(envelope.command, Command::ApproveRefresh);
                         let id = scheduled.review.take().expect("review guard");
                         actor.state.pending = None;
-                        match scheduled.runtime.finish_review(&actor.service, id, approve, || origin.elapsed()).await {
+                        match scheduled.runtime.finish_review(actor.service(), id, approve, || origin.elapsed()).await {
                             Ok(_) => { actor.clear_selection(); actor.page().await }
                             Err(error) => Err(map_subscription(error)),
                         }
@@ -3060,8 +3873,8 @@ async fn run(
                                     (Some(compiled), Ok(target)) => {
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
-                                        session_generation = session_generation.saturating_add(1);
-                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, updates.clone(), network.clone()));
+                                        session_generation = session_generation.saturating_add(1); actor.state.error_generation = session_generation;
+                                        let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone(), session_generation), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
@@ -3080,16 +3893,23 @@ async fn run(
                 };
                 if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, &actor.service, identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
                 }
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
-                        if let Err(error) = scheduled.reload_id(&actor.service, id, origin.elapsed()).await {
+                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
                             actor.state.command_error(true, error.key());
                         }
                     }
                 }
-                if let Err(error) = outcome { actor.state.command_error(source_operation, error.key()); }
+                if let Err(error) = outcome {
+                    let context = context_request_id.and_then(|id| actor.state.error_contexts.matching(Slot::RoutingAck, Some(error.key()), Some(id))).or_else(|| actor.state.error_contexts.matching(Slot::Error, Some(error.key()), None));
+                    actor.state.command_error(source_operation, error.key());
+                    if let Some(context) = context {
+                        actor.state.error_contexts.set_generation(Slot::Error, context.reason, context.generation);
+                        actor.state.error_contexts.set_generation(if source_operation { Slot::Source } else { Slot::Connection }, context.reason, context.generation);
+                    }
+                }
                 actor.state.system_busy = system_flight.is_some();
                 actor.emit();
             }
@@ -3160,6 +3980,7 @@ async fn run(
             actor.emit();
         }
         if quitting
+            && !actor.logs_save.active()
             && system_flight.is_none()
             && !system_stop
             && batch_running.is_none()
@@ -3169,7 +3990,9 @@ async fn run(
         {
             if failed_session.is_some() || system_active {
                 quitting = false;
-                actor.state.command_error(false, "cleanup_failed");
+                actor
+                    .state
+                    .session_error(Cause::CleanupFailed, session_generation);
                 actor.emit();
                 continue;
             }
@@ -3190,15 +4013,31 @@ async fn run(
         true
     };
     actor.selected = None;
-    let service_closed = actor.service.close().await.is_ok();
-    let routing_closed = actor.routing_repository.close().await.is_ok();
+    let service_closed = if let Some(service) = actor.service.take() {
+        service.close().await.is_ok()
+    } else {
+        true
+    };
+    let routing_closed = if let Some(repository) = actor.routing_repository.take() {
+        repository.close().await.is_ok()
+    } else {
+        true
+    };
     let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
     actor.state.can_connect = false;
     actor.state.closed = closed;
+    actor
+        .state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Error);
     actor.state.error = if closed { None } else { Some("cleanup_failed") };
+    actor
+        .state
+        .error_contexts
+        .clear(crate::diagnostics::context::Slot::Connection);
     actor.state.connection_error = actor.state.error;
     actor.state.emit(&actor.callback);
     if closed {
@@ -3237,11 +4076,13 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
-                routing_repository,
+                event_log: yonik_linux::event_log::EventLog::new(),
+                logs_save: crate::backend::logs::SaveJob::default(),
+                routing_repository: Some(routing_repository),
                 routing_revision: Some(0),
                 preferences_store,
                 preferences,
-                service,
+                service: Some(service),
                 state: Snapshot::new(true),
                 callback: Arc::new(|_| {}),
                 selected: None,
@@ -3311,7 +4152,7 @@ mod routing_regressions {
             vec![2]
         );
         let saved = actor
-            .routing_repository
+            .routing_repository()
             .routing_draft()
             .await
             .expect("БД")
@@ -3325,7 +4166,7 @@ mod routing_regressions {
     async fn repository_conflict_returns_matching_error_ack_without_accepting_form() {
         let (mut actor, lock, path) = fixture().await;
         actor
-            .routing_repository
+            .routing_repository()
             .save_routing_draft(0, actor.state.routing.json().into_bytes())
             .await
             .expect("внешняя запись");
@@ -3496,6 +4337,23 @@ fn record_system(snapshot: &mut Snapshot, state: SystemState) {
     }
     snapshot.can_unlock = snapshot.system_recovery_pending;
 }
+fn helper_cause(error: ClientError) -> Cause {
+    match error {
+        ClientError::Unsupported => Cause::HelperUnsupported,
+        ClientError::Denied => Cause::HelperDenied,
+        ClientError::Cancelled => Cause::HelperCancelled,
+        ClientError::Busy => Cause::HelperBusy,
+        ClientError::OwnerLost => Cause::HelperOwnerLost,
+        ClientError::Deadline => Cause::HelperDeadline,
+        ClientError::Timeout => Cause::HelperTimeout,
+        ClientError::InvalidRequest => Cause::HelperInvalidRequest,
+        ClientError::InvalidHandle => Cause::HelperInvalidHandle,
+        ClientError::Stale => Cause::HelperStale,
+        ClientError::Protocol => Cause::HelperProtocol,
+        ClientError::Unavailable => Cause::HelperUnavailable,
+    }
+}
+
 fn system_error(error: ClientError) -> &'static str {
     match error {
         ClientError::Unsupported => "system_unsupported",
@@ -3619,5 +4477,152 @@ mod system_recovery_tests {
         assert!(!snapshot.can_unlock);
         record_system(&mut snapshot, SystemState::Unknown);
         assert!(!snapshot.system_recovery_pending);
+    }
+}
+
+#[cfg(test)]
+#[path = "maintenance_command_tests.rs"]
+mod maintenance_command_tests;
+
+#[cfg(test)]
+mod error_context_tests {
+    use super::*;
+
+    #[test]
+    fn replacement_and_late_session_update_do_not_keep_context() {
+        let mut state = Snapshot::new(true);
+        state.contextual_error(false, ContextFailure::new(Cause::DataDirectoryPermissions));
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_some()
+        );
+        state.command_error(false, "storage");
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_none()
+        );
+        state.error_generation = 9;
+        state.contextual_error(false, ContextFailure::new(Cause::RepositoryOpenStorage));
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Error",
+                error: Some("engine_failed"),
+                context: Some(Cause::EngineExited),
+                generation: Some(8),
+                probe_result: None,
+                network_stamp: None,
+            },
+            None,
+        );
+        assert_eq!(state.error, Some("storage"));
+        assert_eq!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, state.connection_error, None)
+                .expect("текущий контекст")
+                .reason,
+            Cause::RepositoryOpenStorage
+        );
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Disconnected",
+                error: None,
+                context: None,
+                generation: Some(9),
+                probe_result: None,
+                network_stamp: None,
+            },
+            None,
+        );
+        assert!(
+            state
+                .error_contexts
+                .matching(Slot::Connection, Some("storage"), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn actual_directory_guard_has_specific_typed_cause() {
+        let root = std::env::temp_dir().join(format!("p11-context-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o755)
+            .create(&root)
+            .expect("собственный каталог");
+        fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("права");
+        let failure = private_directory(&root).expect_err("guard отказал");
+        fs::remove_dir(&root).expect("очистка");
+        assert_eq!(failure.cause, Cause::DataDirectoryPermissions);
+        assert_eq!(failure.error.key(), "storage");
+    }
+}
+
+#[cfg(test)]
+mod maintenance_context_tests {
+    use super::*;
+    #[test]
+    fn actual_backup_conflict_is_bound_to_ack_and_v1_is_unchanged() {
+        let root = std::env::temp_dir().join(format!("p11-maint-context-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&root)
+            .expect("собственный каталог");
+        let destination = root.join("existing.sqlite");
+        fs::write(&destination, b"previous").expect("существующий файл");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let host = DesktopHost::start(
+            HostConfig::new(root.join("data"), root.join("engines")).with_ephemeral_key([19; 32]),
+            move |raw| {
+                let _ = sender.send(raw);
+            },
+        )
+        .expect("host");
+        let wait = |predicate: &dyn Fn(&serde_json::Value) -> bool| -> serde_json::Value {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                let raw = receiver
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("snapshot deadline");
+                let value: serde_json::Value = serde_json::from_str(&raw).expect("JSON");
+                if predicate(&value) {
+                    return value;
+                }
+            }
+        };
+        let ready = wait(&|value| value["ready"] == true);
+        host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":77,"operation":"backup","destination":destination,"revision":ready["revision"]}).to_string()).expect("Start");
+        let state = wait(&|value| {
+            value["maintenance_ack"]["request_id"] == 77
+                && value["maintenance_ack"]["phase"] == "failed"
+        });
+        let export = crate::diagnostics::export_snapshot_v2(&state.to_string()).expect("actual V2");
+        let metadata: serde_json::Value = serde_json::from_str(&export).expect("JSON");
+        assert_eq!(metadata["errors"][0]["reason"], "maintenance_copy_conflict");
+        assert_eq!(metadata["errors"][0]["request_id"], "77");
+        let mut sibling = state.clone();
+        sibling["maintenance_ack"]["request_id"] = serde_json::json!(78);
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        let legacy = crate::diagnostics::export_snapshot(&state.to_string()).expect("V1");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&legacy).expect("JSON"),
+            serde_json::json!({"schema_version":1,"platform":"linux","errors":[]})
+        );
+        host.shutdown();
+        assert!(host.wait_closed(Duration::from_secs(10)));
+        drop(host);
+        assert_eq!(fs::read(&destination).expect("исходник"), b"previous");
+        fs::remove_file(destination).expect("очистка");
+        for entry in fs::read_dir(root.join("data")).expect("данные") {
+            fs::remove_file(entry.expect("файл").path()).expect("очистка данных");
+        }
+        fs::remove_dir(root.join("data")).expect("очистка data");
+        fs::remove_dir(root).expect("очистка root");
     }
 }

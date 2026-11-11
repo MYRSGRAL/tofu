@@ -7,6 +7,8 @@ license-file.workspace = true
 
 [features]
 default = []
+startup-diagnostics = []
+test-support = ["yonik-linux/test-support"]
 gui = ["dep:cxx", "dep:cxx-qt", "dep:cxx-qt-lib", "dep:cxx-qt-build", "dep:cxx-gen"]
 
 [[bin]]
@@ -43,9 +45,21 @@ cxx-gen = { version = "=0.7.176", optional = true }
 unsafe_code = "deny"
 
 [dev-dependencies]
+# Включает observer в исходном integration harness при обычном cargo test.
+yonik-desktop = { path = ".", features = ["startup-diagnostics"] }
 yonik-linux = { path = "../yonik-linux", features = ["test-support"] }
 
 [[test]]
 name = "p10_gate"
 path = "tests/p10_gate.rs"
 harness = false
+
+[[example]]
+name = "tray_cleanup_negative"
+path = "tests/support/tray_cleanup_negative.rs"
+required-features = ["gui", "test-support"]
+
+[[example]]
+name = "logs_negative"
+path = "tests/support/logs_negative.rs"
+required-features = ["gui", "test-support"]

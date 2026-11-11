@@ -51,7 +51,7 @@ impl SubscriptionScheduler {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs()
-                    .min(i64::MAX as u64 - 86400)
+                    .min(i64::MAX as u64 - u32::MAX as u64)
             }),
         )
     }
@@ -68,6 +68,9 @@ impl SubscriptionScheduler {
             active: BTreeMap::new(),
             futures: FuturesUnordered::new(),
         })
+    }
+    pub fn set_interval(&mut self, interval: Duration) -> Result<(), Error> {
+        self.scheduler.set_interval(interval)
     }
     pub fn schedule(&mut self, id: i64, generation: i64, due: Duration) -> Result<(), Error> {
         self.scheduler.schedule(id, generation, due)?;
@@ -116,7 +119,15 @@ impl SubscriptionScheduler {
             let failures = self.scheduler.failures(work.id()).ok_or(Error::Stale)?;
             let wall = self.wall_clock.clone();
             self.futures.push(Box::pin(async move {
-                if let Err(error) = persist(&service, work, failures, Some(86400), wall()).await {
+                if let Err(error) = persist(
+                    &service,
+                    work,
+                    failures,
+                    Some(work.interval().as_secs()),
+                    wall(),
+                )
+                .await
+                {
                     return (work, Err(error), false);
                 }
                 let cancelled = receiver.clone();
@@ -125,7 +136,12 @@ impl SubscriptionScheduler {
                     .await;
                 if !*cancelled.borrow() && !matches!(result, Ok(RefreshResult::Pending(_))) {
                     let success = matches!(result, Ok(RefreshResult::NotModified));
-                    let state = Scheduler::completion_state(failures, Duration::ZERO, success);
+                    let state = Scheduler::completion_state_with_interval(
+                        failures,
+                        Duration::ZERO,
+                        success,
+                        work.interval(),
+                    );
                     let failures = state.failures;
                     let delay = state.due.map(|due| due.as_secs());
                     if let Err(error) = persist(&service, work, failures, delay, wall()).await {
@@ -255,7 +271,12 @@ impl SubscriptionScheduler {
                 if *cancelled.borrow() {
                     return (result, true);
                 }
-                let state = Scheduler::completion_state(failures, Duration::ZERO, result.is_ok());
+                let state = Scheduler::completion_state_with_interval(
+                    failures,
+                    Duration::ZERO,
+                    result.is_ok(),
+                    work.interval(),
+                );
                 let failures = state.failures;
                 let delay = state.due.map(|due| due.as_secs());
                 if let Err(error) = persist(&service, work, failures, delay, wall()).await {

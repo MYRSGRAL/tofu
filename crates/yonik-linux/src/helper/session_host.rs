@@ -20,6 +20,7 @@ use crate::{
     read_topology,
     worker::WorkerPayload,
 };
+use sha2::Digest;
 use std::{
     fs::File,
     io::Read,
@@ -325,7 +326,19 @@ fn verify_worker_status(bytes: &[u8], uid: u32) -> Result<(), ServiceError> {
     Ok(())
 }
 
+struct BundleCompile {
+    resource_session: crate::worker::ResourceSession,
+    bus_owner: String,
+    peer_identity: [u8; 32],
+    resources: Arc<crate::resource_fd_receiver::RebuiltBatch>,
+    revision: u64,
+    identity: Vec<u8>,
+    bindings: Vec<yonik_engine::resource_bundle::ResourceBinding>,
+    intent: [u8; 32],
+    native_pin: [u8; 32],
+}
 pub(super) struct SessionArtifact {
+    pub(super) bundle: Option<crate::helper::service::BundleDigests>,
     pub(super) payload: Arc<WorkerPayload>,
     plan: SessionNetworkPlan,
     baseline: LinuxTopology,
@@ -336,6 +349,8 @@ pub(super) struct SessionArtifact {
     uid: u32,
     worker_uid: u32,
     kill_switch: bool,
+    attribution_required: bool,
+    peer: Option<Arc<crate::attribution::PeerProcess>>,
     endpoint: IpAddr,
     port: u16,
     protocol: crate::TransportProtocol,
@@ -500,14 +515,103 @@ impl Backend {
         }
         self.supervisor.as_mut().ok_or(ServiceError::Unavailable)
     }
+    pub(super) async fn prepare_bundle_profile(
+        &mut self,
+        uid: u32,
+        request: crate::helper::service::SystemBundleRequest,
+        cancel: &mut Cancellation,
+    ) -> Result<GuardArtifact, ServiceError> {
+        if self.has_session() || self.worker_uncertain {
+            return Err(ServiceError::Busy);
+        }
+        request
+            .peer
+            .as_ref()
+            .ok_or(ServiceError::Unsupported)?
+            .verify_identity()
+            .map_err(|_| ServiceError::Unsupported)?;
+        let intent = request.intent;
+        if intent.digest().map_err(|_| ServiceError::InvalidRequest)? != intent.intent_digest
+            || !intent.requirements.system_tun
+        {
+            return Err(ServiceError::InvalidRequest);
+        }
+        let resources = Arc::new(
+            crate::resource_fd_receiver::rebuild(
+                request.files,
+                &intent.canonical,
+                &intent.expected_native,
+                &|| cancel.check().is_err(),
+            )
+            .map_err(|_| {
+                if cancel.check().is_err() {
+                    ServiceError::Cancelled
+                } else {
+                    ServiceError::InvalidRequest
+                }
+            })?,
+        );
+        let identity = yonik_engine::resource_bundle::policy_identity(intent.policy.policy());
+        yonik_engine::resource_bundle::BoundPolicy::bind(
+            intent.policy.policy(),
+            intent.revision,
+            &identity,
+            resources.as_ref(),
+            intent.bindings.clone(),
+        )
+        .map_err(|_| ServiceError::InvalidRequest)?;
+        let bundle = BundleCompile {
+            resource_session: crate::worker::ResourceSession::fresh().map_err(unavailable)?,
+            bus_owner: request.owner.ok_or(ServiceError::InvalidRequest)?,
+            peer_identity: request
+                .peer
+                .as_ref()
+                .ok_or(ServiceError::Unsupported)?
+                .identity_digest(),
+            resources,
+            revision: intent.revision,
+            identity,
+            bindings: intent.bindings,
+            intent: intent.intent_digest,
+            native_pin: intent.native_pin,
+        };
+        let profile = SystemProfileRequest {
+            server: intent.server,
+            policy: Some(intent.policy),
+            engine: intent.engine,
+            kill_switch: intent.requirements.kill_switch,
+            peer: request.peer,
+        };
+        self.prepare_profile_inner(uid, profile, Some(bundle), cancel)
+            .await
+    }
     pub(super) async fn prepare_profile(
         &mut self,
         uid: u32,
         request: SystemProfileRequest,
         cancel: &mut Cancellation,
     ) -> Result<GuardArtifact, ServiceError> {
+        self.prepare_profile_inner(uid, request, None, cancel).await
+    }
+    async fn prepare_profile_inner(
+        &mut self,
+        uid: u32,
+        request: SystemProfileRequest,
+        bundle: Option<BundleCompile>,
+        cancel: &mut Cancellation,
+    ) -> Result<GuardArtifact, ServiceError> {
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
+        }
+        let attribution_required = request
+            .policy
+            .as_ref()
+            .is_some_and(|policy| policy.requires_attribution());
+        if attribution_required {
+            let admission_uid = worker_uid().map_err(|_| ServiceError::Unsupported)?;
+            crate::attribution::preflight(true, request.peer.as_deref(), admission_uid)
+                .await
+                .map_err(|_| ServiceError::Unsupported)?;
         }
         let server = request
             .server
@@ -541,13 +645,51 @@ impl Backend {
             .map_err(unavailable)?
             .port();
         let port = NonZeroU16::new(port).ok_or(ServiceError::Unavailable)?;
-        let config = yonik_engine::compile_system(
-            &server,
-            request.engine,
-            port,
-            &plan.compiler_tun().map_err(unavailable)?,
-        )
-        .map_err(|_| ServiceError::Unsupported)?;
+        let config = if let Some(policy) = request.policy.as_ref() {
+            let probe =
+                TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).map_err(unavailable)?;
+            let probe_port = NonZeroU16::new(probe.local_addr().map_err(unavailable)?.port())
+                .ok_or(ServiceError::Unavailable)?;
+            if let Some(bundle) = &bundle {
+                let bound = yonik_engine::resource_bundle::BoundPolicy::bind(
+                    policy.policy(),
+                    bundle.revision,
+                    &bundle.identity,
+                    bundle.resources.as_ref(),
+                    bundle.bindings.clone(),
+                )
+                .map_err(|_| ServiceError::InvalidRequest)?;
+                yonik_engine::compile_system_bound_policy(
+                    &server,
+                    request.engine,
+                    port,
+                    probe_port,
+                    &bound,
+                    bundle.revision,
+                    &bundle.identity,
+                    &plan.compiler_tun().map_err(unavailable)?,
+                )
+                .map_err(|_| ServiceError::Unsupported)?
+            } else {
+                yonik_engine::compile_system_policy(
+                    &server,
+                    request.engine,
+                    port,
+                    probe_port,
+                    policy.policy(),
+                    &plan.compiler_tun().map_err(unavailable)?,
+                )
+                .map_err(|_| ServiceError::Unsupported)?
+            }
+        } else {
+            yonik_engine::compile_system(
+                &server,
+                request.engine,
+                port,
+                &plan.compiler_tun().map_err(unavailable)?,
+            )
+            .map_err(|_| ServiceError::Unsupported)?
+        };
         if self.registry.is_none() {
             self.registry = Some(TrustedRegistry::system().map_err(unavailable)?);
         }
@@ -557,7 +699,20 @@ impl Backend {
             .ok_or(ServiceError::Unavailable)?
             .snapshot(request.engine)
             .map_err(unavailable)?;
-        let payload = Arc::new(WorkerPayload::new(binary, config).map_err(unavailable)?);
+        let payload = Arc::new(if let Some(bundle) = &bundle {
+            if binary.trusted_hash() != bundle.native_pin {
+                return Err(ServiceError::Unsupported);
+            }
+            WorkerPayload::new_bundle(
+                binary,
+                config,
+                Arc::clone(&bundle.resources),
+                bundle.resource_session,
+            )
+            .map_err(unavailable)?
+        } else {
+            WorkerPayload::new(binary, config).map_err(unavailable)?
+        });
         let query = RouteQuery::new(endpoint, worker_uid)
             .with_mark(plan.socket_mark())
             .with_transport(protocol, None, Some(server.endpoint().port()));
@@ -611,9 +766,35 @@ impl Backend {
         let bytes = serde_json::to_vec(&serde_json::json!({"version":2,"uid":uid,
             "stamp":stamp.to_string(),"kill_switch":request.kill_switch,"worker_uid":worker_uid,
             "table":plan.routing_table(),"mark":plan.socket_mark(),"nonce":nonce,
-            "payload":payload.digest().as_bytes()}))
+            "payload":payload.digest().as_bytes(),"bundle_owner":bundle.as_ref().map(|b|b.bus_owner.as_str()),"bundle_peer":bundle.as_ref().map(|b|b.peer_identity),"resource_session":bundle.as_ref().map(|b|[b.resource_session.session,b.resource_session.generation])}))
         .map_err(unavailable)?;
+        let bundle_digests = if let Some(bundle) = &bundle {
+            use yonik_engine::resource_bundle::VerifiedCatalog;
+            request
+                .peer
+                .as_ref()
+                .ok_or(ServiceError::Unsupported)?
+                .verify_identity()
+                .map_err(|_| ServiceError::Unsupported)?;
+            let context_digest = sha2::Sha256::digest(&bytes).into();
+            let config = *payload.digest().as_bytes();
+            let runtime = crate::bundle_identity::runtime_bundle_digest(
+                bundle.intent,
+                config,
+                bundle.resources.manifest(),
+                context_digest,
+            )
+            .map_err(unavailable)?;
+            Some(crate::helper::service::BundleDigests {
+                intent: bundle.intent,
+                config,
+                runtime,
+            })
+        } else {
+            None
+        };
         let artifact = SessionArtifact {
+            bundle: bundle_digests,
             payload,
             plan,
             baseline,
@@ -624,6 +805,8 @@ impl Backend {
             uid,
             worker_uid,
             kill_switch: request.kill_switch,
+            attribution_required,
+            peer: request.peer,
             endpoint,
             port: server.endpoint().port(),
             protocol,
@@ -643,6 +826,21 @@ impl Backend {
         stamp: NetworkStamp,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
+        if artifact.bundle.is_some() {
+            artifact
+                .peer
+                .as_ref()
+                .ok_or(ServiceError::Unsupported)?
+                .verify_identity()
+                .map_err(|_| ServiceError::Unsupported)?;
+        }
+        crate::attribution::preflight(
+            artifact.attribution_required,
+            artifact.peer.as_deref(),
+            artifact.worker_uid,
+        )
+        .await
+        .map_err(|_| ServiceError::Unsupported)?;
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }

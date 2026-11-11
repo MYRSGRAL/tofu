@@ -20,7 +20,7 @@ pub const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
 pub const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
 pub const SERVICE_INTERFACE: &str = SERVICE_NAME;
 const MAX_WIRE_BYTES: usize = 64 * 1024;
-const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
+const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="BundleCapabilitiesV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="PrepareBundleV1"><arg name="request" type="s" direction="in"/><arg name="canonical" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,6 +101,8 @@ pub struct SystemProfileRequest {
     pub server: yonik_import::ServerIntent,
     pub engine: yonik_engine::Engine,
     pub kill_switch: bool,
+    pub policy: Option<yonik_engine::policy_wire::SystemPolicy>,
+    pub(crate) peer: Option<Arc<crate::attribution::PeerProcess>>,
 }
 impl std::fmt::Debug for SystemProfileRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -108,9 +110,32 @@ impl std::fmt::Debug for SystemProfileRequest {
     }
 }
 
+pub struct SystemBundleRequest {
+    pub intent: crate::bundle_request::BundleRequest,
+    pub files: Vec<std::fs::File>,
+    pub(crate) owner: Option<String>,
+    pub(crate) peer: Option<Arc<crate::attribution::PeerProcess>>,
+}
+#[derive(Clone, Copy)]
+pub struct BundleDigests {
+    pub intent: [u8; 32],
+    pub config: [u8; 32],
+    pub runtime: [u8; 32],
+}
 /// Единственный владелец привилегированных эффектов; dispatcher сериализует доступ.
 pub trait ProtectionHost: Send + 'static {
     type Artifact: PreparedArtifact;
+    fn bundle_transport(&self) -> bool {
+        false
+    }
+    fn prepare_bundle(
+        &mut self,
+        _uid: u32,
+        _request: SystemBundleRequest,
+        _cancel: Cancellation,
+    ) -> impl Future<Output = Result<(Self::Artifact, PreparedContext), ServiceError>> + Send {
+        async { Err(ServiceError::Unsupported) }
+    }
     fn prepare(
         &mut self,
         uid: u32,
@@ -180,6 +205,18 @@ struct ProfilePrepareRequest<'a> {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PolicyProfilePrepareRequest<'a> {
+    version: u32,
+    mode: String,
+    engine: ProfileEngine,
+    kill_switch: bool,
+    #[serde(borrow)]
+    server: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    policy: &'a serde_json::value::RawValue,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ApplyRequest {
     version: u32,
     handle: [u8; 32],
@@ -193,6 +230,8 @@ struct EmptyRequest {
 enum Request {
     Prepare(bool),
     PrepareProfile(Box<SystemProfileRequest>),
+    PrepareBundle(Box<SystemBundleRequest>),
+    BundleCapabilities,
     Apply(PreparedHandle),
     Stop,
     Unlock,
@@ -216,6 +255,40 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
         return Err(ServiceError::InvalidRequest);
     }
     let body = message.body();
+    if header.member().map(|m| m.as_str()) == Some("PrepareBundleV1") {
+        if body.signature().as_ref().map(|s| s.as_str()) != Some("sah") {
+            return Err(ServiceError::InvalidRequest);
+        }
+        let declared = header.unix_fds().unwrap_or(0) as usize;
+        if declared == 0 || declared > 16 {
+            return Err(ServiceError::InvalidRequest);
+        }
+        // Borrowed handles не дублируют FD до проверки bounded count/unique roles.
+        let (json, fds): (&str, Vec<zbus::zvariant::Fd<'_>>) = body
+            .deserialize()
+            .map_err(|_| ServiceError::InvalidRequest)?;
+        if fds.len() != declared {
+            return Err(ServiceError::InvalidRequest);
+        }
+        use std::os::fd::{AsFd, AsRawFd};
+        let mut roles = std::collections::HashSet::new();
+        if fds.iter().any(|fd| !roles.insert(fd.as_raw_fd())) {
+            return Err(ServiceError::InvalidRequest);
+        }
+        let intent = crate::bundle_request::BundleRequest::parse(json, fds.len())
+            .map_err(|_| ServiceError::InvalidRequest)?;
+        let files = fds
+            .into_iter()
+            .map(|fd| fd.as_fd().try_clone_to_owned().map(std::fs::File::from))
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|_| ServiceError::Unavailable)?;
+        return Ok(Request::PrepareBundle(Box::new(SystemBundleRequest {
+            intent,
+            files,
+            owner: None,
+            peer: None,
+        })));
+    }
     let (json,): (&str,) = body
         .deserialize()
         .map_err(|_| ServiceError::InvalidRequest)?;
@@ -238,10 +311,35 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                     }
                     Ok(Request::Prepare(dto.allow_lan))
                 }
-                "system_profile" => {
-                    let dto: ProfilePrepareRequest<'_> =
-                        serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
-                    if dto.version != 1 || dto.mode != "system_profile" {
+                "system_profile" | "system_profile_policy" => {
+                    let (dto, policy) = if route.mode == "system_profile_policy" {
+                        if !yonik_engine::policy_wire::bounded_depth(json, 5)
+                            || !json.trim_start().starts_with('{')
+                        {
+                            return Err(ServiceError::InvalidRequest);
+                        }
+                        let dto: PolicyProfilePrepareRequest<'_> =
+                            serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                        let policy =
+                            yonik_engine::policy_wire::SystemPolicy::parse(dto.policy.get())
+                                .map_err(|_| ServiceError::InvalidRequest)?;
+                        (
+                            ProfilePrepareRequest {
+                                version: dto.version,
+                                mode: dto.mode,
+                                engine: dto.engine,
+                                kill_switch: dto.kill_switch,
+                                server: dto.server,
+                            },
+                            Some(policy),
+                        )
+                    } else {
+                        let dto: ProfilePrepareRequest<'_> =
+                            serde_json::from_str(json).map_err(|_| ServiceError::InvalidRequest)?;
+                        (dto, None)
+                    };
+                    let dto: ProfilePrepareRequest<'_> = dto;
+                    if dto.version != 1 || dto.mode != route.mode {
                         return Err(ServiceError::InvalidRequest);
                     }
                     let server = yonik_import::ServerIntent::parse_json(dto.server.get()).map_err(
@@ -258,6 +356,8 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                         server,
                         engine,
                         kill_switch: dto.kill_switch,
+                        policy,
+                        peer: None,
                     })))
                 }
                 _ => Err(ServiceError::Unsupported),
@@ -284,6 +384,9 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                 "Unlock" => Ok(Request::Unlock),
                 "State" => Ok(Request::State),
                 "Capabilities" => Ok(Request::Capabilities),
+                "BundleCapabilitiesV1" if header.unix_fds().unwrap_or(0) == 0 => {
+                    Ok(Request::BundleCapabilities)
+                }
                 _ => Err(ServiceError::Unsupported),
             }
         }
@@ -402,6 +505,43 @@ async fn dispatch<H: ProtectionHost>(
         Request::Capabilities => {
             serde_json::json!({"version":1,"public_protection":true,"system_tun":false,"allow_lan":false})
         }
+        Request::BundleCapabilities => {
+            let host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            serde_json::json!({"version":1,"canonical_fd_transport":host.bundle_transport()})
+        }
+        Request::PrepareBundle(mut request) => {
+            let mut identities = None;
+            let handle = broker
+                .prepare(message, Prompt::Allow, cancel.clone(), || async {
+                    let mut host = host.try_lock().map_err(|_| PreparedError::Capacity)?;
+                    if !host.bundle_transport() {
+                        return Err(PreparedError::Unsupported);
+                    }
+                    let pid = tokio::time::timeout(
+                        Duration::from_secs(1),
+                        broker.authorizer().peer_pid(&sender, uid),
+                    )
+                    .await
+                    .map_err(|_| PreparedError::Unsupported)??;
+                    request.owner = Some(sender.to_string());
+                    request.peer = Some(Arc::new(
+                        crate::attribution::PeerProcess::capture(pid, uid)
+                            .map_err(|_| PreparedError::Unsupported)?,
+                    ));
+                    let (artifact, context) = host
+                        .prepare_bundle(uid, *request, cancel.clone())
+                        .await
+                        .map_err(as_prepared)?;
+                    identities = artifact.bundle_digests();
+                    if identities.is_none() {
+                        return Err(PreparedError::Unsupported);
+                    }
+                    Ok((artifact, context))
+                })
+                .await?;
+            let identities = identities.ok_or(ServiceError::Unavailable)?;
+            serde_json::json!({"version":1,"handle":handle.as_bytes(),"intent_digest":identities.intent,"runtime_config_digest":identities.config,"runtime_bundle_digest":identities.runtime})
+        }
         Request::Prepare(allow_lan) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
@@ -416,13 +556,29 @@ async fn dispatch<H: ProtectionHost>(
                 .await?;
             serde_json::json!({"version":1,"handle":handle.as_bytes()})
         }
-        Request::PrepareProfile(request) => {
+        Request::PrepareProfile(mut request) => {
             let handle = broker
                 .prepare(message, Prompt::Allow, cancel.clone(), || async {
                     let mut host = host.try_lock().map_err(|_| {
                         let _ = busy_at("prepare_outer_host");
                         PreparedError::Capacity
                     })?;
+                    if request
+                        .policy
+                        .as_ref()
+                        .is_some_and(|policy| policy.requires_attribution())
+                    {
+                        let pid = tokio::time::timeout(
+                            Duration::from_secs(1),
+                            broker.authorizer().peer_pid(&sender, uid),
+                        )
+                        .await
+                        .map_err(|_| PreparedError::Unsupported)??;
+                        request.peer = Some(Arc::new(
+                            crate::attribution::PeerProcess::capture(pid, uid)
+                                .map_err(|_| PreparedError::Unsupported)?,
+                        ));
+                    }
                     host.prepare_profile(uid, *request, cancel.clone())
                         .await
                         .map_err(as_prepared)

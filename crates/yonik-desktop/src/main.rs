@@ -1,5 +1,7 @@
 #![deny(unsafe_code)]
 
+mod dispatch_error;
+
 // Модуль содержит только декларацию сгенерированного FFI.
 #[allow(unsafe_code)]
 mod bridge;
@@ -92,7 +94,7 @@ mod bridge_impl {
 
         pub fn dispatch(mut self: Pin<&mut Self>, request: QString) {
             let Some(host) = self.host.as_ref() else {
-                self.report_error("startup");
+                self.report_dispatch_error(&request.to_string(), "startup");
                 return;
             };
             if let Err(error) = host.dispatch(&request.to_string()) {
@@ -111,6 +113,16 @@ mod bridge_impl {
             true
         }
 
+        pub fn copy_diagnostics_v2(self: Pin<&mut Self>) -> bool {
+            let Some(metadata) =
+                yonik_desktop::diagnostics::export_snapshot_v2(&self.snapshot_json().to_string())
+            else {
+                return false;
+            };
+            ffi::copy_diagnostic_metadata(&QString::from(&metadata));
+            true
+        }
+
         pub fn shutdown(self: Pin<&mut Self>) {
             if let Some(host) = self.host.as_ref() {
                 host.shutdown();
@@ -121,33 +133,32 @@ mod bridge_impl {
         }
 
         fn report_dispatch_error(self: Pin<&mut Self>, request: &str, message: &str) {
-            let mut snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+            let snapshot = crate::dispatch_error::snapshot(
                 &self.snapshot_json().to_string(),
-            )
-            .unwrap_or_default();
-            if let Ok(command) = serde_json::from_str::<serde_json::Value>(request) {
-                if matches!(
-                    command["command"].as_str(),
-                    Some("edit_routing" | "routing_order" | "routing_delete" | "routing_default")
-                ) {
-                    snapshot.insert("routing_ack".into(), serde_json::json!({"request_id": command["request_id"], "saved_id": null, "error": message}));
-                }
-            }
-            snapshot.insert("error".into(), message.into());
-            self.set_snapshot_json(QString::from(
-                &serde_json::Value::Object(snapshot).to_string(),
-            ));
+                request,
+                message,
+            );
+            let mut replacement: serde_json::Value =
+                serde_json::from_str(&snapshot).unwrap_or_default();
+            yonik_desktop::diagnostics::invalidate_contexts(&mut replacement, None);
+            self.set_snapshot_json(QString::from(&replacement.to_string()));
         }
 
         fn report_error(self: Pin<&mut Self>, message: &str) {
-            let mut snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+            let snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
                 &self.snapshot_json().to_string(),
             )
             .unwrap_or_default();
+            let mut replacement = serde_json::Value::Object(snapshot);
+            yonik_desktop::diagnostics::invalidate_contexts(
+                &mut replacement,
+                Some(yonik_desktop::diagnostics::context::Slot::Error),
+            );
+            let Some(snapshot) = replacement.as_object_mut() else {
+                return;
+            };
             snapshot.insert("error".into(), serde_json::Value::String(message.into()));
-            self.set_snapshot_json(QString::from(
-                &serde_json::Value::Object(snapshot).to_string(),
-            ));
+            self.set_snapshot_json(QString::from(&replacement.to_string()));
         }
     }
 }

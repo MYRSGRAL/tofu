@@ -4,13 +4,16 @@ mod dns;
 pub use dns::{DnsContract, DnsMode, compile_native_dns, compile_policy_with_dns};
 mod options;
 pub mod policy_input;
+pub mod private_dns;
 mod routing;
 mod source_selectors;
 mod system_tun;
 pub use routing::{
     PolicyCapability, PolicyCompileError, PolicyMode, ProbeAccess, ProbeCredentials, compile_policy,
 };
-pub use system_tun::{SystemTun, SystemTunAddress, compile_system, compile_system_policy};
+pub use system_tun::{
+    SystemTun, SystemTunAddress, compile_system, compile_system_bound_policy, compile_system_policy,
+};
 
 use std::{
     fmt,
@@ -334,4 +337,11 @@ fn sing_outbound(server: &ParsedServer, options: &Options) -> Result<Value, Comp
     Ok(value)
 }
 
+pub mod policy_wire;
 pub mod presets;
+
+pub mod external_rules;
+
+pub mod resource_bundle;
+
+pub mod resource_index;

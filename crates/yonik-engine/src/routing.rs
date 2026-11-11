@@ -170,6 +170,49 @@ pub(crate) fn compile_tun_policy(
     )
 }
 
+pub(crate) fn compile_tun_policy_resources<C: crate::resource_bundle::VerifiedCatalog>(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    bound: &crate::resource_bundle::BoundPolicy<'_, C>,
+) -> Result<CompiledConfig, PolicyCompileError> {
+    struct WorkerRoutes<'a>(&'a dyn crate::resource_bundle::ResourceRoutes);
+    impl crate::resource_bundle::ResourceRoutes for WorkerRoutes<'_> {
+        fn refs(
+            &self,
+            rule: yonik_domain::ResourceRule,
+            kind: crate::resource_bundle::ResourceKind,
+        ) -> Vec<&crate::resource_bundle::ExternalRef> {
+            self.0.refs(rule, kind)
+        }
+        fn manifest(&self) -> &[crate::resource_bundle::ExternalRef] {
+            self.0.manifest()
+        }
+        fn worker_slot(&self, resource: &crate::resource_bundle::ExternalRef) -> Option<u32> {
+            if resource.engine == Engine::Xray {
+                return None;
+            }
+            self.0
+                .manifest()
+                .iter()
+                .position(|r| r.digest == resource.digest)
+                .map(|i| 32 + i as u32)
+        }
+    }
+    let resources = WorkerRoutes(bound);
+    compile_policy_resources_inner(
+        server,
+        engine,
+        port,
+        probe_port,
+        bound.policy(),
+        PolicyMode::IpOnly,
+        true,
+        Some(&resources),
+    )
+}
+
 fn compile_policy_inner(
     server: &ParsedServer,
     engine: Engine,
@@ -179,10 +222,71 @@ fn compile_policy_inner(
     mode: PolicyMode,
     tun_sources: bool,
 ) -> Result<CompiledConfig, PolicyCompileError> {
+    compile_policy_resources_inner(
+        server,
+        engine,
+        port,
+        probe_port,
+        policy,
+        mode,
+        tun_sources,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compile_policy_resources(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+    mode: PolicyMode,
+    resources: Option<&dyn crate::resource_bundle::ResourceRoutes>,
+) -> Result<CompiledConfig, PolicyCompileError> {
+    compile_policy_resources_inner(
+        server, engine, port, probe_port, policy, mode, false, resources,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn compile_policy_resources_inner(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+    mode: PolicyMode,
+    tun_sources: bool,
+    resources: Option<&dyn crate::resource_bundle::ResourceRoutes>,
+) -> Result<CompiledConfig, PolicyCompileError> {
     if port == probe_port {
         return Err(PolicyCompileError::ProbePort);
     }
     validate_policy(policy, mode, tun_sources)?;
+    if let Some(resources) = resources {
+        use crate::resource_bundle::ResourceKind;
+        for (rules, user) in [(&policy.user_rules, true), (&policy.preset_rules, false)] {
+            for rule in rules.iter().filter(|r| r.enabled) {
+                let key = if user {
+                    yonik_domain::ResourceRule::User(rule.id)
+                } else {
+                    yonik_domain::ResourceRule::Preset(rule.id)
+                };
+                if mode == PolicyMode::Names && !resources.refs(key, ResourceKind::Cidrs).is_empty()
+                {
+                    return Err(PolicyCompileError::Unsupported(
+                        PolicyCapability::RequiredRealResolution,
+                    ));
+                }
+                if mode == PolicyMode::IpOnly
+                    && !resources.refs(key, ResourceKind::Domains).is_empty()
+                {
+                    return Err(PolicyCompileError::Unsupported(
+                        PolicyCapability::DomainsInIpOnly,
+                    ));
+                }
+            }
+        }
+    }
     crate::validate_listener(server, probe_port).map_err(PolicyCompileError::Server)?;
     let mut config = compile(server, engine, port).map_err(PolicyCompileError::Server)?;
     let auth = ProbeCredentials::random()?;
@@ -243,11 +347,17 @@ fn compile_policy_inner(
             Some(policy.lan.iter().map(ToString::to_string).collect()),
         ));
     }
-    for rule in policy
+    for (rule, key) in policy
         .user_rules
         .iter()
-        .chain(&policy.preset_rules)
-        .filter(|rule| rule.enabled)
+        .map(|r| (r, yonik_domain::ResourceRule::User(r.id)))
+        .chain(
+            policy
+                .preset_rules
+                .iter()
+                .map(|r| (r, yonik_domain::ResourceRule::Preset(r.id))),
+        )
+        .filter(|(rule, _)| rule.enabled)
     {
         let domains = (!rule.conditions.domains.is_empty())
             .then(|| rule.conditions.domains.iter().map(xray_domain).collect());
@@ -258,7 +368,11 @@ fn compile_policy_inner(
                 .map(ToString::to_string)
                 .collect()
         });
-        let mut native = route_rule(engine, rule.action, domains, cidrs);
+        let mut native = if let Some(resources) = resources {
+            resource_rule(engine, rule.action, domains, cidrs, key, resources)
+        } else {
+            route_rule(engine, rule.action, domains, cidrs)
+        };
         if tun_sources {
             crate::source_selectors::apply(engine, &mut native, &rule.conditions.executables);
         }
@@ -279,6 +393,11 @@ fn compile_policy_inner(
             config.value["routing"] = json!({"domainStrategy":"AsIs","rules":rules});
         }
         Engine::SingBox => config.value["route"] = json!({"final":"proxy","rules":rules}),
+    }
+    if engine == Engine::SingBox {
+        if let Some(resources) = resources {
+            config.value["route"]["rule_set"]=json!(resources.manifest().iter().map(|r|json!({"type":"local","tag":r.tag(),"format":"source","path":resources.worker_slot(r).map_or_else(||format!("{}.json",r.tag()),|slot|format!("/proc/self/fd/{slot}"))})).collect::<Vec<_>>());
+        }
     }
     config.probe_port = probe_port;
     config.probe_access = ProbeAccess {
@@ -427,4 +546,72 @@ fn validate_policy(
         }
         _ => Ok(()),
     }
+}
+
+fn resource_rule(
+    engine: Engine,
+    action: Action,
+    mut domains: Option<Vec<String>>,
+    mut cidrs: Option<Vec<String>>,
+    key: yonik_domain::ResourceRule,
+    resources: &dyn crate::resource_bundle::ResourceRoutes,
+) -> Value {
+    use crate::resource_bundle::ResourceKind;
+    let dr = resources.refs(key, ResourceKind::Domains);
+    let cr = resources.refs(key, ResourceKind::Cidrs);
+    if engine == Engine::Xray {
+        if !dr.is_empty() {
+            domains
+                .get_or_insert_with(Vec::new)
+                .extend(dr.iter().map(|r| {
+                    resources.worker_slot(r).map_or_else(
+                        || format!("ext:{}.dat:YONIK", r.tag()),
+                        |slot| format!("ext:/proc/self/fd/{slot}:YONIK"),
+                    )
+                }));
+        }
+        if !cr.is_empty() {
+            cidrs
+                .get_or_insert_with(Vec::new)
+                .extend(cr.iter().map(|r| {
+                    resources.worker_slot(r).map_or_else(
+                        || format!("ext:{}.dat:YONIK", r.tag()),
+                        |slot| format!("ext:/proc/self/fd/{slot}:YONIK"),
+                    )
+                }));
+        }
+        return route_rule(engine, action, domains, cidrs);
+    }
+    if dr.is_empty() && cr.is_empty() {
+        return route_rule(engine, action, domains, cidrs);
+    }
+    let mut groups = Vec::new();
+    for (inline, refs, domain) in [(domains, dr, true), (cidrs, cr, false)] {
+        let mut choices = Vec::new();
+        if let Some(inline) = inline {
+            let mut v = if domain {
+                route_rule(engine, action, Some(inline), None)
+            } else {
+                route_rule(engine, action, None, Some(inline))
+            };
+            if let Some(o) = v.as_object_mut() {
+                o.remove("action");
+                o.remove("outbound");
+            }
+            choices.push(v);
+        }
+        if !refs.is_empty() {
+            choices.push(json!({"rule_set":refs.iter().map(|r|r.tag()).collect::<Vec<_>>()}));
+        }
+        if choices.len() == 1 {
+            groups.push(choices.remove(0));
+        } else if !choices.is_empty() {
+            groups.push(json!({"type":"logical","mode":"or","rules":choices}));
+        }
+    }
+    let mut native = route_rule(engine, action, None, None);
+    native["type"] = json!("logical");
+    native["mode"] = json!("and");
+    native["rules"] = json!(groups);
+    native
 }

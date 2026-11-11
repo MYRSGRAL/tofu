@@ -115,3 +115,8 @@ Desktop-ядра поставляются закреплёнными пакет�
 Предлагается UniFFI для вызова общей Rust-логики из Kotlin. События передаются порциями; большой список серверов — страницами. [UniFFI поддерживает Kotlin и async-интерфейсы](https://mozilla.github.io/uniffi-rs/latest/), но thread affinity и освобождение callbacks необходимо проверить прототипом.
 
 FFI-контракт версионируется независимо от storage schema. Нет передачи panic через ABI. Явные закрытие, отмена и ownership handles обязательны; сборщик мусора Kotlin не определяет момент остановки VPN. Граница FFI не участвует в обработке каждого сетевого пакета.
+
+Additive policy-bearing Prepare/RPCv1 описан в `helper-service.md`, раздел
+`system_profile_policy`. Engine `policy_wire::SystemPolicy` владеет проверенной
+immutable domain Policy и закрытым плоским wire DTO. Linux не принимает UI bool
+вместо requirements, native JSON либо произвольный путь executable ядра.

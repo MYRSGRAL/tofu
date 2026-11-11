@@ -275,6 +275,8 @@ async fn actual_backend_rejects_hostname_without_opening_journal_registry_or_wor
     )
     .unwrap();
     let request = crate::helper::service::SystemProfileRequest {
+        policy: None,
+        peer: None,
         server: yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap(),
         engine: yonik_engine::Engine::Xray,
         kill_switch: false,
@@ -782,4 +784,40 @@ async fn stop_wait_preserves_timeout_cancellation_and_no_effect_before_admission
     ));
     assert_eq!(host.backend.lock().unwrap().epoch, 1);
     assert_eq!(host.stop_admission.available_permits(), 1);
+}
+
+#[tokio::test]
+async fn app_policy_denied_before_backend_resources() {
+    let host = actor_fixture();
+    let mut backend = std::sync::Arc::try_unwrap(host.backend)
+        .ok()
+        .unwrap()
+        .into_inner()
+        .ok()
+        .unwrap();
+    let report = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@192.0.2.1:443".to_vec(),
+    )
+    .unwrap();
+    let policy = yonik_engine::policy_wire::SystemPolicy::parse(r#"{"version":1,"default_action":"proxy","user_rules":[{"id":1,"enabled":true,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":["/usr/bin/client"]}],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}"#).unwrap();
+    let request = crate::helper::service::SystemProfileRequest {
+        server: yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap(),
+        engine: yonik_engine::Engine::Xray,
+        kill_switch: false,
+        policy: Some(policy),
+        peer: None,
+    };
+    let (_keep, mut cancel) = crate::Cancellation::new();
+    assert_eq!(
+        backend
+            .prepare_profile(1000, request, &mut cancel)
+            .await
+            .err(),
+        Some(ServiceError::Unsupported)
+    );
+    assert!(backend.journal.is_none());
+    assert!(backend.registry.is_none());
+    assert!(backend.supervisor.is_none());
+    assert!(!backend.worker_uncertain);
+    assert!(backend.active.is_none());
 }

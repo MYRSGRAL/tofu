@@ -78,7 +78,7 @@ pub(crate) struct Harness {
     pub(crate) host: DesktopHost,
     receiver: mpsc::Receiver<String>,
     snapshots: Vec<String>,
-    diagnostic: harness_diagnostics::Trace,
+    diagnostic: Arc<harness_diagnostics::Trace>,
 }
 impl Harness {
     pub(crate) fn new(config: HostConfig) -> Self {
@@ -88,7 +88,12 @@ impl Harness {
         config: HostConfig,
         hook: impl Fn(&str) + Send + Sync + 'static,
     ) -> Self {
-        let diagnostic = harness_diagnostics::Trace::new();
+        let diagnostic = std::sync::Arc::new(harness_diagnostics::Trace::new());
+        #[cfg(feature = "startup-diagnostics")]
+        let config = {
+            let trace = diagnostic.clone();
+            config.with_startup_observer(move |phase| trace.startup(phase))
+        };
         let (sender, receiver) = mpsc::channel();
         let host = DesktopHost::start(config, move |value| {
             let _ = sender.send(value.clone());
@@ -1826,6 +1831,56 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
 }
 
 #[test]
+fn logs_explicit_page_is_safe_and_stop_remains_available() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"engine", "request_id":"1"}));
+    let page = app.wait(|v| v["logs"]["request_id"] == "1");
+    assert_eq!(page["logs"]["status"], "empty");
+    assert_eq!(page["logs"]["events"].as_array().unwrap().len(), 0);
+    assert!(
+        page["logs"]["export"]
+            .as_str()
+            .unwrap()
+            .starts_with("yonik-events-v1")
+    );
+    assert!(app.host.dispatch(r#"{"command":"logs_read","after":"https://SECRET","source":"app","request_id":"2"}"#).is_err());
+    app.send(json!({"command":"stop"}));
+    app.close();
+}
+
+#[test]
+fn stop_cancels_queued_logs_without_waiting_for_a_page() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let first_ready = AtomicU64::new(0);
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == true && first_ready.fetch_add(1, Ordering::Relaxed) == 0 {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let _ = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+        }
+    });
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"1"}));
+    app.send(json!({"command":"stop"}));
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    let cancelled = app.wait(|v| v["logs"]["status"] == "cancelled");
+    assert_eq!(cancelled["logs"]["request_id"], "1");
+    assert!(cancelled["logs"]["export"].is_null());
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"2"}));
+    app.wait(|v| v["logs"]["request_id"] == "2");
+    app.close();
+}
+
+#[test]
 fn явный_системный_режим_не_подменяется_local_socks() {
     let directory = Directory::new();
     let mut app = Harness::new(directory.config());
@@ -1837,6 +1892,81 @@ fn явный_системный_режим_не_подменяется_local_so
     app.send(json!({"command":"set_connection_mode", "mode":"local"}));
     app.wait(|v| v["connection_mode"] == "local");
     app.close();
+}
+
+#[test]
+fn настройки_расписания_сохраняются_и_отклоняют_короткий_интервал() {
+    let dir = Directory::new();
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(
+        json!({"command":"set_subscription_schedule", "interval_seconds":86399, "background":true}),
+    );
+    let rejected = app.wait(|v| v["connection_error"] == "invalid_input");
+    assert_eq!(rejected["subscription_interval_seconds"], 86400);
+    assert_eq!(rejected["subscription_background"], false);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    app.wait(|v| {
+        v["subscription_interval_seconds"] == 172800 && v["subscription_background"] == true
+    });
+    app.close();
+    let mut reopened = Harness::new(dir.config());
+    let state = reopened.wait(|v| v["ready"] == true);
+    assert_eq!(state["subscription_interval_seconds"], 172800);
+    assert_eq!(state["subscription_background"], true);
+    reopened.close();
+}
+
+#[test]
+fn ручной_fetch_резервирует_настроенный_интервал_до_запроса() {
+    let dir = Directory::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/held", listener.local_addr().unwrap());
+    let (entered, request) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        assert!(stream.read(&mut bytes).unwrap() > 0);
+        entered.send(()).unwrap();
+        assert_eq!(stream.read(&mut bytes).unwrap(), 0);
+    });
+    let mut app = Harness::new(dir.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":false}));
+    app.wait(|v| v["subscription_interval_seconds"] == 172800);
+    app.send(json!({"command":"add_source", "name":"Ручной", "url":url, "local_exception":true, "route":"direct"}));
+    let id = app.wait(|v| v["source_id"].is_i64())["source_id"]
+        .as_i64()
+        .unwrap();
+    app.send(json!({"command":"refresh"}));
+    request.recv_timeout(Duration::from_secs(5)).unwrap();
+    app.close();
+    server.join().unwrap();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+                dir.0.join("subscriptions.sqlite"),
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .unwrap();
+            let service = yonik_linux::SubscriptionService::new(repo);
+            let state = service
+                .schedule_metadata(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state
+                .unwrap();
+            assert_eq!(state.due_wall.unwrap() - state.recorded_wall, 172800);
+            service.close().await.unwrap();
+        });
 }
 
 #[test]
@@ -1870,4 +2000,104 @@ fn closed_snapshot_has_released_last_database_handle() {
             (m.ino(), m.nlink(), m.mode())
         })
     );
+}
+
+#[test]
+fn startup_timeout_captures_original_harness_phase_and_allows_shutdown() {
+    let directory = Directory::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let callback_gate = gate.clone();
+    let mut app = Harness::with_hook(directory.config(), move |snapshot| {
+        let value: Value = serde_json::from_str(snapshot).expect("DTO");
+        if value["ready"] == false && value["busy"] == true {
+            let (lock, condition) = &*callback_gate;
+            let released = lock.lock().expect("gate");
+            let (_released, timeout) = condition
+                .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+                .expect("ограниченное ожидание");
+            assert!(!timeout.timed_out(), "test должен отпустить callback");
+        }
+    });
+    app.wait(|v| v["ready"] == false && v["busy"] == true);
+    // Воспроизводим diagnostic path без ожидания настоящего десятисекундного hang.
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.diagnostic.fail(
+            mpsc::RecvTimeoutError::Timeout,
+            std::panic::Location::caller(),
+            Duration::ZERO,
+        );
+    }))
+    .expect_err("контролируемый timeout");
+    let message = failure.downcast_ref::<String>().expect("diagnostic");
+    assert!(
+        message.contains("RuntimeBuild"),
+        "observer должен работать без CLI features"
+    );
+    assert!(message.contains("startup_phase_elapsed_ms"));
+    assert!(message.contains("startup_phase_age_ms"));
+    app.host.shutdown();
+    let (lock, condition) = &*gate;
+    *lock.lock().expect("release") = true;
+    condition.notify_all();
+    app.wait(|v| v["closed"] == true);
+    assert!(app.host.wait_closed(Duration::from_secs(2)));
+}
+
+#[test]
+fn logs_save_uses_only_accepted_page_and_never_replaces_destination() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    let path = directory.0.join("events.txt");
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"1"}));
+    let page = app.wait(|v| v["logs"]["request_id"] == "1");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"9", "destination":path, "request_id":"2"}),
+    );
+    let refused = app.wait(|v| v["logs"]["request_id"] == "2");
+    assert_eq!(refused["logs"]["status"], "refused");
+    assert!(!path.exists());
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"3"}));
+    app.wait(|v| v["logs"]["request_id"] == "3");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"3", "destination":path, "request_id":"4"}),
+    );
+    let saved = app.wait(|v| v["logs"]["request_id"] == "4" && v["logs"]["status"] != "saving");
+    assert_eq!(saved["logs"]["status"], "saved");
+    assert!(saved["logs"]["export"].is_null());
+    let original = fs::read(&path).expect("экспорт");
+    assert_eq!(
+        original,
+        page["logs"]["export"]
+            .as_str()
+            .expect("страница")
+            .as_bytes()
+    );
+    app.send(json!({"command":"logs_read", "after":"0", "source":"all", "request_id":"5"}));
+    app.wait(|v| v["logs"]["request_id"] == "5");
+    app.send(
+        json!({"command":"logs_save", "page_request_id":"5", "destination":path, "request_id":"6"}),
+    );
+    let refused = app.wait(|v| v["logs"]["request_id"] == "6" && v["logs"]["status"] != "saving");
+    assert_eq!(refused["logs"]["status"], "refused");
+    assert_eq!(fs::read(path).expect("исходный файл"), original);
+    app.close();
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn logs_trusted_control_is_not_deserializable_from_ui() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    assert!(app.host.dispatch(r#"{"command":"logs_test"}"#).is_err());
+    let (sender, receiver) = mpsc::channel();
+    app.host.test_event_log(sender).expect("Rust control");
+    assert!(
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("ответ")
+            .is_some()
+    );
+    app.close();
 }
