@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 
@@ -24,6 +25,9 @@ def main() -> int:
         if digest != manifest["binary"][name]["sha256"]:
             parser.error(f"SHA-256 не совпадает: {name}")
     args.output.mkdir(parents=True, exist_ok=False)
+    # Драйвер импортирует соседние collectors независимо от cwd запуска.
+    tools_dir = Path(__file__).resolve().parents[2] / "tools"
+    sys.path.insert(0, str(tools_dir))
     spec = importlib.util.spec_from_file_location(
         "ui_benchmark", Path(__file__).resolve().parents[2] / "tools/ui_benchmark.py"
     )
