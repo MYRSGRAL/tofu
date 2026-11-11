@@ -4,6 +4,8 @@ mod backup;
 mod batch_targets;
 #[cfg(test)]
 mod cancellation_tests;
+#[cfg(any(test, feature = "test-support"))]
+mod path_diagnostics;
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
@@ -721,29 +723,50 @@ impl Database {
     }
 }
 
+fn unsafe_path(
+    _path: &Path,
+    _branch: &'static str,
+    _node: &Path,
+    _observed: Option<&fs::Metadata>,
+    _error: Option<&std::io::Error>,
+) -> RepositoryError {
+    #[cfg(any(test, feature = "test-support"))]
+    path_diagnostics::record(_path, _branch, _node, _observed, _error);
+    RepositoryError::UnsafePath
+}
+
 fn secure_path(path: &Path) -> Result<()> {
     if !path.is_absolute() || path.file_name().is_none() {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(path, "input_shape", path, None, None));
     }
-    let parent = path.parent().ok_or(RepositoryError::UnsafePath)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| unsafe_path(path, "parent_missing", path, None, None))?;
     if !parent.exists() {
         DirBuilder::new()
             .mode(0o700)
             .create(parent)
-            .map_err(|_| RepositoryError::UnsafePath)?;
+            .map_err(|error| unsafe_path(path, "parent_create", parent, None, Some(&error)))?;
     }
     // canonicalize выявляет симлинки и в предках, а не только в последнем компоненте.
     if parent
         .canonicalize()
-        .map_err(|_| RepositoryError::UnsafePath)?
+        .map_err(|error| unsafe_path(path, "parent_canonicalize", parent, None, Some(&error)))?
         != parent
     {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(path, "parent_noncanonical", parent, None, None));
     }
-    let meta = fs::symlink_metadata(parent).map_err(|_| RepositoryError::UnsafePath)?;
+    let meta = fs::symlink_metadata(parent)
+        .map_err(|error| unsafe_path(path, "parent_stat", parent, None, Some(&error)))?;
     let uid = rustix::process::getuid().as_raw();
     if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o7777 != 0o700 {
-        return Err(RepositoryError::UnsafePath);
+        return Err(unsafe_path(
+            path,
+            "parent_policy",
+            parent,
+            Some(&meta),
+            None,
+        ));
     }
     match fs::symlink_metadata(path) {
         Ok(meta) => {
@@ -752,7 +775,13 @@ fn secure_path(path: &Path) -> Result<()> {
                 || meta.mode() & 0o7777 != 0o600
                 || meta.nlink() != 1
             {
-                return Err(RepositoryError::UnsafePath);
+                return Err(unsafe_path(
+                    path,
+                    "database_policy",
+                    path,
+                    Some(&meta),
+                    None,
+                ));
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -762,26 +791,41 @@ fn secure_path(path: &Path) -> Result<()> {
                 .mode(0o600)
                 .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
                 .open(path)
-                .map_err(|_| RepositoryError::UnsafePath)?;
+                .map_err(|error| unsafe_path(path, "database_create", path, None, Some(&error)))?;
         }
-        Err(_) => return Err(RepositoryError::UnsafePath),
+        Err(error) => return Err(unsafe_path(path, "database_stat", path, None, Some(&error))),
     }
     // SQLite использует эти имена самостоятельно. Не разрешаем готовые симлинки.
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut name = path.as_os_str().to_os_string();
         name.push(suffix);
-        match fs::symlink_metadata(PathBuf::from(name)) {
+        let sidecar = PathBuf::from(name);
+        match fs::symlink_metadata(&sidecar) {
             Ok(meta)
                 if !meta.is_file()
                     || meta.uid() != uid
                     || meta.mode() & 0o077 != 0
                     || meta.nlink() != 1 =>
             {
-                return Err(RepositoryError::UnsafePath);
+                return Err(unsafe_path(
+                    path,
+                    "sidecar_policy",
+                    &sidecar,
+                    Some(&meta),
+                    None,
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(RepositoryError::UnsafePath),
+            Err(error) => {
+                return Err(unsafe_path(
+                    path,
+                    "sidecar_stat",
+                    &sidecar,
+                    None,
+                    Some(&error),
+                ));
+            }
         }
     }
     Ok(())
