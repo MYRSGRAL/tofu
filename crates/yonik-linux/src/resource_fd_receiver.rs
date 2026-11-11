@@ -40,6 +40,7 @@ pub fn verify(
     }
     let mut physical = claimed_work.checked_add(8192).ok_or_else(invalid)?;
     let mut records = 0u64;
+    let mut inodes = std::collections::HashSet::new();
     for (i, (d, file)) in manifest.iter().zip(files).enumerate() {
         if cancel() {
             return Err(cancelled());
@@ -58,6 +59,10 @@ pub fn verify(
             return Err(invalid());
         }
         let metadata = file.metadata()?;
+        use std::os::unix::fs::MetadataExt;
+        if !inodes.insert((metadata.dev(), metadata.ino())) {
+            return Err(invalid());
+        }
         let seals = SealFlags::WRITE | SealFlags::SHRINK | SealFlags::GROW | SealFlags::SEAL;
         if !metadata.is_file()
             || metadata.len() != d.bytes
@@ -149,6 +154,8 @@ impl Drop for Reservation {
 pub struct RebuiltBatch {
     pub artifacts: Vec<File>,
     _sources: Vec<File>,
+    indices: Vec<RuleSetIndex>,
+    manifest: Vec<yonik_engine::resource_bundle::ExternalRef>,
     _reservation: Reservation,
 }
 struct Positioned<'a, C> {
@@ -225,7 +232,18 @@ pub fn rebuild(
         if d.kind != e.kind || d.records != e.records {
             return Err(invalid());
         }
-        work = work.checked_add(e.bytes).ok_or_else(invalid)?;
+        work = work
+            .checked_add(
+                e.bytes
+                    .checked_mul(if e.engine == yonik_engine::Engine::Xray {
+                        3
+                    } else {
+                        2
+                    })
+                    .ok_or_else(invalid)?,
+            )
+            .and_then(|n| n.checked_add(d.records.checked_mul(128)?))
+            .ok_or_else(invalid)?;
         total = total
             .checked_add(d.bytes.checked_mul(3).ok_or_else(invalid)?)
             .ok_or_else(invalid)?;
@@ -233,10 +251,22 @@ pub fn rebuild(
     let reservation = Reservation::acquire(total.checked_add(work).ok_or_else(invalid)?)?;
     verify(descriptors, &sources, work, cancel)?;
     let mut artifacts = Vec::with_capacity(expected.len());
+    let mut indices = Vec::with_capacity(expected.len());
     for ((source, d), e) in sources.iter().zip(descriptors).zip(expected) {
         if cancel() {
             return Err(cancelled());
         }
+        let mut plaintext = zeroize::Zeroizing::new(vec![0; d.bytes as usize]);
+        for (i, block) in plaintext.chunks_mut(8192).enumerate() {
+            if cancel() {
+                return Err(cancelled());
+            }
+            source.read_exact_at(block, (i * 8192) as u64)?;
+        }
+        indices.push(RuleSetIndex::parse_cancellable(
+            &plaintext, d.kind, d.records, cancel,
+        )?);
+        drop(plaintext);
         let format = match (e.engine, d.kind) {
             (Engine::Xray, ResourceKind::Domains) => Format::XrayDomains,
             (Engine::Xray, ResourceKind::Cidrs) => Format::XrayCidrs,
@@ -244,7 +274,7 @@ pub fn rebuild(
             (Engine::SingBox, ResourceKind::Cidrs) => Format::SingCidrs,
         };
         let mut file = File::from(memfd_create(
-            "yonik-verified-resource",
+            format!("yonik-{}", e.tag()),
             MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
         )?);
         let mut writer = BoundedWriter {
@@ -284,6 +314,33 @@ pub fn rebuild(
     Ok(RebuiltBatch {
         artifacts,
         _sources: sources,
+        indices,
+        manifest: expected.to_vec(),
         _reservation: reservation,
     })
+}
+
+impl yonik_engine::resource_bundle::VerifiedCatalog for RebuiltBatch {
+    fn manifest(&self) -> &[yonik_engine::resource_bundle::ExternalRef] {
+        &self.manifest
+    }
+    fn matches_domain(
+        &self,
+        index: usize,
+        name: &yonik_engine::resource_bundle::DomainName,
+    ) -> bool {
+        self.indices
+            .get(index)
+            .is_some_and(|resource| resource.matches_domain(name))
+    }
+    fn matches_ip(&self, index: usize, ip: std::net::IpAddr) -> bool {
+        self.indices
+            .get(index)
+            .is_some_and(|resource| resource.matches_ip(ip))
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn physical_reserved_bytes() -> u64 {
+    RESERVED.load(std::sync::atomic::Ordering::Acquire)
 }

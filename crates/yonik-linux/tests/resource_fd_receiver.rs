@@ -411,4 +411,209 @@ fn semantic_identity_is_separate_from_helper_runtime() {
     intent.revision = 1;
     intent.native_pin[0] ^= 1;
     assert_ne!(digest, intent.digest().unwrap());
+    let request = yonik_linux::bundle_request::BundleRequest {
+        server,
+        policy,
+        engine: Engine::Xray,
+        native_pin: [27; 32],
+        revision: 1,
+        intent_digest: digest,
+        requirements: CompileRequirements {
+            kill_switch: true,
+            system_tun: true,
+        },
+        bindings: binding.to_vec(),
+        canonical: canonical.to_vec(),
+        expected_native: expected.to_vec(),
+    };
+    let json = request.encode().unwrap();
+    assert!(yonik_linux::bundle_request::BundleRequest::parse(&json, 1).is_ok());
+    for count in [0, 2, 17] {
+        assert!(yonik_linux::bundle_request::BundleRequest::parse(&json, count).is_err());
+    }
+    for field in [
+        "intent_digest",
+        "expected_native",
+        "caller_path",
+        "runtime_port",
+    ] {
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        match field {
+            "intent_digest" => value[field] = serde_json::json!(vec![0; 32]),
+            "expected_native" => value[field][0]["digest"][0] = serde_json::json!(0),
+            _ => value[field] = serde_json::json!("forbidden"),
+        }
+        assert!(yonik_linux::bundle_request::BundleRequest::parse(&value.to_string(), 1).is_err());
+    }
+}
+
+#[test]
+fn verified_cidr_catalog_compiles_system_tun_and_rejects_wrong_binding_revision() {
+    use std::num::NonZeroU16;
+    use yonik_engine::{
+        Engine,
+        external_rules::{Format, Limits, compile_records},
+        resource_bundle::{
+            Action, BoundPolicy, ExternalRef, Policy, ResourceBinding, ResourceRule, Rule,
+            policy_identity,
+        },
+    };
+    let bytes = b"10.0.0.0/8\n";
+    let mut artifact = Vec::new();
+    compile_records(
+        std::io::Cursor::new(bytes),
+        &mut artifact,
+        Format::XrayCidrs,
+        1,
+        Limits::default(),
+    )
+    .unwrap();
+    let expected = ExternalRef {
+        engine: Engine::Xray,
+        digest: Sha256::digest(&artifact).into(),
+        bytes: artifact.len() as u64,
+        records: 1,
+        kind: ResourceKind::Cidrs,
+        format_version: 1,
+    };
+    let batch = receiver::rebuild(
+        vec![fixture(bytes, true, true)],
+        &[descriptor(bytes)],
+        &[expected],
+        &|| false,
+    )
+    .unwrap();
+    let policy = Policy {
+        user_rules: vec![Rule {
+            id: 1,
+            enabled: true,
+            conditions: Default::default(),
+            action: Action::Block,
+        }],
+        ..Policy::default()
+    };
+    let identity = policy_identity(&policy);
+    let bound = BoundPolicy::bind(
+        &policy,
+        9,
+        &identity,
+        &batch,
+        vec![ResourceBinding {
+            rule: ResourceRule::User(1),
+            resource: 0,
+        }],
+    )
+    .unwrap();
+    let server = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    let tun = yonik_engine::SystemTun::new(123, 1500, 987, vec!["198.18.0.1/30".parse().unwrap()])
+        .unwrap();
+    let config = yonik_engine::compile_system_bound_policy(
+        &server.servers[0],
+        Engine::Xray,
+        NonZeroU16::new(21001).unwrap(),
+        NonZeroU16::new(21002).unwrap(),
+        &bound,
+        9,
+        &identity,
+        &tun,
+    )
+    .unwrap();
+    let mut encoded = Vec::new();
+    config.write_sensitive(&mut encoded).unwrap();
+    assert!(String::from_utf8(encoded).unwrap().contains("ext:r-"));
+    assert!(
+        yonik_engine::compile_system_bound_policy(
+            &server.servers[0],
+            Engine::Xray,
+            NonZeroU16::new(21001).unwrap(),
+            NonZeroU16::new(21002).unwrap(),
+            &bound,
+            10,
+            &identity,
+            &tun
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn canonical_sidecar_slot_boundary_keeps_accepted_store_reopenable() {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use yonik_engine::external_rules::{Format, Limits, compile_records};
+    use yonik_linux::{
+        rule_set_custody::{RuleSetFormat, RuleSetRef},
+        rule_set_store::EncryptedRuleSetStore,
+    };
+    let source = b"10.0.0.0/8\n";
+    let mut native = Vec::new();
+    compile_records(
+        std::io::Cursor::new(source),
+        &mut native,
+        Format::XrayCidrs,
+        1,
+        Limits::default(),
+    )
+    .unwrap();
+    let reference = RuleSetRef::new(
+        Sha256::digest(&native).into(),
+        native.len() as u64,
+        1,
+        RuleSetFormat::XrayCidrsV1,
+    )
+    .unwrap();
+    for initial in [127, 128] {
+        let path = std::env::temp_dir().join(format!(
+            "yonik-sidecar-boundary-{}-{initial}",
+            std::process::id()
+        ));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        {
+            let mut store =
+                EncryptedRuleSetStore::open(File::open(&path).unwrap(), [31; 32]).unwrap();
+            store.publish(&reference, &native).unwrap();
+            store.commit(0, std::slice::from_ref(&reference)).unwrap();
+            for i in 2..initial {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path.join(format!("sentinel-{i}")))
+                    .unwrap();
+            }
+            assert_eq!(std::fs::read_dir(&path).unwrap().count(), initial);
+            let result = store.publish_canonical(&reference, source, ResourceKind::Cidrs);
+            assert_eq!(result.is_ok(), initial == 127);
+            assert_eq!(std::fs::read_dir(&path).unwrap().count(), 128);
+            assert!(store.reservations().is_ok());
+        }
+        {
+            let mut store =
+                EncryptedRuleSetStore::open(File::open(&path).unwrap(), [31; 32]).unwrap();
+            assert_eq!(store.generation(), 1);
+            if initial == 127 {
+                store
+                    .publish_canonical(&reference, source, ResourceKind::Cidrs)
+                    .unwrap();
+                let lease = store.lease_current().unwrap();
+                assert_eq!(lease.canonical_sources().unwrap().resources.len(), 1);
+            } else {
+                assert!(
+                    store
+                        .publish_canonical(&reference, source, ResourceKind::Cidrs)
+                        .is_err()
+                );
+            }
+            assert!(path.join("sentinel-2").exists());
+        }
+        for entry in std::fs::read_dir(&path).unwrap() {
+            std::fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        std::fs::remove_dir(path).unwrap();
+    }
 }

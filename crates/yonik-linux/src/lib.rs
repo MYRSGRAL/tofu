@@ -100,3 +100,6 @@ pub mod resource_fd_receiver;
 
 #[cfg(target_os = "linux")]
 pub mod bundle_identity;
+
+#[cfg(target_os = "linux")]
+pub mod bundle_request;

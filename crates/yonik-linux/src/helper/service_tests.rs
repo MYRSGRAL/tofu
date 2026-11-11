@@ -622,3 +622,36 @@ async fn policy_profile_private_bus_roundtrip_and_one_shot() {
     assert_eq!(f.effects.load(Ordering::SeqCst), 1);
     f.shutdown().await;
 }
+
+#[test]
+fn bundle_method_rejects_wrong_signature_fd_count_and_unknown_fields() {
+    let wrong = Message::method(SERVICE_PATH, "PrepareBundleV1")
+        .unwrap()
+        .interface(SERVICE_INTERFACE)
+        .unwrap()
+        .build(&("{\"version\":1}",))
+        .unwrap();
+    assert!(matches!(parse(&wrong), Err(ServiceError::InvalidRequest)));
+    let no_fds: Vec<zbus::zvariant::OwnedFd> = Vec::new();
+    let empty = Message::method(SERVICE_PATH, "PrepareBundleV1")
+        .unwrap()
+        .interface(SERVICE_INTERFACE)
+        .unwrap()
+        .build(&("{\"version\":1}", no_fds))
+        .unwrap();
+    assert!(matches!(parse(&empty), Err(ServiceError::InvalidRequest)));
+    let extra = Message::method(SERVICE_PATH, "BundleCapabilitiesV1")
+        .unwrap()
+        .interface(SERVICE_INTERFACE)
+        .unwrap()
+        .build(&("{\"version\":1,\"extra\":true}",))
+        .unwrap();
+    assert!(matches!(parse(&extra), Err(ServiceError::InvalidRequest)));
+    let valid = Message::method(SERVICE_PATH, "BundleCapabilitiesV1")
+        .unwrap()
+        .interface(SERVICE_INTERFACE)
+        .unwrap()
+        .build(&("{\"version\":1}",))
+        .unwrap();
+    assert!(matches!(parse(&valid), Ok(Request::BundleCapabilities)));
+}

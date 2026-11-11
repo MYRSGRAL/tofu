@@ -126,6 +126,14 @@ pub fn runtime_bundle_digest(
     }
     let mut hash = Sha256::new();
     hash.update(b"yonik-runtime-bundle-v1\0");
+    bytes(
+        &mut hash,
+        if manifest[0].engine == yonik_engine::Engine::Xray {
+            b"xray-private-tmpfs-assets-v1"
+        } else {
+            b"sing-box-fixed-fd-source-v1"
+        },
+    );
     hash.update(intent);
     hash.update(config);
     hash.update(context_digest);

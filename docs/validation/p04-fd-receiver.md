@@ -1,86 +1,113 @@
-# P04: граница canonical FD receiver
+# P04: canonical FD admission и helper/worker bundle transport
 
-База: `3c0c4e6d062a540cec439cc7d031d1e0696fb3a7`, ordinary merge
+Подготовленная база `3c0c4e6d062a540cec439cc7d031d1e0696fb3a7` объединяет
 PR90 `7fedcd07014b410ecb278b19be58c55d5f2d8775` и PR101
-`8b7261ef81978b3dc473b913c0a5ccc92f512cc1`.
+`8b7261ef81978b3dc473b913c0a5ccc92f512cc1`. P2 inventory fix
+`12803936f500c3ecb798b9e1843f8fc21ff1fe82` импортирован как `fdc39f0`;
+canonical sidecars используют `reserve(bytes, 1)`, reuse — `reserve(0, 0)`.
+Исходные encoder и native custody format не менялись.
 
-Receiver — независимый preflight, пока не подключён к privileged dispatcher.
-Он не является Prepare, Apply, admission reservation или доказательством custody.
-Existing six RPC и closed capabilities-v1 не изменены.
+## Новый RPC и identities
 
-Предлагаемый additive transport требует согласования root: отдельный
-PrepareBundleV1 с bounded typed request и ordered canonical source FDs.
-Source digest отличается от native artifact digest в существующем manifest.
-Helper должен закрыто проверить source records, перестроить native artifact
-существующим encoder и сверить native manifest/config/policy/revision/bundle
-identity до выдачи одноразового prepared handle. Caller paths не принимаются.
+Старые шесть RPC, closed capabilities-v1, signatures и error/owner fences сохранены.
+Отдельный `BundleCapabilitiesV1(s)` возвращает closed DTO
+`{version:1, canonical_fd_transport:bool}`. Это наличие transport, а не доказательство
+native process attribution, DNS provenance или готовности TUN.
 
-Receiver проверяет весь batch metadata до первого чтения: count <=16, format v1,
-records <=1.5M, checked physical arithmetic <=64MiB, read-only regular memfd,
-четыре обязательных seals, exact length и уникальность digest. Читает через pread,
-не меняет общий file offset. SHA-256 и точный record count проверяются вместе с
-закрытым canonical grammar trusted evaluator. JSON/native protobuf/compressed
-payload, regex и неканонические CIDR отвергаются даже с корректным caller SHA.
-Отмена проверяется перед каждым блоком <=8192 bytes и после окончания.
+`PrepareBundleV1(s, ah)` принимает bounded typed metadata и ≤16 ordered canonical
+source FD. Общий body ≤64 KiB. DTO содержит ServerIntent, SystemPolicy, ordered
+bindings, revision, engine/pin, closed compile requirements, canonical descriptors
+и expected native refs. Artifact/config bodies, caller paths, runtime ports,
+probe credentials и asset env/path не принимаются. Signature и transport FD count
+проверяются отдельно от manifest count. Неизвестные поля отклоняются.
 
-Physical preflight учитывает три копии source и claimed compiler work; это не
-процессная reservation и не RSS promise. До production необходим отдельный
-aggregate pool, учёт native output/index allocations и удержание до доказанного
-worker+cgroup empty либо bounded quarantine. Drop/Stop/owner loss не evidence.
+`yonik-intent-bundle-v1\0` связывает canonical typed server/policy, bindings,
+revision, engine/pin, requirements и оба ordered manifests. Helper сам считает SHA
+и сравнивает intent. `yonik-runtime-bundle-v1\0` дополнительно связывает actual
+config digest, asset strategy, retained runtime-context digest и ordered native
+refs. Старый `yonik-bundle-v1` и смысл CompiledResourceBundle не переопределены.
 
-App AND / BlockedProcessAttribution и Domain+CIDR / Real provenance gates остаются.
-150k membership component proof не является production Apply. Полный P04,
-actual both-core worker dataflow и isolated system-bus VM gate этим receiver
-не подтверждаются.
+Helper резервирует реальные ports/network plan, сам генерирует private probe
+credentials и fresh 16-byte resource session/generation context. Контекст связывает
+также unique bus owner, проверенный peer PID/starttime/namespaces и network stamp.
+Новый reply содержит one-use handle и intent/config/runtime digests; config body
+и probe credentials не возвращаются. Client проверяет intent echo, closed DTO,
+sender/current owner. Ни один mutating RPC не повторяется автоматически.
 
-## Отдельные semantic и runtime identities
+## Admission и native content
 
-Новый `IntentBundle::digest` использует `yonik-intent-bundle-v1\0` и связывает
-bounded typed ServerIntent serialization, policy identity, ordered typed bindings,
-revision, engine/pin, закрытые compile requirements, ordered canonical descriptors
-и expected native refs. Runtime ports и probe secrets не входят в intent.
-Текущий slice requirements — SystemTUN / IpOnly без domain provenance;
-requirements не считаются доказательством capability/provenance.
+Fresh polkit и daemon-derived peer identity выполняются до privileged effects.
+Все FD metadata проверяются до первого pread: ordered count, readonly regular
+memfd, mandatory seals, exact size, distinct inode/digest и physical reservation.
+Затем stream SHA/count и закрытый canonical grammar. Caller hash/count не заменяют
+проверку содержимого. JSON/native protobuf extras, regex и compressed payload не
+интерпретируются. Rebuild использует прежний encoder, сравнивает exact native
+size/SHA/records/kind/version и выдаёт sealed readonly artifacts.
 
-`runtime_bundle_digest` использует `yonik-runtime-bundle-v1\0` и связывает intent,
-actual config digest, helper retained context digest и immutable ordered native
-manifest. Helper обязан вычислять context digest из собственного retained
-owner/epoch/plan/private context. Старый `yonik-bundle-v1` не переопределён.
-Эти функции пока не подключены к prepared handle, dispatcher или client reply.
+Индексы строятся из тех же canonical bytes с отменой по records. BoundPolicy
+проверяет policy identity/revision/bindings; SystemTUN compiler сохраняет старый
+control flow, inline OR external и AND между категориями. IpOnly/domain и native
+app-attribution gates сохранены. Реальный DNS provenance этим transport не выдаётся.
 
-Original canonical proof хранится отдельным `c-<native digest>.enc`, AAD
-`yonik-canonical-source-v1\0` + native descriptor + bounded source header.
-Ни index dedup, ни native bytes не используются для восстановления original
-source. Native association перед публикацией воспроизводится существующим
-encoder и проверяется SHA/length/count. Current/previous state schema прежняя;
-sidecars учитываются inventory и reservations, автоматического prune нет.
+## Original source и reservations
 
-## Проверки и оставшаяся интеграция
+ResourceCatalog сохраняет exact original source, включая порядок/дубликаты,
+отдельным `c-<native digest>.enc`. AAD `yonik-canonical-source-v1\0` связывает
+роль/version, native descriptor и bounded source header. Source association
+проверяется повторным native encoder SHA/length/count. Старые artifacts без
+canonical proof возвращают Unsupported с требованием rebuild из original source.
+Native/state schema и atomic current/previous прежние; sidecars учитываются
+staging/current/previous/active-quarantine/retained и inventory, автоматического GC нет.
 
-Rust 1.85.1 / `--locked`, jobs=1, общий `with-rust-slot`, transient root BSD flock.
-Evidence: `/home/myrs/projects/yonik/local/evidence/p04-fd-receiver/`.
+4 MiB config, 8 MiB legacy retention и существующий 64 MiB config pool не повышены.
+Отдельный physical-artifact pool — 64 MiB: canonical FD/buffers/indices, helper и
+worker native copies, Xray tmpfs copy и explicit native parse/matcher work credit
+(1 KiB/record + fixed overhead). Credit удерживается с payload до empty evidence.
+Store cap 512 MiB относится к DISK. Canonical persistence ограничена 16 MiB/proof;
+128 MiB whole-buffer encoder cap не является обещанием RSS.
 
-Receiver regression suite: metadata/hash/order/count/seals/readonly/cancel/budget,
-closed grammar negatives, duplicate preservation и exact native hash при rebuild
-для обоих engines. Large-case: catalog 100k domains + 50k CIDR, encrypted original
-proof, reopen/export и native rebuild из canonical FD. Это encoder/store/FD proof;
-никакие native binaries и production Apply этим тестом не запускаются.
+## Worker v2 и Xray private tmpfs
 
-Для завершения остаются negotiated PrepareBundleV1 и closed reply DTO, client
-owner fence/no-retry, helper fresh authorization и peer evidence, typed admission
-и binding, runtime digest/plan/custody в одноразовом handle, private worker ABI,
-worker-owned immutable artifacts и native asset paths, empty-evidence/quarantine
-на Stop/Cancel/owner loss/recovery. После этого необходим isolated system-bus VM
-с реальными обоими pinned cores. До этой проверки P04 остаётся незавершённым.
+Legacy worker v1 unchanged. V2 — typed header, fresh helper resource context и ≤16
+native descriptors; SCM roles только `[binary, config, artifact0..N]`. Extra roles,
+duplicate digests, mixed engines, wrong count/size/hash/format отклоняются.
+Worker делает bounded pread в новый worker-owned memfd0600, проверяет bytes/SHA,
+ставит seals, reopen readonly и дублирует в exact slots 32+i. Занятый slot вызывает
+отказ с закрытием только собственного duplicate. CLOEXEC снимается только с typed
+resource FD перед native exec. Image/control/directory FD не наследуются.
 
-Свежая локальная проверка slice: 7 integration tests, 3 store regression tests,
-`cargo +1.85.1 clippy --locked -p yonik-linux --all-targets -- -D warnings`,
-`cargo +1.85.1 fmt --all -- --check` — PASS. Проверка catalog regression отдельно
-также PASS. API canonical store ограничивает один source/native proof 16 MiB;
-это дополнительное ограничение physical admission, frozen encoder 128 MiB и
-512 MiB disk cap не повышены. 64 MiB pool не является доказательством RSS.
+Sing-box renderer использует fixed `/proc/self/fd/N`, `format: source`. Raw pinned
+Xray (`cc4b84…`) отверг absolute ext path: `asset path must stay in asset directory`.
+Raw FAIL сохранён в `native-fd-gate-diagnostic.log`; adapter `4c31db…` прошёл тот же
+FD config-check. Это отдельный loader gate, не production Apply.
 
-Изолированный процесс fixture (без Cargo/rustc): large-case обоих engines завершён
-за 17.395 s, peak RSS 27 232 KiB по `getrusage(RUSAGE_CHILDREN)`; каждый export
-возвращает два canonical FD. Это footprint конкретного encoder/store/rebuild
-fixture, не worker/VM RSS и не обещание при 10x нагрузке.
+Для Xray renderer генерирует relative `ext:r-<digest>.dat:YONIK`. Per-command
+XRAY_LOCATION_ASSET задаёт только worker-owned generated root на unit-private
+`/dev/shm`, не global env/DTO/ABI authority. Controlled units задают
+`rw,nosuid,nodev,noexec,mode=1777,size=64M,nr_inodes=128`. Existing PrivateDevices,
+CAP и DeviceAllow сохранены. Новый Xray lane проверяет semantic unit options и
+получает actual kernel tmpfs/cgroup proof через NO-FD preflight до FD transfer.
+Нет private/bounded tmpfs — отказ, без disk fallback; legacy v1 feature не требует.
+
+Materialization: exclusive0700 role/CSPRNG root; digest-only filenames; bounded
+stream/hash/fsync/verify и regular files0400. Это не обещание F_SEAL для filesystem
+copy; исходный worker memfd остаётся sealed. Private custody ledger содержит
+session/generation/cgroup, role/nonce, root dev/ino/mount и ordered inode/hash/size.
+После child reap guard удаляет только known owned entries с identity checks.
+Foreign entry/unknown child → bounded quarantine. Run/crash namespace cleanup
+зависит от controlled unit lifetime и подтверждённой пустой cgroup, без name-only GC.
+
+## Проверки и границы
+
+Evidence вне TTL: `/home/myrs/projects/yonik/local/evidence/p04-fd-receiver/`.
+MSRV Rust1.85.1, --locked, jobs1, global build slot и root BSD flock.
+Receiver/store, typed client/private-bus, worker v1/v2, prepared owner/epoch/auth
+и quota/reopen regressions проверяются отдельно от actual VM gate.
+
+Большой component fixture: 100k domains + 50k CIDR, encrypted original source,
+sealed export/native rebuild обоим formats, cancellation и metadata negatives.
+Это component proof, не domain Apply. Actual CIDR bundle gate обоим cores и
+private tmpfs guard/foreign/budget fixture выполняются на frozen candidate в
+собственной signed-base VM с real system bus/polkit и production executables.
+До результатов VM production PASS не заявляется. Native app AND и Domain+CIDR/
+real provenance остаются genuine gates; полного P04 этот slice не объявляет.
