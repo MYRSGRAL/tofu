@@ -1345,9 +1345,24 @@ fn preferences_reopen_applies_engine_port_probe_and_language() {
         first.send(command);
         first.wait(|v| v[field] == expected);
     }
+    first.send(json!({"command":"set_proxy_fetch_dns","upstream":"127.0.0.1:5353"}));
+    first.wait(|v| v["proxy_fetch_dns"] == "127.0.0.1:5353");
+    for invalid in [
+        "resolver.example:53",
+        "https://127.0.0.1:53",
+        "127.0.0.1:0",
+        "0.0.0.0:53",
+        "224.0.0.1:53",
+        "[fe80::1%3]:53",
+    ] {
+        first.send(json!({"command":"set_proxy_fetch_dns","upstream":invalid}));
+        let state = first.wait(|v| v["error"] == "invalid_input");
+        assert_eq!(state["proxy_fetch_dns"], "127.0.0.1:5353");
+    }
     first.close();
     let mut second = Harness::new(directory.config());
     let state = second.wait(|v| v["ready"] == true);
+    assert_eq!(state["proxy_fetch_dns"], "127.0.0.1:5353");
     assert_eq!(state["engine"], "sing-box");
     assert_eq!(state["port"], 18889);
     assert_eq!(state["probe_expected_status"], 200);
@@ -1732,9 +1747,23 @@ fn native_session_proxy_manual_and_scheduled_refresh() {
     app.wait(|v| v["selected_profile"].is_i64());
     app.send(json!({"command":"set_probe_target","url":probe,"expected_status":204}));
     app.wait(|v| v["probe_custom"] == true);
+    if let Ok(upstream) = std::env::var("YONIK_PROXY_FETCH_DNS") {
+        app.send(json!({"command":"set_proxy_fetch_dns","upstream":upstream}));
+        app.wait(|v| v["proxy_fetch_dns"] == upstream);
+    }
     app.send(json!({"command":"connect"}));
     app.wait(|v| v["status"] == "Connected");
-    app.send(json!({"command":"add_source","name":"Proxy","url":url,"local_exception":true,"route":"proxy"}));
+    if let Ok(upstream) = std::env::var("YONIK_PROXY_FETCH_DNS") {
+        app.send(json!({"command":"set_proxy_fetch_dns","upstream":"127.0.0.1:1"}));
+        let unchanged = app.wait(|v| v["error"] == "busy");
+        assert_eq!(unchanged["proxy_fetch_dns"], upstream);
+    }
+    let proxy_url = if std::env::var("YONIK_PROXY_FETCH_DNS").is_ok() {
+        url.replace("127.0.0.1", "subscription.example")
+    } else {
+        url.clone()
+    };
+    app.send(json!({"command":"add_source","name":"Proxy","url":proxy_url,"local_exception":true,"route":"proxy"}));
     let proxy = app.wait(|v| v["source_name"] == "Proxy");
     let proxy_id = proxy["source_id"].clone();
     app.send(json!({"command":"refresh"}));
