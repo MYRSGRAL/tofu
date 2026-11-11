@@ -75,3 +75,24 @@ Timeout 0, memory failure/OOM observations 0, crash 0, output-limit 0, control/c
 Максимум probe wall 0.040748 с; RSS 64252 КиБ, включая fork baseline.
 Rust 1.85.1: fmt, clippy -p yonik-import --all-targets -- -D warnings, все тесты yonik-import прошли. Python: ruff check/format и 7 unittest (6 negative controls + сводка) прошли.
 P04 целиком — НЕ PASS: сохраняются полнота форматов/семантики, coverage-guided fuzz/sanitizers и решение контракта DNS-label.
+
+## Исправления независимого review
+
+В исходном `final-600/summary.json` счётчик `rejected` смешивал 64 956 rejected
+records и 57 672 rejected calls (122 628). Этот raw файл сохранён без изменения;
+`analyze.py` и приведённые выше результаты уже разделяют обе величины. Новые
+summary имеют `format_version: 2`, ключи `*_records` и `*_calls`. Регрессия
+исполняет настоящий `campaign.run` с двумя контролируемыми ответами и проверяет
+отдельные метрики. Для исправления сводки кампания повторно не запускалась.
+
+Подстрока `memory` в произвольном stderr больше не означает отказ allocator.
+Распознаются только завершённые диагностические строки `MemoryError` либо
+`memory allocation of N bytes failed`; другие nonzero exits остаются crash.
+Это классификация диагностического признака, не доказательство kernel OOM.
+Negative control `memory unrelated` с exit1 воспроизводил прежний ложный статус
+и теперь остаётся crash; настоящий Python MemoryError по-прежнему распознаётся.
+Короткие controls подключены к стандартному `tools/tests` discovery; 10-минутная
+кампания автоматически в CI не запускается.
+
+RED/GREEN и проверки сохранены вне TTL:
+`/home/myrs/projects/yonik/local/validation/p04-duration/review-fix-{red,green}.log`.

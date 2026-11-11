@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import resource
 import selectors
 import signal
@@ -81,7 +82,14 @@ def probe(
         if not process.stdin.closed:
             process.stdin.close()
     if status == "exit" and process.returncode:
-        status = "memory_failure" if b"memory" in output.lower() else "crash"
+        allocator_failure = (
+            re.search(
+                rb"(?:^|\n)(?:MemoryError|memory allocation of [1-9][0-9]* bytes failed)\r?\n?$",
+                output,
+            )
+            is not None
+        )
+        status = "memory_failure" if allocator_failure else "crash"
     return {
         "status": status,
         "code": process.returncode,
@@ -204,7 +212,9 @@ def run(
                     else:
                         accepted, rejected, reviewed, native = map(int, parts)
                         counts.update(
-                            accepted=accepted, rejected=rejected, reviewed=reviewed
+                            accepted_records=accepted,
+                            rejected_records=rejected,
+                            reviewed_records=reviewed,
                         )
                         status = "parsed"
                         if expected == "accept" and not accepted:
@@ -218,7 +228,7 @@ def run(
                         and status == "rejected"
                     ):
                         status = "control_failure"
-                counts[status] += 1
+                counts[f"{status}_calls"] += 1
                 observation.update(
                     index=index,
                     family=name,
@@ -236,7 +246,12 @@ def run(
             index += 1
     (destination / "summary.json").write_text(
         json.dumps(
-            {"counts": counts, "cases": index, "seconds": time.monotonic() - started},
+            {
+                "format_version": 2,
+                "counts": counts,
+                "cases": index,
+                "seconds": time.monotonic() - started,
+            },
             indent=2,
         )
     )
