@@ -93,3 +93,20 @@ Evidence вне TTL: `/home/myrs/projects/yonik/local/evidence/pr101-bound/`.
 P2: прежняя проверка учитывала только существующие файлы. Новая atomic_write резервирует также один staging-slot до CREATE; 129-я публикация и первая запись state в уже полном каталоге отказываются до изменения файлов. Metadata write failure сохраняет прежнее поведение poisoned экземпляра: последующее reopen остаётся допустимым, прежний state/ресурсы сохраняются. Это отказ по quota, не автоматическое удаление retained.
 
 RED двух граничных тестов → GREEN пяти store-тестов: после каждой принятой публикации проверяются reservations и reopen, первая state при 128 ресурсах не создаётся. Rust1.85.1 pinned Clippy all-targets/fmt PASS. Native membership не повторялся. Evidence `/home/myrs/projects/yonik/local/validation/pr101-file-cap/`; manifest записан после проверок.
+
+## Освобождение directory lock после fork
+
+CI выявил WouldBlock при reopen после drop последнего store. CLOEXEC не закрывает
+унаследованный open file description до exec дочернего процесса. Отдельный fork
+probe и детерминированная try_clone/OFD регрессия воспроизвели удержание lock.
+Теперь последний Inner::drop явно снимает flock, как существующий
+managed_network::storage::LockedDirectory. Пока custody Arc жив, lock сохраняется.
+Это не меняет release_after_empty/quarantine и лимит файлов.
+
+Проверены RED→GREEN regression, 6 store-тестов, 382 Linux library tests (25 ignored),
+MSRV 1.85.1 all-target Clippy и fmt. Evidence:
+`/home/myrs/projects/yonik/local/validation/pr101-lock-release/manifest.json`.
+Неподходящий общий Cargo cache первоначально дал E0432: после package-specific
+clean исходники построены заново. Этот E0432 не считается behavioral RED.
+Cargo.lock менял только порядок элементов при clean; semantic equivalence проверена,
+исходные байты восстановлены. Новые зависимости не добавлялись.
