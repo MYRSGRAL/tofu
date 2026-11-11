@@ -287,6 +287,7 @@ ApplicationWindow {
             catalog: ["Не удалось прочитать каталог приложений.", "Could not read the application catalog."],
             preferences_write: ["Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.", "Could not save settings. The change was not applied. Check preferences.json in the data directory."],
             invalid_input: ["Проверьте введённые данные и адрес подписки.", "Check the input and subscription URL."],
+            invalid_ip: ["Проверьте IP-адрес или домен.", "Check the IP address or domain."],
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
             source_in_use: ["Сначала отключите прокси, затем удалите подписку.", "Disconnect the proxy before deleting this subscription."],
             refresh_required: ["Загрузка уже завершилась. Проверьте список серверов.", "Loading has already finished. Check the server list."],
