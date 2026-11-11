@@ -91,3 +91,10 @@ engine baseline, screenshot/HiDPI/accessibility/clipboard/tray и матрицы
 
 Это готовые executable и воспроизводимые команды с явно сохранёнными gaps,
 а не завершённый live comparison. Raw evidence хранится вне Git и вне TTL.
+
+
+## Отмена offscreen runner
+
+Исправлен P2: SIGTERM родительской проверки больше не оставляет candidate в отдельной сессии. Используется существующая deferred Cancellation: spawn и cleanup защищены от прерывания, после spawn отмена доставляется, finally закрывает child; обработчики восстанавливаются. Отмена возвращает exit130.
+
+Регрессия запускает настоящий CLI с fake binaries, ждёт их PID и отправляет SIGTERM runner во время ожидания ACK. Baseline RED оставлял процесс живым; GREEN завершает его. Fake child игнорирует TERM, поэтому проверяется и KILL. Всего 18 protocol/lifecycle-тестов PASS; Ruff format/check PASS. Rust и реальные GUI повторно не запускались. Evidence `/home/myrs/projects/yonik/local/validation/pr99-cancel/`; manifest записан после проверок.

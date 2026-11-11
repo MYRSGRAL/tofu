@@ -37,56 +37,72 @@ def main() -> int:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["QT_QUICK_BACKEND"] = "software"
     os.environ["GDK_BACKEND"] = "headless"
-    results = []
-    for toolkit in ("qt", "gtk", "slint"):
-        for rows in (1000, 10000):
-            record = dict(toolkit=toolkit, rows=rows, valid=False, reports=[])
-            child = None
-            try:
-                child = driver.Child(
-                    [
-                        str(args.artifacts / f"yonik-bench-{toolkit}"),
-                        "--rows",
-                        str(rows),
-                    ],
-                    args.output / f"{toolkit}-{rows}.stderr.log",
-                )
-                oracle = driver.Oracle(rows)
-                report, _ = child.ack(10)
-                oracle.validate(report, "frame")
-                record["reports"].append(report)
-                for command in (
-                    driver.query(),
-                    driver.query("server-0.example.invalid"),
-                    dict(op="select", id=1),
-                    dict(op="favorite", id=1, value=True),
-                    driver.query(favorites_only=True),
-                    driver.query(),
-                    driver.query(sort="name"),
-                    dict(op="scroll", index=199),
-                    dict(op="hide"),
-                    dict(op="show"),
-                ):
-                    event = oracle.apply(command)
-                    child.send(command, 10)
+    cancellation = driver.Cancellation()
+    try:
+        results = []
+        for toolkit in ("qt", "gtk", "slint"):
+            for rows in (1000, 10000):
+                record = dict(toolkit=toolkit, rows=rows, valid=False, reports=[])
+                child = None
+                cancellation.protected = True
+                cancellation.check()
+                try:
+                    child = driver.Child(
+                        [
+                            str(args.artifacts / f"yonik-bench-{toolkit}"),
+                            "--rows",
+                            str(rows),
+                        ],
+                        args.output / f"{toolkit}-{rows}.stderr.log",
+                    )
+                    cancellation.protected = False
+                    cancellation.check()
+                    oracle = driver.Oracle(rows)
                     report, _ = child.ack(10)
-                    oracle.validate(report, event)
-                    if report["toolkit"] != record["reports"][0]["toolkit"]:
-                        raise driver.BenchmarkError("Toolkit изменился внутри запуска")
+                    oracle.validate(report, "frame")
                     record["reports"].append(report)
-                child.send(dict(op="quit"), 10)
-                child.finish(10)
-                record["valid"] = True
-            except (driver.BenchmarkError, OSError) as error:
-                record["error"] = str(error)
-            finally:
-                if child is not None:
-                    child.close()
-            results.append(record)
-            (args.output / "protocol.json").write_text(
-                json.dumps(results, ensure_ascii=False, indent=2) + "\n"
-            )
-    return 0 if all(record["valid"] for record in results) else 1
+                    for command in (
+                        driver.query(),
+                        driver.query("server-0.example.invalid"),
+                        dict(op="select", id=1),
+                        dict(op="favorite", id=1, value=True),
+                        driver.query(favorites_only=True),
+                        driver.query(),
+                        driver.query(sort="name"),
+                        dict(op="scroll", index=199),
+                        dict(op="hide"),
+                        dict(op="show"),
+                    ):
+                        event = oracle.apply(command)
+                        child.send(command, 10)
+                        report, _ = child.ack(10)
+                        oracle.validate(report, event)
+                        if report["toolkit"] != record["reports"][0]["toolkit"]:
+                            raise driver.BenchmarkError(
+                                "Toolkit изменился внутри запуска"
+                            )
+                        record["reports"].append(report)
+                    child.send(dict(op="quit"), 10)
+                    child.finish(10)
+                    record["valid"] = True
+                except (driver.BenchmarkError, OSError) as error:
+                    record["error"] = str(error)
+                finally:
+                    cancellation.protected = True
+                    if child is not None:
+                        child.close()
+                results.append(record)
+                (args.output / "protocol.json").write_text(
+                    json.dumps(results, ensure_ascii=False, indent=2) + "\n"
+                )
+        cancellation.check()
+        return 0 if all(record["valid"] for record in results) else 1
+
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        cancellation.protected = True
+        cancellation.restore()
 
 
 if __name__ == "__main__":
