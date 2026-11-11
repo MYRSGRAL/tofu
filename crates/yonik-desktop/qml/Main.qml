@@ -845,6 +845,8 @@ ApplicationWindow {
                 PresetPanel {
                     Layout.fillWidth: true
                     snapshot: window.state.presets || ({})
+                    routing: window.state.routing || ({})
+                    routingRevision: window.state.routing_revision
                     language: window.language
                     onCommand: payload => window.send(payload)
                 }

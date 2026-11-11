@@ -88,6 +88,17 @@ impl Store {
             })
             .transpose()
     }
+    /// Opaque content ID; это не путь и не native JSON.
+    pub fn active_id(&self) -> Result<Option<String>, Error> {
+        let id = self.read_index()?.active;
+        if let Some(id) = &id {
+            self.load(id)?;
+        }
+        Ok(id)
+    }
+    pub fn candidate(&self, id: &str) -> Result<Candidate, Error> {
+        validate(&self.load(id)?)
+    }
     /// Резервная версия читается независимо от здоровья active.
     pub fn previous(&self) -> Result<Option<(Metadata, Candidate)>, Error> {
         self.read_index()?
@@ -146,6 +157,15 @@ impl Store {
         };
         validate(&snapshot)?;
         let _lock = self.lock()?;
+        // Ограничение каталога, включая осиротевшие immutable snapshots.
+        if fs::read_dir(&self.root)
+            .map_err(|_| Error::Storage)?
+            .take(66)
+            .count()
+            >= 66
+        {
+            return Err(Error::Storage);
+        }
         let bytes = serde_json::to_vec(&snapshot).map_err(|_| Error::Invalid)?;
         let id = hash(&bytes);
         let target = self.root.join(&id);
@@ -206,6 +226,10 @@ impl Store {
         Ok(snapshot)
     }
     fn read_index(&self) -> Result<Index, Error> {
+        let root = fs::symlink_metadata(&self.root).map_err(|_| Error::Storage)?;
+        if !root.is_dir() || root.permissions().mode() & 0o077 != 0 {
+            return Err(Error::Storage);
+        }
         let path = self.root.join("index");
         if !path.try_exists().map_err(|_| Error::Storage)? {
             return Ok(Index::default());
@@ -249,7 +273,7 @@ impl Store {
         result
     }
 }
-fn validate_metadata(m: &Metadata) -> Result<(), Error> {
+pub fn validate_metadata(m: &Metadata) -> Result<(), Error> {
     if !valid_token(&m.source_id)
         || !valid_token(&m.version)
         || m.format != "plain-domain-cidr-v1"
