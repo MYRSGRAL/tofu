@@ -92,3 +92,20 @@ restart стенда, не аппаратным logout/login. Сигнализа
 при pending OpenSession; каждая возможная точка прерывания CreateItem/GetSecret
 не инъецировалась. Собственные overlay, cloud-init/SSH keys и target очищаются
 после сохранения binaries/manifests/public evidence вне TTL.
+
+## Автоматический gate stale owner
+
+Independent review обнаружил, что owner_changed и stale probe только
+записывались. Root добавил обязательный gate для полного режима: реальный
+owner должен измениться, PID ранее открытого probe должен сохраниться,
+GetSecret должен быть отклонён ровно для одного item и не вернуть читаемый секрет.
+Отсутствующие результаты и подмена PID отклоняются. Focus unlock остаётся
+отдельным узким режимом и не выдаётся за полную stale-owner матрицу.
+
+Regression RED → GREEN (включая false owner, readable stale item, другой PID
+и отсутствующий результат), Ruff PASS. Окончательный verifier offline повторно
+применён к сохранённым candidate3/all и candidate4/unlock: PASS. Guest/Rust
+не изменены и VM заново не запускалась; это не доказательство запуска всего
+итогового fixture head. Исторические различия hashes runner сохранены.
+Evidence: `local/validation/credentiallife/stale-gate-{red,green}.log` и
+`stale-gate-manifest.json`.

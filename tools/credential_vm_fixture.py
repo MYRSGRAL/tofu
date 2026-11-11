@@ -46,7 +46,7 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def verify_results(results: dict[str, object]) -> None:
+def verify_results(results: dict[str, object], *, focused_unlock: bool = False) -> None:
     failures = [
         name
         for name, value in results.items()
@@ -57,6 +57,22 @@ def verify_results(results: dict[str, object]) -> None:
         for name, value in results.items()
         if name.startswith("profile_") and value != "profile_verified"
     )
+    if not focused_unlock:
+        opened = results.get("stale_session_open")
+        stale = results.get("stale_after_owner_change")
+        if (
+            results.get("owner_changed") is not True
+            or not isinstance(opened, dict)
+            or opened.get("state") != "session_open"
+            or type(opened.get("pid")) is not int
+            or opened["pid"] <= 0
+            or not isinstance(stale, dict)
+            or type(stale.get("pid")) is not int
+            or stale["pid"] != opened["pid"]
+            or stale.get("get_secret_readable") != 0
+            or stale.get("get_secret_refused") != 1
+        ):
+            failures.append("stale_owner_identity_and_denial")
     if failures:
         raise RuntimeError("Не прошли VM gates: " + ", ".join(failures))
 
@@ -298,7 +314,9 @@ def execute() -> None:
         # Guest stdout содержит только публичные результаты, никогда D-Bus payload.
         parsed = json.loads(result)
         (EVIDENCE / "actual-service.json").write_text(json.dumps(parsed, indent=2))
-        verify_results(parsed)
+        verify_results(
+            parsed, focused_unlock=os.environ.get("YONIK_VM_FOCUS") == "unlock"
+        )
     finally:
         try:
             run(ssh + ["poweroff"])
