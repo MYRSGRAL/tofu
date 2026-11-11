@@ -42,7 +42,7 @@ def inside(args: argparse.Namespace) -> None:
         raise RuntimeError('Нет private proc')
     if os.readlink('/proc/self/ns/net') == args.parent_net:
         raise RuntimeError('Нет private net')
-    if sorted(path.name for path in Path('/sys/class/net').iterdir()) != ['lo']:
+    if sorted(line.split(':', 1)[0].strip() for line in Path('/proc/net/dev').read_text().splitlines()[2:]) != ['lo']:
         raise RuntimeError('Ожидался только loopback')
     baseline = snapshot()
     results = []
