@@ -337,3 +337,7 @@ fn sing_outbound(server: &ParsedServer, options: &Options) -> Result<Value, Comp
 pub mod presets;
 
 pub mod external_rules;
+
+pub mod resource_bundle;
+
+pub mod resource_index;

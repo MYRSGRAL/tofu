@@ -1,5 +1,7 @@
 # P-04: нижний слой external rule-set compiler
 
+Историческое состояние encoder/custody. Продолжение: [bound resource bundle](p04-bound-resource-bundle.md).
+
 База: `f3c937d717a97345dee3bc5bb79127fe4c96ae1e`.
 Этот slice не закрывает P-04 и не включает caller paths.
 
