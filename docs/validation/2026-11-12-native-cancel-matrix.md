@@ -46,3 +46,22 @@ ABS_CORE_DIR ABS_NEW_EVIDENCE_DIR`. Сохранить evidence перед cargo
 
 TUN, DesktopHost/GUI, физический G-POWER, Android и длительный memory plateau этим
 компонентным прогоном не принимаются. Старые 100 cycles не повторяются.
+
+## Фактический результат
+
+**8/8 PASS**: обе положительные передачи marker, обе отмены startup с exact
+Cancelled, обе отмены traffic после native greeting, оба отказа peer.
+Все восемь exit code — 0; все восемь terminal owned-group — `{}`.
+После Stop каждый native PID/starttime отдельно проверен Rust-стендом.
+Negative fixture с 8 MiB распознан; после его terminate/wait owned group снова пуста.
+Две Python oracle-проверки PASS. Raw samples доступны в `attempt-2/matrix.json`,
+сводные значения — `summary.json`; это измеренные samples, а не гарантированный peak.
+
+Actual source HEAD: `a1f0c73` (полный SHA в manifest). Binary SHA256:
+`f7025ef7118100716dd325590ad11d71f118f6dfd55206848202b6ff349fd5dd`.
+Повторная финальная сборка дала идентичный SHA256. Все Rust-команды: 1.85.1,
+with-rust-slot, jobs=1, внешний target под flock собственного transient root.
+
+Первый preflight `attempt-1` завершился до native cases: `/sys/class/net`
+отражал host sysfs mount. Проверка интерфейсов переведена на namespaced
+`/proc/net/dev`; первый raw failure сохранён. Приёмочный run — `attempt-2`.
