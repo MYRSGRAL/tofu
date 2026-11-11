@@ -257,6 +257,18 @@ def check_scoped_ui(source: str) -> int:
             raise CatalogError(f"P11: конечная граница отсутствует: {end}")
         ts = tokens(source[offset:stop])
         if "routingDiagnosticsScope" in start:
+            # Граница должна следовать за целыми sibling-элементами, а не
+            # обрезать обязательный элемент после его objectName.
+            depth = 0
+            for token in ts:
+                if token == "{":
+                    depth += 1
+                elif token == "}":
+                    depth -= 1
+                    if depth < 0:
+                        raise CatalogError("P11: граница пересекает QML-элемент")
+            if depth:
+                raise CatalogError("P11: граница обрезает QML-элемент")
             names = [
                 literal(ts[i + 2])
                 for i in range(len(ts) - 2)

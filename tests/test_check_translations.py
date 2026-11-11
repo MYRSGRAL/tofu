@@ -70,6 +70,20 @@ class TranslationTests(unittest.TestCase):
             checker.main()
         self.assertEqual(error.exception.code, 1)
 
+    def test_p11_boundary_cannot_cut_required_element(self) -> None:
+        source = (ROOT / checker.CATALOG).read_text()
+        boundary = checker.SCOPED_UI[1][1]
+        self.assertEqual(source.count(boundary), 1)
+        changed = source.replace(boundary, "                RowLayout {")
+        name = 'objectName: "routingExplanation"'
+        changed = changed.replace(name, name + "\n" + boundary + " }", 1)
+        changed = changed.replace(
+            'window.tr("причина недоступна", "reason unavailable")',
+            '"Причина только по-русски"',
+        )
+        with self.assertRaises(checker.CatalogError):
+            checker.check_scoped_ui(changed)
+
     def test_p11_required_explanation_cannot_disappear_from_scope(self) -> None:
         source = (ROOT / checker.CATALOG).read_text()
         changed = source.replace('objectName: "routingExplanation"', 'objectName: ""')
