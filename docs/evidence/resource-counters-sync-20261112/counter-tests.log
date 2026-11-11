@@ -1,0 +1,12 @@
+test_disabled_wakeups_and_missing_energy (test_resource_counters.CounterTests.test_disabled_wakeups_and_missing_energy) ... ok
+test_energy_intervals (test_resource_counters.CounterTests.test_energy_intervals) ... ok
+test_numeric_bounds (test_resource_counters.CounterTests.test_numeric_bounds) ... ok
+test_permissions_and_bounds (test_resource_counters.CounterTests.test_permissions_and_bounds) ... ok
+test_sample_process_additive_integration (test_resource_counters.CounterTests.test_sample_process_additive_integration) ... ok
+test_sources_and_duplicate_alias (test_resource_counters.CounterTests.test_sources_and_duplicate_alias) ... ok
+test_wakeups_identity_and_churn (test_resource_counters.CounterTests.test_wakeups_identity_and_churn) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.006s
+
+OK

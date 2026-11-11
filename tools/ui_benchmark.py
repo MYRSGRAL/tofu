@@ -16,6 +16,10 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
+from resource_counters import Collector
+
+RESOURCE_COUNTERS = Collector()
+
 MAX_LINE = 8192
 MAX_STDOUT = 1024 * 1024
 MAX_STDERR = 1024 * 1024
@@ -217,6 +221,7 @@ def sample_process(pid: int) -> dict[str, Any]:
         clock_ticks_per_second=os.sysconf("SC_CLK_TCK"),
         gpu=None,
         hardware_power=None,
+        resource_counters=RESOURCE_COUNTERS.sample(pid),
     )
     return result
 
@@ -508,6 +513,11 @@ def environment() -> dict[str, Any]:
             )
         },
         power_supply=power,
+        resource_counter_contract={
+            "schema_version": 1,
+            "wakeups": "all_threads_schedstats_nr_wakeups_when_enabled",
+            "energy": "independent_kernel_sources_not_total_platform_energy",
+        },
         power_profile=read_optional(Path("/sys/firmware/acpi/platform_profile")),
     )
 
@@ -535,7 +545,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         limitations=[
             "frame/shown ack не заменяет screenshot QA и проверку toolkit callback",
             "main_thread_context_switches_proxy — переключения только главного потока, НЕ wakeups и не сумма всех потоков",
-            "GPU и hardware power недоступны",
+            "GPU недоступен; hardware_power сохранён как legacy null, см. resource_counters",
+            "resource_counters availability не заменяет hardware gate; энергия зон не суммируется",
             "lock проверяется на границах интервалов <=60 секунд; краткая блокировка между проверками может быть не замечена",
         ],
     )
