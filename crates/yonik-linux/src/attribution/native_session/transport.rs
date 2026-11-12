@@ -427,6 +427,9 @@ pub(super) mod tests {
             return Err(Unavailable::Timeout);
         }
         assert_eq!(&reply[96..98], &[1, 0]);
+        let ttl = u64::from_be_bytes(reply[104..112].try_into().unwrap());
+        assert!(ttl > 0 && ttl <= 20_000_000);
+        eprintln!("retained wire Known ttl_ns={ttl}");
         assert_eq!(
             &reply[160..],
             std::fs::read_link("/proc/self/exe")
