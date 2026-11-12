@@ -40,7 +40,8 @@ impl ScheduleFailure {
             E::Repository(R::Storage) => Some(Cause::SchedulerRepositoryStorage),
             E::Repository(R::Conflict) => Some(Cause::SchedulerRepositoryConflict),
             E::Repository(R::NotFound) => Some(Cause::SchedulerRepositoryNotFound),
-            E::Fetch(_) | E::Import(_) => None,
+            E::Import(_) => Some(Cause::SchedulerServiceImportFailed),
+            E::Fetch(_) => None,
         };
         Self {
             error: super::map_subscription(error),
