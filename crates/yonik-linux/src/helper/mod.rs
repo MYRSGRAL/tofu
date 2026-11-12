@@ -12,7 +12,8 @@ mod systemd_worker;
 pub use protection_host::SystemProtectionHost as SystemSessionHost;
 pub use protection_host::{GuardArtifact, SystemProtectionHost};
 pub use systemd_worker::{
-    SystemWorkerSupervisor, WorkerLiveness, WorkerSupervisorError, WorkerTicket,
+    BootstrapUnitObservation, SystemWorkerSupervisor, WorkerLiveness, WorkerSupervisorError,
+    WorkerTicket,
 };
 
 pub(crate) mod memory;
