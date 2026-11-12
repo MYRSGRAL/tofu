@@ -421,6 +421,62 @@ impl Broker {
             },
         })
     }
+    /// Проекция только через retained snapshot и повторный kernel witness.
+    /// Не выпускает authority и не продлевает исходный TTL.
+    pub(super) fn project(
+        &self,
+        flow: Flow,
+        snapshot: &OwnerSnapshot,
+        epoch: u64,
+    ) -> Result<(OwnerSnapshot, String, Duration), Unavailable> {
+        if self.context.revoked {
+            return Err(Unavailable::Revoked);
+        }
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
+        if epoch != self.context.epoch || snapshot.epoch != epoch {
+            return Err(Unavailable::Authority);
+        }
+        let path = || -> Result<String, Unavailable> {
+            let metadata = snapshot
+                .executable_fd
+                .metadata()
+                .map_err(|_| Unavailable::Coverage)?;
+            if (metadata.dev(), metadata.ino()) != snapshot.executable {
+                return Err(Unavailable::Authority);
+            }
+            let path = fs::read_link(format!(
+                "/proc/self/fd/{}",
+                snapshot.executable_fd.as_raw_fd()
+            ))
+            .map_err(|_| Unavailable::Coverage)?;
+            let text = path.to_str().ok_or(Unavailable::Coverage)?;
+            super::native_wire::executable_path(text.as_bytes())
+                .map_err(|_| Unavailable::Coverage)?;
+            let current = fs::metadata(&path).map_err(|_| Unavailable::Coverage)?;
+            if (current.dev(), current.ino()) != snapshot.executable {
+                return Err(Unavailable::Authority);
+            }
+            Ok(text.to_owned())
+        };
+        let before = path()?;
+        let validated = kernel::revalidate(&self.context, flow, snapshot)?;
+        if path()? != before {
+            return Err(Unavailable::Authority);
+        }
+        if self.context.revoked {
+            return Err(Unavailable::Revoked);
+        }
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
+        let ttl = DEADLINE
+            .checked_sub(snapshot.observed_from.elapsed())
+            .filter(|ttl| !ttl.is_zero())
+            .ok_or(Unavailable::Timeout)?;
+        Ok((validated, before, ttl))
+    }
     /// Проверенный snapshot интервала lookup; не identity при рождении socket.
     pub fn lookup(&mut self, flow: Flow) -> Lookup {
         let result = self.lookup_inner(flow);

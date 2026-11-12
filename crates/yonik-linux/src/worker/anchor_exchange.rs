@@ -57,6 +57,64 @@ impl Challenge {
         pid: u32,
         uid: u32,
     ) -> Result<NamespaceObservation, WorkerError> {
+        self.exchange_marker(stream, pid, uid, OFFER)
+    }
+    /// Binding формируется из уже свежего namespace challenge. Поля server остаются
+    /// наблюдением issuer до отдельного canonical PID1/kernel admission.
+    pub fn role_binding(
+        &self,
+        epoch: u64,
+        server_pid: u32,
+        server_start: u64,
+    ) -> Result<super::role_handoff::Binding, WorkerError> {
+        let binding = super::role_handoff::Binding {
+            nonce: self.bytes[8..40]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            digest: self.bytes[40..72]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            epoch,
+            session: self.bytes[72..88]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            generation: u64::from_be_bytes(
+                self.bytes[88..96]
+                    .try_into()
+                    .map_err(|_| WorkerError::Protocol)?,
+            ),
+            invocation: self.bytes[96..112]
+                .try_into()
+                .map_err(|_| WorkerError::Protocol)?,
+            server_pid,
+            server_start,
+        };
+        binding.record()?;
+        Ok(binding)
+    }
+    /// Private v2 negotiation доступна только за непроизводимым production gate.
+    pub fn exchange_for_handoff(
+        self,
+        _permit: &super::role_handoff::ProductionPermit,
+        binding: &super::role_handoff::Binding,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+    ) -> Result<NamespaceObservation, WorkerError> {
+        let expected =
+            self.role_binding(binding.epoch, binding.server_pid, binding.server_start)?;
+        if expected.record()? != binding.record()? {
+            return Err(WorkerError::Protocol);
+        }
+        self.exchange_marker(stream, pid, uid, super::role_handoff::OFFER)
+    }
+    fn exchange_marker(
+        self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+        offer: &[u8; 8],
+    ) -> Result<NamespaceObservation, WorkerError> {
         use rustix::net::{AddressFamily, SocketFlags, SocketType, socketpair};
         stream
             .set_write_timeout(Some(
@@ -84,12 +142,12 @@ impl Challenge {
         }
         if sendmsg(
             stream,
-            &[IoSlice::new(OFFER)],
+            &[IoSlice::new(offer)],
             &mut ancillary,
             SendFlags::NOSIGNAL,
         )
         .map_err(|_| WorkerError::Io)?
-            != OFFER.len()
+            != offer.len()
         {
             return Err(WorkerError::Protocol);
         }
@@ -103,15 +161,23 @@ impl Challenge {
         {
             return Err(WorkerError::Peer);
         }
-        let mut identities = [(0, 0); 3];
-        for (fd, identity) in fds.iter().zip(&mut identities) {
-            if rustix::fs::fstatfs(fd)
+        for (fd, kind) in fds.iter().zip([
+            yonik_nsfs::NamespaceType::Net,
+            yonik_nsfs::NamespaceType::Pid,
+            yonik_nsfs::NamespaceType::Mount,
+        ]) {
+            if yonik_nsfs::namespace_type(fd).map_err(|_| WorkerError::Protocol)? != kind {
+                return Err(WorkerError::Protocol);
+            }
+            if rustix::fs::fcntl_getfl(fd)
                 .map_err(|_| WorkerError::Protocol)?
-                .f_type as i64
-                != 0x6e736673
+                .intersects(rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::RDWR)
             {
                 return Err(WorkerError::Protocol);
             }
+        }
+        let mut identities = [(0, 0); 3];
+        for (fd, identity) in fds.iter().zip(&mut identities) {
             let st = rustix::fs::fstat(fd).map_err(|_| WorkerError::Io)?;
             *identity = (st.st_dev, st.st_ino);
         }
@@ -140,13 +206,13 @@ impl Challenge {
     }
 }
 
-/// Только observation. Без NS_GET_NSTYPE и opaque unit/kernel proof нельзя
+/// Только observation. Даже с NS_GET_NSTYPE без opaque unit/kernel proof нельзя
 /// преобразовать в WorkerChannelAnchor. В этом объекте нет mount namespace FD.
 pub struct NamespaceObservation {
     custody: Arc<NamespaceCustody>,
     identities: NamespaceIdentity,
 }
-/// Opaque observation identity; не доказательство kernel namespace type.
+/// Opaque observation identity; не доказательство unit/kernel enforcement.
 #[derive(PartialEq, Eq)]
 pub struct NamespaceIdentity([(u64, u64); 3]);
 
@@ -301,7 +367,10 @@ fn receive(
     ))
 }
 
-pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), WorkerError> {
+pub(crate) fn bootstrap(
+    stream: &UnixStream,
+    mode: WorkerMode,
+) -> Result<Option<super::role_handoff::RunHandoff>, WorkerError> {
     stream
         .set_read_timeout(Some(TIMEOUT))
         .map_err(|_| WorkerError::Io)?;
@@ -311,8 +380,9 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
     if n.0 != 8 {
         return Err(WorkerError::Protocol);
     }
-    if &marker != OFFER {
-        return Ok(());
+    let v2 = &marker == super::role_handoff::OFFER;
+    if &marker != OFFER && !v2 {
+        return Ok(None);
     }
     if mode != WorkerMode::Run {
         return Err(WorkerError::Protocol);
@@ -341,7 +411,12 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
         }
     }
     if msg.bytes != 8
-        || &marker != OFFER
+        || &marker
+            != if v2 {
+                super::role_handoff::OFFER
+            } else {
+                OFFER
+            }
         || msg
             .flags
             .intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC)
@@ -390,12 +465,31 @@ pub(crate) fn bootstrap(stream: &UnixStream, mode: WorkerMode) -> Result<(), Wor
     if ack != closed || !extra.is_empty() || c.pid != peer.pid || !c.uid.is_root() {
         return Err(WorkerError::Peer);
     }
-    Ok(())
+    if v2 {
+        return super::role_handoff::receive_run_handoff(
+            &socket,
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+        )
+        .map(Some);
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn check_rejects_v2_before_accepting_descriptors() {
+        use std::io::Write;
+        let (worker, mut helper) = UnixStream::pair().unwrap();
+        helper.write_all(super::super::role_handoff::OFFER).unwrap();
+        assert!(matches!(
+            bootstrap(&worker, WorkerMode::Check),
+            Err(WorkerError::Protocol)
+        ));
+    }
     #[test]
     fn unbound_challenge_is_rejected() {
         assert!(Challenge::new([0; 32], [1; 16], 1, [2; 16]).is_err());
@@ -470,6 +564,8 @@ mod tests {
         ];
         match attack {
             "generic-fd" => files[0] = File::open("/dev/null").unwrap(),
+            "swapped-types" => files.swap(0, 1),
+            "wrong-type" => files[2] = File::open("/proc/self/ns/uts").unwrap(),
             "duplicate-fd" => files[1] = File::open("/proc/self/ns/net").unwrap(),
             "extra-fd" => files.push(File::open("/dev/null").unwrap()),
             _ => (),
@@ -505,6 +601,8 @@ mod tests {
             "invocation",
             "generic-fd",
             "duplicate-fd",
+            "swapped-types",
+            "wrong-type",
             "extra-fd",
             "sender-pid",
             "sender-uid",

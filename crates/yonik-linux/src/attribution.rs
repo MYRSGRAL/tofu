@@ -190,6 +190,10 @@ pub(crate) async fn preflight(
     if worker_uid == peer.uid {
         return Err(AttributionFailure::WorkerIsCaller);
     }
+    // Единственная точка будущего helper issuer; raw caller credentials выше
+    // остаются лишь отрицательными проверками, а не bootstrap authority.
+    let _session = native_session::Session::verified_helper_bootstrap()
+        .map_err(|_| AttributionFailure::NativeMechanismUnverified)?;
     Err(AttributionFailure::NativeMechanismUnverified)
 }
 
@@ -224,3 +228,9 @@ mod tests {
 
 /// Независимая библиотека private owner receiver.
 pub mod broker;
+
+/// Production NativeBroker wire; не fixture YOB1 ABI.
+pub mod native_wire;
+
+/// Закрытая сессия frozen native ABI.
+pub mod native_session;

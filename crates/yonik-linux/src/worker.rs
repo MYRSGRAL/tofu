@@ -30,6 +30,7 @@ use yonik_application::ConfigDigest;
 use yonik_engine::{CompiledConfig, Engine};
 
 pub mod anchor_exchange;
+pub mod role_handoff;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const HEADER_LEN: usize = 80;
@@ -764,7 +765,7 @@ pub async fn serve(mode: WorkerMode) -> Result<(), WorkerError> {
     serve_stream(stream, mode).await
 }
 async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), WorkerError> {
-    anchor_exchange::bootstrap(&stream, mode)?;
+    let handoff = anchor_exchange::bootstrap(&stream, mode)?;
     let Received {
         binary,
         config,
@@ -823,6 +824,13 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
                 return Err(error);
             }
         };
+        if let Some(handoff) = handoff {
+            let result = handoff.exec(&mut command);
+            if let Some(assets) = assets.as_mut() {
+                assets.cleanup_after_failed_exec()?;
+            }
+            return result;
+        }
         let _error = command.exec();
         // exec вернулся: новый child не создан, собственный ledger можно убрать.
         if let Some(assets) = assets.as_mut() {

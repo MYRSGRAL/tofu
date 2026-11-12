@@ -525,6 +525,118 @@ mod tests {
         eprintln!("in-flight cancel+teardown {:?}", begun.elapsed());
     }
     #[test]
+    fn retained_projection_positive_and_stale_replaced_deleted_epoch() {
+        use super::super::{Broker, Process, TrustedContext};
+        use std::{
+            collections::VecDeque,
+            fs,
+            os::{fd::AsRawFd, unix::fs::MetadataExt},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client =
+            std::sync::Arc::new(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        let (_peer, _) = listener.accept().unwrap();
+        let f = flow(client.local_addr().unwrap(), client.peer_addr().unwrap(), 6);
+        let pid = std::process::id();
+        let uid = rustix::process::getuid().as_raw();
+        let context = TrustedContext::from_host(pid, uid, uid, 7, [1; 32], [2; 32]).unwrap();
+        fn observe(client: &TcpStream, f: Flow, epoch: u64) -> super::OwnerSnapshot {
+            let observed_from = Instant::now();
+            let pid = std::process::id();
+            let uid = rustix::process::getuid().as_raw();
+            let process = Process::capture(pid, uid).unwrap();
+            let exe = fs::File::open("/proc/self/exe").unwrap();
+            let m = exe.metadata().unwrap();
+            let (inode, cookie) = witness(f, observed_from + super::DEADLINE)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                fs::read_link(format!("/proc/{pid}/task/{pid}/fd/{}", client.as_raw_fd()))
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                format!("socket:[{inode}]")
+            );
+            process.validate().unwrap();
+            super::OwnerSnapshot {
+                pidfd: process.pidfd,
+                executable_fd: exe,
+                pid,
+                start_time: process.start,
+                executable: (m.dev(), m.ino()),
+                cookie,
+                epoch,
+                socket_inode: inode,
+                task_id: pid,
+                task_start: process.start,
+                socket_fd: client.as_raw_fd() as u32,
+                observed_from,
+                observed_until: Instant::now(),
+            }
+        }
+        let mut snapshot = observe(&client, f, 7);
+        let mut broker = Broker {
+            context,
+            cache: VecDeque::new(),
+            last_cold: None,
+        };
+        let (_, path, ttl) = broker.project(f, &snapshot, 7).unwrap();
+        assert_eq!(
+            path,
+            fs::read_link("/proc/self/exe").unwrap().to_str().unwrap()
+        );
+        assert!(ttl > Duration::ZERO && ttl <= Duration::from_millis(20));
+        let wire_client = std::sync::Arc::clone(&client);
+        let wire_broker = Broker {
+            context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32]).unwrap(),
+            cache: VecDeque::new(),
+            last_cold: None,
+        };
+        crate::attribution::native_session::known_roundtrip(
+            wire_broker,
+            move |broker| {
+                let snapshot = observe(&wire_client, f, 1);
+                let snapshot = super::revalidate(&broker.context, f, &snapshot).unwrap();
+                broker.cache = VecDeque::from([(f, snapshot)]);
+            },
+            f,
+        );
+
+        let stale = super::duplicate(&snapshot).unwrap();
+        std::thread::sleep(super::DEADLINE.saturating_sub(stale.observed_from.elapsed()));
+        assert!(matches!(
+            broker.project(f, &stale, 7),
+            Err(Unavailable::Timeout)
+        ));
+        snapshot = observe(&client, f, 7);
+        assert!(broker.project(f, &snapshot, 8).is_err());
+        snapshot = observe(&client, f, 7);
+        snapshot.executable.1 ^= 1;
+        assert!(broker.project(f, &snapshot, 7).is_err());
+        snapshot = observe(&client, f, 7);
+        let path = std::env::temp_dir().join(format!("yonik-deleted-exe-{}", pid));
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        snapshot.executable_fd = file;
+        // Реально заменённый retained FD не соответствует исходному executable.
+        assert!(broker.project(f, &snapshot, 7).is_err());
+        snapshot = observe(&client, f, 7);
+        snapshot.executable_fd = fs::File::open(&path).unwrap();
+        let metadata = snapshot.executable_fd.metadata().unwrap();
+        snapshot.executable = (metadata.dev(), metadata.ino());
+        fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            broker.project(f, &snapshot, 7),
+            Err(Unavailable::Coverage)
+        ));
+        snapshot = observe(&client, f, 7);
+        broker.revoke();
+        assert!(broker.project(f, &snapshot, 7).is_err());
+    }
+    #[test]
     fn cache_rejects_reuse_executable_and_epoch_without_churn() {
         use super::{OwnerSnapshot, Process, TrustedContext, revalidate};
         use std::{fs, os::unix::fs::MetadataExt};
