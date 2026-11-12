@@ -1485,9 +1485,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
+index 0000000..1d231d9
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,130 @@
 +package nativehooks
 +
 +import (
@@ -1597,6 +1598,26 @@ new file mode 100644
 +	}
 +	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
 +	return ok && c != nil
++}
++
++type dnsExchangeKey struct{}
++
++// DNSExchangeContext отделяет отмену caller от общего DNS I/O, сохраняя revoke.
++func DNSExchangeContext(ctx context.Context) (context.Context, context.CancelFunc) {
++	shared, cancel := context.WithCancel(context.WithValue(context.WithoutCancel(ctx), dnsExchangeKey{}, true))
++	c, _ := ctx.Value(routingKey{}).(*routingConsumer)
++	if c == nil {
++		return shared, cancel
++	}
++	c.mu.Lock()
++	session := c.session
++	c.mu.Unlock()
++	if session == nil {
++		cancel()
++		return shared, cancel
++	}
++	stop := context.AfterFunc(session.Context(), cancel)
++	return shared, func() { stop(); cancel() }
 +}
 diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
 new file mode 100644
@@ -2460,14 +2481,18 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
+index 0000000..d1cfc92
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,159 @@
 +package nativehooks
 +
 +import (
 +	"context"
++	"encoding/binary"
++	"net/netip"
 +	"os"
++	"sync/atomic"
 +	"testing"
 +	"time"
 +)
@@ -2526,8 +2551,15 @@ new file mode 100644
 +}
 +
 +// ClosedDNSFixture меняет ответ broker только после начала controlled exchange.
++var dnsFixtureSequence atomic.Uint32
++
 +func ClosedDNSFixture(t *testing.T) (context.Context, func(string)) {
 +	s, p, _ := fixture(t)
++	s.maxTTL = time.Second
++	id := dnsFixtureSequence.Add(1)
++	binary.LittleEndian.PutUint32(p.Binding.Nonce[:4], id)
++	s.binding = p.Binding
++	p.Flow.Local = netip.AddrPortFrom(p.Flow.Local.Addr(), uint16(1024+id%60000))
 +	ctx, cancel := context.WithCancel(context.Background())
 +	t.Cleanup(cancel)
 +	t.Cleanup(func() { _ = s.Revoke() })
@@ -2536,7 +2568,7 @@ new file mode 100644
 +	c.lookup = func(context.Context, Flow) (Evidence, error) {
 +		reply := p
 +		reply.Observed = time.Now()
-+		reply.Expires = reply.Observed.Add(20 * time.Millisecond)
++		reply.Expires = reply.Observed.Add(time.Second)
 +		if mode == "unknown" {
 +			reply.Status = Unknown
 +		}
@@ -2545,6 +2577,12 @@ new file mode 100644
 +		}
 +		if mode == "stale" {
 +			reply.Expires = reply.Observed.Add(-time.Millisecond)
++		}
++		if mode == "wrong-session" {
++			reply.Binding.Nonce[0]++
++		}
++		if mode == "wrong-binding" {
++			reply.Binding.ConfigDigest[0]++
 +		}
 +		if mode == "epoch" {
 +			reply.Binding.Epoch++
@@ -2890,12 +2928,15 @@ index e452bda..ae03818 100644
  			}
 diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
 new file mode 100644
+index 0000000..6acd3b6
 --- /dev/null
 +++ b/common/yonikbroker/dns_callsite_test.go
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,224 @@
 +package nativehooks_test
 +
 +import (
++	"context"
++	"fmt"
 +	mdns "github.com/miekg/dns"
 +	"github.com/xtls/xray-core/app/dispatcher"
 +	appdns "github.com/xtls/xray-core/app/dns"
@@ -2910,7 +2951,11 @@ new file mode 100644
 +	fdns "github.com/xtls/xray-core/features/dns"
 +	rdns "github.com/xtls/xray-core/features/routing/dns"
 +	rsession "github.com/xtls/xray-core/features/routing/session"
++	"github.com/xtls/xray-core/proxy/freedom"
 +	"net"
++	"runtime"
++	"strings"
++	"sync/atomic"
 +	"testing"
 +	"time"
 +)
@@ -2972,6 +3017,144 @@ new file mode 100644
 +			})
 +		}
 +	}
++}
++
++// Два независимых authenticated caller используют один DNS question и exchanger.
++func TestNativeDNSConcurrentAuthority(t *testing.T) {
++	for _, transport := range []string{"tcp", "udp"} {
++		for _, parallel := range []bool{false, true} {
++			for _, mode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "wrong-session", "wrong-binding"} {
++				for _, victim := range []int{0, 1} {
++					t.Run(fmt.Sprintf("%s/parallel=%v/%s/victim=%d", transport, parallel, mode, victim), func(t *testing.T) {
++						listener, err := net.Listen("tcp", "127.0.0.1:0")
++						if err != nil {
++							t.Fatal(err)
++						}
++						entered, release := make(chan struct{}), make(chan struct{})
++						var queries atomic.Int32
++						server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++							if queries.Add(1) == 1 {
++								close(entered)
++							}
++							<-release
++							reply := new(mdns.Msg)
++							reply.SetReply(q)
++							rr, _ := mdns.NewRR("private.test. 60 IN A 192.0.2.17")
++							reply.Answer = []mdns.RR{rr}
++							_ = w.WriteMsg(reply)
++						})}
++						endpoint := "tcp+local://" + listener.Addr().String()
++						if transport == "udp" {
++							_ = listener.Close()
++							packet, err := net.ListenPacket("udp", "127.0.0.1:0")
++							if err != nil {
++								t.Fatal(err)
++							}
++							server.Listener = nil
++							server.PacketConn = packet
++							endpoint = "udp://" + packet.LocalAddr().String()
++						}
++						go server.ActivateAndServe()
++						defer server.Shutdown()
++						cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress(endpoint))}}}}
++						if transport == "udp" {
++							cfg.NameServer[0].Address = &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")), Port: uint32(server.PacketConn.LocalAddr().(*net.UDPAddr).Port)}
++						}
++						instance, err := core.New(&core.Config{Outbound: []*core.OutboundHandlerConfig{{ProxySettings: serial.ToTypedMessage(&freedom.Config{})}}, App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++						if err != nil {
++							t.Fatal(err)
++						}
++						defer instance.Close()
++						client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++						ctx0, change0 := hooks.ClosedDNSFixture(t)
++						ctx1, change1 := hooks.ClosedDNSFixture(t)
++						ctx0 = context.WithValue(ctx0, core.XrayKey(1), instance)
++						ctx1 = context.WithValue(ctx1, core.XrayKey(1), instance)
++						changes := []func(string){change0, change1}
++						option := fdns.IPOption{IPv4Enable: true}
++						results := []chan []net.IP{make(chan []net.IP, 1), make(chan []net.IP, 1)}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx0, "private.test", option)
++							if err != nil {
++								t.Logf("caller0 err=%v", err)
++							}
++							results[0] <- ips
++						}()
++						select {
++						case <-entered:
++						case <-time.After(5 * time.Second):
++							t.Fatal("нет exchange")
++						}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx1, "private.test", option)
++							if err != nil {
++								t.Logf("caller1 err=%v", err)
++							}
++							results[1] <- ips
++						}()
++						// Барьер подтверждает два реальных native fetch до выпуска DNS reply.
++						deadline := time.Now().Add(5 * time.Second)
++						for {
++							buf := make([]byte, 1<<20)
++							n := runtime.Stack(buf, true)
++							if strings.Count(string(buf[:n]), "app/dns.fetch(") >= 2 {
++								break
++							}
++							if time.Now().After(deadline) {
++								close(release)
++								t.Fatal("оба caller не вошли в native fetch")
++							}
++							runtime.Gosched()
++						}
++						changes[victim](mode)
++						close(release)
++						for i, ch := range results {
++							select {
++							case ips := <-ch:
++								allowed := mode == "known" || i != victim
++								if allowed {
++									if len(ips) != 1 || !ips[0].Equal(net.ParseIP("192.0.2.17")) {
++										t.Fatalf("caller %d должен получить адрес: %v", i, ips)
++									}
++								} else if len(ips) != 0 {
++									t.Fatalf("caller %d получил адрес без authority: %v", i, ips)
++								}
++							case <-time.After(5 * time.Second):
++								t.Fatal("await завис")
++							}
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("coalescing: queries=%d", queries.Load())
++						}
++						// Свежие вызовы используют общий native cache, но повторно проверяют каждого caller.
++						for i, ctx := range []context.Context{ctx0, ctx1} {
++							ips, _, _ := client.LookupIPWithContext(ctx, "private.test", option)
++							allowed := mode == "known" || i != victim
++							if allowed != (len(ips) == 1) {
++								t.Fatalf("cache caller %d: %v", i, ips)
++							}
++						}
++						// Отдельный caller прогревает routing cache, затем теряет authority.
++						cacheCtx, cacheChange := hooks.ClosedDNSFixture(t)
++						cacheCtx = context.WithValue(cacheCtx, core.XrayKey(1), instance)
++						cacheCtx = session.ContextWithOutbounds(cacheCtx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++						route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(cacheCtx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++						if ips := route.GetTargetIPs(); len(ips) != 1 {
++							t.Fatalf("warm routing cache: %v", ips)
++						}
++						cacheChange(mode)
++						if ips := route.GetTargetIPs(); (mode == "known") != (len(ips) == 1) {
++							t.Fatalf("routing cache после %s: %v", mode, ips)
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("cache miss: queries=%d", queries.Load())
++						}
++					})
++				}
++			}
++		}
++	}
++
 +}
 diff --git a/features/dns/client.go b/features/dns/client.go
 index 6eb4bd0..b564907 100644
@@ -3648,9 +3831,10 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/socket.go b/common/yonikbroker/socket.go
 new file mode 100644
+index 0000000..0a50cfa
 --- /dev/null
 +++ b/common/yonikbroker/socket.go
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,63 @@
 +package nativehooks
 +
 +import (
@@ -3690,7 +3874,13 @@ new file mode 100644
 +		_ = c.session.Revoke()
 +		return nil, ErrDenied
 +	}
-+	stop := context.AfterFunc(ctx, func() { _ = c.session.Revoke() })
++	stop := context.AfterFunc(ctx, func() {
++		if exchange, _ := ctx.Value(dnsExchangeKey{}).(bool); exchange {
++			_ = socket.Close()
++			return
++		}
++		_ = c.session.Revoke()
++	})
 +	owned := &socketCancellation{Closer: socket, stop: stop}
 +	handle, err := c.session.Track(time.Now(), c.required, c.flow, proof, owned)
 +	if err != nil {
@@ -3708,3 +3898,157 @@ new file mode 100644
 +}
 +
 +func (s *socketCancellation) Close() error { s.stop(); return s.Closer.Close() }
+diff --git a/app/dns/cache_controller.go b/app/dns/cache_controller.go
+index 6e2fd6c..9eac043 100644
+--- a/app/dns/cache_controller.go
++++ b/app/dns/cache_controller.go
+@@ -245,14 +245,18 @@ func (c *CacheController) flush(batch []migrationEntry) {
+ func (c *CacheController) updateRecord(req *dnsRequest, rep *IPRecord) {
+ 	rtt := time.Since(req.start)
+ 
+-	switch req.reqType {
+-	case dnsmessage.TypeA:
+-		c.pub.Publish(req.domain+"4", rep)
+-	case dnsmessage.TypeAAAA:
+-		c.pub.Publish(req.domain+"6", rep)
++	publish := func() {
++		switch req.reqType {
++		case dnsmessage.TypeA:
++			c.pub.Publish(req.domain+"4", rep)
++		case dnsmessage.TypeAAAA:
++			c.pub.Publish(req.domain+"6", rep)
++		}
++
+ 	}
+ 
+ 	if c.disableCache {
++		publish()
+ 		errors.LogInfo(context.Background(), c.name, " got answer: ", req.domain, " ", req.reqType, " -> ", rep.IP, ", rtt: ", rtt)
+ 		return
+ 	}
+@@ -294,6 +298,8 @@ func (c *CacheController) updateRecord(req *dnsRequest, rep *IPRecord) {
+ 	c.ips[req.domain] = newRec
+ 	c.Unlock()
+ 
++	publish()
++
+ 	if pubRecord != nil {
+ 		_, ttl, err := pubRecord.getIPs()
+ 		if ttl > 0 && !go_errors.Is(err, errRecordNotFound) {
+diff --git a/app/dns/dnscommon.go b/app/dns/dnscommon.go
+index 10597d5..ddcef3d 100644
+--- a/app/dns/dnscommon.go
++++ b/app/dns/dnscommon.go
+@@ -12,7 +12,7 @@ import (
+ 	"github.com/xtls/xray-core/common/log"
+ 	"github.com/xtls/xray-core/common/net"
+ 	"github.com/xtls/xray-core/common/session"
+-	"github.com/xtls/xray-core/core"
++
+ 	dns_feature "github.com/xtls/xray-core/features/dns"
+ 
+ 	"golang.org/x/net/dns/dnsmessage"
+@@ -258,7 +258,7 @@ L:
+ 
+ // toDnsContext create a new background context with parent inbound, session and dns log
+ func toDnsContext(ctx context.Context, addr string) context.Context {
+-	dnsCtx := core.ToBackgroundDetachedContext(ctx)
++	dnsCtx := context.WithoutCancel(ctx)
+ 	if inbound := session.InboundFromContext(ctx); inbound != nil {
+ 		dnsCtx = session.ContextWithInbound(dnsCtx, inbound)
+ 	}
+diff --git a/app/dns/nameserver_cached.go b/app/dns/nameserver_cached.go
+index cbd2f03..7767f57 100644
+--- a/app/dns/nameserver_cached.go
++++ b/app/dns/nameserver_cached.go
+@@ -3,6 +3,7 @@ package dns
+ import (
+ 	"context"
+ 	go_errors "errors"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"time"
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+@@ -65,12 +66,30 @@ func fetch(ctx context.Context, s CachedNameserver, fqdn string, option dns.IPOp
+ 		key = key + "6"
+ 	}
+ 
+-	v, _, _ := s.getCacheController().requestGroup.Do(key, func() (any, error) {
+-		return doFetch(ctx, s, fqdn, option), nil
++	// Общие DNS данные живут независимо от отмены первого caller.
++	shared := s.getCacheController().requestGroup.DoChan(key, func() (any, error) {
++		sharedCtx, release := hooks.DNSExchangeContext(ctx)
++		defer release()
++		queryCtx, cancel := context.WithTimeout(sharedCtx, 8*time.Second)
++		defer cancel()
++		return doFetch(queryCtx, s, fqdn, option), nil
+ 	})
+-	ret := v.(result)
++	select {
++	case <-ctx.Done():
++		return nil, 0, ctx.Err()
++	case value := <-shared:
++		ret := value.Val.(result)
++		// Отзыв владельца общего socket не отзывает соседний flow.
++		if ret.error != nil && ctx.Err() == nil {
++			retryCtx, release := hooks.DNSExchangeContext(ctx)
++			defer release()
++			retryCtx, cancel := context.WithTimeout(retryCtx, 8*time.Second)
++			defer cancel()
++			ret = doFetch(retryCtx, s, fqdn, option)
++		}
++		return ret.ips, ret.ttl, ret.error
++	}
+ 
+-	return ret.ips, ret.ttl, ret.error
+ }
+ 
+ type result struct {
+diff --git a/app/dns/nameserver_udp.go b/app/dns/nameserver_udp.go
+index 7761662..34d10bf 100644
+--- a/app/dns/nameserver_udp.go
++++ b/app/dns/nameserver_udp.go
+@@ -2,6 +2,7 @@ package dns
+ 
+ import (
+ 	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -26,6 +27,7 @@ type ClassicNameServer struct {
+ 	address         *net.Destination
+ 	requests        map[uint16]*udpDnsRequest
+ 	udpServer       *udp.Dispatcher
++	dispatcher      routing.Dispatcher
+ 	requestsCleanup *task.Periodic
+ 	reqID           uint32
+ 	clientIP        net.IP
+@@ -48,6 +50,7 @@ func NewClassicNameServer(address net.Destination, dispatcher routing.Dispatcher
+ 		address:         &address,
+ 		requests:        make(map[uint16]*udpDnsRequest),
+ 		clientIP:        clientIP,
++		dispatcher:      dispatcher,
+ 	}
+ 	s.requestsCleanup = &task.Periodic{
+ 		Interval: time.Minute,
+@@ -189,7 +192,18 @@ func (s *ClassicNameServer) sendQuery(ctx context.Context, noResponseErrCh chan<
+ 			}
+ 			return
+ 		}
+-		s.udpServer.Dispatch(toDnsContext(ctx, s.address.String()), *s.address, b)
++		server := s.udpServer
++		if hooks.HasFlowContext(ctx) {
++			// Managed exchange не переиспользует socket другого flow.
++			var isolated *udp.Dispatcher
++			isolated = udp.NewDispatcher(s.dispatcher, func(replyCtx context.Context, packet *udp_proto.Packet) {
++				s.HandleResponse(replyCtx, packet)
++				isolated.RemoveRay()
++			})
++			server = isolated
++			go func() { <-ctx.Done(); isolated.RemoveRay() }()
++		}
++		server.Dispatch(toDnsContext(ctx, s.address.String()), *s.address, b)
+ 	}
+ }
+ 

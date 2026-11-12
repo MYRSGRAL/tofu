@@ -91,3 +91,6 @@ packet handoff после socket await. Отдельный legacy/missing-API т
 Полная матрица второго core и concurrent queries/coalescing остаются отдельным
 leaf. Параллельный `core.New` выявляет upstream global InitSystemDialer race;
 текущие тесты не меняют эту независимую реализацию. Production issuer закрыт.
+
+Concurrent DNS/cache leaf и границы его приёмки: см.
+`docs/validation/2026-11-12-xray-concurrent-dns.md`.
