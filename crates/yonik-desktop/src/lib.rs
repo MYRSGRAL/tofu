@@ -21,3 +21,6 @@ pub mod maintenance;
 
 #[cfg(all(target_os = "linux", feature = "startup-diagnostics"))]
 pub use backend::StartupPhase;
+
+#[cfg(target_os = "linux")]
+pub mod local_import;

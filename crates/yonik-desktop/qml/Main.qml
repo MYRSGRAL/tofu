@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import cloud.highpriority.yonik
 
 ApplicationWindow {
@@ -48,6 +49,9 @@ ApplicationWindow {
     readonly property bool selectionConfirmed: (desiredProfileId === null || state.selected_profile === desiredProfileId)
         && (desiredSourceId === null || state.source_id === desiredSourceId)
     property bool sourceOptions: false
+    property bool localImportActive: false
+    property bool localImportObserved: false
+    property bool localImportReview: false
     property string commandContext: "connection"
     readonly property string connectionError: state.connection_error || (!state.ready ? state.error || "" : "")
     readonly property string sourceError: state.source_error || ""
@@ -63,6 +67,18 @@ ApplicationWindow {
     function openAdd(paste) {
         pasteOnOpen = paste
         addDialog.open()
+    }
+    function submitLocalImport(command) {
+        desiredSourceId = null
+        desiredProfileId = null
+        searchDelay.stop()
+        searchQueued = false
+        page = 1
+        localImportReview = true
+        localImportActive = true
+        localImportObserved = false
+        send(command)
+        addDialog.close()
     }
     function selectSource(id) {
         desiredSourceId = id
@@ -100,7 +116,7 @@ ApplicationWindow {
 
     function tr(ru, en) { return language === "ru" ? ru : en }
     function send(command) {
-        const sourceCommands = ["import_source", "refresh", "cancel_refresh", "rename_source", "delete_source", "set_source_hwid", "select_source", "source_page", "approve_refresh", "discard_refresh", "review_page", "query", "select_profile"]
+        const sourceCommands = ["import_text", "import_file", "cancel_local_import", "import_source", "refresh", "cancel_refresh", "rename_source", "delete_source", "set_source_hwid", "select_source", "source_page", "approve_refresh", "discard_refresh", "review_page", "query", "select_profile"]
         commandContext = sourceCommands.indexOf(command.command) >= 0 ? "source" : "connection"
         if (!state.closed) backend.dispatch(JSON.stringify(command))
     }
@@ -164,6 +180,9 @@ ApplicationWindow {
             completeRouting(next.routing_ack)
             if (searchQueued && !next.busy && !next.pending) searchDelay.restart()
             parseError = ""
+            if (window.localImportActive && next.busy) window.localImportObserved = true
+            if (window.localImportActive && (next.error || (window.localImportObserved && !next.busy))) window.localImportActive = false
+            if (window.localImportObserved && !next.busy && !next.pending) window.localImportReview = false
             if (next.pending && !reviewDialog.visible) reviewDialog.open()
             if (!next.pending && reviewDialog.visible) reviewDialog.close()
         } catch (_) {
@@ -693,9 +712,10 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
-                    visible: window.sourceFeedbackText() !== "" || !!window.parseError
+                    visible: window.sourceFeedbackText() !== "" || !!window.parseError || (window.state.busy && window.localImportActive)
                     SmallLabel { objectName: "subscriptionFeedback"; Layout.fillWidth: true; maximumLineCount: 3; elide: Text.ElideRight; color: window.sourceError ? "#e6bc83" : window.muted; text: window.parseError || window.sourceFeedbackText() }
                     ActionButton { objectName: "cancelSourceRefreshButton"; visible: window.sourceLoading; enabled: window.state.busy && window.state.refresh_source_id !== undefined && window.state.refresh_source_id !== null && typeof window.state.refresh_token === "string"; text: window.tr("Отмена", "Cancel"); onClicked: window.send({command: "cancel_refresh", id: window.state.refresh_source_id, token: window.state.refresh_token}) }
+                    ActionButton { objectName: "cancelImportButton"; visible: window.state.busy && window.localImportActive; text: window.tr("Отменить импорт", "Cancel import"); onClicked: window.send({command: "cancel_local_import"}) }
                     ActionButton { objectName: "openReviewButton"; visible: !!window.state.pending; text: window.tr("Проверить", "Review"); onClicked: reviewDialog.open() }
                 }
                 RowLayout {
@@ -1355,7 +1375,7 @@ ApplicationWindow {
         modal: true
         title: window.tr("Добавить подписку", "Add subscription")
         closePolicy: Popup.CloseOnEscape
-        onClosed: { sourceName.clear(); sourceUrl.clear(); sourceHwid.checked = false; localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
+        onClosed: { localImportText.clear(); localImportLimit.visible = false; sourceName.clear(); sourceUrl.clear(); sourceHwid.checked = false; localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
         contentItem: PanelScroll {
             id: addScroll
             implicitHeight: Math.min(addContent.implicitHeight, window.height - 140)
@@ -1370,6 +1390,22 @@ ApplicationWindow {
             RowLayout {
                 TextField { id: sourceUrl; objectName: "sourceUrlInput"; Layout.fillWidth: true; maximumLength: 8192; echoMode: reveal.checked ? TextInput.Normal : TextInput.Password; selectByMouse: true; inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData; Accessible.name: window.tr("Секретная ссылка подписки", "Secret subscription URL") }
                 CheckBox { id: reveal; objectName: "revealSourceUrl"; text: window.tr("Показать", "Show") }
+            }
+            PlainLabel { text: window.tr("Текст или файл конфигурации", "Configuration text or file") }
+            TextArea {
+                id: localImportText; objectName: "localImportTextInput"
+                Layout.fillWidth: true; Layout.preferredHeight: 100
+                wrapMode: TextEdit.Wrap; selectByMouse: true
+                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                Accessible.name: window.tr("Секретный текст импорта", "Secret import text")
+                onTextChanged: if (length > 1048576) { clear(); localImportLimit.visible = true }
+            }
+            PlainLabel { id: localImportLimit; visible: false; text: window.tr("Превышен размер текста. Выберите файл до 8 MiB.", "Text too large. Select a file up to 8 MiB.") }
+            RowLayout {
+                ActionButton { objectName: "importTextButton"; text: window.tr("Импорт текста", "Import text"); enabled: window.editable && !window.state.pending && localImportText.length > 0; onClicked: {
+                    window.submitLocalImport({command: "import_text", name: sourceName.text.trim() || window.tr("Локальный импорт", "Local import"), text: localImportText.text})
+                } }
+                ActionButton { objectName: "importFileButton"; text: window.tr("Выбрать файл", "Choose file"); enabled: window.editable && !window.state.pending; onClicked: localImportFile.open() }
             }
             ActionButton {
                 id: sourceAdvanced; objectName: "sourceAdvancedButton"
@@ -1398,6 +1434,7 @@ ApplicationWindow {
                     highlighted: true
                     enabled: window.state.ready && sourceUrl.text.trim().length > 0 && !window.state.busy && !window.state.pending
                     onClicked: {
+                        window.localImportReview = false
                         window.desiredSourceId = null
                         window.desiredProfileId = null
                         searchDelay.stop()
@@ -1412,6 +1449,28 @@ ApplicationWindow {
         }
         }
         onOpened: { sourceUrl.clear(); sourceName.clear(); sourceHwid.checked = false; if (window.pasteOnOpen) sourceUrl.paste(); window.pasteOnOpen = false; sourceUrl.forceActiveFocus() }
+    }
+    FileDialog {
+        id: localImportFile; objectName: "localImportFileDialog"
+        fileMode: FileDialog.OpenFile
+        options: FileDialog.DontResolveSymlinks
+        title: window.tr("Импорт конфигурации до 8 MiB", "Import configuration up to 8 MiB")
+        onAccepted: {
+            const url = selectedFile.toString()
+            if (!url.startsWith("file:///")) return
+            window.submitLocalImport({command: "import_file", name: sourceName.text.trim() || window.tr("Локальный импорт", "Local import"), path: decodeURIComponent(url.substring(7))})
+        }
+    }
+    FileDialog {
+        id: localBackupFile; objectName: "localImportBackupDialog"
+        fileMode: FileDialog.SaveFile
+        title: window.tr("Резервная копия в новом файле приватного каталога", "Backup in a new file in a private directory")
+        onAccepted: {
+            const url = selectedFile.toString()
+            if (!url.startsWith("file:///")) return
+            window.maintenanceRequestSequence += 1
+            window.send({command: "maintenance_start", request_id: window.maintenanceRequestSequence, operation: "backup", destination: decodeURIComponent(url.substring(7)), revision: window.state.revision || 0})
+        }
     }
     DarkDialog {
         id: reviewDialog
@@ -1429,9 +1488,14 @@ ApplicationWindow {
             id: reviewContent
             width: reviewScroll.availableWidth
             spacing: 12
+            PlainLabel { Layout.fillWidth: true; visible: window.localImportReview; text: window.tr("Перед первым сохранением создайте зашифрованную резервную копию. Исходник сохраняется зашифрованным без изменений.", "Create an encrypted backup before the first save. The original input is stored encrypted without changes.") }
+            ActionButton { objectName: "localImportBackupButton"; visible: window.localImportReview; enabled: !window.state.busy && window.state.ready; text: window.tr("Создать резервную копию…", "Create backup…"); onClicked: localBackupFile.open() }
+            ActionButton { objectName: "localImportBackupCancelButton"; visible: window.localImportReview && window.state.busy && !!window.state.maintenance_ack; enabled: !!window.state.maintenance_ack && window.state.maintenance_ack.phase !== "cancelling"; text: window.tr("Отменить резервную копию", "Cancel backup"); onClicked: window.send({command: "maintenance_cancel", request_id: window.state.maintenance_ack.request_id}) }
+            PlainLabel { objectName: "localImportBackupFeedback"; Layout.fillWidth: true; visible: window.localImportReview && !!window.state.maintenance_ack; text: !window.state.maintenance_ack ? "" : window.state.maintenance_ack.phase === "complete" ? window.tr("Резервная копия готова. Можно сохранить профили.", "Backup ready. You can save profiles.") : window.state.maintenance_ack.error ? window.errorText(window.state.maintenance_ack.error) : window.tr("Подготовка резервной копии…", "Preparing backup…") }
+            PlainLabel { Layout.fillWidth: true; visible: window.localImportReview && !!window.sourceError; color: "#e6bc83"; text: window.sourceError ? window.errorText(window.sourceError) : "" }
             PlainLabel { Layout.fillWidth: true; text: window.tr("Проверьте результат перед заменой сохранённых профилей.", "Review the result before replacing saved profiles.") }
-            PlainLabel { text: window.tr("Принято: ", "Accepted: ") + (window.state.pending ? window.state.pending.accepted : 0) }
-            PlainLabel { text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
+            PlainLabel { objectName: "importAcceptedCount"; text: window.tr("Принято: ", "Accepted: ") + (window.state.pending ? window.state.pending.accepted : 0) }
+            PlainLabel { objectName: "importRejectedCount"; text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
             PlainLabel { text: window.tr("Требуют внимания: ", "Flagged: ") + (window.state.pending ? window.state.pending.flagged : 0) }
             PlainLabel { objectName: "nativeJsonWarning"; Layout.fillWidth: true; color: "#e6bc83"; visible: !!window.state.pending && !!window.state.pending.native_json; text: window.tr("Источник содержит конфигурацию ядра JSON. Её содержимое не показывается: она может содержать секреты. Подтверждайте импорт только из доверенного источника.", "The source contains native engine JSON configuration. Its contents are hidden because they may contain secrets. Approve only a trusted source.") }
             ListView {
@@ -1467,7 +1531,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 8
                 layoutDirection: Qt.RightToLeft
-                ActionButton { objectName: "approveRefreshButton"; text: window.tr("Сохранить профили", "Save profiles"); highlighted: true; enabled: !!window.state.pending && !window.state.busy; onClicked: window.send({command: "approve_refresh"}) }
+                ActionButton { objectName: "approveRefreshButton"; text: window.tr("Сохранить профили", "Save profiles"); highlighted: true; enabled: !!window.state.pending && (window.state.pending.accepted > 0 || window.state.pending.native_json) && !window.state.busy; onClicked: window.send({command: "approve_refresh"}) }
                 ActionButton { objectName: "reviewStopButton"; visible: window.state.can_stop; text: window.tr("Отключить", "Disconnect"); onClicked: window.send({command: "stop"}) }
                 ActionButton { objectName: "discardRefreshButton"; text: window.tr("Отменить импорт", "Discard import"); enabled: !window.state.busy; onClicked: window.send({command: "discard_refresh"}) }
             }
