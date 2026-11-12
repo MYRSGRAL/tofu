@@ -11,6 +11,7 @@ from desktop_ui_smoke import execute, ui  # noqa: E402
 
 
 def main() -> None:
+    controlled = "--controlled-transports" in sys.argv[3:]
     binary = Path(sys.argv[1]).resolve(strict=True)
     output = Path(sys.argv[2]).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -23,6 +24,8 @@ def main() -> None:
         cases = [(index, None) for index in range(6)] + [
             (index, transport) for index in range(3) for transport in ("ws", "grpc")
         ]
+        if controlled:
+            cases = [(1, "ws"), (2, "grpc")]
         for case_number, (index, transport) in enumerate(cases):
             steps.extend(
                 [
@@ -48,8 +51,8 @@ def main() -> None:
                 )
                 for field, value in [
                     ("serverName", "Manual"),
-                    ("host", "example.com"),
-                    ("port", "443"),
+                    ("host", "127.0.0.1" if controlled else "example.com"),
+                    ("port", "24443" if controlled else "443"),
                 ]
             )
             if index < 2:
@@ -76,8 +79,16 @@ def main() -> None:
                     steps.append(ui("click", "manualTls"))
                 steps.extend(
                     [
-                        ui("text", "manual_sni", value="tls.example.com"),
-                        ui("text", "manual_alpn", value="h2,http/1.1"),
+                        ui(
+                            "text",
+                            "manual_sni",
+                            value="yonik.test" if controlled else "tls.example.com",
+                        ),
+                        ui(
+                            "text",
+                            "manual_alpn",
+                            value="" if controlled else "h2,http/1.1",
+                        ),
                         ui("click", "manualTransport"),
                         ui(
                             "click",
@@ -89,14 +100,28 @@ def main() -> None:
                 if transport == "ws":
                     steps.extend(
                         [
-                            ui("text", "manual_path", value="/ws"),
-                            ui("text", "manual_wsHost", value="cdn.example.com"),
+                            ui(
+                                "text",
+                                "manual_path",
+                                value="/manual-echo" if controlled else "/ws",
+                            ),
+                            ui(
+                                "text",
+                                "manual_wsHost",
+                                value="yonik.test" if controlled else "cdn.example.com",
+                            ),
                         ]
                     )
                 else:
                     steps.extend(
                         [
-                            ui("text", "manual_service", value="service-name"),
+                            ui(
+                                "text",
+                                "manual_service",
+                                value="manual-service"
+                                if controlled
+                                else "service-name",
+                            ),
                         ]
                     )
             steps.append(
