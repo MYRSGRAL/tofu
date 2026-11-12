@@ -11,6 +11,12 @@ pub struct RuleInput {
     pub domains: Vec<String>,
     pub destinations: Vec<String>,
     pub action: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "yonik_engine::platform_source::deserialize_sources"
+    )]
+    pub platform_sources: Option<Vec<yonik_engine::platform_source::PlatformSourceInput>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +45,11 @@ fn action(value: &str) -> Result<Action, &'static str> {
 impl Draft {
     /// Ограниченный отчёт без исходных селекторов и персональных данных.
     pub fn diagnostics(&self) -> serde_json::Value {
+        if let Ok(policy) = self.policy() {
+            if let Some(id) = policy.unsupported_selector() {
+                return serde_json::json!({"incomplete":true,"warnings":[],"error":"unsupported_selector","rule_id":id});
+            }
+        }
         use yonik_domain::policy_diagnostics::{Limits, WarningKind, diagnose};
         match self
             .policy()
@@ -64,6 +75,11 @@ impl Draft {
             return Err("limit");
         }
         let policy = self.policy()?;
+        if let Some(id) = policy.unsupported_selector() {
+            return Ok(
+                serde_json::json!({"status":"unsupported", "reason":"unsupported_selector", "rule_id":id}),
+            );
+        }
         if policy
             .user_rules
             .iter()
@@ -110,6 +126,28 @@ impl Draft {
             },
         )
     }
+    /// Граница активации: storage validation не запрещает сохранение V2.
+    pub fn system_policy(
+        &self,
+    ) -> Result<yonik_engine::policy_wire::SystemPolicy, yonik_engine::policy_input::PolicyInputError>
+    {
+        use yonik_engine::policy_input::PolicyInputError;
+        let policy = self.policy().map_err(|_| PolicyInputError::InvalidPolicy)?;
+        if let Some(id) = policy.unsupported_selector() {
+            return Err(PolicyInputError::UnsupportedSelector(id));
+        }
+        let rules = self.rules.iter().zip(&policy.user_rules).map(|(r, typed)| {
+            let (suffixes, exact): (Vec<_>, Vec<_>) = r.domains.iter().partition(|s| s.starts_with("*."));
+            let mut row = serde_json::json!({"id":r.id,"enabled":r.enabled,"action":r.action,
+                "domain":exact,"domain_suffix":suffixes.iter().map(|s| &s[2..]).collect::<Vec<_>>(),
+                "ip_cidr":typed.conditions.destinations.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "executable_paths":r.executables});
+            if let Some(sources) = &r.platform_sources { row["platform_sources"] = serde_json::json!(sources); }
+            row
+        }).collect::<Vec<_>>();
+        yonik_engine::policy_wire::SystemPolicy::parse(&serde_json::json!({"version":self.version,
+            "default_action":self.default_action,"user_rules":rules,"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}).to_string())
+    }
     pub fn json(&self) -> String {
         serde_json::to_string(self).expect("DTO без fallible полей")
     }
@@ -122,7 +160,7 @@ impl Draft {
         Ok(draft)
     }
     pub fn policy(&self) -> Result<Policy, &'static str> {
-        if self.version != 1 || self.rules.len() > 256 {
+        if ![1, 2].contains(&self.version) || self.rules.len() > 256 {
             return Err("limit");
         }
         let bytes: usize = self
@@ -136,12 +174,39 @@ impl Draft {
             })
             .map(String::len)
             .sum();
+        let bytes = bytes
+            + self
+                .rules
+                .iter()
+                .flat_map(|r| r.platform_sources.iter().flatten())
+                .map(|s| s.bytes())
+                .sum::<usize>();
         if bytes > 200_000 {
             return Err("limit");
         }
         let mut ids = std::collections::HashSet::new();
         let mut rules = Vec::with_capacity(self.rules.len());
         for input in &self.rules {
+            if (self.version == 2) != input.platform_sources.is_some() {
+                return Err("format");
+            }
+            let sources = input.platform_sources.as_deref().unwrap_or_default();
+            if sources.len() > 16 {
+                return Err("limit");
+            }
+            let platform_sources = sources
+                .iter()
+                .map(|s| s.typed())
+                .collect::<Result<Vec<_>, _>>()?;
+            if platform_sources
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != platform_sources.len()
+            {
+                return Err("duplicate_parameter");
+            }
+
             if input.id == 0 || input.id > 9_007_199_254_740_991 || !ids.insert(input.id) {
                 return Err("id");
             }
@@ -189,11 +254,15 @@ impl Draft {
                 enabled: input.enabled,
                 action: action(&input.action)?,
                 conditions: Conditions {
+                    platform_sources,
                     executables: input.executables.clone(),
                     domains,
                     destinations,
                 },
             });
+        }
+        if self.json().len() > 262144 {
+            return Err("limit");
         }
         Ok(Policy {
             user_rules: rules,
@@ -202,14 +271,41 @@ impl Draft {
         })
     }
     pub fn put(&mut self, input: RuleInput, confirm_broad: bool) -> Result<(), &'static str> {
+        let mut candidate = self.clone();
+        if input
+            .platform_sources
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+            && candidate.version == 1
+        {
+            candidate.version = 2;
+            for rule in &mut candidate.rules {
+                rule.platform_sources = Some(vec![]);
+            }
+        }
+        let mut input = input;
+        if candidate.version == 1 && input.platform_sources.as_ref().is_some_and(Vec::is_empty) {
+            input.platform_sources = None;
+        }
+        if candidate.version == 2 && input.platform_sources.is_none() {
+            input.platform_sources = Some(
+                candidate
+                    .rules
+                    .iter()
+                    .find(|r| r.id == input.id)
+                    .and_then(|r| r.platform_sources.clone())
+                    .unwrap_or_default(),
+            );
+        }
+
         if input.executables.is_empty()
             && input.domains.is_empty()
             && input.destinations.is_empty()
+            && input.platform_sources.as_ref().is_none_or(Vec::is_empty)
             && !confirm_broad
         {
             return Err("broad");
         }
-        let mut candidate = self.clone();
         if let Some(rule) = candidate.rules.iter_mut().find(|r| r.id == input.id) {
             *rule = input;
         } else {
