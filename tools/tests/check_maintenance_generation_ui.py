@@ -56,7 +56,9 @@ FLOW = r"""
   }
   if(step===6) { click("settingsDiagnosticsButton"); step=7; return }
   if(step===7) {
+   console.log("GEN BEFORE COPY " + backend.snapshot_json)
    click("copyDiagnosticsButton")
+   console.log("GEN COPY RESULT " + JSON.stringify(find(window.contentItem,"diagnosticsExportResult").text))
    console.log("GEN CURRENT " + backend.snapshot_json)
    console.log("GEN CLIPBOARD " + clipboard())
    if(completed===1) { window.back(); step=3; return }
@@ -73,6 +75,65 @@ FLOW = r"""
  }
 }
 """
+
+
+def assess_fence(records: dict[str, list], supported: bool = False) -> str:
+    """Отличает настоящий отказ stale A от нового fault B без state injection."""
+    assert records["CLOSED"][-1]["closed"], "нет closed"
+    if "BLOCKED" in records:
+        return "BLOCKED"
+    assert len(records["A"]) == len(records["EXPORT A"]) == 1
+    original = records["A"][0]
+    exported = records["EXPORT A"][0]
+    export_metadata(json.dumps(exported).encode())
+    assert exported["errors"] == original["error_contexts"], "positive A mismatch"
+    if not supported:
+        assert {c["slot"] for c in original["error_contexts"]} == {"error", "source"}
+        assert all(
+            c["generation"] == str(original["scheduler_generation"])
+            and c["stage"] == "scheduler_validation"
+            and c["reason"] == "scheduler_interval_invalid"
+            for c in original["error_contexts"]
+        ), "не actual source context A"
+    assert all(
+        len(records[k]) == 2
+        for k in ("REPLACEMENT", "BEFORE COPY", "CURRENT", "CLIPBOARD", "COPY RESULT")
+    ), "неполный backup/restore lifecycle"
+    previous_generation = original["scheduler_generation"]
+    previous_clipboard = exported
+    outcomes = []
+    for index, replacement in enumerate(records["REPLACEMENT"]):
+        ack = replacement["maintenance_ack"]
+        assert ack["request_id"] == index + 1 and ack["phase"] == "complete"
+        assert not ack["error"] and replacement["ready"]
+        generation = replacement["scheduler_generation"]
+        assert generation > previous_generation, "replacement generation не выросла"
+        before = records["BEFORE COPY"][index]
+        current = records["CURRENT"][index]
+        assert before == current, "snapshot изменился во время copy"
+        assert before["scheduler_generation"] == generation
+        contexts = before["error_contexts"]
+        clipboard = records["CLIPBOARD"][index]
+        success = records["COPY RESULT"][index] in ("Скопировано", "Copied")
+        if supported:
+            assert not contexts
+        if not contexts:
+            assert not success and clipboard == previous_clipboard, "invalidation copy"
+            outcomes.append("INVALIDATED")
+        elif any(c in original["error_contexts"] for c in contexts):
+            assert not success and clipboard == previous_clipboard, "stale A exported"
+            outcomes.append("STALE_REFUSED")
+        else:
+            assert all(c["generation"] == str(generation) for c in contexts)
+            if success:
+                export_metadata(json.dumps(clipboard).encode())
+                assert clipboard["errors"] == contexts, "B export mismatch"
+            else:
+                assert clipboard == previous_clipboard
+            outcomes.append("B_OVERWROTE_A_UNPROVEN")
+        previous_clipboard = clipboard
+        previous_generation = generation
+    return ",".join(outcomes)
 
 
 def main() -> None:
@@ -146,6 +207,8 @@ def main() -> None:
             "OBSERVED",
             "CLOSED",
             "BLOCKED",
+            "BEFORE COPY",
+            "COPY RESULT",
         ):
             prefix = "GEN " + marker + " "
             if prefix in line:
@@ -168,19 +231,16 @@ def main() -> None:
         "PRODUCTION MAIN SHA256 " + hashlib.sha256(main_path.read_bytes()).hexdigest()
         in output
     )
+    assessment = assess_fence(records, args.supported_control)
     summary = {
+        "fence_assessment": assessment,
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "records": records,
     }
     (out / "observations.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2)
     )
-    print(
-        "BLOCKED"
-        if "BLOCKED" in records
-        else "Observed replacement (requires fence assessment)",
-        out,
-    )
+    print(assessment, out)
 
 
 if __name__ == "__main__":

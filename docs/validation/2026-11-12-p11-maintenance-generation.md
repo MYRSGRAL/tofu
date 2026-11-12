@@ -102,3 +102,25 @@ Harness добавляет только --supported-control и проверяе�
 два matching complete ACK и пустые error_contexts. Исходный ZERO case сохранён.
 Rust не менялся; Cargo и transient root не создавались. MSRV/clippy/fmt evidence
 retained binary остаётся parent p11-interval-132; новых Rust PASS не заявляется.
+
+## Продолжение: строгий observer до доставки fixed binary
+
+Observer теперь сохраняет BEFORE COPY и COPY RESULT штатной DiagnosticsExport,
+проверяет positive strict V2 A против actual error_contexts, source/error slots,
+stage/reason и scheduler generation. Для двух matching complete ACK обязательны
+ready, рост generation и неизменность snapshot во время copy. После replacement:
+STALE_REFUSED требует отказа кнопки и сохранения clipboard; INVALIDATED требует
+пустых actual contexts, отказа и сохранения clipboard. Новый context B с текущей
+generation классифицируется B_OVERWROTE_A_UNPROVEN: старый fence не доказан.
+Экспорт B при успехе проходит strict V2 и сравнение с actual contexts.
+
+Шесть локальных unittest controls проверяют классификацию и отклонение stale
+success, неверного request_id и изменения clipboard при отказе. Это синтетические
+controls Python assertions, они не инжектируются в GUI и не являются actual
+acceptance. Pinned Ruff 0.17.4 check / format --check и py_compile прошли.
+Rust/backend не изменены; Cargo не запускался, transient root не создавался.
+
+Actual прогон ожидает verified path/hash нового root binary после terminal
+сборки. Старые failed backup не повторялись, healthy control не повторялся.
+При B_OVERWROTE_A_UNPROVEN root нужен закрытый one-shot input/timing control;
+barrier, Cause, catalog и HostConfig этим изменением не добавлены.
