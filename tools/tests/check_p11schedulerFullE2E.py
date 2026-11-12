@@ -157,7 +157,10 @@ ApplicationWindow {
         )
         export_metadata(line.encode())
         (args.task / f"export-{locale}.json").write_text(line)
-    if "SCHEDULER clipboard refusal PASS" not in output or "E2E closed=true" not in output:
+    if (
+        "SCHEDULER clipboard refusal PASS" not in output
+        or "E2E closed=true" not in output
+    ):
         raise RuntimeError(output)
     print(output)
 

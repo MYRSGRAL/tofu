@@ -135,7 +135,9 @@ ApplicationWindow {
     (args.task / "qt.log").write_text(output)
     result.check_returncode()
     prefix = "E2E SNAPSHOT "
-    captured = next(line.split(prefix, 1)[1] for line in output.splitlines() if prefix in line)
+    captured = next(
+        line.split(prefix, 1)[1] for line in output.splitlines() if prefix in line
+    )
     (args.task / "actual-snapshot.json").write_text(captured)
     for locale in ("ru", "en"):
         prefix = f"SCHEDULER EXPORT {locale} "
@@ -144,7 +146,10 @@ ApplicationWindow {
         )
         export_metadata(line.encode())
         (args.task / f"export-{locale}.json").write_text(line)
-    if "SCHEDULER clipboard refusal PASS" not in output or "E2E closed=true" not in output:
+    if (
+        "SCHEDULER clipboard refusal PASS" not in output
+        or "E2E closed=true" not in output
+    ):
         raise RuntimeError(output)
     print(output)
 
