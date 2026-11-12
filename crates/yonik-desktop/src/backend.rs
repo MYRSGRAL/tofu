@@ -58,6 +58,8 @@ pub struct HostConfig {
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
+    #[cfg(feature = "test-support")]
+    scheduler_capacity: Option<usize>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -71,7 +73,24 @@ impl HostConfig {
             startup_observer: StartupObserver::default(),
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
+            #[cfg(feature = "test-support")]
+            scheduler_capacity: None,
         }
+    }
+    /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
+    #[cfg(feature = "test-support")]
+    pub fn ephemeral_scheduler_example(
+        data_dir: PathBuf,
+        engine_dir: PathBuf,
+        key: [u8; 32],
+        capacity: usize,
+    ) -> Result<Self> {
+        if !(1..=20_000).contains(&capacity) {
+            return Err(DesktopError("invalid_input"));
+        }
+        let mut config = Self::new(data_dir, engine_dir).with_ephemeral_key(key);
+        config.scheduler_capacity = Some(capacity);
+        Ok(config)
     }
     /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
     #[cfg(feature = "startup-diagnostics")]
@@ -3419,7 +3438,14 @@ async fn run(
     let mut subscription_policy = control.subscription_policy.subscribe();
     let mut subscription_visible = control.subscription_visible.subscribe();
     let origin = tokio::time::Instant::now();
-    let mut scheduled = match DesktopSchedule::new() {
+    #[cfg(feature = "test-support")]
+    let owner = match config.scheduler_capacity {
+        Some(capacity) => DesktopSchedule::bounded(capacity),
+        None => DesktopSchedule::new(),
+    };
+    #[cfg(not(feature = "test-support"))]
+    let owner = DesktopSchedule::new();
+    let mut scheduled = match owner {
         Ok(owner) => owner,
         Err(error) => {
             actor.state.schedule_error(error, None);
@@ -5325,5 +5351,40 @@ mod maintenance_context_tests {
         }
         fs::remove_dir(root.join("data")).expect("очистка data");
         fs::remove_dir(root).expect("очистка root");
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod scheduler_example_limits {
+    use super::HostConfig;
+    use std::path::PathBuf;
+
+    #[test]
+    fn capacity_cannot_disable_or_raise_production_limit() {
+        for capacity in [0, 20_001, usize::MAX] {
+            assert!(
+                HostConfig::ephemeral_scheduler_example(
+                    PathBuf::from("data"),
+                    PathBuf::from("engines"),
+                    [7; 32],
+                    capacity,
+                )
+                .is_err()
+            );
+        }
+        for capacity in [1, 20_000] {
+            let config = HostConfig::ephemeral_scheduler_example(
+                PathBuf::from("data"),
+                PathBuf::from("engines"),
+                [7; 32],
+                capacity,
+            )
+            .expect("Допустимая ёмкость отдельного стенда");
+            assert_eq!(config.scheduler_capacity, Some(capacity));
+            assert!(config.ephemeral_key.is_some());
+            assert!(!config.system_subscription_policy);
+        }
+        let config = HostConfig::new(PathBuf::from("data"), PathBuf::from("engines"));
+        assert_eq!(config.scheduler_capacity, None);
     }
 }
