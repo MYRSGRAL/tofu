@@ -5,7 +5,7 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "4cd45ebe9500cbcfee064c8094f6393e62e1aa96839588cf9d879178abeb6c78",
+  "patch_sha256": "f518907e76b60abdf9b6fce81363ec50cd11e842f95e41573127d26cb63736bb",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
@@ -46,10 +46,12 @@
     "features/routing/dns/context.go": "66e90fc4871895ceb26efcbacf0fce83f0a9535c05b3dc86c439f9bab91261f4",
     "features/routing/session/context.go": "d4e46e3029880331f47493574697b3903c0e0760daa2a8fb2fc59266cc2cacaa",
     "proxy/freedom/freedom.go": "374abc23368cb170a51d5afbf05772cfb322a09d1cdcd8b77ed059a282363649",
-    "app/dns/nameserver_cached.go": "71e039182adc5df856c77d31c6b736c7a5685aa7f24c8ac3b77a739e4e50f990",
+    "app/dns/nameserver_cached.go": "2945990930fc06fb08dfc2d1165fd8208a6d61776275c0b689d0816a4ac79ff3",
     "app/dns/nameserver_udp.go": "3119832a165a32f5ddb7424946805c0eacfb6260f5bb93cb389780dd3ecd3554",
     "app/dns/dnscommon.go": "26d5331d7732d297137bee4a66dbeb7d880f7e891391502018b1885cef87ab98",
-    "app/dns/cache_controller.go": "ad0a4bbf6590b4dd91fb409075e3d4df42eeb75e76bec538899cbc0d17cba907"
+    "app/dns/cache_controller.go": "c0a573b057d0caaadd3519d4dd9cae0441047a7f04671283e3dec13c3d543464",
+    "app/dns/yonik_exchange.go": "9d5a107f02a93c5dafeb1be697244b4b9b433640d86648a3064e754bb2f7ddde",
+    "app/dns/yonik_exchange_test.go": "11b70f42b4bce1cc3a0861e9a19a1b2b8b68ec65678451606022ec77bee26d0a"
   },
   "owned_tun_constructor_connected": true
 }

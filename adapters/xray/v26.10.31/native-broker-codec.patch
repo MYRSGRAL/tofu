@@ -3899,10 +3899,27 @@ index 0000000..0a50cfa
 +
 +func (s *socketCancellation) Close() error { s.stop(); return s.Closer.Close() }
 diff --git a/app/dns/cache_controller.go b/app/dns/cache_controller.go
-index 6e2fd6c..9eac043 100644
 --- a/app/dns/cache_controller.go
 +++ b/app/dns/cache_controller.go
-@@ -245,14 +245,18 @@ func (c *CacheController) flush(batch []migrationEntry) {
+@@ -14,7 +14,6 @@
+ 	dns_feature "github.com/xtls/xray-core/features/dns"
+ 
+ 	"golang.org/x/net/dns/dnsmessage"
+-	"golang.org/x/sync/singleflight"
+ )
+ 
+ const (
+@@ -37,7 +36,8 @@
+ 	pub           *pubsub.Service
+ 	cacheCleanup  *task.Periodic
+ 	highWatermark int
+-	requestGroup  singleflight.Group
++	exchangeMu    sync.Mutex
++	exchanges     map[string]*cachePending
+ }
+ 
+ func NewCacheController(name string, disableCache bool, serveStale bool, serveExpiredTTL uint32) *CacheController {
+@@ -245,14 +245,18 @@
  func (c *CacheController) updateRecord(req *dnsRequest, rep *IPRecord) {
  	rtt := time.Since(req.start)
  
@@ -3926,7 +3943,7 @@ index 6e2fd6c..9eac043 100644
  		errors.LogInfo(context.Background(), c.name, " got answer: ", req.domain, " ", req.reqType, " -> ", rep.IP, ", rtt: ", rtt)
  		return
  	}
-@@ -294,6 +298,8 @@ func (c *CacheController) updateRecord(req *dnsRequest, rep *IPRecord) {
+@@ -294,6 +298,8 @@
  	c.ips[req.domain] = newRec
  	c.Unlock()
  
@@ -3958,10 +3975,9 @@ index 10597d5..ddcef3d 100644
  		dnsCtx = session.ContextWithInbound(dnsCtx, inbound)
  	}
 diff --git a/app/dns/nameserver_cached.go b/app/dns/nameserver_cached.go
-index cbd2f03..7767f57 100644
 --- a/app/dns/nameserver_cached.go
 +++ b/app/dns/nameserver_cached.go
-@@ -3,6 +3,7 @@ package dns
+@@ -3,6 +3,7 @@
  import (
  	"context"
  	go_errors "errors"
@@ -3969,38 +3985,36 @@ index cbd2f03..7767f57 100644
  	"time"
  
  	"github.com/xtls/xray-core/common/errors"
-@@ -65,12 +66,30 @@ func fetch(ctx context.Context, s CachedNameserver, fqdn string, option dns.IPOp
+@@ -65,12 +66,27 @@
  		key = key + "6"
  	}
  
 -	v, _, _ := s.getCacheController().requestGroup.Do(key, func() (any, error) {
 -		return doFetch(ctx, s, fqdn, option), nil
-+	// Общие DNS данные живут независимо от отмены первого caller.
-+	shared := s.getCacheController().requestGroup.DoChan(key, func() (any, error) {
-+		sharedCtx, release := hooks.DNSExchangeContext(ctx)
-+		defer release()
-+		queryCtx, cancel := context.WithTimeout(sharedCtx, 8*time.Second)
-+		defer cancel()
-+		return doFetch(queryCtx, s, fqdn, option), nil
- 	})
+-	})
 -	ret := v.(result)
++	shared, leave := cacheExchange(ctx, s, key, fqdn, option)
++	defer leave()
+ 
+-	return ret.ips, ret.ttl, ret.error
 +	select {
 +	case <-ctx.Done():
 +		return nil, 0, ctx.Err()
-+	case value := <-shared:
-+		ret := value.Val.(result)
++	case <-shared.done:
++		ret := shared.result
 +		// Отзыв владельца общего socket не отзывает соседний flow.
 +		if ret.error != nil && ctx.Err() == nil {
 +			retryCtx, release := hooks.DNSExchangeContext(ctx)
 +			defer release()
 +			retryCtx, cancel := context.WithTimeout(retryCtx, 8*time.Second)
 +			defer cancel()
++			stop := context.AfterFunc(ctx, cancel)
++			defer stop()
 +			ret = doFetch(retryCtx, s, fqdn, option)
 +		}
 +		return ret.ips, ret.ttl, ret.error
 +	}
- 
--	return ret.ips, ret.ttl, ret.error
++
  }
  
  type result struct {
@@ -4052,3 +4066,161 @@ index 7761662..34d10bf 100644
  	}
  }
  
+diff --git a/app/dns/yonik_exchange.go b/app/dns/yonik_exchange.go
+new file mode 100644
+--- /dev/null
++++ b/app/dns/yonik_exchange.go
+@@ -0,0 +1,57 @@
++package dns
++
++import (
++	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	D "github.com/xtls/xray-core/features/dns"
++	"time"
++)
++
++type cachePending struct {
++	waiters int
++	done    chan struct{}
++	cancel  context.CancelFunc
++	result  result
++}
++
++// Последний waiter освобождает общий upstream; отмена соседа не влияет на остальных.
++func cacheExchange(ctx context.Context, s CachedNameserver, key, fqdn string, option D.IPOption) (*cachePending, func()) {
++	c := s.getCacheController()
++	c.exchangeMu.Lock()
++	if c.exchanges == nil {
++		c.exchanges = make(map[string]*cachePending)
++	}
++	p := c.exchanges[key]
++	if p == nil {
++		shared, release := hooks.DNSExchangeContext(ctx)
++		query, cancel := context.WithTimeout(shared, 8*time.Second)
++		p = &cachePending{done: make(chan struct{}), cancel: cancel}
++		c.exchanges[key] = p
++		go func() {
++			defer release()
++			defer cancel()
++			ret := doFetch(query, s, fqdn, option)
++			c.exchangeMu.Lock()
++			p.result = ret
++			if c.exchanges[key] == p {
++				delete(c.exchanges, key)
++			}
++			close(p.done)
++			c.exchangeMu.Unlock()
++		}()
++	}
++	p.waiters++
++	c.exchangeMu.Unlock()
++
++	return p, func() {
++		c.exchangeMu.Lock()
++		defer c.exchangeMu.Unlock()
++		p.waiters--
++		if p.waiters == 0 {
++			if c.exchanges[key] == p {
++				delete(c.exchanges, key)
++			}
++			p.cancel()
++		}
++	}
++}
+diff --git a/app/dns/yonik_exchange_test.go b/app/dns/yonik_exchange_test.go
+new file mode 100644
+--- /dev/null
++++ b/app/dns/yonik_exchange_test.go
+@@ -0,0 +1,91 @@
++package dns
++
++import (
++	"context"
++	D "github.com/xtls/xray-core/features/dns"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++type heldExchange struct {
++	cache   *CacheController
++	started chan context.Context
++	retry   bool
++	calls   atomic.Int32
++}
++
++func (s *heldExchange) getCacheController() *CacheController { return s.cache }
++func (s *heldExchange) sendQuery(ctx context.Context, errs chan<- error, _ string, _ D.IPOption) {
++	s.started <- ctx
++	if s.retry && s.calls.Add(1) == 1 {
++		errs <- context.Canceled
++	}
++}
++func waitExchange(t *testing.T, ch <-chan context.Context) context.Context {
++	t.Helper()
++	select {
++	case ctx := <-ch:
++		return ctx
++	case <-time.After(time.Second):
++		t.Fatal("exchange не начат")
++		return nil
++	}
++}
++func endedExchange(t *testing.T, ctx context.Context) {
++	t.Helper()
++	select {
++	case <-ctx.Done():
++	case <-time.After(time.Second):
++		t.Fatal("upstream жив после последнего cancel")
++	}
++}
++func TestNativeDNSLastWaiterCancel(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2)}
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan struct{})
++	go func() { defer close(done); fetch(ctx, s, "held.", D.IPOption{IPv4Enable: true}) }()
++	upstream := waitExchange(t, s.started)
++	cancel()
++	endedExchange(t, upstream)
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("caller жив")
++	}
++}
++func TestNativeDNSRetryCancel(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2), retry: true}
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan struct{})
++	go func() { defer close(done); fetch(ctx, s, "retry.", D.IPOption{IPv4Enable: true}) }()
++	waitExchange(t, s.started)
++	retry := waitExchange(t, s.started)
++	cancel()
++	endedExchange(t, retry)
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("retry caller жив")
++	}
++}
++func TestNativeDNSWaiterIsolation(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2)}
++	a, ca := context.WithCancel(context.Background())
++	defer ca()
++	b, cb := context.WithCancel(context.Background())
++	defer cb()
++	_, leaveA := cacheExchange(a, s, "same", "same.", D.IPOption{IPv4Enable: true})
++	upstream := waitExchange(t, s.started)
++	_, leaveB := cacheExchange(b, s, "same", "same.", D.IPOption{IPv4Enable: true})
++	ca()
++	leaveA()
++	select {
++	case <-upstream.Done():
++		t.Fatal("отмена соседа убила exchange")
++	default:
++	}
++	cb()
++	leaveB()
++	endedExchange(t, upstream)
++}
