@@ -113,6 +113,7 @@ def assess_fence(records: dict[str, list], supported: bool = False) -> str:
         assert before == current, "snapshot изменился во время copy"
         assert before["scheduler_generation"] == generation
         contexts = before["error_contexts"]
+        assert contexts == replacement["error_contexts"], "contexts changed after ACK"
         clipboard = records["CLIPBOARD"][index]
         success = records["COPY RESULT"][index] in ("Скопировано", "Copied")
         if supported:
@@ -120,7 +121,16 @@ def assess_fence(records: dict[str, list], supported: bool = False) -> str:
         if not contexts:
             assert not success and clipboard == previous_clipboard, "invalidation copy"
             outcomes.append("INVALIDATED")
-        elif any(c in original["error_contexts"] for c in contexts):
+        elif contexts and all(
+            c["generation"] is not None and int(c["generation"]) < generation
+            for c in contexts
+        ):
+            assert {c["slot"] for c in contexts} == {"error", "source"}
+            assert all(
+                c["stage"] == "scheduler_validation"
+                and c["reason"] == "scheduler_interval_invalid"
+                for c in contexts
+            )
             assert not success and clipboard == previous_clipboard, "stale A exported"
             outcomes.append("STALE_REFUSED")
         else:
@@ -145,57 +155,63 @@ def main() -> None:
         action="store_true",
         help="Исправный interval: обязательный positive backup/restore control",
     )
+    parser.add_argument("--binary-manifest", type=Path)
+    parser.add_argument("--assess-existing", action="store_true")
     args = parser.parse_args()
     if os.environ.get("QT_QPA_PLATFORM") != "offscreen" or not os.environ.get(
         "DBUS_SESSION_BUS_ADDRESS"
     ):
         parser.error("нужны offscreen и private D-Bus")
     out = args.output.resolve()
-    out.mkdir(mode=0o700, parents=True, exist_ok=False)
-    source = out / "observer.cpp"
-    source.write_text(INTERPOSE)
-    library = out / "observer.so"
-    flags = shlex.split(
-        subprocess.check_output(
-            ["pkg-config", "--cflags", "--libs", "Qt6Qml"], text=True
+    if args.assess_existing:
+        output = (out / "qt.log").read_text()
+        assert "GEN CLOSED " in output and "UI FAIL " not in output
+    else:
+        out.mkdir(mode=0o700, parents=True, exist_ok=False)
+        source = out / "observer.cpp"
+        source.write_text(INTERPOSE)
+        library = out / "observer.so"
+        flags = shlex.split(
+            subprocess.check_output(
+                ["pkg-config", "--cflags", "--libs", "Qt6Qml"], text=True
+            )
         )
-    )
-    subprocess.run(
-        [
-            "clang++",
-            "-shared",
-            "-fPIC",
-            str(source),
-            "-o",
-            str(library),
-            *flags,
-            "-ldl",
-        ],
-        check=True,
-    )
-    driver = out / "driver.qml"
-    driver.write_text(
-        DRIVER.split(" Timer {", 1)[0]
-        + FLOW.replace("SUPPORTED", "true" if args.supported_control else "false")
-        .replace("BACKUP", json.dumps(str(out / "backup.sqlite")))
-        .replace("RESTORED", json.dumps(str(out / "restored.sqlite")))
-    )
-    result = subprocess.run(
-        [str(args.binary.resolve()), str(out / "host")]
-        + (["supported"] if args.supported_control else []),
-        env=dict(
-            os.environ,
-            LD_PRELOAD=str(library),
-            YONIK_UI_DRIVER=str(driver),
-            QT_FORCE_STDERR_LOGGING="1",
-        ),
-        capture_output=True,
-        text=True,
-        timeout=40,
-    )
-    output = result.stdout + result.stderr
-    (out / "qt.log").write_text(output)
-    result.check_returncode()
+        subprocess.run(
+            [
+                "clang++",
+                "-shared",
+                "-fPIC",
+                str(source),
+                "-o",
+                str(library),
+                *flags,
+                "-ldl",
+            ],
+            check=True,
+        )
+        driver = out / "driver.qml"
+        driver.write_text(
+            DRIVER.split(" Timer {", 1)[0]
+            + FLOW.replace("SUPPORTED", "true" if args.supported_control else "false")
+            .replace("BACKUP", json.dumps(str(out / "backup.sqlite")))
+            .replace("RESTORED", json.dumps(str(out / "restored.sqlite")))
+        )
+        result = subprocess.run(
+            [str(args.binary.resolve()), str(out / "host")]
+            + (["supported"] if args.supported_control else []),
+            env=dict(
+                os.environ,
+                LD_PRELOAD=str(library),
+                YONIK_UI_DRIVER=str(driver),
+                QT_FORCE_STDERR_LOGGING="1",
+            ),
+            capture_output=True,
+            text=True,
+            timeout=40,
+        )
+        output = result.stdout + result.stderr
+        (out / "qt.log").write_text(output)
+        result.check_returncode()
     records: dict[str, list[dict]] = {}
     for line in output.splitlines():
         for marker in (
@@ -227,13 +243,18 @@ def main() -> None:
     main_path = (
         Path(__file__).resolve().parents[2] / "crates/yonik-desktop/qml/Main.qml"
     )
-    assert (
-        "PRODUCTION MAIN SHA256 " + hashlib.sha256(main_path.read_bytes()).hexdigest()
-        in output
-    )
+    main_hash = hashlib.sha256(main_path.read_bytes()).hexdigest()
+    binary_hash = hashlib.sha256(args.binary.read_bytes()).hexdigest()
+    if args.binary_manifest:
+        manifest = json.loads(args.binary_manifest.read_text())
+        assert manifest["artifacts"][args.binary.name] == binary_hash
+        main_hash = manifest["source_sha256"]["crates/yonik-desktop/qml/Main.qml"]
+    assert "PRODUCTION MAIN SHA256 " + main_hash in output
     assessment = assess_fence(records, args.supported_control)
     summary = {
         "fence_assessment": assessment,
+        "main_sha256": main_hash,
+        "assessment_from_saved_log": args.assess_existing,
         "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
         "records": records,
     }

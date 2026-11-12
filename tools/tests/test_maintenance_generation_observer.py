@@ -69,6 +69,15 @@ class FenceTests(unittest.TestCase):
             assess_fence(records_for("stale")), "STALE_REFUSED,STALE_REFUSED"
         )
 
+    def test_restore_refuses_intermediate_owner(self) -> None:
+        records = records_for("stale")
+        for key in ("REPLACEMENT", "BEFORE COPY", "CURRENT"):
+            records[key][1]["error_contexts"] = [
+                dict(context, generation="3")
+                for context in records[key][1]["error_contexts"]
+            ]
+        self.assertEqual(assess_fence(records), "STALE_REFUSED,STALE_REFUSED")
+
     def test_overwrite_is_not_proof(self) -> None:
         self.assertEqual(
             assess_fence(records_for("new")),

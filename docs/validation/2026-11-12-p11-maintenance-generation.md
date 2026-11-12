@@ -124,3 +124,44 @@ Actual прогон ожидает verified path/hash нового root binary �
 сборки. Старые failed backup не повторялись, healthy control не повторялся.
 При B_OVERWROTE_A_UNPROVEN root нужен закрытый one-shot input/timing control;
 barrier, Cause, catalog и HostConfig этим изменением не добавлены.
+
+## Fixed binary: actual RU stale fence подтверждён
+
+Root передал binary из PR143, source fix 21cc500 на b79:
+`/home/myrs/projects/yonik/local/evidence/scheduler-interval-transaction/p11schedulerIntervalE2E`,
+SHA256 `d03f6ed9f6b8ee654a3e74df0373b37b58e4bba8b0e74df908e447d912204a73`.
+Hash проверен локально. Manifest связывает binary и production Main SHA256
+`277a8f30075168f0d4be76ae89ff3d75ac8234a057920aec12bf79976c6c19c5`.
+MSRV1.85.1 build/clippy all-targets -D warnings/fmt terminal PASS переданы root;
+локально прочитаны build.log, clippy.log, fmt.log в той же evidence-папке.
+verify.sh только прочитан, не запущен повторно.
+
+Выполнен один новый actual GUI lifecycle через offscreen/private D-Bus, неизменённый
+qrc Main, native clipboard и настоящую MaintenanceView.submit. A=1 имеет actual
+source/error scheduler_validation scheduler_interval_invalid и положительный
+strict V2 export. Backup request_id=1 complete, ready=true, owner=3 сохраняет
+contexts=1; штатная copy возвращает отказ и сохраняет clipboard A. Restore
+request_id=2 complete, ready=true, owner=5 сохраняет contexts=3; copy снова
+отказывает, clipboard неизменён. Snapshot до/после copy совпадает. Результат
+`STALE_REFUSED,STALE_REFUSED`, closed=true и terminal Qt exit=0. Повторного
+fault, успевшего заменить stale context до copy, не наблюдалось; barrier не нужен.
+
+Первичная post-processing проверка остановилась на несовпадении Main старой
+ветки с новой базой binary. Сам GUI завершился успешно; лог сохранён. Observer
+получил явный --binary-manifest, проверяющий hash binary и embedded Main против
+manifest, и --assess-existing для оценки сохранённого лога без GUI-повтора.
+Restore assertion уточнён для промежуточного stale owner=3, с отдельным control.
+
+Evidence вне TTL:
+`/home/myrs/projects/yonik/local/validation/p11-maintenance-generation/fixed-transaction-ru/`
+содержит qt.log, observations.json, observer.cpp/.so, driver.qml, host,
+backup.sqlite и restored.sqlite. Обе SQLite-копии 40960 байт, read-only
+integrity_check=ok; matching successful restore дополнительно подтверждает чтение
+backup с исходным синтетическим key. Snapshot/context/state не присваивались.
+Старые failed и healthy evidence сохранены, не повторялись.
+
+7 observer controls, pinned Ruff0.17.4 check/format --check и py_compile PASS.
+Rust/backend не менялись, Cargo не запускался, transient root отсутствует.
+Это actual RU proof, не SecretService/TUN/физический или Android proof; EN
+lifecycle данным запуском не проверялся. Base PR141 переводит root после
+координации зависимостей PR143; merge не выполнялся.
