@@ -165,3 +165,46 @@ Rust/backend не менялись, Cargo не запускался, transient r
 Это actual RU proof, не SecretService/TUN/физический или Android proof; EN
 lifecycle данным запуском не проверялся. Base PR141 переводит root после
 координации зависимостей PR143; merge не выполнялся.
+
+## Fresh EN acceptance на том же PR143 binary
+
+Отдельный seed-процесс того же verified binary через Settings → Appearance →
+languageChoice сохранил EN preferences, затем дал closed и exit=0. Его retained
+contexts после смены языка НЕ использованы как EN proof. Seed evidence:
+`/home/myrs/projects/yonik/local/validation/p11-maintenance-generation/fixed-en-preferences-seed/`
+(driver.qml, qt.log, process.json, host/data/preferences.json).
+
+Следующий отдельный процесс создал новый encrypted repository и scheduler A=1,
+загрузив копию этих preferences до старта backend. Все actual snapshots A,
+replacement, before/current copy и closed имеют language=en. Preferences warning
+отсутствует. Production button имеет текст Copy diagnostics, positive result
+Copied, strict V2 содержит actual source/error scheduler_validation A=1.
+Backup request_id=1 complete, owner=3/contexts=1; restore request_id=2 complete,
+owner=5/contexts=3. В обоих случаях штатная кнопка возвращает точный английский
+отказ Export unavailable, native clipboard остаётся равен начальному export A.
+Snapshots до/после copy совпадают. Результат STALE_REFUSED,STALE_REFUSED,
+closed=true, сохранённый process.json exit_code=0. Barrier не добавлялся.
+
+EN evidence вне TTL:
+`/home/myrs/projects/yonik/local/validation/p11-maintenance-generation/fixed-transaction-en-accepted/`
+содержит observations.json, qt.log, process.json, driver.qml, observer.cpp/.so,
+input-preferences.json (0600), host, backup.sqlite/restored.sqlite и атомарно
+опубликованный acceptance-manifest.json с hashes файлов и integrity results.
+Обе SQLite-копии по 40960 байт, read-only integrity_check=ok. Binary SHA256
+`d03f6ed9f6b8ee654a3e74df0373b37b58e4bba8b0e74df908e447d912204a73`,
+embedded Main SHA256 `277a8f30075168f0d4be76ae89ff3d75ac8234a057920aec12bf79976c6c19c5`
+проверены против root manifest PR143. Финальные locale assertions дополнительно
+проверены на сохранённом логе без нового GUI запуска.
+
+Промежуточные EN FAIL сохранены в fixed-transaction-en/, fixed-transaction-en-ready/
+и fixed-transaction-en-fresh/. Причина локализована: observer создавал input copy
+preferences с 0644, production Store::read требует 0600 и корректно отклонял файл
+с preferences_warning и RU fallback. Это не несовместимость формата. Исправлены
+права промежуточной копии; добавлена проверка отсутствия warning и locale, а также
+сохранение process exit code. Старые FAIL и healthy evidence не изменены.
+
+7 controls, pinned Ruff0.17.4 check/format --check и py_compile PASS. Rust/backend
+не менялись, binary не пересобирался, Cargo/transient root отсутствуют. Actual
+maintenance clipboard lifecycle теперь проверен отдельно RU и fresh EN.
+SecretService, Android и физические gates остаются открытыми. Root переводит
+PR141 на main после merge PR143; feature-parent merge не выполнялся.

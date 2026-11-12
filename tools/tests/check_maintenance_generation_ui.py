@@ -28,12 +28,19 @@ FLOW = r"""
   if(!state.ready) return
   if(step===0) {
    require(SUPPORTED ? state.error_contexts.length===0 : (state.error_contexts.length===2 && state.error_contexts.every(c=>c.reason==="scheduler_interval_invalid")),"actual input contexts")
+   require(!state.preferences_warning,"safe preferences admitted")
+   if(state.language!==LOCALE || window.language!==LOCALE) {
+    if(driver.ticks===1) console.log("GEN LANGUAGE WAIT " + backend.snapshot_json)
+    return
+   }
    original=state; console.log("GEN A " + backend.snapshot_json)
    click("settingsButton"); step=1; return
   }
   if(step===1) { click("settingsDiagnosticsButton"); step=2; return }
   if(step===2) {
+   require(find(window.contentItem,"copyDiagnosticsButton").text===(LOCALE==="en"?"Copy diagnostics":"Копировать диагностику"),"localized copy button")
    click("copyDiagnosticsButton"); previous=clipboard()
+   require(find(window.contentItem,"diagnosticsExportResult").text===(LOCALE==="en"?"Copied":"Скопировано"),"positive native export")
    require(previous.length>0,"initial clipboard"); console.log("GEN EXPORT A " + previous)
    window.back(); step=3; return
   }
@@ -155,6 +162,8 @@ def main() -> None:
         action="store_true",
         help="Исправный interval: обязательный positive backup/restore control",
     )
+    parser.add_argument("--locale", choices=("ru", "en"), default="ru")
+    parser.add_argument("--preferences", type=Path)
     parser.add_argument("--binary-manifest", type=Path)
     parser.add_argument("--assess-existing", action="store_true")
     args = parser.parse_args()
@@ -162,12 +171,24 @@ def main() -> None:
         "DBUS_SESSION_BUS_ADDRESS"
     ):
         parser.error("нужны offscreen и private D-Bus")
+    if args.locale == "en" and not args.preferences:
+        parser.error("EN требует сохранённых preferences реального UI lifecycle")
     out = args.output.resolve()
     if args.assess_existing:
         output = (out / "qt.log").read_text()
         assert "GEN CLOSED " in output and "UI FAIL " not in output
     else:
         out.mkdir(mode=0o700, parents=True, exist_ok=False)
+        environment = dict(os.environ)
+        if args.preferences:
+            preferences = args.preferences.read_bytes()
+            assert json.loads(preferences)["language"] == args.locale
+            (out / "input-preferences.json").write_bytes(preferences)
+            (out / "input-preferences.json").chmod(0o600)
+            environment["YONIK_UI_PREFERENCES"] = str(out / "input-preferences.json")
+            environment["YONIK_UI_PREFERENCES_DESTINATION"] = str(
+                out / "host/data/preferences.json"
+            )
         source = out / "observer.cpp"
         source.write_text(INTERPOSE)
         library = out / "observer.so"
@@ -192,7 +213,8 @@ def main() -> None:
         driver = out / "driver.qml"
         driver.write_text(
             DRIVER.split(" Timer {", 1)[0]
-            + FLOW.replace("SUPPORTED", "true" if args.supported_control else "false")
+            + FLOW.replace("LOCALE", json.dumps(args.locale))
+            .replace("SUPPORTED", "true" if args.supported_control else "false")
             .replace("BACKUP", json.dumps(str(out / "backup.sqlite")))
             .replace("RESTORED", json.dumps(str(out / "restored.sqlite")))
         )
@@ -200,7 +222,7 @@ def main() -> None:
             [str(args.binary.resolve()), str(out / "host")]
             + (["supported"] if args.supported_control else []),
             env=dict(
-                os.environ,
+                environment,
                 LD_PRELOAD=str(library),
                 YONIK_UI_DRIVER=str(driver),
                 QT_FORCE_STDERR_LOGGING="1",
@@ -211,6 +233,7 @@ def main() -> None:
         )
         output = result.stdout + result.stderr
         (out / "qt.log").write_text(output)
+        (out / "process.json").write_text(json.dumps({"exit_code": result.returncode}))
         result.check_returncode()
     records: dict[str, list[dict]] = {}
     for line in output.splitlines():
@@ -250,8 +273,22 @@ def main() -> None:
         assert manifest["artifacts"][args.binary.name] == binary_hash
         main_hash = manifest["source_sha256"]["crates/yonik-desktop/qml/Main.qml"]
     assert "PRODUCTION MAIN SHA256 " + main_hash in output
+    assert all(
+        state["language"] == args.locale
+        for marker in ("A", "REPLACEMENT", "BEFORE COPY", "CURRENT", "CLOSED")
+        for state in records[marker]
+    ), "producer language changed"
+    if args.locale == "en":
+        assert all(
+            result in (
+                "Copied",
+                "Export unavailable: verified metadata for this error are missing.",
+            )
+            for result in records["COPY RESULT"]
+        ), "не EN результат copy"
     assessment = assess_fence(records, args.supported_control)
     summary = {
+        "locale": args.locale,
         "fence_assessment": assessment,
         "main_sha256": main_hash,
         "assessment_from_saved_log": args.assess_existing,
