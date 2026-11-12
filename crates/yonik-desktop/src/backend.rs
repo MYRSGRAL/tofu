@@ -526,6 +526,7 @@ impl DesktopHost {
         if matches!(
             command,
             Command::Reload
+                | Command::CancelLocalImport
                 | Command::Refresh
                 | Command::ApproveRefresh
                 | Command::DiscardRefresh
