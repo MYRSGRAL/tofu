@@ -38,3 +38,26 @@ Evidence, тестовые бинарники, source archive и SHA256 manifest
 `/home/myrs/projects/yonik/local/evidence/dns-neighbors-e5a27/` (файлы actual).
 Rust не запускался; exact remote Rust CI остаётся merge gate root.
 Sing-box, Android и физические G-UI/G-POWER сюда не входят.
+
+## Дополнение: sensitive actual socket ownership control
+
+`TestAuthenticatedSocketOwnership` закрывает оставшийся пробел: authenticated DNS
+возвращает 127.0.0.1, Known проходит RoutingEntry и реальный DialSystem TCP/UDP,
+счётчики default dialer и echo подтверждают 1 dial / 1 handoff / 1 egress.
+После этого cancel либо revoke обязаны завершить revokeDone, освободить flow
+registry, запретить Write/Read на открытом сокете и последующий DialSystem.
+Ожидание revokeDone необходимо: Revoke очищает registry перед закрытием FD.
+
+Точная RED-мутация в `transport/internet/system_dialer.go` заменяет только вызов
+OwnSocket и возврат ownedFlowConn на `return conn, nil`; BeforeSocketDial остаётся.
+RED: TCP/revoke и UDP/revoke падают на разрешённом subsequent Write;
+cancel падает по deadline завершения revoke (callback регистрации отсутствует).
+Возврат исходного callsite: все четыре случая GREEN под race без SKIP.
+Это отдельный контроль actual ownership, не cache fence.
+
+Evidence: `/home/myrs/projects/yonik/local/evidence/xray-socket-control/`:
+`ownership-red.patch`, `red.log`, `green.log`, `green-back.log`, оба race binary,
+исходники GREEN и SHA256 manifest. Проверены Go vet, release build, builder18,
+pinned Ruff check/format и scoped gofmt. Rust/ABI/pins/capabilities не менялись;
+Rust проверки относятся к отдельной работе root. Sing-box остаётся следующим leaf,
+его PASS этим результатом не заявляется.

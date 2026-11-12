@@ -2526,7 +2526,7 @@ diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,230 @@
 +package nativehooks
 +
 +import (
@@ -2739,6 +2739,23 @@ new file mode 100644
 +	c.mu.Lock()
 +	defer c.mu.Unlock()
 +	return c.next
++}
++
++func AuthenticatedFlowCount(ctx context.Context) int {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	c.session.mu.Lock()
++	defer c.session.mu.Unlock()
++	return len(c.session.flows)
++}
++
++func WaitAuthenticatedRevoke(ctx context.Context) bool {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	select {
++	case <-c.session.revokeDone:
++		return true
++	case <-time.After(time.Second):
++		return false
++	}
 +}
 diff --git a/proxy/tun/worker_other.go b/proxy/tun/worker_other.go
 new file mode 100644
@@ -3026,7 +3043,7 @@ diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_ca
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/dns_callsite_test.go
-@@ -0,0 +1,541 @@
+@@ -0,0 +1,611 @@
 +package nativehooks_test
 +
 +import (
@@ -3400,7 +3417,7 @@ new file mode 100644
 +}
 +
 +// actualEcho проверяет точный адрес, реальный socket и двусторонний payload.
-+func actualEcho(t *testing.T, ctx context.Context, network string, ips []net.IP, allowed bool) {
++func actualEcho(t *testing.T, ctx context.Context, network string, ips []net.IP, allowed bool, revoke ...func()) {
 +	t.Helper()
 +	var port int
 +	received := make(chan string, 1)
@@ -3423,6 +3440,7 @@ new file mode 100644
 +			if e == nil {
 +				received <- string(b)
 +				c.Write(b)
++				c.Read(make([]byte, 4))
 +			}
 +		}()
 +	} else {
@@ -3461,7 +3479,7 @@ new file mode 100644
 +				if e == nil {
 +					_, e = io.ReadFull(c, b)
 +				}
-+				c.Close()
++				defer c.Close()
 +				if e != nil || string(b) != "echo" {
 +					t.Fatal("echo", e, string(b))
 +				}
@@ -3471,6 +3489,32 @@ new file mode 100644
 +						t.Fatal(v)
 +					}
 +					egress++
++					if len(revoke) > 0 {
++						t.Logf("registered flows before revoke=%d", hooks.AuthenticatedFlowCount(ctx))
++						revoke[0]()
++						if !hooks.WaitAuthenticatedRevoke(ctx) {
++							t.Fatal("revoke не завершён")
++						}
++						deadline := time.Now().Add(time.Second)
++						for hooks.AuthenticatedFlowCount(ctx) != 0 && time.Now().Before(deadline) {
++							time.Sleep(time.Millisecond)
++						}
++						if hooks.AuthenticatedFlowCount(ctx) != 0 {
++							t.Fatal("flow остался после отзыва")
++						}
++						c.SetDeadline(time.Now().Add(time.Second))
++						if _, err := c.Write([]byte("late")); err == nil {
++							t.Fatal("subsequent Write разрешён после отзыва")
++						}
++						if _, err := c.Read(make([]byte, 4)); err == nil {
++							t.Fatal("subsequent Read разрешён после отзыва")
++						}
++						if next, err := internet.DialSystem(ctx, dst, nil); err == nil {
++							next.Close()
++							t.Fatal("subsequent dial разрешён")
++						}
++					}
++
 +				case <-time.After(time.Second):
 +					t.Fatal("нет egress")
 +				}
@@ -3568,6 +3612,49 @@ new file mode 100644
 +func (*actualSystemDialer) DestIpAddress() xnet.IP { return nil }
 +
 +type actualCounterKey struct{}
++
++func TestAuthenticatedSocketOwnership(t *testing.T) {
++	internet.UseAlternativeSystemDialer(&actualSystemDialer{})
++	defer internet.UseAlternativeSystemDialer(nil)
++	for _, network := range []string{"tcp", "udp"} {
++		for _, mode := range []string{"cancel", "revoke"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				l, e := net.Listen("tcp", "127.0.0.1:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				var questions atomic.Int32
++				server := &mdns.Server{Listener: l, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					questions.Add(1)
++					r := new(mdns.Msg)
++					r.SetReply(q)
++					rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++					r.Answer = []mdns.RR{rr}
++					w.WriteMsg(r)
++				})}
++				go server.ActivateAndServe()
++				defer server.Shutdown()
++				cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + l.Addr().String()))}}}}
++				instance, e := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer instance.Close()
++				ctx, change := hooks.ClosedAuthenticatedDNSFixture(t)
++				client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++				option := fdns.IPOption{IPv4Enable: true}
++				ips, _, e := client.LookupIPWithContext(ctx, "private.test", option)
++				if e != nil || len(ips) != 1 {
++					t.Fatal("warm", ips, e)
++				}
++				if hooks.RoutingEntry(ctx) != nil {
++					t.Fatal("routing отказал Known")
++				}
++				actualEcho(t, ctx, network, ips, true, func() { change(mode) })
++			})
++		}
++	}
++}
 diff --git a/features/dns/client.go b/features/dns/client.go
 index 6eb4bd0..b564907 100644
 --- a/features/dns/client.go
