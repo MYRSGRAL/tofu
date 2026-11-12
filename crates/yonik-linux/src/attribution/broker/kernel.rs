@@ -671,13 +671,8 @@ mod tests {
             wire_broker,
             move |broker| {
                 let snapshot = observe(&wire_client, f, 1, deadline)?;
-                let checked = super::revalidate(&broker.context, f, &snapshot);
-                eprintln!(
-                    "retained callback revalidate elapsed={:?}, result={:?}",
-                    snapshot.observed_from.elapsed(),
-                    checked.as_ref().map(|_| ())
-                );
-                let snapshot = checked?;
+                // Lookup и project повторно проверяют реальный snapshot; лишняя
+                // тестовая проверка здесь расходовала тот же production TTL.
                 broker.cache = VecDeque::from([(f, snapshot)]);
                 Ok(())
             },
