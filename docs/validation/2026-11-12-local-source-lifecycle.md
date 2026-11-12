@@ -30,3 +30,33 @@ Evidence вне TTL: `/home/myrs/projects/yonik/local/evidence/fr07-local-lifecy
 Финальный manifest связывает exact HEAD/tree, production/persistence binaries,
 исходники, закреплённые cores и логи hashes. Проверки: MSRV 1.85.1 GUI clippy
 all-targets -D warnings, fmt, Ruff 0.17.4 check/format --check и targeted tests.
+
+## Исправление двух acceptance-oracle после review
+
+Первоначальный HTTPS endpoint witness не исключал direct bypass; прежние
+результаты для этого claim недостаточны. Новый контроль для каждого core
+сначала проверяет прямую HTTPS-доступность fixture со строгой проверкой CA,
+затем запускает GUI с неверным VLESS UUID. Ожидаются Limited и отсутствие
+запроса на endpoint. С верным UUID ожидаются Connected и настоящий HTTPS probe.
+Direct bypass не удовлетворяет отрицательному контролю.
+
+После клика visible/enabled mainConnectButton в активном состоянии больше
+не отправляется backend stop. Следующий шаг ждёт одновременно Disconnected,
+busy=false и can_stop=false. Все четыре cases затем закрываются, открывают
+тот же encrypted store и удаляют local source штатными controls.
+
+Evidence: `/home/myrs/projects/yonik/local/evidence/pr137-peer-stop/manifest.json`,
+`final-short/{sing-box,xray}-{denied,known}`. Четыре cases и восемь terminal
+GUI traces — PASS. Persistence GUI binary и core pins прежние, Rust не менялся
+и Cargo повторно не запускался. Ruff 0.17.4 check/format — PASS.
+
+Первый диагностический запуск отверг тестовый CA без keyUsage строгим TLS
+Python. CA fixture теперь явно имеет critical CA:TRUE/keyCertSign/cRLSign;
+проверка сертификата не отключается. Следующая неуспешная попытка обнаружила
+слишком длинный Unix socket path: короткий private runtime устранил проблему.
+Оба FAIL сохранены. Private D-Bus не содержит service activation directories;
+HOME/XDG/runtime приватны, сеть ограничена namespace с lo. Секретные CA keys
+временные, удаляются вместе с fixture; в evidence они не экспортируются.
+
+Это исправление GUI/peer oracle; production TUN, Secret Service custody,
+полный FR07, Android и физическая приёмка этим не заявляются.

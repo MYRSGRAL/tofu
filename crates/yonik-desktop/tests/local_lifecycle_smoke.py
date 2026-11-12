@@ -27,6 +27,9 @@ def main() -> None:
         core_steps = []
         if "YONIK_LIFECYCLE_ENGINE" in os.environ:
             engine = os.environ["YONIK_LIFECYCLE_ENGINE"]
+            expected_status = os.environ.get("YONIK_LIFECYCLE_STATUS", "Connected")
+            if expected_status not in {"Connected", "Limited"}:
+                raise ValueError("Неизвестный terminal status fixture")
             core_steps = [
                 {
                     "when": {"selected_profile": 1},
@@ -41,11 +44,16 @@ def main() -> None:
                     },
                 },
                 ui("click", "homeButton", when={"probe_custom": True}),
-                ui("click", "mainConnectButton"),
                 ui(
                     "click",
                     "mainConnectButton",
-                    when={"status": "Connected", "can_stop": True},
+                    expect={"mainConnectButton": {"visible": True, "enabled": True}},
+                ),
+                ui(
+                    "click",
+                    "mainConnectButton",
+                    when={"status": expected_status, "can_stop": True},
+                    expect={"mainConnectButton": {"visible": True, "enabled": True}},
                 ),
             ]
         engines = (
@@ -137,11 +145,11 @@ def main() -> None:
                 ui("click", "profileSelect_1"),
                 *core_steps,
                 {
-                    "when": {"selected_profile": 1, "source_local": True},
-                    "command": {"command": "stop"},
-                },
-                {
-                    "when": {"busy": False, "can_stop": False},
+                    "when": {
+                        "status": "Disconnected",
+                        "busy": False,
+                        "can_stop": False,
+                    },
                     "command": {"command": "shutdown"},
                 },
             ],
