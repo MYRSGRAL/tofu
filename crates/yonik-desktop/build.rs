@@ -82,6 +82,7 @@ fn main() {
         CxxQtBuilder::new_qml_module(
             QmlModule::new("cloud.highpriority.yonik")
                 .qml_file("qml/Main.qml")
+                .qml_file("qml/ManualEntry.qml")
                 .qml_file("qml/MaintenanceView.qml")
                 .qml_file("qml/DiagnosticsExport.qml")
                 .qml_file("qml/LogsView.qml")
