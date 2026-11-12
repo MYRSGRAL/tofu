@@ -48,6 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 id: i as u64,
                 enabled: true,
                 conditions: Conditions {
+                    platform_sources: vec![],
                     executables: vec![format!("/opt/fixture/app-{i}")],
                     destinations: vec!["203.0.113.0/24".parse().expect("Фиксированный CIDR")],
                     domains: vec![],
@@ -104,6 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         id: 1,
         enabled: true,
         conditions: Conditions {
+            platform_sources: vec![],
             executables: vec!["/opt/fixture/app-0".into()],
             domains: vec![yonik_domain::DomainPattern::Exact(
                 "example.invalid".parse()?,
@@ -143,6 +145,7 @@ mod tests {
                 id: 1,
                 enabled: true,
                 conditions: Conditions {
+                    platform_sources: vec![],
                     executables: vec![],
                     domains: vec![
                         yonik_domain::DomainPattern::Exact("example.invalid".parse()?);

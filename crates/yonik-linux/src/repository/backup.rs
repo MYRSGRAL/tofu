@@ -75,7 +75,7 @@ fn validate_controlled(
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(storage)?;
-    if !(1..=3).contains(&version) {
+    if !(1..=4).contains(&version) {
         return Err(RepositoryError::UnsupportedVersion);
     }
     validate_schema(connection, version)?;
@@ -709,6 +709,116 @@ fn recover_staging(parent: &Path, key: &[u8; 32]) -> Result<()> {
                 .is_dir()
         {
             remove_owned_namespace(parent, &entry.path(), key)?;
+        }
+    }
+    Ok(())
+}
+
+/// Проверяется реальный closed backup; никакой bool/receipt из GUI не даёт authority.
+pub(super) fn admit_format4(
+    live: &Connection,
+    key: &[u8; 32],
+    id: &[u8; 32],
+    backup: Option<&Path>,
+) -> Result<()> {
+    let version: i64 = live
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(storage)?;
+    if version == 4 {
+        return Ok(());
+    }
+    if version != 3 {
+        return Err(RepositoryError::UnsupportedVersion);
+    }
+    let path = backup.ok_or(RepositoryError::InvalidInput)?;
+    secure_path(path)?;
+    if fs::metadata(path)
+        .map_err(|_| RepositoryError::Storage)?
+        .len()
+        > BACKUP_LIMIT
+    {
+        return Err(RepositoryError::InvalidInput);
+    }
+    let live_path = live.path().ok_or(RepositoryError::UnsafePath)?;
+    let original = fs::metadata(live_path).map_err(|_| RepositoryError::Storage)?;
+    let candidate = fs::metadata(path).map_err(|_| RepositoryError::Storage)?;
+    if original.dev() == candidate.dev() && original.ino() == candidate.ino() {
+        return Err(RepositoryError::UnsafePath);
+    }
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        match fs::symlink_metadata(PathBuf::from(name)) {
+            Ok(_) => return Err(RepositoryError::Conflict),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(RepositoryError::Storage),
+        }
+    }
+    let copy = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(storage)?;
+    copy.execute_batch("BEGIN DEFERRED;").map_err(storage)?;
+    validate_controlled(&copy, key, &MaintenanceControl::default())?;
+    let copy_version: i64 = copy
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(storage)?;
+    let copy_id: Vec<u8> = copy
+        .query_row("SELECT id FROM repository", [], |r| r.get(0))
+        .map_err(storage)?;
+    if copy_version != 3 || copy_id != id {
+        return Err(RepositoryError::Conflict);
+    }
+    let mut bytes = 0usize;
+    for (table, order) in [
+        ("repository", "id"),
+        ("sources", "id"),
+        ("snapshots", "source_id"),
+        ("profile_catalog", "source_id"),
+        ("profiles", "id"),
+        ("source_sequence", "singleton"),
+        ("sqlite_sequence", "name"),
+        ("routing_draft", "singleton"),
+    ] {
+        let exists = table_exists(live, table)?;
+        if exists != table_exists(&copy, table)? {
+            return Err(RepositoryError::Conflict);
+        }
+        if !exists {
+            continue;
+        }
+        // Имена — только константы выше; пользовательский ввод не входит в SQL.
+        let sql = format!("SELECT * FROM {table} ORDER BY {order}");
+        let mut a = live.prepare(&sql).map_err(storage)?;
+        let mut b = copy.prepare(&sql).map_err(storage)?;
+        if a.column_count() != b.column_count() {
+            return Err(RepositoryError::Conflict);
+        }
+        let columns = a.column_count();
+        let mut ar = a.query([]).map_err(storage)?;
+        let mut br = b.query([]).map_err(storage)?;
+        loop {
+            match (ar.next().map_err(storage)?, br.next().map_err(storage)?) {
+                (None, None) => break,
+                (Some(a), Some(b)) => {
+                    for index in 0..columns {
+                        let x = a.get_ref(index).map_err(storage)?;
+                        if x != b.get_ref(index).map_err(storage)? {
+                            return Err(RepositoryError::Conflict);
+                        }
+                        bytes = bytes.saturating_add(match x {
+                            rusqlite::types::ValueRef::Blob(v)
+                            | rusqlite::types::ValueRef::Text(v) => v.len(),
+                            _ => 8,
+                        });
+                        if bytes > BACKUP_LIMIT as usize {
+                            return Err(RepositoryError::InvalidInput);
+                        }
+                    }
+                }
+                _ => return Err(RepositoryError::Conflict),
+            }
         }
     }
     Ok(())

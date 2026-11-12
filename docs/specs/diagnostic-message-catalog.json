@@ -59,6 +59,14 @@
       "retryable": false
     },
     {
+      "code": "INVALID_IP",
+      "message_key": "invalid_ip",
+      "ru": "Проверьте IP-адрес или домен.",
+      "en": "Check the IP address or domain.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
       "code": "BUSY",
       "message_key": "busy",
       "ru": "Дождитесь завершения текущей операции.",

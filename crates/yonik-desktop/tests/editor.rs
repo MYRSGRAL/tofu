@@ -9,6 +9,7 @@ fn составной_dto_сохраняет_таблицу_истинности
     draft
         .put(
             RuleInput {
+                platform_sources: None,
                 id: 41,
                 enabled: true,
                 executables: vec!["/fixture/one".into(), "/fixture/two".into()],
@@ -74,6 +75,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
             draft
                 .put(
                     RuleInput {
+                        platform_sources: None,
                         id,
                         enabled: true,
                         executables: vec![format!("/fixture/app{id}")],
@@ -89,6 +91,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
         draft
             .put(
                 RuleInput {
+                    platform_sources: None,
                     id: count + 1,
                     enabled: true,
                     executables: vec![],
@@ -138,6 +141,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
 fn compound_roundtrip_and_invalid_input_preserve_draft() {
     let mut draft = Draft::default();
     let rule = RuleInput {
+        platform_sources: None,
         id: 1,
         enabled: true,
         executables: vec!["/usr/bin/browser".into()],
@@ -159,6 +163,7 @@ fn compound_roundtrip_and_invalid_input_preserve_draft() {
 fn broad_confirmation_ids_and_limits() {
     let mut draft = Draft::default();
     let mut rule = RuleInput {
+        platform_sources: None,
         id: 1,
         enabled: true,
         executables: vec![],
@@ -235,6 +240,7 @@ fn bounded_diagnostics_keep_identity_and_disabled_semantics() {
         draft
             .put(
                 RuleInput {
+                    platform_sources: None,
                     id,
                     enabled: id != 3,
                     executables: vec![],
@@ -277,6 +283,7 @@ fn explanation_uses_evaluator_without_claiming_runtime_witness() {
     draft
         .put(
             RuleInput {
+                platform_sources: None,
                 id: 7,
                 enabled: true,
                 executables: vec![],
@@ -306,6 +313,7 @@ fn truncated_report_is_explicit_and_preserves_policy() {
         draft
             .put(
                 RuleInput {
+                    platform_sources: None,
                     id,
                     enabled: true,
                     executables: vec![],
@@ -322,4 +330,221 @@ fn truncated_report_is_explicit_and_preserves_policy() {
     assert_eq!(report["incomplete"], true);
     assert_eq!(report["warnings"].as_array().expect("массив").len(), 256);
     assert_eq!(draft.json(), before);
+}
+
+#[test]
+fn p07_closed_v2_preserves_disabled_and_rejects_enabled_before_witness() {
+    let raw = r#"{"version":2,"default_action":"direct","ru_direct":null,"rules":[{"id":41,"enabled":false,"executables":["/usr/bin/client"],"domains":[],"destinations":[],"action":"proxy","platform_sources":[{"kind":"android_package","package":"org.Example_app"}]}]}"#;
+    let draft = Draft::parse(raw).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&draft.json()).unwrap(),
+        serde_json::from_str::<serde_json::Value>(raw).unwrap()
+    );
+    assert_eq!(
+        draft.policy().unwrap().user_rules[0]
+            .conditions
+            .platform_sources
+            .len(),
+        1
+    );
+    assert!(draft.system_policy().is_ok());
+    let enabled = Draft::parse(&raw.replace("false", "true")).unwrap();
+    assert!(matches!(
+        enabled.system_policy(),
+        Err(yonik_engine::policy_input::PolicyInputError::UnsupportedSelector(41))
+    ));
+    assert_eq!(
+        enabled.explain("1.1.1.1").unwrap()["reason"],
+        "unsupported_selector"
+    );
+    assert_eq!(enabled.explain("1.1.1.1").unwrap()["rule_id"], 41);
+    for invalid in [
+        raw.replace("org.Example_app", "org.1app"),
+        raw.replace("android_package", "future"),
+        raw.replace("\"version\":2", "\"version\":3"),
+        raw.replace("\"package\":", "\"extra\":true,\"package\":"),
+    ] {
+        assert!(Draft::parse(&invalid).is_err());
+    }
+    let mut v1 = Draft::default();
+    let rule = draft.rules[0].clone();
+    v1.put(rule, false).unwrap();
+    assert_eq!(v1.version, 2);
+    assert_eq!(Draft::parse(&v1.json()).unwrap().json(), v1.json());
+}
+
+#[tokio::test]
+async fn p07_migration_cas_reopen() {
+    let dir = std::env::temp_dir().join(format!("yonik-p07-migration-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = dir.join("draft.sqlite");
+    let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+        path.clone(),
+        zeroize::Zeroizing::new([29; 32]),
+    )
+    .await
+    .unwrap();
+    assert!(repo.routing_draft().await.unwrap().is_none());
+    let mut draft = Draft::default();
+    let original = draft.json().into_bytes();
+    assert_eq!(
+        repo.save_routing_draft(0, original.clone()).await.unwrap(),
+        1
+    );
+    draft
+        .put(
+            RuleInput {
+                id: 41,
+                enabled: false,
+                executables: vec![],
+                domains: vec![],
+                destinations: vec![],
+                action: "proxy".into(),
+                platform_sources: Some(vec![
+                    yonik_engine::platform_source::PlatformSourceInput::AndroidPackage {
+                        package: "org.example.app".into(),
+                    },
+                ]),
+            },
+            false,
+        )
+        .unwrap();
+    repo.close().await.unwrap();
+    let backup = dir.join("v3-backup.sqlite");
+    yonik_linux::EncryptedSubscriptionRepository::backup_closed(
+        path.clone(),
+        backup.clone(),
+        zeroize::Zeroizing::new([29; 32]),
+    )
+    .await
+    .unwrap();
+    let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+        path.clone(),
+        zeroize::Zeroizing::new([29; 32]),
+    )
+    .await
+    .unwrap();
+    let migrated = draft.json().into_bytes();
+    assert!(
+        repo.save_routing_draft_v2(0, migrated.clone(), Some(backup.clone()))
+            .await
+            .is_err()
+    );
+    let (revision, bytes) = repo.routing_draft().await.unwrap().unwrap();
+    assert_eq!(revision, 1);
+    assert_eq!(*bytes, original);
+    assert_eq!(
+        repo.save_routing_draft_v2(1, migrated.clone(), Some(backup.clone()))
+            .await
+            .unwrap(),
+        2
+    );
+    repo.close().await.unwrap();
+    let repo =
+        yonik_linux::EncryptedSubscriptionRepository::open(path, zeroize::Zeroizing::new([29; 32]))
+            .await
+            .unwrap();
+    let (revision, bytes) = repo.routing_draft().await.unwrap().unwrap();
+    assert_eq!(revision, 2);
+    assert_eq!(*bytes, migrated);
+    assert_eq!(
+        Draft::parse(std::str::from_utf8(&bytes).unwrap())
+            .unwrap()
+            .version,
+        2
+    );
+    repo.close().await.unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn p07_bounds_and_v2_required_field() {
+    use yonik_engine::platform_source::PlatformSourceInput;
+    let rule = RuleInput {
+        id: 1,
+        enabled: false,
+        executables: vec![],
+        domains: vec![],
+        destinations: vec![],
+        action: "direct".into(),
+        platform_sources: Some(
+            (0..16)
+                .map(|n| PlatformSourceInput::AndroidPackage {
+                    package: format!("org.app{n}"),
+                })
+                .collect(),
+        ),
+    };
+    let mut draft = Draft {
+        ru_direct: None,
+        version: 2,
+        rules: vec![rule.clone()],
+        default_action: "direct".into(),
+    };
+    assert!(draft.policy().is_ok());
+    draft.rules[0]
+        .platform_sources
+        .as_mut()
+        .unwrap()
+        .push(PlatformSourceInput::AndroidPackage {
+            package: "org.extra".into(),
+        });
+    assert!(draft.policy().is_err());
+    draft.rules = (1..=256)
+        .map(|id| {
+            let mut r = rule.clone();
+            r.id = id;
+            r
+        })
+        .collect();
+    assert!(draft.policy().is_ok());
+    draft.rules.push({
+        let mut r = rule;
+        r.id = 257;
+        r
+    });
+    assert!(draft.policy().is_err());
+    assert!(Draft::parse(r#"{"version":2,"rules":[{"id":1,"enabled":false,"executables":[],"domains":[],"destinations":[],"action":"direct"}],"default_action":"direct"}"#).is_err());
+}
+
+#[test]
+fn explain_использует_разрешённый_preset_и_p07_guard() {
+    use yonik_domain::{Action, AndroidPackageId, Conditions, PlatformSource, Rule};
+    let draft = Draft::parse(
+        &serde_json::json!({"version":2,"rules":[],"default_action":"proxy",
+        "ru_direct":{"snapshot":"a".repeat(64),"enabled":true}})
+        .to_string(),
+    )
+    .unwrap();
+    assert!(draft.policy().is_err());
+    let resolved = || {
+        let mut policy = draft.base_policy().unwrap();
+        policy.preset_rules.push(Rule {
+            id: 77,
+            enabled: true,
+            action: Action::Direct,
+            conditions: Conditions {
+                destinations: vec!["192.0.2.0/24".parse().unwrap()],
+                ..Conditions::default()
+            },
+        });
+        policy
+    };
+    let result = draft.explain_with_policy("192.0.2.1", resolved()).unwrap();
+    assert_eq!(result["status"], "fixture");
+    assert_eq!(result["action"], "Direct");
+    assert_eq!(result["origin"], "Preset(77)");
+    let mut policy = resolved();
+    policy.preset_rules[0]
+        .conditions
+        .platform_sources
+        .push(PlatformSource::AndroidPackage {
+            package: AndroidPackageId::parse("org.example.app").unwrap(),
+        });
+    let result = draft.explain_with_policy("192.0.2.1", policy).unwrap();
+    assert_eq!(result["status"], "unsupported");
+    assert_eq!(result["reason"], "unsupported_selector");
+    assert_eq!(result["rule_id"], 77);
 }

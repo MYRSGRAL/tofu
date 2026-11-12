@@ -96,8 +96,14 @@ pub(super) struct DesktopSchedule {
 }
 impl DesktopSchedule {
     pub fn new() -> ScheduleResult<Self> {
+        Self::bounded(20_000)
+    }
+    pub(super) fn bounded(capacity: usize) -> ScheduleResult<Self> {
         static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
-        let identity = NEXT_OWNER
+        Self::from_owner_counter(&NEXT_OWNER, capacity)
+    }
+    pub(super) fn from_owner_counter(counter: &AtomicU64, capacity: usize) -> ScheduleResult<Self> {
+        let identity = counter
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
             })
@@ -107,7 +113,7 @@ impl DesktopSchedule {
                 error: DesktopError("startup"),
                 cause: Some(Cause::SchedulerInitializeExhausted),
             })?;
-        Self::with_limits(identity, 20_000)
+        Self::with_limits(identity, capacity)
     }
     fn with_limits(identity: NonZeroU64, capacity: usize) -> ScheduleResult<Self> {
         Ok(Self {
@@ -224,6 +230,9 @@ impl DesktopSchedule {
                 .map_err(ScheduleFailure::service)?;
             let count = page.len();
             for token in page {
+                if token.is_local() {
+                    continue;
+                }
                 let id = token.id;
                 let generation = token.generation;
                 if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -302,6 +311,9 @@ impl DesktopSchedule {
             .await
             .map_err(ScheduleFailure::service)?
         {
+            if token.is_local() {
+                return Ok(());
+            }
             let generation = token.generation;
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -399,6 +411,67 @@ impl DesktopSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn local_v2_is_excluded_on_load_and_reload() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("yonik-local-due-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("каталог");
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("repo");
+        repo.close().await.expect("close for backup");
+        let backup = path.join("backup3");
+        yonik_linux::EncryptedSubscriptionRepository::backup_closed(
+            path.join("db"),
+            backup.clone(),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("backup");
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("reopen");
+        let service = SubscriptionService::new(repo);
+        let report = yonik_import::import_bytes(b"trojan://secret@example.com:443".to_vec())
+            .expect("report");
+        let (_sender, cancel) = yonik_linux::Cancellation::new();
+        let id = service
+            .approve_local_import("local".into(), &report, cancel, Some(backup))
+            .await
+            .expect("approve");
+        let mut schedule = DesktopSchedule::new().expect("schedule");
+        schedule
+            .load_at(&service, Duration::ZERO, 1000)
+            .await
+            .expect("load");
+        schedule
+            .reload_id(&service, id, Duration::ZERO)
+            .await
+            .expect("reload");
+        assert!(schedule.generations.is_empty());
+        assert!(schedule.deadline().is_none());
+        assert!(
+            service
+                .schedule_metadata(id)
+                .await
+                .expect("metadata")
+                .expect("source")
+                .state
+                .is_none()
+        );
+        service.close().await.expect("close");
+        std::fs::remove_dir_all(path).expect("очистка своего каталога");
+    }
 
     #[tokio::test]
     async fn stale_command_waits_for_admission_ack_without_publishing_failure() {
@@ -1184,5 +1257,35 @@ mod tests {
         owner.policy.battery_saver = false;
         owner.visible = false;
         assert_eq!(owner.deadline(), None);
+    }
+}
+
+#[cfg(test)]
+mod owner_allocator_tests {
+    use super::*;
+
+    #[test]
+    fn local_counter_exhaustion_preserves_terminal_value() {
+        let counter = AtomicU64::new(u64::MAX);
+        let failure = DesktopSchedule::from_owner_counter(&counter, 20_000)
+            .err()
+            .expect("исчерпанный allocator");
+        assert_eq!(failure.key(), "startup");
+        assert!(matches!(
+            failure.cause,
+            Some(Cause::SchedulerInitializeExhausted)
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn local_counter_allocates_last_supported_identity() {
+        let counter = AtomicU64::new(u64::MAX - 1);
+        let owner = DesktopSchedule::from_owner_counter(&counter, 20_000)
+            .expect("последний допустимый owner");
+        assert_eq!(owner.generation, u64::MAX - 1);
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+        assert!(DesktopSchedule::from_owner_counter(&counter, 20_000).is_err());
+        assert!(DesktopSchedule::new().is_ok());
     }
 }
