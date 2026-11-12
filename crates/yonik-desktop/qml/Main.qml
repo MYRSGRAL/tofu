@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import cloud.highpriority.yonik
 
 ApplicationWindow {
@@ -48,6 +49,9 @@ ApplicationWindow {
     readonly property bool selectionConfirmed: (desiredProfileId === null || state.selected_profile === desiredProfileId)
         && (desiredSourceId === null || state.source_id === desiredSourceId)
     property bool sourceOptions: false
+    property bool localImportActive: false
+    property bool localImportObserved: false
+    property bool localImportReview: false
     property string commandContext: "connection"
     readonly property string connectionError: state.connection_error || (!state.ready ? state.error || "" : "")
     readonly property string sourceError: state.source_error || ""
@@ -63,6 +67,18 @@ ApplicationWindow {
     function openAdd(paste) {
         pasteOnOpen = paste
         addDialog.open()
+    }
+    function submitLocalImport(command) {
+        desiredSourceId = null
+        desiredProfileId = null
+        searchDelay.stop()
+        searchQueued = false
+        page = 1
+        localImportReview = true
+        localImportActive = true
+        localImportObserved = false
+        send(command)
+        addDialog.close()
     }
     function selectSource(id) {
         desiredSourceId = id
@@ -100,7 +116,7 @@ ApplicationWindow {
 
     function tr(ru, en) { return language === "ru" ? ru : en }
     function send(command) {
-        const sourceCommands = ["import_source", "refresh", "cancel_refresh", "rename_source", "delete_source", "set_source_hwid", "select_source", "source_page", "approve_refresh", "discard_refresh", "review_page", "query", "select_profile"]
+        const sourceCommands = ["import_text", "import_file", "cancel_local_import", "import_source", "refresh", "cancel_refresh", "rename_source", "delete_source", "set_source_hwid", "select_source", "source_page", "approve_refresh", "discard_refresh", "review_page", "query", "select_profile"]
         commandContext = sourceCommands.indexOf(command.command) >= 0 ? "source" : "connection"
         if (!state.closed) backend.dispatch(JSON.stringify(command))
     }
@@ -164,6 +180,9 @@ ApplicationWindow {
             completeRouting(next.routing_ack)
             if (searchQueued && !next.busy && !next.pending) searchDelay.restart()
             parseError = ""
+            if (window.localImportActive && next.busy) window.localImportObserved = true
+            if (window.localImportActive && (next.error || (window.localImportObserved && !next.busy))) window.localImportActive = false
+            if (window.localImportObserved && !next.busy && !next.pending) window.localImportReview = false
             if (next.pending && !reviewDialog.visible) reviewDialog.open()
             if (!next.pending && reviewDialog.visible) reviewDialog.close()
         } catch (_) {
@@ -275,6 +294,10 @@ ApplicationWindow {
             + row.position + ": " + (reason ? tr(reason[0], reason[1]) : tr("Требует проверки", "Review required"))
             + (field ? " (" + tr(field[0], field[1]) + ")" : "")
     }
+    function isUnsupportedSelector(reason) {
+        return reason === "unsupported_selector"
+    }
+
     function errorText(key) {
         const messages = {
             listen_port_busy: ["Порт занят. Повторите подключение.", "Port is busy. Try connecting again."],
@@ -287,6 +310,7 @@ ApplicationWindow {
             catalog: ["Не удалось прочитать каталог приложений.", "Could not read the application catalog."],
             preferences_write: ["Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.", "Could not save settings. The change was not applied. Check preferences.json in the data directory."],
             invalid_input: ["Проверьте введённые данные и адрес подписки.", "Check the input and subscription URL."],
+            invalid_ip: ["Проверьте IP-адрес или домен.", "Check the IP address or domain."],
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
             source_in_use: ["Сначала отключите прокси, затем удалите подписку.", "Disconnect the proxy before deleting this subscription."],
             refresh_required: ["Загрузка уже завершилась. Проверьте список серверов.", "Loading has already finished. Check the server list."],
@@ -323,6 +347,8 @@ ApplicationWindow {
         const editorMessages = {
             action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
             format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
+            duplicate_parameter: ["Повторяющийся параметр", "Duplicate parameter"],
+            unsupported_option: ["Опция не поддерживается", "Unsupported option"],
             routing_stale: ["Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.", "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one."],
             routing_ack_identity: ["Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.", "Save response did not match the rule. Input is preserved; check the draft."],
             routing_storage: ["Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.", "Draft not saved: damaged database or conflict. Original preserved; restart the application."],
@@ -662,9 +688,10 @@ ApplicationWindow {
                         enabled: window.state.ready && !window.state.busy && count > 0
                         Accessible.name: window.tr("Источник серверов", "Server source")
                     }
-                    ActionButton { objectName: "refreshSourceButton"; text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: window.send({command: "refresh"}) }
+                    ActionButton { objectName: "refreshSourceButton"; text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_local === false && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: window.send({command: "refresh"}) }
                     ActionButton { objectName: "sourceOptionsButton"; text: window.tr("Ещё", "More"); leftPadding: 8; rightPadding: 8; Accessible.name: window.tr("Параметры подписки", "Source options"); checkable: true; checked: window.sourceOptions; enabled: window.state.source_id !== null; onClicked: window.sourceOptions = !window.sourceOptions }
                 }
+                SmallLabel { objectName: "localSourceLabel"; visible: window.state.source_local === true; text: window.tr("Локальный источник", "Local source") }
                 RowLayout {
                     visible: window.state.sources_total > 64
                     SmallLabel { Layout.fillWidth: true; text: window.tr("Подписки: ", "Subscriptions: ") + (window.state.sources_offset + 1) + "–" + (window.state.sources_offset + window.state.sources.length) + " / " + window.state.sources_total }
@@ -676,7 +703,7 @@ ApplicationWindow {
                     visible: window.sourceOptions && window.state.source_id !== null
                     RowLayout {
                     Layout.fillWidth: true
-                    CheckBox { objectName: "subscriptionHwidChoice"; Layout.fillWidth: true; text: window.tr("ID устройства", "Device ID"); checked: window.state.source_hwid_enabled === true; enabled: window.state.ready && !window.state.busy && !window.state.pending; onToggled: window.send({command: "set_source_hwid", enabled: checked}) }
+                    CheckBox { objectName: "subscriptionHwidChoice"; Layout.fillWidth: true; text: window.tr("ID устройства", "Device ID"); checked: window.state.source_hwid_enabled === true; enabled: window.state.ready && window.state.source_local === false && !window.state.busy && !window.state.pending; onToggled: window.send({command: "set_source_hwid", enabled: checked}) }
                     HelpButton { explanation: window.tr("Отправляет провайдеру случайный стабильный ID, без данных оборудования. Изменение повторно загружает подписку.", "Sends a random stable ID without hardware data. Changing it refreshes the subscription.") }
                     }
                     RowLayout {
@@ -686,9 +713,10 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
-                    visible: window.sourceFeedbackText() !== "" || !!window.parseError
+                    visible: window.sourceFeedbackText() !== "" || !!window.parseError || (window.state.busy && window.localImportActive)
                     SmallLabel { objectName: "subscriptionFeedback"; Layout.fillWidth: true; maximumLineCount: 3; elide: Text.ElideRight; color: window.sourceError ? "#e6bc83" : window.muted; text: window.parseError || window.sourceFeedbackText() }
                     ActionButton { objectName: "cancelSourceRefreshButton"; visible: window.sourceLoading; enabled: window.state.busy && window.state.refresh_source_id !== undefined && window.state.refresh_source_id !== null && typeof window.state.refresh_token === "string"; text: window.tr("Отмена", "Cancel"); onClicked: window.send({command: "cancel_refresh", id: window.state.refresh_source_id, token: window.state.refresh_token}) }
+                    ActionButton { objectName: "cancelImportButton"; visible: window.state.busy && window.localImportActive; text: window.tr("Отменить импорт", "Cancel import"); onClicked: window.send({command: "cancel_local_import"}) }
                     ActionButton { objectName: "openReviewButton"; visible: !!window.state.pending; text: window.tr("Проверить", "Review"); onClicked: reviewDialog.open() }
                 }
                 RowLayout {
@@ -842,9 +870,12 @@ ApplicationWindow {
                 spacing: 12
                 property bool advanced: false
                 property double selectedId: 0
+                property var platformSources: undefined
+                function resetPlatformSources() { platformSources = undefined }
                 property int simpleGroup: 0
                 function values(text) { return text.split("\n").map(s => s.trim()).filter(s => s.length > 0) }
                 function load(rule) {
+                    platformSources = rule.platform_sources === undefined ? undefined : JSON.parse(JSON.stringify(rule.platform_sources))
                     selectedId = rule.id
                     formRevision = window.state.routing_revision
                     saveError = ""
@@ -868,11 +899,19 @@ ApplicationWindow {
                     window.sendRouting({command: "routing_order", ids: ids})
                 }
                 SectionTitle { text: window.tr("Черновик маршрутизации", "Routing draft") }
+                PresetPanel {
+                    Layout.fillWidth: true
+                    snapshot: window.state.presets || ({})
+                    routing: window.state.routing || ({})
+                    routingRevision: window.state.routing_revision
+                    language: window.language
+                    onCommand: payload => window.send(payload)
+                }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Черновик сохраняется в зашифрованной БД. Первое подходящее правило имеет приоритет. VPN/LAN и пресеты здесь не редактируются.", "Draft is saved in the encrypted database. First matching rule wins. VPN/LAN and presets are not editable here.") }
                 ActionButton { objectName: "routingModeButton"; text: editor.advanced ? window.tr("Простой режим", "Simple mode") : window.tr("Расширенный режим", "Advanced mode"); onClicked: editor.advanced = !editor.advanced }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Условия групп: И; строки внутри группы: ИЛИ. Составные правила сохраняются при смене режима.", "Groups use AND; lines within a group use OR. Switching mode preserves compound rules.") }
                 SmallLabel { objectName: "routingDiagnosticsScope"; Layout.fillWidth: true; text: window.tr("Ограниченная диагностика сохранённой ревизии ", "Limited diagnostics for saved revision ") + window.state.routing_revision + window.tr(". Отсутствие предупреждений не доказывает совместимость. VPN/LAN здесь не настроены.", ". No warnings does not prove compatibility. VPN/LAN are not configured here.") }
-                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? window.tr("Отчёт устарел: черновик изменился. Требуется актуальный снимок.", "Report is stale: the draft changed. A current snapshot is required.") : window.tr("Анализ неполный: достигнут лимит или вход не поддерживается.", "Analysis is incomplete: a limit was reached or input is unsupported.") }
+                SmallLabel { objectName: "routingDiagnosticsIncomplete"; visible: !!window.state.routing_diagnostics && window.state.routing_diagnostics.incomplete; text: window.state.routing_diagnostics && window.isUnsupportedSelector(window.state.routing_diagnostics.error) ? window.tr("Правило #", "Rule #") + window.state.routing_diagnostics.rule_id + window.tr(": селектор неприменим на Linux", ": selector is unsupported on Linux") : window.state.routing_diagnostics && window.state.routing_diagnostics.stale ? window.tr("Отчёт устарел: черновик изменился. Требуется актуальный снимок.", "Report is stale: the draft changed. A current snapshot is required.") : window.tr("Анализ неполный: достигнут лимит или вход не поддерживается.", "Analysis is incomplete: a limit was reached or input is unsupported.") }
                 Repeater {
                     model: window.state.routing_diagnostics ? window.state.routing_diagnostics.warnings : []
                     delegate: SmallLabel {
@@ -888,7 +927,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     property var explanation: window.state.routing_explanation
                     visible: !!explanation && explanation.revision === window.state.routing_revision && explanation.request_id === window.routingRequestId
-                    text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
+                    text: !explanation ? "" : explanation.result.status === "fixture" ? window.tr("Предварительный расчёт: ", "Preliminary evaluation: ") + explanation.result.action + " · " + explanation.result.origin : window.tr("Неизвестно: ", "Unknown: ") + (explanation.result.reason === "application_witness_missing" ? window.tr("нет подтверждённой атрибуции приложения", "no verified application attribution") : (explanation.result.reason === "dns_witness_missing" || explanation.result.reason === "dns_missing") ? window.tr("нет подтверждённых DNS-данных", "no verified DNS evidence") : window.isUnsupportedSelector(explanation.result.reason) ? window.tr("неприменимый селектор правила #", "unsupported selector in rule #") + explanation.result.rule_id : explanation.result.reason === "evaluation_rejected" ? window.tr("вход отклонён вычислителем", "input rejected by evaluator") : window.tr("причина недоступна", "reason unavailable")) + window.tr(". Это не проверка применения.", ". This does not verify application of routing.")
                 }
                 RowLayout {
                     objectName: "routingDefaultRow"
@@ -902,7 +941,7 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
-                        SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules") }
+                        SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.platform_sources && ruleRow.modelData.platform_sources.length ? window.tr("Платформенный селектор неприменим на Linux", "Platform selector is unsupported on Linux") : (ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules")) }
                         RowLayout {
                             ActionButton { objectName: "routingEdit" + ruleRow.modelData.id; text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
                             ActionButton { objectName: "routingUp" + ruleRow.modelData.id; text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
@@ -952,11 +991,11 @@ ApplicationWindow {
                             const rules = window.state.routing.rules
                             const id = editor.selectedId || (rules.reduce((n, r) => Math.max(n, r.id), 0) + 1)
                             editor.saveError = ""
-                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
+                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, platform_sources: editor.platformSources, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
                             editor.settle()
                         }
                     }
-                    ActionButton { text: window.tr("Как новое", "As new"); onClicked: { editor.selectedId = 0; editor.formRevision = window.state.routing_revision; editor.saveError = "" } }
+                    ActionButton { text: window.tr("Как новое", "As new"); onClicked: { editor.resetPlatformSources(); editor.selectedId = 0; editor.formRevision = window.state.routing_revision; editor.saveError = "" } }
                 }
                 PlainLabel { objectName: "routingSaveError"; Layout.fillWidth: true; visible: !!editor.saveError || !!(window.routingFeedback && window.routingFeedback.error); text: window.errorText(editor.saveError || (window.routingFeedback ? window.routingFeedback.error : "")) }
                 ActionButton {
@@ -1025,6 +1064,7 @@ ApplicationWindow {
             SpinBox {
                 id: scheduleHours
                 objectName: "subscriptionInterval"
+                enabled: window.state.source_local === false
                 from: 24; to: 1193046
                 value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
                 editable: true
@@ -1033,6 +1073,7 @@ ApplicationWindow {
             }
             CheckBox {
                 objectName: "subscriptionBackground"
+                enabled: window.state.source_local === false
                 text: window.tr("Разрешить обновления в фоне", "Allow background updates")
                 checked: window.state.subscription_background === true
                 onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
@@ -1337,7 +1378,7 @@ ApplicationWindow {
         modal: true
         title: window.tr("Добавить подписку", "Add subscription")
         closePolicy: Popup.CloseOnEscape
-        onClosed: { sourceName.clear(); sourceUrl.clear(); sourceHwid.checked = false; localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
+        onClosed: { localImportText.clear(); localImportLimit.visible = false; sourceName.clear(); sourceUrl.clear(); sourceHwid.checked = false; localException.checked = false; sourceAdvanced.checked = false; reveal.checked = false }
         contentItem: PanelScroll {
             id: addScroll
             implicitHeight: Math.min(addContent.implicitHeight, window.height - 140)
@@ -1352,6 +1393,23 @@ ApplicationWindow {
             RowLayout {
                 TextField { id: sourceUrl; objectName: "sourceUrlInput"; Layout.fillWidth: true; maximumLength: 8192; echoMode: reveal.checked ? TextInput.Normal : TextInput.Password; selectByMouse: true; inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData; Accessible.name: window.tr("Секретная ссылка подписки", "Secret subscription URL") }
                 CheckBox { id: reveal; objectName: "revealSourceUrl"; text: window.tr("Показать", "Show") }
+            }
+            ActionButton { objectName: "manualEntryButton"; text: window.tr("Сервер вручную", "Manual server"); enabled: window.editable && !window.state.pending; onClicked: { addDialog.close(); manualEntry.open() } }
+            PlainLabel { text: window.tr("Текст или файл конфигурации", "Configuration text or file") }
+            TextArea {
+                id: localImportText; objectName: "localImportTextInput"
+                Layout.fillWidth: true; Layout.preferredHeight: 100
+                wrapMode: TextEdit.Wrap; selectByMouse: true
+                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                Accessible.name: window.tr("Секретный текст импорта", "Secret import text")
+                onTextChanged: if (length > 1048576) { clear(); localImportLimit.visible = true }
+            }
+            PlainLabel { id: localImportLimit; visible: false; text: window.tr("Превышен размер текста. Выберите файл до 8 MiB.", "Text too large. Select a file up to 8 MiB.") }
+            RowLayout {
+                ActionButton { objectName: "importTextButton"; text: window.tr("Импорт текста", "Import text"); enabled: window.editable && !window.state.pending && localImportText.length > 0; onClicked: {
+                    window.submitLocalImport({command: "import_text", name: sourceName.text.trim() || window.tr("Локальный импорт", "Local import"), text: localImportText.text})
+                } }
+                ActionButton { objectName: "importFileButton"; text: window.tr("Выбрать файл", "Choose file"); enabled: window.editable && !window.state.pending; onClicked: localImportFile.open() }
             }
             ActionButton {
                 id: sourceAdvanced; objectName: "sourceAdvancedButton"
@@ -1380,6 +1438,7 @@ ApplicationWindow {
                     highlighted: true
                     enabled: window.state.ready && sourceUrl.text.trim().length > 0 && !window.state.busy && !window.state.pending
                     onClicked: {
+                        window.localImportReview = false
                         window.desiredSourceId = null
                         window.desiredProfileId = null
                         searchDelay.stop()
@@ -1394,6 +1453,33 @@ ApplicationWindow {
         }
         }
         onOpened: { sourceUrl.clear(); sourceName.clear(); sourceHwid.checked = false; if (window.pasteOnOpen) sourceUrl.paste(); window.pasteOnOpen = false; sourceUrl.forceActiveFocus() }
+    }
+    ManualEntry {
+        id: manualEntry
+        english: window.language === "en"
+        onSubmitted: function(name, text) { window.submitLocalImport({command: "import_text", name: name, text: text}) }
+    }
+    FileDialog {
+        id: localImportFile; objectName: "localImportFileDialog"
+        fileMode: FileDialog.OpenFile
+        options: FileDialog.DontResolveSymlinks
+        title: window.tr("Импорт конфигурации до 8 MiB", "Import configuration up to 8 MiB")
+        onAccepted: {
+            const url = selectedFile.toString()
+            if (!url.startsWith("file:///")) return
+            window.submitLocalImport({command: "import_file", name: sourceName.text.trim() || window.tr("Локальный импорт", "Local import"), path: decodeURIComponent(url.substring(7))})
+        }
+    }
+    FileDialog {
+        id: localBackupFile; objectName: "localImportBackupDialog"
+        fileMode: FileDialog.SaveFile
+        title: window.tr("Резервная копия в новом файле приватного каталога", "Backup in a new file in a private directory")
+        onAccepted: {
+            const url = selectedFile.toString()
+            if (!url.startsWith("file:///")) return
+            window.maintenanceRequestSequence += 1
+            window.send({command: "maintenance_start", request_id: window.maintenanceRequestSequence, operation: "backup", destination: decodeURIComponent(url.substring(7)), revision: window.state.revision || 0})
+        }
     }
     DarkDialog {
         id: reviewDialog
@@ -1411,9 +1497,14 @@ ApplicationWindow {
             id: reviewContent
             width: reviewScroll.availableWidth
             spacing: 12
+            PlainLabel { Layout.fillWidth: true; visible: window.localImportReview; text: window.tr("Перед первым сохранением создайте зашифрованную резервную копию. Исходник сохраняется зашифрованным без изменений.", "Create an encrypted backup before the first save. The original input is stored encrypted without changes.") }
+            ActionButton { objectName: "localImportBackupButton"; visible: window.localImportReview; enabled: !window.state.busy && window.state.ready; text: window.tr("Создать резервную копию…", "Create backup…"); onClicked: localBackupFile.open() }
+            ActionButton { objectName: "localImportBackupCancelButton"; visible: window.localImportReview && window.state.busy && !!window.state.maintenance_ack; enabled: !!window.state.maintenance_ack && window.state.maintenance_ack.phase !== "cancelling"; text: window.tr("Отменить резервную копию", "Cancel backup"); onClicked: window.send({command: "maintenance_cancel", request_id: window.state.maintenance_ack.request_id}) }
+            PlainLabel { objectName: "localImportBackupFeedback"; Layout.fillWidth: true; visible: window.localImportReview && !!window.state.maintenance_ack; text: !window.state.maintenance_ack ? "" : window.state.maintenance_ack.phase === "complete" ? window.tr("Резервная копия готова. Можно сохранить профили.", "Backup ready. You can save profiles.") : window.state.maintenance_ack.error ? window.errorText(window.state.maintenance_ack.error) : window.tr("Подготовка резервной копии…", "Preparing backup…") }
+            PlainLabel { Layout.fillWidth: true; visible: window.localImportReview && !!window.sourceError; color: "#e6bc83"; text: window.sourceError ? window.errorText(window.sourceError) : "" }
             PlainLabel { Layout.fillWidth: true; text: window.tr("Проверьте результат перед заменой сохранённых профилей.", "Review the result before replacing saved profiles.") }
-            PlainLabel { text: window.tr("Принято: ", "Accepted: ") + (window.state.pending ? window.state.pending.accepted : 0) }
-            PlainLabel { text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
+            PlainLabel { objectName: "importAcceptedCount"; text: window.tr("Принято: ", "Accepted: ") + (window.state.pending ? window.state.pending.accepted : 0) }
+            PlainLabel { objectName: "importRejectedCount"; text: window.tr("Отклонено: ", "Rejected: ") + (window.state.pending ? window.state.pending.rejected : 0) }
             PlainLabel { text: window.tr("Требуют внимания: ", "Flagged: ") + (window.state.pending ? window.state.pending.flagged : 0) }
             PlainLabel { objectName: "nativeJsonWarning"; Layout.fillWidth: true; color: "#e6bc83"; visible: !!window.state.pending && !!window.state.pending.native_json; text: window.tr("Источник содержит конфигурацию ядра JSON. Её содержимое не показывается: она может содержать секреты. Подтверждайте импорт только из доверенного источника.", "The source contains native engine JSON configuration. Its contents are hidden because they may contain secrets. Approve only a trusted source.") }
             ListView {
@@ -1449,7 +1540,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 8
                 layoutDirection: Qt.RightToLeft
-                ActionButton { objectName: "approveRefreshButton"; text: window.tr("Сохранить профили", "Save profiles"); highlighted: true; enabled: !!window.state.pending && !window.state.busy; onClicked: window.send({command: "approve_refresh"}) }
+                ActionButton { objectName: "approveRefreshButton"; text: window.tr("Сохранить профили", "Save profiles"); highlighted: true; enabled: !!window.state.pending && (window.state.pending.accepted > 0 || window.state.pending.native_json) && !window.state.busy; onClicked: window.send({command: "approve_refresh"}) }
                 ActionButton { objectName: "reviewStopButton"; visible: window.state.can_stop; text: window.tr("Отключить", "Disconnect"); onClicked: window.send({command: "stop"}) }
                 ActionButton { objectName: "discardRefreshButton"; text: window.tr("Отменить импорт", "Discard import"); enabled: !window.state.busy; onClicked: window.send({command: "discard_refresh"}) }
             }

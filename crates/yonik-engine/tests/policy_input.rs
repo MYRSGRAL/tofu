@@ -56,7 +56,7 @@ fn rejects_malformed_unknown_duplicate_and_missing_fields() {
 #[test]
 fn rejects_invalid_semantics() {
     for input in [
-        r#"{"version":2}"#,
+        r#"{"version":3}"#,
         r#"{"version":1,"lan":["10.1.2.3/8"]}"#,
         r#"{"version":1,"lan":["::ffff:192.0.2.0/120"]}"#,
         r#"{"version":1,"private_domains":[{"suffix":"*.example.com","vpn":1,"available":true}]}"#,
@@ -152,5 +152,25 @@ fn read_is_bounded_and_errors_never_include_input() {
         assert!(!display.contains("secret"));
         assert!(!debug.contains("secret"));
         assert!(std::error::Error::source(&error).is_none());
+    }
+}
+
+#[test]
+fn p07_closed_input_retains_sources() {
+    let input = r#"{"version":2,"user_rules":[{"id":41,"enabled":false,"action":"direct","conditions":{"platform_sources":[{"kind":"android_package","package":"org.Example_app"}]}}]}"#;
+    assert_eq!(
+        read(input).unwrap().user_rules[0]
+            .conditions
+            .platform_sources
+            .len(),
+        1
+    );
+    for invalid in [
+        input.replace("org.Example_app", "org.1app"),
+        input.replace("android_package", "future"),
+        input.replace("\"version\":2", "\"version\":1"),
+        input.replace("\"package\":", "\"other\":0,\"package\":"),
+    ] {
+        assert!(read(&invalid).is_err());
     }
 }

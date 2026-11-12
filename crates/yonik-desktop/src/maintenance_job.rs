@@ -400,6 +400,7 @@ mod tests {
         assert!(host.wait_closed(Duration::from_secs(10)));
         drop(host);
         *TEST_GATE.lock().expect("test gate") = None;
+        fs::remove_dir(data.join("presets")).expect("очистка пустого preset fixture");
         for entry in fs::read_dir(&data).expect("fixture") {
             fs::remove_file(entry.expect("файл").path()).expect("очистка");
         }
@@ -495,6 +496,7 @@ mod tests {
         drop(host);
         *TEST_GATE.lock().expect("gate") = None;
         fs::remove_dir(database).expect("очистка fault");
+        fs::remove_dir(data.join("presets")).expect("очистка пустого preset fixture");
         for entry in fs::read_dir(&data).expect("fixture") {
             fs::remove_file(entry.expect("файл").path()).expect("очистка");
         }

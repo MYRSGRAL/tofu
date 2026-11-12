@@ -12,7 +12,8 @@ pub use evaluation::{
     PolicyFault, PrivateDomain, Resolution, ResolverPath, VpnId,
 };
 pub use policy::{
-    Action, Conditions, Decision, Flow, Policy, PrivateNetwork, Route, Rule, RuleOrigin,
+    Action, AndroidPackageId, Conditions, Decision, Flow, PlatformSource, Policy, PrivateNetwork,
+    Route, Rule, RuleOrigin,
 };
 
 mod dns_policy;

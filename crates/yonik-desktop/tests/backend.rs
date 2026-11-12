@@ -2148,3 +2148,310 @@ fn logs_trusted_control_is_not_deserializable_from_ui() {
     );
     app.close();
 }
+
+fn local_backup(app: &mut Harness, directory: &Directory) {
+    local_backup_at(app, directory, 0);
+}
+
+fn local_backup_at(app: &mut Harness, directory: &Directory, revision: i64) {
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(directory.0.join("copies"))
+        .expect("отдельный приватный каталог копии");
+    app.send(json!({"command":"maintenance_start", "request_id":9001, "operation":"backup", "destination":directory.0.join("copies/before-local.sqlite"), "revision":revision}));
+    let ack = app.wait(|v| {
+        v["maintenance_ack"]["request_id"] == 9001
+            && matches!(
+                v["maintenance_ack"]["phase"].as_str(),
+                Some("complete" | "failed")
+            )
+    });
+    assert_eq!(ack["maintenance_ack"]["error"], Value::Null);
+    assert_eq!(ack["ready"], true);
+}
+
+#[test]
+fn local_text_partial_approval_reopen_and_network_controls_fail_closed() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    let requests = Arc::new(AtomicU64::new(0));
+    let observed = requests.clone();
+    let (url, server) = fixture_with_requests(
+        vec!["trojan://remote-control@example.com:443#remote"; 2],
+        move |_| {
+            observed.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    app.send(json!({"command":"import_source", "name":"Control", "url":url, "local_exception":true, "route":"direct"}));
+    let remote = app.wait(|v| v["busy"] == false && v["total"] == 1);
+    let remote_id = remote["source_id"].clone();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    local_backup_at(
+        &mut app,
+        &directory,
+        remote["revision"].as_i64().expect("revision"),
+    );
+    app.send(json!({"command":"query", "search":"stale", "favorites_only":true, "offset":200}));
+    app.wait(|v| v["offset"] == 200 && v["search"] == "stale");
+    let original = "trojan://local-secret@example.com:443#local\ninvalid://rejected\n";
+    app.send(json!({"command":"import_text", "name":"Локальный", "text":original}));
+    let review = app.wait(|v| v["pending"].is_object());
+    assert_eq!(review["pending"]["accepted"], 1);
+    assert_eq!(review["pending"]["rejected"], 1);
+    assert!(!review.to_string().contains("local-secret"));
+    app.send(json!({"command":"routing_default", "request_id":88, "expected_revision":0, "action":"direct"}));
+    let busy = app.wait(|v| v["routing_ack"]["request_id"] == 88);
+    assert_eq!(busy["routing_ack"]["error"], "busy");
+    assert_eq!(busy["routing_revision"], 0);
+    assert_eq!(busy["maintenance_available"], true);
+    app.send(json!({"command":"approve_refresh"}));
+    let saved = app.wait(|v| v["pending"].is_null() && v["total"] == 1);
+    assert_eq!(saved["offset"], 0);
+    assert_eq!(saved["profiles"].as_array().expect("profiles").len(), 1);
+    assert_eq!(saved["search"], "");
+    assert_eq!(saved["favorites_only"], false);
+    let id = saved["source_id"].as_i64().expect("source");
+    assert_eq!(saved["source_local"], true);
+    app.send(json!({"command":"rename_source", "id":id, "name":"Локальный переименован"}));
+    app.wait(|v| v["source_name"] == "Локальный переименован" && v["source_local"] == true);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    let denied = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(
+        denied["subscription_interval_seconds"],
+        saved["subscription_interval_seconds"]
+    );
+    assert_eq!(denied["revision"], saved["revision"]);
+    app.send(json!({"command":"refresh"}));
+    let rejected = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(rejected["revision"], saved["revision"]);
+    app.send(json!({"command":"source_change", "request_id":17, "id":id, "expected_generation":saved["source_generation"], "name":"Не менять", "url":url, "local_exception":true, "route":"direct", "hwid_enabled":false}));
+    let unchanged = app.wait(|v| v["source_change_ack"]["request_id"] == 17);
+    assert_eq!(unchanged["source_change_ack"]["error"], "invalid_input");
+    assert_eq!(unchanged["revision"], saved["revision"]);
+    app.send(json!({"command":"set_source_hwid", "enabled":true}));
+    let denied = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(denied["revision"], saved["revision"]);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    app.send(json!({"command":"select_source", "id":remote_id}));
+    app.wait(|v| v["source_id"] == remote_id && v["busy"] == false);
+    app.send(json!({"command":"refresh"}));
+    app.wait(|v| v["busy"] == false && v["revision"].as_u64().unwrap_or(0) > 1);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    server.join().expect("positive remote control");
+    app.send(json!({"command":"select_source", "id":id}));
+    app.wait(|v| v["source_id"] == id);
+    app.close();
+    let mut reopened = Harness::new(directory.config());
+    reopened.wait(|v| v["ready"] == true);
+    reopened.send(json!({"command":"select_source", "id":id}));
+    let snapshot = reopened.wait(|v| v["source_id"] == id && v["source_local"] == true);
+    assert_eq!(snapshot["source_id"], id);
+    assert_eq!(snapshot["total"], 1);
+    reopened.send(json!({"command":"set_source_hwid", "enabled":true}));
+    reopened.wait(|v| v["error"] == "invalid_input");
+    reopened.close();
+    assert!(!app.snapshots.join("").contains("local-secret"));
+    assert!(!reopened.snapshots.join("").contains("local-secret"));
+    let database = directory.0.join("subscriptions.sqlite");
+    assert!(
+        !fs::read(&database)
+            .expect("encrypted database")
+            .windows(b"local-secret".len())
+            .any(|window| window == b"local-secret")
+    );
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(async {
+            let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+                database,
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .expect("repository");
+            let record = repo.load(id).await.expect("load").expect("local source");
+            assert_eq!(
+                record.source.generation,
+                saved["source_generation"].as_i64().expect("generation")
+            );
+            let snapshot = record.snapshot.expect("snapshot");
+            assert_eq!(
+                snapshot.revision,
+                saved["revision"].as_i64().expect("revision")
+            );
+            assert_eq!(snapshot.body.as_slice(), original.as_bytes());
+            repo.close().await.expect("close");
+        });
+}
+
+#[test]
+fn local_file_import_errors_and_discard_do_not_create_sources() {
+    let directory = Directory::new();
+    let file = directory.0.join("input.txt");
+    fs::write(&file, "trojan://file-secret@example.com:443#file\n").expect("fixture");
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    local_backup(&mut app, &directory);
+    app.send(json!({"command":"import_file", "name":"Файл", "path":file}));
+    app.wait(|v| v["pending"]["accepted"] == 1);
+    app.send(json!({"command":"discard_refresh"}));
+    app.wait(|v| v["pending"].is_null());
+    app.send(json!({"command":"import_file", "name":"Ошибка", "path":directory.0.join("secret-missing-file")}));
+    let failed = app.wait(|v| v["error"] == "invalid_input");
+    assert!(!failed.to_string().contains("secret-missing-file"));
+    assert!(!failed.to_string().contains("file-secret"));
+    app.send(json!({"command":"import_file", "name":"Файл", "path":file}));
+    app.wait(|v| v["pending"]["accepted"] == 1);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["total"] == 1);
+    app.close();
+}
+
+#[test]
+fn local_unknown_options_preserve_profile_but_block_activation() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    local_backup(&mut app, &directory);
+    app.send(json!({"command":"import_text", "name":"Unknown", "text":"trojan://secret@example.com:443?unknown_option=secret#blocked"}));
+    app.wait(|v| v["pending"]["flagged"] == 1);
+    app.send(json!({"command":"approve_refresh"}));
+    let saved = app.wait(|v| v["total"] == 1 && v["pending"].is_null());
+    app.send(json!({"command":"select_profile", "id":saved["profiles"][0]["id"], "revision":saved["revision"]}));
+    app.wait(|v| v["selected_profile"].is_i64());
+    app.send(json!({"command":"connect"}));
+    app.wait(|v| v["error"] == "engine_config" && v["can_stop"] == false);
+    app.close();
+}
+
+#[test]
+fn local_base64_and_both_json_formats_use_existing_importer() {
+    let inputs = [
+        "dHJvamFuOi8vc2VjcmV0QGV4YW1wbGUuY29tOjQ0MyN0ZXN0",
+        r#"{"outbounds":[{"protocol":"trojan","settings":{"servers":[{"address":"example.com","port":443,"password":"secret"}]},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"example.com"}}}]}"#,
+        r#"{"outbounds":[{"type":"trojan","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true,"server_name":"example.com"}}]}"#,
+    ];
+    for input in inputs {
+        let directory = Directory::new();
+        let mut app = Harness::new(directory.config());
+        app.wait(|v| v["ready"] == true);
+        local_backup(&mut app, &directory);
+        app.send(json!({"command":"import_text", "name":"Local", "text":input}));
+        app.wait(|v| v["pending"]["accepted"] == 1);
+        app.send(json!({"command":"approve_refresh"}));
+        app.wait(|v| v["total"] == 1 && v["pending"].is_null());
+        app.close();
+    }
+}
+
+#[test]
+fn local_cancel_ack_prevents_stale_report_from_replacing_next_import() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    local_backup(&mut app, &directory);
+    app.send(json!({"command":"import_text", "name":"Отменённый", "text":"trojan://old-secret@example.com:443#old\n".repeat(20_000)}));
+    app.wait(|v| v["busy"] == true);
+    app.send(json!({"command":"cancel_local_import"}));
+    app.wait(|v| v["busy"] == false && v["pending"].is_null());
+    app.send(json!({"command":"import_text", "name":"Новый", "text":"trojan://new-secret@example.com:443#new"}));
+    app.wait(|v| v["pending"]["accepted"] == 1);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["source_name"] == "Новый" && v["total"] == 1);
+    app.close();
+}
+
+#[test]
+fn local_cancel_does_not_discard_remote_partial_review() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec![
+        "trojan://remote-secret@example.com:443#remote\ninvalid://rejected",
+    ]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_source", "name":"Remote", "url":url, "local_exception":true, "route":"direct"}));
+    app.wait(|v| v["pending"]["accepted"] == 1 && v["busy"] == false);
+    app.send(json!({"command":"cancel_local_import"}));
+    let retained = app.wait(|v| v["pending"]["accepted"] == 1 && v["busy"] == false);
+    assert_eq!(retained["pending"]["rejected"], 1);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["total"] == 1);
+    app.close();
+    server.join().expect("fixture");
+}
+
+#[test]
+fn local_failed_backup_keeps_review_and_allows_fresh_backup_retry() {
+    let directory = Directory::new();
+    fs::write(directory.0.join("existing-backup"), "не заменять").expect("fixture");
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_text", "name":"Retry", "text":"trojan://retry-secret@example.com:443#retry"}));
+    app.wait(|v| v["pending"]["accepted"] == 1);
+    app.send(json!({"command":"maintenance_start", "request_id":1, "operation":"backup", "destination":directory.0.join("existing-backup"), "revision":0}));
+    app.wait(|v| {
+        v["maintenance_ack"]["request_id"] == 1 && v["maintenance_ack"]["phase"] == "failed"
+    });
+    app.send(json!({"command":"approve_refresh"}));
+    let refused = app.wait(|v| v["error"].is_string() && v["pending"].is_object());
+    assert_eq!(refused["sources_total"], 0);
+    assert_eq!(refused["revision"], 0);
+    assert!(!refused.to_string().contains("retry-secret"));
+    assert_eq!(
+        fs::read_to_string(directory.0.join("existing-backup")).expect("original"),
+        "не заменять"
+    );
+    local_backup(&mut app, &directory);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["total"] == 1);
+    app.close();
+}
+
+#[test]
+#[ignore = "Требует контрольный старый Qt binary и отдельный evidence"]
+fn local_format4_actual_old_reader_refuses_connect_delete_write_and_opens_backup3() {
+    let directory = Directory::new();
+    let config = HostConfig::new(directory.0.clone(), directory.0.join("engines"))
+        .with_ephemeral_key([43; 32]);
+    let mut app = Harness::new(config);
+    app.wait(|v| v["ready"] == true);
+    local_backup(&mut app, &directory);
+    app.send(json!({"command":"import_text", "name":"Compatibility", "text":"trojan://compat-secret@example.com:443#compat"}));
+    app.wait(|v| v["pending"]["accepted"] == 1);
+    app.send(json!({"command":"approve_refresh"}));
+    app.wait(|v| v["pending"].is_null() && v["total"] == 1);
+    app.close();
+    let status = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/local_import_old_reader.py"
+        ))
+        .arg(std::env::var_os("YONIK_IMPORT_OLD_BINARY").expect("old fixture"))
+        .arg(&directory.0)
+        .arg(std::env::var_os("YONIK_IMPORT_COMPAT_EVIDENCE").expect("evidence"))
+        .status()
+        .expect("actual old binary control");
+    assert!(status.success());
+}
+
+#[test]
+fn local_cancel_unknown_field_preserves_report_and_normal_cancel_works() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_text", "name":"Локальный", "text":"trojan://cancel-secret@example.com:443#local"}));
+    let report = app.wait(|v| v["pending"]["accepted"] == 1 && v["busy"] == false);
+    let error = app
+        .host
+        .dispatch(r#"{"command":"cancel_local_import","unexpected":true}"#)
+        .expect_err("лишнее поле запрещено");
+    assert_eq!(error.key(), "invalid_input");
+    app.send(json!({"command":"review_page", "offset":0}));
+    let retained = app.wait(|v| v["pending"]["accepted"] == 1);
+    assert_eq!(retained["pending"], report["pending"]);
+    app.send(json!({"command":"cancel_local_import"}));
+    app.wait(|v| v["pending"].is_null() && v["busy"] == false);
+    app.close();
+}

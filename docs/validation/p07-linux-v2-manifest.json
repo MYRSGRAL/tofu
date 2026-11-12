@@ -1,0 +1,56 @@
+{
+  "source_commit": "d3fe29e2bfe1f394956a96e800cdac3fba1536eb",
+  "main": "1cd4a32db5b2c889039661ce0657eff0a3031842",
+  "repository_coherent_head": "010242a8ee06a18b4656a42c4451a802d36a85e3",
+  "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)\nbinary: rustc\ncommit-hash: 4eb161250e340c8f48f66e2b929ef4a5bed7c181\ncommit-date: 2025-03-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.85.1\nLLVM version: 19.1.7\n",
+  "toolchain_sha256": "f8d033fd72e878ec60493788c8bffec2e6c154dcab6f0cb4c145af8ada26a7ed  /home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc\n87e9ff02f95ea17d877e7c4eeb0f365f50fe3827f5afec132131ff3b8031a57e  /home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/cargo\n",
+  "binary": "/home/myrs/projects/yonik/local/evidence/p07-linux-v2/p07-native-fixture",
+  "binary_sha256": "fbeed56453c38f9ec44dc49056e8bca6cb5dd28a88502356d9a422540f767242",
+  "sources_manifest": "p07-linux-v2-sources.sha256",
+  "sources_manifest_sha256": "b4b97653a554d191184d9d285040fece99efe5a2c4ff8f98ed1d711565e687ae",
+  "jobs": 1,
+  "features": "gui,test-support",
+  "qt": {
+    "launches": 4,
+    "migration": true,
+    "reopen": true,
+    "unsupported_explain": true,
+    "duplicate_disabled": true,
+    "duplicate_enabled": true,
+    "simple_advanced_preserved": true
+  },
+  "old_reader": {
+    "new_transaction_created_format4": true,
+    "old_open_connect_write_rejected": true,
+    "sha256_unchanged": "e369066b5ef6192cad7102fcc23b67c3d7a8fc9c743fa4dcfa5b5f98c561c660",
+    "rollback_backup3_opened_by_old": true
+  },
+  "guards": {
+    "domain": {
+      "red_exit": 101,
+      "green_exit": 0
+    },
+    "wire": {
+      "red_exit": 101,
+      "green_exit": 0
+    },
+    "proxy-compilers": {
+      "red_exit": 101,
+      "green_exit": 0
+    },
+    "system-compilers": {
+      "red_exit": 101,
+      "green_exit": 0
+    },
+    "explain": {
+      "red_exit": 101,
+      "green_exit": 0
+    }
+  },
+  "evidence": "/home/myrs/projects/yonik/local/evidence/p07-linux-v2",
+  "deferred": [
+    "Android runtime",
+    "physical G-UI",
+    "physical G-POWER"
+  ]
+}

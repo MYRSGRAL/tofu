@@ -130,7 +130,7 @@ fn send_reply(
 }
 
 #[cfg(test)]
-type LookupHook = Box<dyn FnOnce(&mut Session)>;
+type LookupHook = Box<dyn FnOnce(&mut Session) -> Result<(), Unavailable>>;
 #[cfg(test)]
 thread_local! {
     static BEFORE_LOOKUP: std::cell::RefCell<Option<LookupHook>> =
@@ -178,9 +178,10 @@ impl Session {
             #[cfg(test)]
             BEFORE_LOOKUP.with(|hook| {
                 if let Some(callback) = hook.borrow_mut().take() {
-                    callback(self);
+                    callback(self)?;
                 }
-            });
+                Ok(())
+            })?;
             let lookup = self.lookup(&bytes).map_err(|_| Unavailable::Malformed)?;
             let snapshot_expiry = match &lookup {
                 Lookup::KnownOwner(owner) => Some(
@@ -296,9 +297,22 @@ pub(super) mod tests {
         handshake_delayed(peer, acknowledge, Duration::ZERO)
     }
     fn handshake_delayed(peer: &OwnedFd, acknowledge: bool, delay: Duration) -> Vec<u8> {
+        handshake_until(
+            peer,
+            acknowledge,
+            delay,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap()
+    }
+    fn handshake_until(
+        peer: &OwnedFd,
+        acknowledge: bool,
+        delay: Duration,
+        deadline: Instant,
+    ) -> Result<Vec<u8>, Unavailable> {
         let cancel = AtomicBool::new(false);
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let hello = receive(peer, deadline, &cancel).unwrap();
+        let hello = receive(peer, deadline, &cancel)?;
         let mut features = hello[..112].to_vec();
         Header {
             kind: Kind::Features,
@@ -310,7 +324,7 @@ pub(super) mod tests {
         .unwrap();
         features[96..104].copy_from_slice(&wire::FEATURES.to_be_bytes());
         features[104..112].copy_from_slice(&wire::OWNED_TUN.to_be_bytes());
-        send(peer, &features, None, deadline, &cancel).unwrap();
+        send(peer, &features, None, deadline, &cancel)?;
         let mut bytes = [0; 128];
         let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
         loop {
@@ -340,7 +354,7 @@ pub(super) mod tests {
                     break;
                 }
                 Err(rustix::io::Errno::AGAIN) => {
-                    fence(deadline, &cancel).unwrap();
+                    fence(deadline, &cancel)?;
                     std::thread::sleep(TICK);
                 }
                 e => panic!("{e:?}"),
@@ -359,50 +373,59 @@ pub(super) mod tests {
         ack[99] = 1;
         std::thread::sleep(delay);
         if acknowledge {
-            send(peer, &ack, None, deadline, &cancel).unwrap();
+            send(peer, &ack, None, deadline, &cancel)?;
         }
-        hello
+        Ok(hello)
     }
     pub(in crate::attribution) fn known_roundtrip(
         broker: super::super::super::broker::Broker,
-        prepare: impl FnOnce(&mut super::super::super::broker::Broker) + Send + 'static,
+        prepare: impl FnOnce(&mut super::super::super::broker::Broker) -> Result<(), Unavailable>
+        + Send
+        + 'static,
         flow: super::super::super::broker::Flow,
-    ) {
+        deadline: Instant,
+    ) -> Result<(), Unavailable> {
         let (mut session, peer, metadata) = fixture();
         session.roles.as_mut().unwrap().broker = Some(broker);
         let thread = std::thread::spawn(move || {
             BEFORE_LOOKUP.with(|hook| {
                 *hook.borrow_mut() = Some(Box::new(move |session| {
-                    prepare(session.roles.as_mut().unwrap().broker.as_mut().unwrap());
+                    prepare(session.roles.as_mut().unwrap().broker.as_mut().unwrap())
                 }));
             });
             session.serve(&metadata, &AtomicBool::new(false))
         });
         // Задержка bootstrap заведомо превышает owner TTL; наблюдение ещё не начато.
-        let hello = handshake_delayed(&peer, true, Duration::from_millis(30));
-        let mut lookup = vec![0; 144];
-        Header {
-            kind: Kind::Lookup,
-            request_id: 43,
-            epoch: 1,
-            digest: [2; 32],
-        }
-        .write(&mut lookup)
-        .unwrap();
-        lookup[64..96].copy_from_slice(&hello[64..96]);
-        lookup[96] = if flow.family == 2 { 4 } else { 6 };
-        lookup[97] = flow.protocol;
-        lookup[100..102].copy_from_slice(&flow.local_port.to_be_bytes());
-        lookup[102..104].copy_from_slice(&flow.remote_port.to_be_bytes());
-        lookup[104..120].copy_from_slice(&flow.local);
-        lookup[120..136].copy_from_slice(&flow.remote);
-        let deadline = Instant::now() + Duration::from_secs(1);
-        let cancel = AtomicBool::new(false);
-        send(&peer, &lookup, None, deadline, &cancel).unwrap();
-        let reply = receive(&peer, deadline, &cancel).unwrap();
+        let exchange = (|| {
+            let hello = handshake_until(&peer, true, Duration::from_millis(30), deadline)?;
+            let mut lookup = vec![0; 144];
+            Header {
+                kind: Kind::Lookup,
+                request_id: 43,
+                epoch: 1,
+                digest: [2; 32],
+            }
+            .write(&mut lookup)
+            .unwrap();
+            lookup[64..96].copy_from_slice(&hello[64..96]);
+            lookup[96] = if flow.family == 2 { 4 } else { 6 };
+            lookup[97] = flow.protocol;
+            lookup[100..102].copy_from_slice(&flow.local_port.to_be_bytes());
+            lookup[102..104].copy_from_slice(&flow.remote_port.to_be_bytes());
+            lookup[104..120].copy_from_slice(&flow.local);
+            lookup[120..136].copy_from_slice(&flow.remote);
+            let cancel = AtomicBool::new(false);
+            send(&peer, &lookup, None, deadline, &cancel)?;
+            receive(&peer, deadline, &cancel)
+        })();
         drop(peer);
-        assert_eq!(thread.join().unwrap(), Err(Unavailable::Disconnected));
+        let worker = thread.join().unwrap();
+        eprintln!("retained wire worker: {worker:?}");
+        let reply = known_exchange_result(exchange, worker)?;
         assert_eq!(Header::decode(&reply, 0).unwrap().request_id, 43);
+        if reply[96..98] == [3, 3] {
+            return Err(Unavailable::Timeout);
+        }
         assert_eq!(&reply[96..98], &[1, 0]);
         assert_eq!(
             &reply[160..],
@@ -411,6 +434,41 @@ pub(super) mod tests {
                 .to_str()
                 .unwrap()
                 .as_bytes()
+        );
+        Ok(())
+    }
+    fn known_exchange_result(
+        exchange: Result<Vec<u8>, Unavailable>,
+        worker: Result<(), Unavailable>,
+    ) -> Result<Vec<u8>, Unavailable> {
+        match (exchange, worker) {
+            (Err(error), _)
+                if error != Unavailable::Timeout && error != Unavailable::Disconnected =>
+            {
+                Err(error)
+            }
+            (result, Err(Unavailable::Disconnected)) => result,
+            (_, Err(error)) => Err(error),
+            (_, Ok(())) => Err(Unavailable::Malformed),
+        }
+    }
+    #[test]
+    fn known_exchange_does_not_hide_malformed_behind_worker_timeout() {
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Malformed), Err(Unavailable::Timeout)),
+            Err(Unavailable::Malformed)
+        );
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Disconnected), Err(Unavailable::Timeout)),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Timeout), Err(Unavailable::Authority)),
+            Err(Unavailable::Authority)
+        );
+        assert_eq!(
+            known_exchange_result(Ok(vec![1]), Err(Unavailable::Disconnected)),
+            Ok(vec![1])
         );
     }
     #[test]

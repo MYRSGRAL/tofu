@@ -304,3 +304,48 @@ fn install_preserves_healthy_previous_when_active_is_corrupt() {
         "v1"
     );
 }
+
+#[test]
+fn product_catalog_reads_previous_independently_of_corrupt_active() {
+    let temp = Temp::new();
+    let store = Store::open(&temp.0).expect("store");
+    for version in ["v1", "v2"] {
+        store
+            .install(
+                metadata(version, "https://example.org/list", DOMAINS, IPS),
+                DOMAINS.to_vec(),
+                IPS.to_vec(),
+            )
+            .expect("install");
+    }
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.0.join("index")).expect("index")).expect("json");
+    let active = index["active"].as_str().expect("active");
+    std::fs::write(temp.0.join(active), b"corrupt").expect("fault");
+    assert!(store.active().is_err());
+    assert_eq!(
+        store
+            .previous()
+            .expect("independent previous")
+            .expect("v1")
+            .0
+            .version,
+        "v1"
+    );
+    store.rollback().expect("recover");
+    assert_eq!(
+        store
+            .active()
+            .expect("healthy active")
+            .expect("v1")
+            .0
+            .version,
+        "v1"
+    );
+    assert!(
+        store
+            .previous()
+            .expect("corrupt old active excluded")
+            .is_none()
+    );
+}
