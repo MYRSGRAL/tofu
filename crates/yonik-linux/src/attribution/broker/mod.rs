@@ -214,9 +214,32 @@ fn receive_frame(
     Ok((bytes, credentials.ok_or(Unavailable::Authority)?))
 }
 
+/// Lookup использует только scope broker; worker mount namespace не является
+/// свидетельством покрытия таблиц процессов и FD владельцев приложения.
+pub struct BrokerLookupView {
+    pid: u32,
+    namespaces: [(u64, u64); 3],
+}
+impl BrokerLookupView {
+    pub fn capture() -> Result<Self, Unavailable> {
+        let pid = std::process::id();
+        Ok(Self {
+            pid,
+            namespaces: namespaces(pid)?,
+        })
+    }
+    fn validate(&self) -> Result<(), Unavailable> {
+        if self.pid != std::process::id() || namespaces(self.pid)? != self.namespaces {
+            return Err(Unavailable::Coverage);
+        }
+        Ok(())
+    }
+}
+
 /// Не Deserialize: worker PID и UID никогда не берутся из запроса.
 pub struct TrustedContext {
     worker: Process,
+    lookup_view: BrokerLookupView,
     target_uid: u32,
     epoch: u64,
     nonce: [u8; 32],
@@ -244,6 +267,7 @@ impl TrustedContext {
                     e
                 }
             })?,
+            lookup_view: BrokerLookupView::capture()?,
             target_uid,
             epoch,
             nonce,
@@ -297,6 +321,11 @@ impl Broker {
         rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
             .map_err(|_| Unavailable::Authority)?;
         context.worker.validate()?;
+        context.lookup_view.validate()?;
+        // Legacy direct-proc admission сохраняет прежний контракт общего scope.
+        if context.worker.namespaces != context.lookup_view.namespaces {
+            return Err(Unavailable::Coverage);
+        }
         Ok(Self {
             context,
             cache: VecDeque::new(),
@@ -392,6 +421,62 @@ impl Broker {
             },
         })
     }
+    /// Проекция только через retained snapshot и повторный kernel witness.
+    /// Не выпускает authority и не продлевает исходный TTL.
+    pub(super) fn project(
+        &self,
+        flow: Flow,
+        snapshot: &OwnerSnapshot,
+        epoch: u64,
+    ) -> Result<(OwnerSnapshot, String, Duration), Unavailable> {
+        if self.context.revoked {
+            return Err(Unavailable::Revoked);
+        }
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
+        if epoch != self.context.epoch || snapshot.epoch != epoch {
+            return Err(Unavailable::Authority);
+        }
+        let path = || -> Result<String, Unavailable> {
+            let metadata = snapshot
+                .executable_fd
+                .metadata()
+                .map_err(|_| Unavailable::Coverage)?;
+            if (metadata.dev(), metadata.ino()) != snapshot.executable {
+                return Err(Unavailable::Authority);
+            }
+            let path = fs::read_link(format!(
+                "/proc/self/fd/{}",
+                snapshot.executable_fd.as_raw_fd()
+            ))
+            .map_err(|_| Unavailable::Coverage)?;
+            let text = path.to_str().ok_or(Unavailable::Coverage)?;
+            super::native_wire::executable_path(text.as_bytes())
+                .map_err(|_| Unavailable::Coverage)?;
+            let current = fs::metadata(&path).map_err(|_| Unavailable::Coverage)?;
+            if (current.dev(), current.ino()) != snapshot.executable {
+                return Err(Unavailable::Authority);
+            }
+            Ok(text.to_owned())
+        };
+        let before = path()?;
+        let validated = kernel::revalidate(&self.context, flow, snapshot)?;
+        if path()? != before {
+            return Err(Unavailable::Authority);
+        }
+        if self.context.revoked {
+            return Err(Unavailable::Revoked);
+        }
+        if self.context.cancelled.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
+        let ttl = DEADLINE
+            .checked_sub(snapshot.observed_from.elapsed())
+            .filter(|ttl| !ttl.is_zero())
+            .ok_or(Unavailable::Timeout)?;
+        Ok((validated, before, ttl))
+    }
     /// Проверенный snapshot интервала lookup; не identity при рождении socket.
     pub fn lookup(&mut self, flow: Flow) -> Lookup {
         let result = self.lookup_inner(flow);
@@ -479,3 +564,15 @@ mod receiver_tests;
 // Test-only pending validator до согласования trusted unit proof и custody с Root/FDwriter109.
 #[cfg(test)]
 mod worker_anchor;
+
+#[cfg(test)]
+mod lookup_view_tests {
+    use super::*;
+    #[test]
+    fn broker_view_is_bound_to_its_own_process_scope() {
+        let mut view = BrokerLookupView::capture().unwrap();
+        assert_eq!(view.validate(), Ok(()));
+        view.namespaces[2].1 ^= 1;
+        assert_eq!(view.validate(), Err(Unavailable::Coverage));
+    }
+}

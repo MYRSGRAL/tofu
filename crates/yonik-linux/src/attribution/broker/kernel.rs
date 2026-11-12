@@ -195,9 +195,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
         return Err(Unavailable::Cancelled);
     }
     context.worker.validate()?;
-    if namespaces(std::process::id())? != context.worker.namespaces {
-        return Err(Unavailable::Coverage);
-    }
+    context.lookup_view.validate()?;
     if ![2, 10].contains(&flow.family) || ![6, 17].contains(&flow.protocol) {
         return Err(Unavailable::Malformed);
     }
@@ -270,7 +268,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
                 .map_err(|_| Unavailable::Coverage)?
                 .uid()
                 != context.target_uid
-                || namespaces(tid)? != context.worker.namespaces
+                || namespaces(tid)? != context.lookup_view.namespaces
             {
                 return Err(Unavailable::Coverage);
             }
@@ -304,7 +302,7 @@ fn capture(context: &TrustedContext, flow: Flow) -> Result<Option<OwnerSnapshot>
             }
             if task.metadata().map_err(|_| Unavailable::Coverage)?.uid() != context.target_uid
                 || super::start(tid)? != task_start
-                || namespaces(tid)? != context.worker.namespaces
+                || namespaces(tid)? != context.lookup_view.namespaces
             {
                 return Err(Unavailable::Coverage);
             }
@@ -387,11 +385,9 @@ pub(super) fn revalidate(
         return Err(Unavailable::Timeout);
     }
     context.worker.validate()?;
-    if namespaces(std::process::id())? != context.worker.namespaces {
-        return Err(Unavailable::Coverage);
-    }
+    context.lookup_view.validate()?;
     let process = Process::capture(s.pid, context.target_uid)?;
-    if process.start != s.start_time || process.namespaces != context.worker.namespaces {
+    if process.start != s.start_time || process.namespaces != context.lookup_view.namespaces {
         return Err(Unavailable::Authority);
     }
     let exe = fs::metadata(format!("/proc/{}/exe", s.pid)).map_err(|_| Unavailable::Coverage)?;
@@ -399,7 +395,7 @@ pub(super) fn revalidate(
         return Err(Unavailable::Authority);
     }
     if super::start(s.task_id)? != s.task_start
-        || namespaces(s.task_id)? != context.worker.namespaces
+        || namespaces(s.task_id)? != context.lookup_view.namespaces
     {
         return Err(Unavailable::Authority);
     }
@@ -527,6 +523,197 @@ mod tests {
         assert_eq!(fds(), baseline);
         assert!(begun.elapsed() < Duration::from_secs(1));
         eprintln!("in-flight cancel+teardown {:?}", begun.elapsed());
+    }
+    #[test]
+    fn retained_projection_positive_and_stale_replaced_deleted_epoch() {
+        retained_projection_retry(
+            Instant::now() + Duration::from_secs(1),
+            retained_projection_attempt,
+        )
+        .unwrap();
+    }
+    fn retained_projection_retry(
+        deadline: Instant,
+        mut observe: impl FnMut(Instant) -> Result<(), Unavailable>,
+    ) -> Result<(), Unavailable> {
+        let begun = Instant::now();
+        for attempt in 1..=3 {
+            if Instant::now() >= deadline {
+                return Err(Unavailable::Timeout);
+            }
+            let result = observe(deadline);
+            eprintln!(
+                "retained attempt={attempt}, elapsed={:?}, result={result:?}",
+                begun.elapsed()
+            );
+            match result {
+                Ok(()) if Instant::now() <= deadline => return Ok(()),
+                Ok(()) => return Err(Unavailable::Timeout),
+                Err(Unavailable::Timeout) if attempt < 3 => {}
+                other => return other,
+            }
+        }
+        Err(Unavailable::Timeout)
+    }
+    #[test]
+    fn retained_retry_is_bounded_and_only_timeout_is_retryable() {
+        let mut calls = 0;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            retained_projection_retry(deadline, |_| {
+                calls += 1;
+                Err(Unavailable::Timeout)
+            }),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(calls, 3);
+        calls = 0;
+        assert_eq!(
+            retained_projection_retry(deadline, |_| {
+                calls += 1;
+                Err(Unavailable::Authority)
+            }),
+            Err(Unavailable::Authority)
+        );
+        assert_eq!(calls, 1);
+        calls = 0;
+        assert_eq!(
+            retained_projection_retry(Instant::now(), |_| {
+                calls += 1;
+                Ok(())
+            }),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(calls, 0);
+    }
+    fn retained_projection_attempt(deadline: Instant) -> Result<(), Unavailable> {
+        use super::super::{Broker, Process, TrustedContext};
+        use std::{
+            collections::VecDeque,
+            fs,
+            os::{fd::AsRawFd, unix::fs::MetadataExt},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client =
+            std::sync::Arc::new(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        let (_peer, _) = listener.accept().unwrap();
+        let f = flow(client.local_addr().unwrap(), client.peer_addr().unwrap(), 6);
+        let pid = std::process::id();
+        let uid = rustix::process::getuid().as_raw();
+        let context = TrustedContext::from_host(pid, uid, uid, 7, [1; 32], [2; 32]).unwrap();
+        fn observe(
+            client: &TcpStream,
+            f: Flow,
+            epoch: u64,
+            deadline: Instant,
+        ) -> Result<super::OwnerSnapshot, Unavailable> {
+            let observed_from = Instant::now();
+            let pid = std::process::id();
+            let uid = rustix::process::getuid().as_raw();
+            let process = Process::capture(pid, uid).unwrap();
+            let exe = fs::File::open("/proc/self/exe").unwrap();
+            let m = exe.metadata().unwrap();
+            let result = witness(f, (observed_from + super::DEADLINE).min(deadline));
+            eprintln!(
+                "retained capture/witness elapsed={:?}, result={result:?}",
+                observed_from.elapsed()
+            );
+            let (inode, cookie) = result?.expect("socket fixture должен присутствовать");
+            assert_eq!(
+                fs::read_link(format!("/proc/{pid}/task/{pid}/fd/{}", client.as_raw_fd()))
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                format!("socket:[{inode}]")
+            );
+            process.validate().unwrap();
+            Ok(super::OwnerSnapshot {
+                pidfd: process.pidfd,
+                executable_fd: exe,
+                pid,
+                start_time: process.start,
+                executable: (m.dev(), m.ino()),
+                cookie,
+                epoch,
+                socket_inode: inode,
+                task_id: pid,
+                task_start: process.start,
+                socket_fd: client.as_raw_fd() as u32,
+                observed_from,
+                observed_until: Instant::now(),
+            })
+        }
+        let mut snapshot = observe(&client, f, 7, deadline)?;
+        let mut broker = Broker {
+            context,
+            cache: VecDeque::new(),
+            last_cold: None,
+        };
+        let projected = broker.project(f, &snapshot, 7);
+        eprintln!(
+            "retained direct project elapsed={:?}, result={:?}",
+            snapshot.observed_from.elapsed(),
+            projected.as_ref().map(|(_, _, ttl)| ttl)
+        );
+        let (_, path, ttl) = projected?;
+        assert_eq!(
+            path,
+            fs::read_link("/proc/self/exe").unwrap().to_str().unwrap()
+        );
+        assert!(ttl > Duration::ZERO && ttl <= Duration::from_millis(20));
+        let wire_client = std::sync::Arc::clone(&client);
+        let wire_broker = Broker {
+            context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32]).unwrap(),
+            cache: VecDeque::new(),
+            last_cold: None,
+        };
+        crate::attribution::native_session::known_roundtrip(
+            wire_broker,
+            move |broker| {
+                let snapshot = observe(&wire_client, f, 1, deadline)?;
+                // Lookup и project повторно проверяют реальный snapshot; лишняя
+                // тестовая проверка здесь расходовала тот же production TTL.
+                broker.cache = VecDeque::from([(f, snapshot)]);
+                Ok(())
+            },
+            f,
+            deadline,
+        )?;
+
+        let stale = super::duplicate(&snapshot).unwrap();
+        std::thread::sleep(super::DEADLINE.saturating_sub(stale.observed_from.elapsed()));
+        assert!(matches!(
+            broker.project(f, &stale, 7),
+            Err(Unavailable::Timeout)
+        ));
+        snapshot = observe(&client, f, 7, deadline)?;
+        assert!(broker.project(f, &snapshot, 8).is_err());
+        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot.executable.1 ^= 1;
+        assert!(broker.project(f, &snapshot, 7).is_err());
+        snapshot = observe(&client, f, 7, deadline)?;
+        let path = std::env::temp_dir().join(format!("yonik-deleted-exe-{}", pid));
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        snapshot.executable_fd = file;
+        // Реально заменённый retained FD не соответствует исходному executable.
+        assert!(broker.project(f, &snapshot, 7).is_err());
+        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot.executable_fd = fs::File::open(&path).unwrap();
+        let metadata = snapshot.executable_fd.metadata().unwrap();
+        snapshot.executable = (metadata.dev(), metadata.ino());
+        fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            broker.project(f, &snapshot, 7),
+            Err(Unavailable::Coverage)
+        ));
+        snapshot = observe(&client, f, 7, deadline)?;
+        broker.revoke();
+        assert!(broker.project(f, &snapshot, 7).is_err());
+        Ok(())
     }
     #[test]
     fn cache_rejects_reuse_executable_and_epoch_without_churn() {

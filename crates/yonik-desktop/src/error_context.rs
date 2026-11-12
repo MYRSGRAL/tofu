@@ -62,6 +62,7 @@ pub enum Cause {
     SchedulerServiceHwidRedirect,
     SchedulerServiceUnsupportedProxy,
     SchedulerServiceFetchFailed,
+    SchedulerServiceImportFailed,
 
     SchedulerRepositoryInvalidInput,
     SchedulerRepositoryUnsafePath,
@@ -244,6 +245,7 @@ impl Cause {
                 Stage::SchedulerService,
             ),
             Self::SchedulerServiceFetchFailed => ("FETCH", "fetch", Stage::SchedulerService),
+            Self::SchedulerServiceImportFailed => ("IMPORT", "import", Stage::SchedulerService),
             Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
             Self::SchedulerRepositoryInvalidInput => {
                 ("STORAGE", "storage", Stage::SchedulerService)

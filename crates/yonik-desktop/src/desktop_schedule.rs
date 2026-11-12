@@ -48,7 +48,7 @@ impl ScheduleFailure {
                 Some(Cause::SchedulerServiceUnsupportedProxy)
             }
             E::Fetch(_) => Some(Cause::SchedulerServiceFetchFailed),
-            E::Import(_) => None,
+            E::Import(_) => Some(Cause::SchedulerServiceImportFailed),
         };
         Self {
             error: super::map_subscription(error),

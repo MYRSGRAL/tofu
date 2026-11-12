@@ -1251,5 +1251,15 @@
       "source"
     ],
     "generation_required": true
+  },
+  "scheduler_service_import_failed": {
+    "code": "IMPORT",
+    "message_key": "import",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
   }
 }
