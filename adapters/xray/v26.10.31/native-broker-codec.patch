@@ -1485,14 +1485,14 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
-index 0000000..1d231d9
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,141 @@
 +package nativehooks
 +
 +import (
 +	"context"
++	xsession "github.com/xtls/xray-core/common/session"
 +	"os"
 +	"sync"
 +	"syscall"
@@ -1604,7 +1604,17 @@ index 0000000..1d231d9
 +
 +// DNSExchangeContext отделяет отмену caller от общего DNS I/O, сохраняя revoke.
 +func DNSExchangeContext(ctx context.Context) (context.Context, context.CancelFunc) {
-+	shared, cancel := context.WithCancel(context.WithValue(context.WithoutCancel(ctx), dnsExchangeKey{}, true))
++	// Общий DNS I/O не разделяет изменяемый outbound caller с routing/blackhole.
++	outbounds := xsession.OutboundsFromContext(ctx)
++	cloned := make([]*xsession.Outbound, len(outbounds))
++	for i, outbound := range outbounds {
++		if outbound != nil {
++			value := *outbound
++			cloned[i] = &value
++		}
++	}
++	base := xsession.ContextWithOutbounds(context.WithoutCancel(ctx), cloned)
++	shared, cancel := context.WithCancel(context.WithValue(base, dnsExchangeKey{}, true))
 +	c, _ := ctx.Value(routingKey{}).(*routingConsumer)
 +	if c == nil {
 +		return shared, cancel
@@ -2155,7 +2165,7 @@ diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/cl
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux_test.go
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,305 @@
 +//go:build linux && !android
 +
 +package nativehooks
@@ -2166,6 +2176,7 @@ new file mode 100644
 +	"io"
 +	"net"
 +	"os"
++	"sync/atomic"
 +	"syscall"
 +	"testing"
 +	"time"
@@ -2175,7 +2186,10 @@ new file mode 100644
 +func closedTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
 +	return closedTUNFixtureMode(t, "cancel")
 +}
-+func closedTUNFixtureMode(t *testing.T, mode string) (context.Context, *os.File, func()) {
++
++var authenticatedFixtureSequence atomic.Uint32
++
++func closedTUNFixtureMode(t *testing.T, mode string, authority ...*atomic.Uint32) (context.Context, *os.File, func()) {
 +	t.Helper()
 +	known := len(mode) > 6 && mode[:6] == "known/"
 +	if known {
@@ -2194,7 +2208,11 @@ new file mode 100644
 +	}
 +	original := os.NewFile(uintptr(fd), "fixture-original")
 +	t.Cleanup(func() { original.Close() })
-+	req, _ := unix.NewIfreq("ynkfixture0")
++	name := "ynkfixture0"
++	if len(authority) != 0 {
++		name = "ynkpeer%d"
++	}
++	req, _ := unix.NewIfreq(name)
 +	req.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
 +	if err = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); err != nil {
 +		t.Fatal(err)
@@ -2205,6 +2223,10 @@ new file mode 100644
 +	}
 +	b, pidfd := liveBootstrap(t)
 +	record := roleRecord()
++	if len(authority) != 0 {
++		be.PutUint32(b.Binding.Nonce[28:], authenticatedFixtureSequence.Add(1))
++		copy(record[8:40], b.Binding.Nonce[:])
++	}
 +	be.PutUint32(record[120:], b.ServerPID)
 +	be.PutUint64(record[128:], b.ServerStarttime)
 +	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
@@ -2284,6 +2306,27 @@ new file mode 100644
 +				be.PutUint64(reply[136:], 1)
 +				be.PutUint64(reply[144:], 2)
 +				copy(reply[160:], "/fixture")
++				if len(authority) != 0 {
++					state := authority[0].Load()
++					if state == 1 || state == 2 {
++						reply = makeFrame(ReplyKind, request.Header.RequestID, b.Binding, 160)
++						reply[96] = 2
++						if state == 2 {
++							reply[96] = 3
++							reply[97] = 1
++						}
++					}
++					switch state {
++					case 3:
++						reply[24] ^= 1
++					case 4:
++						reply[64] ^= 1
++					case 5:
++						reply[32] ^= 1
++					case 6:
++						be.PutUint64(reply[104:], 0)
++					}
++				}
 +				if syscall.Sendmsg(pair[1], reply, nil, nil, 0) != nil {
 +					return
 +				}
@@ -2481,10 +2524,9 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
-index 0000000..d1cfc92
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,213 @@
 +package nativehooks
 +
 +import (
@@ -2643,6 +2685,60 @@ index 0000000..d1cfc92
 +			}
 +		})
 +	}
++}
++
++// ClosedAuthenticatedDNSFixture выдаёт proof только через private wire issuer.
++func ClosedAuthenticatedDNSFixture(t *testing.T) (context.Context, func(string)) {
++	state := new(atomic.Uint32)
++	ctx, _, revoke := closedTUNFixtureMode(t, "known/cancel", state)
++	ctx, cancel := context.WithCancel(ctx)
++	t.Cleanup(cancel)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	_, p, _ := fixture(t)
++	c.mu.Lock()
++	c.flow = p.Flow
++	c.mu.Unlock()
++	t.Cleanup(func() {
++		revoke()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("flow release deadline")
++		}
++		c.session.mu.Lock()
++		remaining := len(c.session.flows)
++		c.session.mu.Unlock()
++		if remaining != 0 {
++			t.Errorf("authenticated flows остались: %d", remaining)
++		}
++	})
++	return ctx, func(mode string) {
++		switch mode {
++		case "unknown":
++			state.Store(1)
++		case "unavailable":
++			state.Store(2)
++		case "epoch":
++			state.Store(3)
++		case "wrong-session":
++			state.Store(4)
++		case "wrong-binding":
++			state.Store(5)
++		case "stale":
++			state.Store(6)
++		case "cancel":
++			cancel()
++		case "revoke":
++			revoke()
++		}
++	}
++}
++
++func AuthenticatedProofCount(ctx context.Context) uint64 {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.next
 +}
 diff --git a/proxy/tun/worker_other.go b/proxy/tun/worker_other.go
 new file mode 100644
@@ -2928,10 +3024,9 @@ index e452bda..ae03818 100644
  			}
 diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
 new file mode 100644
-index 0000000..6acd3b6
 --- /dev/null
 +++ b/common/yonikbroker/dns_callsite_test.go
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,541 @@
 +package nativehooks_test
 +
 +import (
@@ -2943,6 +3038,7 @@ index 0000000..6acd3b6
 +	"github.com/xtls/xray-core/app/policy"
 +	"github.com/xtls/xray-core/app/proxyman"
 +	_ "github.com/xtls/xray-core/app/proxyman/outbound"
++	xlog "github.com/xtls/xray-core/common/log"
 +	xnet "github.com/xtls/xray-core/common/net"
 +	"github.com/xtls/xray-core/common/serial"
 +	"github.com/xtls/xray-core/common/session"
@@ -2952,6 +3048,8 @@ index 0000000..6acd3b6
 +	rdns "github.com/xtls/xray-core/features/routing/dns"
 +	rsession "github.com/xtls/xray-core/features/routing/session"
 +	"github.com/xtls/xray-core/proxy/freedom"
++	internet "github.com/xtls/xray-core/transport/internet"
++	"io"
 +	"net"
 +	"runtime"
 +	"strings"
@@ -3156,6 +3254,320 @@ index 0000000..6acd3b6
 +	}
 +
 +}
++
++func TestAuthenticatedDNSConcurrentAuthority(t *testing.T) {
++	internet.UseAlternativeSystemDialer(&actualSystemDialer{})
++	for _, transport := range []string{"tcp", "udp"} {
++		for _, parallel := range []bool{false} {
++			for _, mode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "wrong-session", "wrong-binding"} {
++				for _, victim := range []int{0} {
++					t.Run(fmt.Sprintf("%s/parallel=%v/%s/victim=%d", transport, parallel, mode, victim), func(t *testing.T) {
++						listener, err := net.Listen("tcp", "127.0.0.1:0")
++						if err != nil {
++							t.Fatal(err)
++						}
++						entered, release := make(chan struct{}), make(chan struct{})
++						var queries atomic.Int32
++						server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++							if queries.Add(1) == 1 {
++								close(entered)
++							}
++							<-release
++							reply := new(mdns.Msg)
++							reply.SetReply(q)
++							rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++							reply.Answer = []mdns.RR{rr}
++							_ = w.WriteMsg(reply)
++						})}
++						endpoint := "tcp+local://" + listener.Addr().String()
++						if transport == "udp" {
++							_ = listener.Close()
++							packet, err := net.ListenPacket("udp", "127.0.0.1:0")
++							if err != nil {
++								t.Fatal(err)
++							}
++							server.Listener = nil
++							server.PacketConn = packet
++							endpoint = "udp://" + packet.LocalAddr().String()
++						}
++						go server.ActivateAndServe()
++						defer server.Shutdown()
++						cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress(endpoint))}}}}
++						if transport == "udp" {
++							cfg.NameServer[0].Address = &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")), Port: uint32(server.PacketConn.LocalAddr().(*net.UDPAddr).Port)}
++						}
++						instance, err := core.New(&core.Config{Outbound: []*core.OutboundHandlerConfig{{ProxySettings: serial.ToTypedMessage(&freedom.Config{})}}, App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++						if err != nil {
++							t.Fatal(err)
++						}
++						defer instance.Close()
++						client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++						ctx0, change0 := hooks.ClosedAuthenticatedDNSFixture(t)
++						ctx1, change1 := hooks.ClosedAuthenticatedDNSFixture(t)
++						ctx0 = context.WithValue(ctx0, core.XrayKey(1), instance)
++						ctx1 = context.WithValue(ctx1, core.XrayKey(1), instance)
++						changes := []func(string){change0, change1}
++						option := fdns.IPOption{IPv4Enable: true}
++						results := []chan []net.IP{make(chan []net.IP, 1), make(chan []net.IP, 1)}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx0, "private.test", option)
++							if err != nil {
++								t.Logf("caller0 err=%v", err)
++							}
++							results[0] <- ips
++						}()
++						select {
++						case <-entered:
++						case <-time.After(5 * time.Second):
++							t.Fatal("нет exchange")
++						}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx1, "private.test", option)
++							if err != nil {
++								t.Logf("caller1 err=%v", err)
++							}
++							results[1] <- ips
++						}()
++						// Барьер подтверждает два реальных native fetch до выпуска DNS reply.
++						deadline := time.Now().Add(5 * time.Second)
++						for {
++							buf := make([]byte, 1<<20)
++							n := runtime.Stack(buf, true)
++							if strings.Count(string(buf[:n]), "app/dns.fetch(") >= 2 {
++								break
++							}
++							if time.Now().After(deadline) {
++								close(release)
++								t.Fatal("оба caller не вошли в native fetch")
++							}
++							runtime.Gosched()
++						}
++						before := []uint64{hooks.AuthenticatedProofCount(ctx0), hooks.AuthenticatedProofCount(ctx1)}
++						changes[victim](mode)
++						close(release)
++						for i, ch := range results {
++							select {
++							case ips := <-ch:
++								ctx := []context.Context{ctx0, ctx1}[i]
++								if (mode == "known" || i != victim) && hooks.AuthenticatedProofCount(ctx) <= before[i] {
++									t.Fatal("нет свежего proof после await")
++								}
++								actualEcho(t, ctx, transport, ips, mode == "known" || i != victim)
++								allowed := mode == "known" || i != victim
++								if allowed {
++									if len(ips) != 1 || !ips[0].Equal(net.ParseIP("127.0.0.1")) {
++										t.Fatalf("caller %d должен получить адрес: %v", i, ips)
++									}
++								} else if len(ips) != 0 {
++									t.Fatalf("caller %d получил адрес без authority: %v", i, ips)
++								}
++							case <-time.After(5 * time.Second):
++								t.Fatal("await завис")
++							}
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("coalescing: queries=%d", queries.Load())
++						}
++						// Свежие вызовы используют общий native cache, но повторно проверяют каждого caller.
++						for i, ctx := range []context.Context{ctx0, ctx1} {
++							ips, _, _ := client.LookupIPWithContext(ctx, "private.test", option)
++							allowed := mode == "known" || i != victim
++							if allowed != (len(ips) == 1) {
++								t.Fatalf("cache caller %d: %v", i, ips)
++							}
++						}
++						// Отдельный caller прогревает routing cache, затем теряет authority.
++						cacheCtx, cacheChange := hooks.ClosedAuthenticatedDNSFixture(t)
++						cacheCtx = context.WithValue(cacheCtx, core.XrayKey(1), instance)
++						cacheCtx = session.ContextWithOutbounds(cacheCtx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++						route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(cacheCtx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++						if ips := route.GetTargetIPs(); len(ips) != 1 {
++							t.Fatalf("warm routing cache: %v", ips)
++						}
++						cacheChange(mode)
++						if ips := route.GetTargetIPs(); (mode == "known") != (len(ips) == 1) {
++							t.Fatalf("routing cache после %s: %v", mode, ips)
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("cache miss: queries=%d", queries.Load())
++						}
++					})
++				}
++			}
++		}
++	}
++
++}
++
++// actualEcho проверяет точный адрес, реальный socket и двусторонний payload.
++func actualEcho(t *testing.T, ctx context.Context, network string, ips []net.IP, allowed bool) {
++	t.Helper()
++	var port int
++	received := make(chan string, 1)
++	if network == "tcp" {
++		l, e := net.Listen("tcp", "127.0.0.1:0")
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer l.Close()
++		port = l.Addr().(*net.TCPAddr).Port
++		go func() {
++			c, e := l.Accept()
++			if e != nil {
++				return
++			}
++			defer c.Close()
++			c.SetDeadline(time.Now().Add(time.Second))
++			b := make([]byte, 4)
++			_, e = io.ReadFull(c, b)
++			if e == nil {
++				received <- string(b)
++				c.Write(b)
++			}
++		}()
++	} else {
++		l, e := net.ListenPacket("udp", "127.0.0.1:0")
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer l.Close()
++		port = l.LocalAddr().(*net.UDPAddr).Port
++		go func() {
++			b := make([]byte, 4)
++			n, a, e := l.ReadFrom(b)
++			if e == nil {
++				received <- string(b[:n])
++				l.WriteTo(b[:n], a)
++			}
++		}()
++	}
++	counter := &actualSystemDialer{}
++	ctx = context.WithValue(ctx, actualCounterKey{}, counter)
++	egress := 0
++	if len(ips) > 0 {
++		if !ips[0].Equal(net.ParseIP("127.0.0.1")) {
++			t.Fatal("неверный адрес", ips)
++		}
++		dst := xnet.TCPDestination(xnet.IPAddress(ips[0]), xnet.Port(port))
++		if network == "udp" {
++			dst.Network = xnet.Network_UDP
++		}
++		if hooks.RoutingEntry(ctx) == nil {
++			c, e := internet.DialSystem(ctx, dst, nil)
++			if e == nil {
++				c.SetDeadline(time.Now().Add(time.Second))
++				_, e = c.Write([]byte("echo"))
++				b := make([]byte, 4)
++				if e == nil {
++					_, e = io.ReadFull(c, b)
++				}
++				c.Close()
++				if e != nil || string(b) != "echo" {
++					t.Fatal("echo", e, string(b))
++				}
++				select {
++				case v := <-received:
++					if v != "echo" {
++						t.Fatal(v)
++					}
++					egress++
++				case <-time.After(time.Second):
++					t.Fatal("нет egress")
++				}
++			}
++		}
++	}
++	expected := 0
++	if allowed {
++		expected = 1
++	}
++	dials, handoffs := counter.dials.Load(), counter.handoffs.Load()
++	if dials != int32(expected) || handoffs != int32(expected) || egress != expected {
++		t.Fatalf("actual dial=%d handoff=%d egress=%d want=%d", dials, handoffs, egress, expected)
++	}
++	t.Logf("actual %s dial=%d socket-handoff=%d egress=%d", network, dials, handoffs, egress)
++}
++
++type cacheCheckpoint struct {
++	change func(string)
++	mode   string
++	hits   atomic.Int32
++}
++
++func (h *cacheCheckpoint) Handle(m xlog.Message) {
++	if d, ok := m.(*xlog.DNSLog); ok && d.Status == xlog.DNSCacheHit && d.Domain == "private.test." {
++		h.hits.Add(1)
++		mode := h.mode
++		if mode == "" {
++			mode = "unknown"
++		}
++		h.change(mode)
++	}
++}
++
++// Checkpoint находится внутри реального cache-hit перед возвратом cached reply.
++func TestAuthenticatedCacheFence(t *testing.T) {
++	l, e := net.Listen("tcp", "127.0.0.1:0")
++	if e != nil {
++		t.Fatal(e)
++	}
++	var questions atomic.Int32
++	server := &mdns.Server{Listener: l, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++		questions.Add(1)
++		r := new(mdns.Msg)
++		r.SetReply(q)
++		rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++		r.Answer = []mdns.RR{rr}
++		w.WriteMsg(r)
++	})}
++	go server.ActivateAndServe()
++	defer server.Shutdown()
++	cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + l.Addr().String()))}}}}
++	instance, e := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++	if e != nil {
++		t.Fatal(e)
++	}
++	defer instance.Close()
++	ctx, change := hooks.ClosedAuthenticatedDNSFixture(t)
++	client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++	option := fdns.IPOption{IPv4Enable: true}
++	ips, _, e := client.LookupIPWithContext(ctx, "private.test", option)
++	if e != nil || len(ips) != 1 {
++		t.Fatal("warm", ips, e)
++	}
++	if hooks.RoutingEntry(ctx) != nil {
++		t.Fatal("entry отвергнут до cache")
++	}
++	h := &cacheCheckpoint{change: change}
++	xlog.RegisterHandler(h)
++	ips, _, e = client.LookupIPWithContext(ctx, "private.test", option)
++	if h.hits.Load() != 1 || questions.Load() != 1 {
++		t.Fatalf("cache checkpoint hits=%d questions=%d", h.hits.Load(), questions.Load())
++	}
++	if e == nil || len(ips) != 0 {
++		t.Fatalf("cache fence пропустил адрес: %v %v", ips, e)
++	}
++}
++
++type actualSystemDialer struct {
++	dials, handoffs atomic.Int32
++	real            internet.DefaultSystemDialer
++}
++
++func (d *actualSystemDialer) Dial(ctx context.Context, src xnet.Address, dst xnet.Destination, opt *internet.SocketConfig) (net.Conn, error) {
++	counter, _ := ctx.Value(actualCounterKey{}).(*actualSystemDialer)
++	if counter != nil {
++		counter.dials.Add(1)
++	}
++	c, e := d.real.Dial(ctx, src, dst, opt)
++	if e == nil && counter != nil {
++		counter.handoffs.Add(1)
++	}
++	return c, e
++}
++func (*actualSystemDialer) DestIpAddress() xnet.IP { return nil }
++
++type actualCounterKey struct{}
 diff --git a/features/dns/client.go b/features/dns/client.go
 index 6eb4bd0..b564907 100644
 --- a/features/dns/client.go
@@ -3831,7 +4243,6 @@ new file mode 100644
 +}
 diff --git a/common/yonikbroker/socket.go b/common/yonikbroker/socket.go
 new file mode 100644
-index 0000000..0a50cfa
 --- /dev/null
 +++ b/common/yonikbroker/socket.go
 @@ -0,0 +1,63 @@
@@ -4132,12 +4543,13 @@ diff --git a/app/dns/yonik_exchange_test.go b/app/dns/yonik_exchange_test.go
 new file mode 100644
 --- /dev/null
 +++ b/app/dns/yonik_exchange_test.go
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,117 @@
 +package dns
 +
 +import (
 +	"context"
 +	D "github.com/xtls/xray-core/features/dns"
++	"reflect"
 +	"sync/atomic"
 +	"testing"
 +	"time"
@@ -4177,6 +4589,7 @@ new file mode 100644
 +}
 +func TestNativeDNSLastWaiterCancel(t *testing.T) {
 +	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2)}
++	assertReleased(t, s)
 +	ctx, cancel := context.WithCancel(context.Background())
 +	done := make(chan struct{})
 +	go func() { defer close(done); fetch(ctx, s, "held.", D.IPOption{IPv4Enable: true}) }()
@@ -4191,6 +4604,7 @@ new file mode 100644
 +}
 +func TestNativeDNSRetryCancel(t *testing.T) {
 +	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2), retry: true}
++	assertReleased(t, s)
 +	ctx, cancel := context.WithCancel(context.Background())
 +	done := make(chan struct{})
 +	go func() { defer close(done); fetch(ctx, s, "retry.", D.IPOption{IPv4Enable: true}) }()
@@ -4223,6 +4637,29 @@ new file mode 100644
 +	cb()
 +	leaveB()
 +	endedExchange(t, upstream)
++}
++
++func assertReleased(t *testing.T, s *heldExchange) {
++	t.Helper()
++	t.Cleanup(func() {
++		deadline := time.Now().Add(time.Second)
++		for {
++			s.cache.exchangeMu.Lock()
++			n := len(s.cache.exchanges)
++			s.cache.exchangeMu.Unlock()
++			s.cache.pub.Cleanup()
++			s.cache.pub.RLock()
++			subs := reflect.ValueOf(s.cache.pub).Elem().FieldByName("subs").Len()
++			s.cache.pub.RUnlock()
++			if n == 0 && subs == 0 {
++				return
++			}
++			if time.Now().After(deadline) {
++				t.Fatalf("release exchanges=%d subscriptions=%d", n, subs)
++			}
++			time.Sleep(time.Millisecond)
++		}
++	})
 +}
 diff --git a/common/yonikbroker/pipeline_test.go b/common/yonikbroker/pipeline_test.go
 new file mode 100644
@@ -4416,13 +4853,14 @@ diff --git a/common/yonikbroker/named_downstream_test.go b/common/yonikbroker/na
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/named_downstream_test.go
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,178 @@
 +package nativehooks_test
 +
 +import (
 +	"fmt"
 +	mdns "github.com/miekg/dns"
 +	"github.com/xtls/xray-core/common/buf"
++	xlog "github.com/xtls/xray-core/common/log"
 +	xnet "github.com/xtls/xray-core/common/net"
 +	H "github.com/xtls/xray-core/common/yonikbroker"
 +	"github.com/xtls/xray-core/core"
@@ -4553,10 +4991,13 @@ new file mode 100644
 +					warmQuestions = len(entered)
 +				}
 +
-+				change(mode)
++				var checkpoint *cacheCheckpoint
 +				if cached {
++					checkpoint = &cacheCheckpoint{change: change, mode: mode}
++					xlog.RegisterHandler(checkpoint)
 +					run()
 +				} else {
++					change(mode)
 +					close(release)
 +				}
 +				if mode == "known" {
@@ -4579,6 +5020,9 @@ new file mode 100644
 +					if egress.Load() != 0 {
 +						t.Fatalf("запрещённый egress %d", egress.Load())
 +					}
++				}
++				if cached && checkpoint.hits.Load() == 0 {
++					t.Fatal("не достигнут actual cache-hit checkpoint")
 +				}
 +				if cached && len(entered) != warmQuestions {
 +					t.Fatal("cache flow выполнил новый DNS exchange")
