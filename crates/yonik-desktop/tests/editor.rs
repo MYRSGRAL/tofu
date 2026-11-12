@@ -334,7 +334,7 @@ fn truncated_report_is_explicit_and_preserves_policy() {
 
 #[test]
 fn p07_closed_v2_preserves_disabled_and_rejects_enabled_before_witness() {
-    let raw = r#"{"version":2,"default_action":"direct","rules":[{"id":41,"enabled":false,"executables":["/usr/bin/client"],"domains":[],"destinations":[],"action":"proxy","platform_sources":[{"kind":"android_package","package":"org.Example_app"}]}]}"#;
+    let raw = r#"{"version":2,"default_action":"direct","ru_direct":null,"rules":[{"id":41,"enabled":false,"executables":["/usr/bin/client"],"domains":[],"destinations":[],"action":"proxy","platform_sources":[{"kind":"android_package","package":"org.Example_app"}]}]}"#;
     let draft = Draft::parse(raw).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&draft.json()).unwrap(),
@@ -478,6 +478,7 @@ fn p07_bounds_and_v2_required_field() {
         ),
     };
     let mut draft = Draft {
+        ru_direct: None,
         version: 2,
         rules: vec![rule.clone()],
         default_action: "direct".into(),
@@ -506,4 +507,44 @@ fn p07_bounds_and_v2_required_field() {
     });
     assert!(draft.policy().is_err());
     assert!(Draft::parse(r#"{"version":2,"rules":[{"id":1,"enabled":false,"executables":[],"domains":[],"destinations":[],"action":"direct"}],"default_action":"direct"}"#).is_err());
+}
+
+#[test]
+fn explain_использует_разрешённый_preset_и_p07_guard() {
+    use yonik_domain::{Action, AndroidPackageId, Conditions, PlatformSource, Rule};
+    let draft = Draft::parse(
+        &serde_json::json!({"version":2,"rules":[],"default_action":"proxy",
+        "ru_direct":{"snapshot":"a".repeat(64),"enabled":true}})
+        .to_string(),
+    )
+    .unwrap();
+    assert!(draft.policy().is_err());
+    let resolved = || {
+        let mut policy = draft.base_policy().unwrap();
+        policy.preset_rules.push(Rule {
+            id: 77,
+            enabled: true,
+            action: Action::Direct,
+            conditions: Conditions {
+                destinations: vec!["192.0.2.0/24".parse().unwrap()],
+                ..Conditions::default()
+            },
+        });
+        policy
+    };
+    let result = draft.explain_with_policy("192.0.2.1", resolved()).unwrap();
+    assert_eq!(result["status"], "fixture");
+    assert_eq!(result["action"], "Direct");
+    assert_eq!(result["origin"], "Preset(77)");
+    let mut policy = resolved();
+    policy.preset_rules[0]
+        .conditions
+        .platform_sources
+        .push(PlatformSource::AndroidPackage {
+            package: AndroidPackageId::parse("org.example.app").unwrap(),
+        });
+    let result = draft.explain_with_policy("192.0.2.1", policy).unwrap();
+    assert_eq!(result["status"], "unsupported");
+    assert_eq!(result["reason"], "unsupported_selector");
+    assert_eq!(result["rule_id"], 77);
 }

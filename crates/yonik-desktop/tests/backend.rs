@@ -2358,3 +2358,23 @@ fn local_format4_actual_old_reader_refuses_connect_delete_write_and_opens_backup
         .expect("actual old binary control");
     assert!(status.success());
 }
+
+#[test]
+fn local_cancel_unknown_field_preserves_report_and_normal_cancel_works() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_text", "name":"Локальный", "text":"trojan://cancel-secret@example.com:443#local"}));
+    let report = app.wait(|v| v["pending"]["accepted"] == 1 && v["busy"] == false);
+    let error = app
+        .host
+        .dispatch(r#"{"command":"cancel_local_import","unexpected":true}"#)
+        .expect_err("лишнее поле запрещено");
+    assert_eq!(error.key(), "invalid_input");
+    app.send(json!({"command":"review_page", "offset":0}));
+    let retained = app.wait(|v| v["pending"]["accepted"] == 1);
+    assert_eq!(retained["pending"], report["pending"]);
+    app.send(json!({"command":"cancel_local_import"}));
+    app.wait(|v| v["pending"].is_null() && v["busy"] == false);
+    app.close();
+}
