@@ -96,6 +96,9 @@ pub(super) struct DesktopSchedule {
 }
 impl DesktopSchedule {
     pub fn new() -> ScheduleResult<Self> {
+        Self::bounded(20_000)
+    }
+    pub(super) fn bounded(capacity: usize) -> ScheduleResult<Self> {
         static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
         let identity = NEXT_OWNER
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -107,7 +110,7 @@ impl DesktopSchedule {
                 error: DesktopError("startup"),
                 cause: Some(Cause::SchedulerInitializeExhausted),
             })?;
-        Self::with_limits(identity, 20_000)
+        Self::with_limits(identity, capacity)
     }
     fn with_limits(identity: NonZeroU64, capacity: usize) -> ScheduleResult<Self> {
         Ok(Self {
