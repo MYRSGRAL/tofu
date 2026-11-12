@@ -5,7 +5,7 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "d349739312858e2fd5ad34b43925067233ac45ac312165ec7c81ab0b44920bdc",
+  "patch_sha256": "705eacd1f3650706d8cacb86fad779a6928fe4153ad6a673d3c247a1b92f03f8",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
@@ -14,8 +14,8 @@
     "frozen-vectors.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216",
     "bootstrap_linux.go": "6a867a7f974c2e6f5642b16502b7f001c65d00370e8db734516e75b5c883678b",
     "bootstrap_linux_test.go": "b6f0b01e824737449928a9f2fac4153d8a5d2dbc93f54ce2d30bfab77718d575",
-    "routing.go": "4376b492a6be91d5b320f49f912c5ecc1693928c76a16fb4f48a3f0567587d27",
-    "routing_test.go": "e69f550bbf0e4d1868bd5f9cb53af3c77ec74b92f4af84a5f0919b85cd50e388",
+    "routing.go": "14deed0c19e81d1040dd45507374e4040a2917f08a3294336f983bbb7ab0b91f",
+    "routing_test.go": "b2108f104da8fed2d7788ac1f38d6c45180d72fdd5e9f053a3966b5cf094f75e",
     "closed_tun_linux.go": "10cb68401679f2476cb7e741d64d6e76efb98cabf191e560c51b0ec618def0bb",
     "closed_tun_linux_test.go": "00b4272b032d817c8bcd9f0f5243eb9e9f46fbd418380e842e216c50fa479a26",
     "export_test.go": "5baf92dacacd3577fb86526ea5d3a4a96f260f6557ccb00627f909c028de008d",
@@ -24,11 +24,12 @@
     "dns_callsite_test.go": "eab56e25ea52195d1347cce2698683748777d3b85a36fa9ca8d6be171e630dbc",
     "routing_legacy_test.go": "84462b0d30c2d6d9337adad6cc198e0528e79b1c91d7b3fa5950205adbff6034",
     "freedom_callsite_test.go": "6e61b431a977ed14492d58988c751ca0fe591db6af52eedd00a018a311872420",
-    "socket.go": "1c3f4dbbffc00749ab6336205270dc3b55a28fefb3484443fd9b3ed02542d431",
+    "socket.go": "e36ee4344c73e368b04d1a79698c7abf9b4593213292baaa65775576df1ee0d1",
     "revoke_callsite_test.go": "bc065df25f4093128d2abfcbafc3acbf3d7c70ab5fcad042db67681257018c73",
     "pipeline_test.go": "f932fa60cfcb4d4f35ec2d203d06d10040b2a3d0809c427eaca1fa7f2b17e9f4",
     "named_downstream_test.go": "be45b093701871a9399420220f51723a1ea8e1d63b0ba7f4e140fbc27dc19936",
-    "monitor_close_linux_test.go": "3667bf7e5f2c742f2c384d80cc62ad1487afd2b3eab06fd64b6cc92f788f23c8"
+    "monitor_close_linux_test.go": "3667bf7e5f2c742f2c384d80cc62ad1487afd2b3eab06fd64b6cc92f788f23c8",
+    "flow_scope_test.go": "59acf7ee051fe3ffbfe796030cca0bdd2e15fab183a0a544ac913e235292e517"
   },
   "native_protocol": null,
   "adapter_features": {},
