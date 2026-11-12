@@ -56,6 +56,13 @@ pub enum Cause {
     SchedulerServiceForeignApproval,
     SchedulerServiceStaleUpdate,
     SchedulerServiceWorker,
+    SchedulerServiceHwidRequired,
+    SchedulerServiceHwidLimit,
+    SchedulerServiceHwidRejected,
+    SchedulerServiceHwidRedirect,
+    SchedulerServiceUnsupportedProxy,
+    SchedulerServiceFetchFailed,
+
     SchedulerRepositoryInvalidInput,
     SchedulerRepositoryUnsafePath,
     SchedulerRepositoryUnsupportedVersion,
@@ -219,6 +226,24 @@ impl Cause {
                 ("STORAGE", "storage", Stage::SchedulerService)
             }
             Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceHwidRequired => {
+                ("HWID_REQUIRED", "hwid_required", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidLimit => {
+                ("HWID_LIMIT", "hwid_limit", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidRejected => {
+                ("HWID_REJECTED", "hwid_rejected", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidRedirect => {
+                ("HWID_REDIRECT", "hwid_redirect", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceUnsupportedProxy => (
+                "UNSUPPORTED_PROXY",
+                "unsupported_proxy",
+                Stage::SchedulerService,
+            ),
+            Self::SchedulerServiceFetchFailed => ("FETCH", "fetch", Stage::SchedulerService),
             Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
             Self::SchedulerRepositoryInvalidInput => {
                 ("STORAGE", "storage", Stage::SchedulerService)
