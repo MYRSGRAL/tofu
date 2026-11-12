@@ -6,6 +6,7 @@ rust-version.workspace = true
 license-file.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+yonik-nsfs = { path = "../yonik-nsfs", version = "=0.1.0" }
 yonik-application = { path = "../yonik-application" }
 yonik-engine = { path = "../yonik-engine" }
 yonik-import = { path = "../yonik-import" }

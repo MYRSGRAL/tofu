@@ -1,0 +1,15 @@
+[package]
+name = "yonik-nsfs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "std"] }
+
+# Единственное согласованное исключение: private NS_GET_NSTYPE wrapper.
+# Workspace forbid и yonik-linux lints.workspace остаются без изменений.
+[lints.rust]
+unsafe_code = "deny"
