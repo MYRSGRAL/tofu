@@ -15,6 +15,7 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QVariant>
+#include <QUrl>
 #include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
@@ -116,6 +117,19 @@ inline bool perform(QQuickWindow* window, const QJsonObject& action)
         if (!value.isString() || value.toString().size() > 2048) return false;
         QGuiApplication::clipboard()->setText(value.toString());
         return true;
+    }
+    if (kind == QStringLiteral("select_file")) {
+        auto* dialog = findObject(window, action.value(QStringLiteral("object")).toString());
+        const auto path = action.value(QStringLiteral("value")).toString();
+        if (!dialog || !dialog->property("visible").toBool() || path.size() > 4096
+            || !QDir::isAbsolutePath(path) || dialog->metaObject()->indexOfProperty("selectedFile") < 0) return false;
+        const auto selected = QUrl::fromLocalFile(path);
+        if (!dialog->setProperty("selectedFile", selected)
+            || dialog->property("selectedFile").toUrl() != selected) return false;
+        // Native helper не получает синтетическую selection. Доставляем тот же
+        // accepted-сигнал после явного выбора в настоящем Qt FileDialog.
+        if (!QMetaObject::invokeMethod(dialog, "close", Qt::DirectConnection)) return false;
+        return QMetaObject::invokeMethod(dialog, "accepted", Qt::DirectConnection);
     }
     auto* item = qobject_cast<QQuickItem*>(findObject(window, action.value(QStringLiteral("object")).toString()));
     if (!item || !item->isVisible() || !item->isEnabled()) return false;

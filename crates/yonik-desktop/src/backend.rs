@@ -213,6 +213,15 @@ enum Command {
         #[serde(default)]
         hwid_enabled: bool,
     },
+    ImportText {
+        name: String,
+        text: String,
+    },
+    ImportFile {
+        name: String,
+        path: String,
+    },
+    CancelLocalImport,
     ImportSource {
         name: String,
         url: String,
@@ -326,6 +335,9 @@ impl Command {
             self,
             Self::Reload
                 | Self::AddSource { .. }
+                | Self::ImportText { .. }
+                | Self::ImportFile { .. }
+                | Self::CancelLocalImport
                 | Self::ImportSource { .. }
                 | Self::SourceChange { .. }
                 | Self::RenameSource { .. }
@@ -487,8 +499,19 @@ impl DesktopHost {
             .map_err(|_| DesktopError("busy"))
     }
     pub fn dispatch(&self, request: &str) -> Result<()> {
-        if request.len() > 16 * 1024 {
+        if request.len() > 6 * yonik_import::MAX_INPUT_BYTES + 4096 {
             return Err(DesktopError("invalid_input"));
+        }
+        if request.len() > 16 * 1024 {
+            #[derive(Deserialize)]
+            struct Header<'a> {
+                command: &'a str,
+            }
+            let header: Header<'_> =
+                serde_json::from_str(request).map_err(|_| DesktopError("invalid_input"))?;
+            if header.command != "import_text" {
+                return Err(DesktopError("invalid_input"));
+            }
         }
         let command: Command =
             serde_json::from_str(request).map_err(|_| DesktopError("invalid_input"))?;
@@ -590,6 +613,15 @@ fn validate(command: &Command) -> Result<()> {
         Command::MaintenanceCancel { request_id } => {
             *request_id > 0 && *request_id <= 9_007_199_254_740_991
         }
+        Command::ImportText { name, text: input } => {
+            !name.trim().is_empty()
+                && text(name, 512)
+                && !input.is_empty()
+                && input.len() <= yonik_import::MAX_INPUT_BYTES
+        }
+        Command::ImportFile { name, path } => {
+            !name.trim().is_empty() && text(name, 512) && !path.is_empty() && text(path, 4096)
+        }
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
             !name.trim().is_empty() && text(name, 512) && text(url, 8192)
         }
@@ -677,7 +709,9 @@ struct ReviewRow {
 }
 
 fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
-    let report = pending.report();
+    report_dto(pending.report(), offset)
+}
+fn report_dto(report: &yonik_import::ImportReport, offset: usize) -> Result<PendingDto> {
     let total = report.issues.len()
         + report
             .servers
@@ -732,12 +766,15 @@ fn pending_dto(pending: &PendingRefresh, offset: usize) -> Result<PendingDto> {
                 field: None,
             })
         });
-    let summary = pending.summary();
     Ok(PendingDto {
-        accepted: summary.accepted,
-        rejected: summary.rejected,
-        flagged: summary.flagged,
-        native_json: summary.native_json,
+        accepted: report.servers.len(),
+        rejected: report.issues.len(),
+        flagged: report
+            .servers
+            .iter()
+            .filter(|s| !s.review_flags().is_empty())
+            .count(),
+        native_json: report.native_json.is_some(),
         rows: issues.chain(flags).skip(offset).take(100).collect(),
         rows_total: total,
         rows_offset: offset,
@@ -932,6 +969,9 @@ impl Snapshot {
             if matches!(
                 command,
                 Command::AddSource { .. }
+                    | Command::ImportText { .. }
+                    | Command::ImportFile { .. }
+                    | Command::CancelLocalImport
                     | Command::ImportSource { .. }
                     | Command::SetSourceHwid { .. }
                     | Command::SelectSource { .. }
@@ -3255,6 +3295,16 @@ async fn run(
     let mut running: Option<Running> = None;
     let mut failed_session: Option<LocalSession> = None;
     let mut refreshing: Option<RefreshTask> = None;
+    type LocalTask = (
+        String,
+        watch::Sender<bool>,
+        tokio::task::JoinHandle<
+            std::result::Result<yonik_import::ImportReport, crate::local_import::PrepareError>,
+        >,
+    );
+    let mut local_task: Option<LocalTask> = None;
+    let mut local_pending: Option<(String, yonik_import::ImportReport)> = None;
+    let mut local_backup: Option<PathBuf> = None;
     let mut batch_running: Option<BatchRunning> = None;
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
@@ -3370,6 +3420,8 @@ async fn run(
             schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
         }
         let allowed = !quitting
+            && local_task.is_none()
+            && local_pending.is_none()
             && refreshing.is_none()
             && actor.pending.is_none()
             && scheduled.review.is_none();
@@ -3382,6 +3434,9 @@ async fn run(
         tokio::select! {
             biased;
             changed = priority.changed() => {
+                if let Some((_, cancel, task)) = local_task.take() { cancel.send_replace(true); let _ = task.await; actor.state.busy = false; }
+                if local_pending.take().is_some() { actor.state.pending = None; }
+
                 if changed.is_err() { quitting = true; }
                 if actor.state.connection_mode == ConnectionMode::System && (system_active || system_flight.is_some()) {
                     system_stop |= system_active || system_flight.as_ref().is_some_and(|flight| flight.mutating);
@@ -3630,6 +3685,22 @@ async fn run(
                 while let Ok(update) = events.try_recv() { actor.update(update); }
                 actor.emit();
             }
+            result = async { (&mut local_task.as_mut().expect("guard").2).await }, if local_task.is_some() => {
+                let (name, cancel, _) = local_task.take().expect("guard");
+                actor.state.busy = false;
+                if !*cancel.borrow() && !quitting {
+                    match result {
+                        Ok(Ok(report)) => {
+                            match report_dto(&report, 0) {
+                                Ok(dto) => { actor.state.pending = Some(dto); local_pending = Some((name, report)); }
+                                Err(error) => actor.state.command_error(true, error.key()),
+                            }
+                        }
+                        _ => actor.state.command_error(true, "invalid_input"),
+                    }
+                }
+                actor.emit();
+            }
             result = async { (&mut refreshing.as_mut().expect("guard").2).await }, if refreshing.is_some() => {
                 let (generation, cancel, _, identity, _) = refreshing.take().expect("guard");
                 actor.state.busy = false;
@@ -3679,8 +3750,9 @@ async fn run(
                 }
                 if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
+                    let completed_backup = if *operation == maintenance::Operation::Backup { Some(destination.clone()) } else { None };
                     let live = config.data_dir.join("subscriptions.sqlite");
-                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
+                    if local_task.is_some() || !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
                         actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
                         actor.emit(); continue;
                     }
@@ -3707,6 +3779,7 @@ async fn run(
                                 let action = *priority.borrow_and_update();
                                 quitting |= action.shutdown;
                                 cancellation.cancel();
+                                if local_pending.take().is_some() { actor.state.pending = None; }
                                 maintenance_controller.cancel(request_id);
                                 actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                 actor.emit();
@@ -3744,6 +3817,9 @@ async fn run(
                         }
                     }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
+                    if result.is_ok() && job_drained && envelope.generation == control.generation.load(Ordering::SeqCst) {
+                        if let Some(path) = completed_backup { local_backup = Some(path); }
+                    }
 
                     // Completion принадлежит единственному join handle этого request;
                     // внешние callbacks не могут завершить следующую generation.
@@ -3814,6 +3890,27 @@ async fn run(
                 let context_request_id = envelope.command.routing_request_id();
                 if context_request_id.is_some() { actor.state.routing_generation = envelope.generation; actor.state.error_contexts.clear(Slot::RoutingAck); }
 
+
+                if (local_task.is_some() || local_pending.is_some()) && !matches!(&envelope.command, Command::CancelLocalImport | Command::ApproveRefresh | Command::DiscardRefresh | Command::ReviewPage { .. } | Command::SubscriptionVisibility { .. }) {
+                    actor.state.command_error(true, "busy"); actor.emit(); continue;
+                }
+                // Запрет до scheduler.cancel/reserve и любого сетевого эффекта.
+                let local_forbidden = match &envelope.command {
+                    Command::Refresh | Command::SetSourceHwid { .. } => actor.state.source_id,
+                    Command::SourceChange { id, .. } => Some(*id),
+                    _ => None,
+                };
+                if let Some(id) = local_forbidden {
+                    let error = match actor.service().source_is_local(id).await {
+                        Ok(false) => None,
+                        Ok(true) => Some("invalid_input"),
+                        Err(error) => Some(map_subscription(error).key()),
+                    };
+                    if let Some(error) = error {
+                        if let Command::SourceChange { request_id, .. } = &envelope.command { actor.state.source_change_ack = Some(SourceChangeAck { request_id: *request_id, id, generation: None, error: Some(error) }); }
+                        actor.state.command_error(true, error); actor.emit(); continue;
+                    }
+                }
                 let source_operation = envelope.command.is_source_operation();
                 let reload_schedule = matches!(&envelope.command, Command::AddSource { .. } | Command::ImportSource { .. } | Command::SetSourceHwid { .. });
                 if (scheduled.fetching || scheduled.deferred.is_some()) && matches!(&envelope.command, Command::ImportSource { .. } | Command::ApproveRefresh | Command::DiscardRefresh) {
@@ -3856,7 +3953,45 @@ async fn run(
                         flight.cancel.send_replace(true); system_stop = true;
                     }
                 }
+                let local_is_file = matches!(&envelope.command, Command::ImportFile { .. });
                 let outcome = match envelope.command {
+                    Command::ImportText { name, text } | Command::ImportFile { name, path: text } => {
+                        if refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || scheduled.review.is_some() || actor.pending.is_some() || actor.state.can_stop { Err(DesktopError("busy")) }
+                        else {
+                            let is_file = local_is_file;
+                            let (cancel, receiver) = watch::channel(false);
+                            let task = tokio::spawn(async move {
+                                if is_file { crate::local_import::prepare_file(PathBuf::from(text), receiver).await }
+                                else { crate::local_import::prepare_text(text.into_bytes(), receiver).await }
+                            });
+                            local_task = Some((name, cancel, task)); actor.state.busy = true; Ok(())
+                        }
+                    }
+                    Command::CancelLocalImport => {
+                        if let Some((_, cancel, _)) = &local_task { cancel.send_replace(true); }
+                        if local_pending.take().is_some() { actor.state.pending = None; } Ok(())
+                    }
+                    Command::DiscardRefresh if local_pending.is_some() => { local_pending = None; actor.state.pending = None; Ok(()) }
+                    Command::ReviewPage { offset } if local_pending.is_some() => { match report_dto(&local_pending.as_ref().expect("guard").1, offset) { Ok(dto) => { actor.state.pending = Some(dto); Ok(()) }, Err(error) => Err(error) } }
+                    Command::ApproveRefresh if local_pending.is_some() => {
+                        let (name, report) = local_pending.as_ref().expect("guard");
+                        let result = {
+                            let (sender, cancel) = Cancellation::new();
+                            let mut interruption = control.priority.subscribe();
+                            let operation = actor.service().approve_local_import(name.clone(), report, cancel, local_backup.clone());
+                            tokio::pin!(operation);
+                            tokio::select! {
+                                biased;
+                                _ = interruption.changed() => { sender.send_replace(true); let _ = operation.await; Err(DesktopError("cancelled")) }
+                                result = &mut operation => result.map_err(map_subscription),
+                            }
+                        };
+                        match result {
+                            Ok(id) if envelope.generation == control.generation.load(Ordering::SeqCst) => { local_pending = None; actor.state.pending = None; actor.state.source_id = Some(id); actor.state.offset = 0; actor.state.search.clear(); actor.state.favorites_only = false; actor.clear_selection(); actor.reload().await }
+                            Ok(_) => { local_pending = None; actor.state.pending = None; Err(DesktopError("cancelled")) }
+                            Err(error) => Err(error)
+                        }
+                    }
                     Command::SubscriptionVisibility { visible } => { scheduled.visible = visible; Ok(()) }
                     Command::ApproveRefresh | Command::DiscardRefresh if scheduled.review.is_some() => {
                         let approve = matches!(envelope.command, Command::ApproveRefresh);

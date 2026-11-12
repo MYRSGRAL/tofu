@@ -157,6 +157,12 @@ struct SourceData {
     hwid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     schedule: Option<ScheduleState>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    local: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Debug намеренно не реализован: имя и URL могут содержать секреты.
@@ -177,9 +183,51 @@ impl SubscriptionSource {
             hwid_enabled: false,
             hwid: None,
             schedule: None,
+            local: false,
         });
         value.validate()?;
         Ok(value)
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.0.local
+    }
+
+    pub fn local(name: String) -> Result<Self, SubscriptionError> {
+        let value = Self(SourceData {
+            version: 2,
+            name,
+            url: String::new(),
+            local_exception: false,
+            proxy: false,
+            hwid_enabled: false,
+            hwid: None,
+            schedule: None,
+            local: true,
+        });
+        value.validate_data()?;
+        Ok(value)
+    }
+
+    fn validate_data(&self) -> Result<(), SubscriptionError> {
+        if self.0.local {
+            if self.0.version != 2
+                || !self.0.url.is_empty()
+                || self.0.proxy
+                || self.0.local_exception
+                || self.0.hwid_enabled
+                || self.0.hwid.is_some()
+                || self.0.schedule.is_some()
+                || self.0.name.trim().is_empty()
+                || self.0.name.len() > 512
+                || self.0.name.chars().any(char::is_control)
+            {
+                return Err(SubscriptionError::InvalidSource);
+            }
+            Ok(())
+        } else {
+            self.validate().map(|_| ())
+        }
     }
 
     pub fn with_hwid(mut self, enabled: bool) -> Result<Self, SubscriptionError> {
@@ -199,6 +247,9 @@ impl SubscriptionSource {
     }
 
     fn validate(&self) -> Result<Source, SubscriptionError> {
+        if self.is_local() {
+            return Err(SubscriptionError::InvalidSource);
+        }
         if let Some(state) = self.0.schedule {
             state.validate()?;
         }
@@ -230,7 +281,7 @@ impl SubscriptionSource {
     }
 
     fn encode(&self) -> Result<Vec<u8>, SubscriptionError> {
-        self.validate()?;
+        self.validate_data()?;
         serde_json::to_vec(&self.0).map_err(|_| SubscriptionError::InvalidSource)
     }
 }
@@ -382,6 +433,12 @@ impl PendingRefresh {
     }
 }
 
+impl ScheduleMetadata {
+    pub fn is_local(&self) -> bool {
+        serde_json::from_slice::<SourceData>(&self.payload).map_or(true, |data| data.local)
+    }
+}
+
 impl SubscriptionService {
     pub fn new(repository: EncryptedSubscriptionRepository) -> Self {
         Self {
@@ -400,7 +457,34 @@ impl SubscriptionService {
             .map_err(SubscriptionError::Repository)
     }
 
+    /// Только явное подтверждение отчёта host. Оригинал и каталог создаются атомарно.
+    pub async fn approve_local_import(
+        &self,
+        name: String,
+        report: &ImportReport,
+        cancel: crate::Cancellation,
+        backup: Option<std::path::PathBuf>,
+    ) -> Result<i64, SubscriptionError> {
+        if report.servers.is_empty() && report.native_json.is_none() {
+            return Err(SubscriptionError::InvalidSource);
+        }
+        let source = SubscriptionSource::local(name)?;
+        Ok(self
+            .repository
+            .create_local_snapshot(
+                source.encode()?,
+                report.original().expose().as_bytes().to_vec(),
+                cancel,
+                backup,
+            )
+            .await?
+            .id)
+    }
+
     pub async fn add(&self, source: SubscriptionSource) -> Result<i64, SubscriptionError> {
+        if source.is_local() {
+            return Err(SubscriptionError::InvalidSource);
+        }
         Ok(self.repository.create_source(source.encode()?).await?.id)
     }
 
@@ -417,9 +501,11 @@ impl SubscriptionService {
     fn schedule_record(record: crate::SourceRecord) -> Result<ScheduleMetadata, SubscriptionError> {
         let data: SourceData = serde_json::from_slice(&record.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
-        if let Some(state) = data.schedule {
-            state.validate()?;
-        }
+        SubscriptionSource(
+            serde_json::from_slice(&record.payload)
+                .map_err(|_| SubscriptionError::InvalidSource)?,
+        )
+        .validate_data()?;
         Ok(ScheduleMetadata {
             id: record.id,
             generation: record.generation,
@@ -444,6 +530,9 @@ impl SubscriptionService {
         token: ScheduleMetadata,
         state: ScheduleState,
     ) -> Result<(), SubscriptionError> {
+        if token.is_local() {
+            return Err(SubscriptionError::InvalidSource);
+        }
         state.validate()?;
         let mut data: SourceData =
             serde_json::from_slice(&token.payload).map_err(|_| SubscriptionError::InvalidSource)?;
@@ -552,7 +641,7 @@ impl SubscriptionService {
             let data: SourceData = serde_json::from_slice(&record.payload)
                 .map_err(|_| SubscriptionError::InvalidSource)?;
             let source = SubscriptionSource(data);
-            source.validate()?;
+            source.validate_data()?;
             sources.push(SubscriptionSummary {
                 id: record.id,
                 name: source.0.name,
@@ -607,6 +696,9 @@ impl SubscriptionService {
         generation: i64,
         source: SubscriptionSource,
     ) -> Result<i64, SubscriptionError> {
+        if self.source_is_local(id).await? || source.is_local() {
+            return Err(SubscriptionError::InvalidSource);
+        }
         let mut source = source;
         source.0.schedule = None;
         let _source_update = self.source_updates.lock().await;
@@ -658,12 +750,26 @@ impl SubscriptionService {
         let data = serde_json::from_slice(&record.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
         let source = SubscriptionSource(data);
-        source.validate()?;
+        source.validate_data()?;
         Ok(SubscriptionSummary {
             id,
             name: source.0.name,
             hwid_enabled: source.0.hwid_enabled,
         })
+    }
+
+    pub async fn source_is_local(&self, id: i64) -> Result<bool, SubscriptionError> {
+        let record = self
+            .repository
+            .source_record_by_id(id)
+            .await?
+            .ok_or(SubscriptionError::NotFound)?;
+        let source = SubscriptionSource(
+            serde_json::from_slice(&record.payload)
+                .map_err(|_| SubscriptionError::InvalidSource)?,
+        );
+        source.validate_data()?;
+        Ok(source.is_local())
     }
 
     pub async fn source_hwid_enabled(&self, id: i64) -> Result<bool, SubscriptionError> {
@@ -675,11 +781,14 @@ impl SubscriptionService {
         let data = serde_json::from_slice(&record.source.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
         let source = SubscriptionSource(data);
-        source.validate()?;
+        source.validate_data()?;
         Ok(source.0.hwid_enabled)
     }
 
     pub async fn set_source_hwid(&self, id: i64, enabled: bool) -> Result<(), SubscriptionError> {
+        if self.source_is_local(id).await? {
+            return Err(SubscriptionError::InvalidSource);
+        }
         let _source_update = self.source_updates.lock().await;
         let record = self
             .repository
@@ -689,7 +798,7 @@ impl SubscriptionService {
         let data = serde_json::from_slice(&record.source.payload)
             .map_err(|_| SubscriptionError::InvalidSource)?;
         let source = SubscriptionSource(data);
-        source.validate()?;
+        source.validate_data()?;
         if source.0.hwid_enabled == enabled {
             return Ok(());
         }
@@ -793,6 +902,9 @@ impl SubscriptionService {
             .ok_or(SubscriptionError::NotFound)?;
         if generation.is_some_and(|value| value != record.source.generation) {
             return Err(SubscriptionError::StaleUpdate);
+        }
+        if self.source_is_local(id).await? {
+            return Err(SubscriptionError::InvalidSource);
         }
         let serial = CONTROLLERS
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -1071,3 +1183,280 @@ mod scheduler_tests;
 #[cfg(test)]
 #[path = "subscription_cancellation_tests.rs"]
 mod cancellation_tests;
+
+#[cfg(test)]
+mod local_import_tests {
+    use super::*;
+
+    #[test]
+    fn remote_v1_encoding_is_unchanged_and_local_is_strict_v2() {
+        let remote = SubscriptionSource::new(
+            "remote".into(),
+            "https://example.com/sub".into(),
+            false,
+            FetchRoute::Direct,
+        )
+        .expect("remote");
+        assert_eq!(
+            String::from_utf8(remote.encode().expect("encode")).expect("utf8"),
+            r#"{"version":1,"name":"remote","url":"https://example.com/sub","local_exception":false,"proxy":false,"hwid_enabled":false,"hwid":null}"#
+        );
+        let local = SubscriptionSource::local("local".into()).expect("local");
+        let encoded = local.encode().expect("encode");
+        assert!(local.is_local());
+        assert!(local.validate().is_err());
+        let mut value: serde_json::Value = serde_json::from_slice(&encoded).expect("JSON");
+        assert_eq!(value["version"], 2);
+        value["version"] = 1.into();
+        assert!(
+            SubscriptionSource(serde_json::from_value(value).expect("data"))
+                .validate_data()
+                .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod local_transaction_tests {
+    use super::*;
+    use std::{
+        fs,
+        os::unix::fs::DirBuilderExt,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    #[tokio::test]
+    async fn approved_original_is_encrypted_atomic_and_survives_reopen() {
+        round_trip(false).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "Нужны pinned cores в YONIK_LOCAL_CORE_ROOT"]
+    async fn local_repository_reopen_intent_and_both_native_config_checks() {
+        round_trip(true).await;
+    }
+
+    struct NoFetch;
+    impl SubscriptionFetch for NoFetch {
+        fn fetch<'a>(
+            &'a self,
+            _: &'a Source,
+            _: FetchRoute,
+            _: Option<&'a FetchValidators>,
+            _: watch::Receiver<bool>,
+        ) -> futures_util::future::BoxFuture<'a, Result<FetchResponse, FetchError>> {
+            panic!("Локальный источник не должен попадать в FetchRequest")
+        }
+    }
+    async fn round_trip(native: bool) {
+        let path = std::env::temp_dir().join(format!(
+            "yonik-local-transaction-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("каталог");
+        let database = path.join("repository.sqlite");
+        let repo = EncryptedSubscriptionRepository::open(
+            database.clone(),
+            zeroize::Zeroizing::new([93; 32]),
+        )
+        .await
+        .expect("repository");
+        let service = SubscriptionService::new(repo.clone());
+        let original =
+            b"trojan://encrypted-local-secret@example.com:443#local\ninvalid://rejected\n";
+        let report = yonik_import::import_bytes(original.to_vec()).expect("report");
+        let (_missing_sender, missing_cancel) = crate::Cancellation::new();
+        assert!(
+            service
+                .approve_local_import("local".into(), &report, missing_cancel, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.list_ids()
+                .await
+                .expect("no writes without backup")
+                .is_empty()
+        );
+        drop(service);
+        repo.close().await.expect("close before backup");
+        let backup = path.join("backup3.sqlite");
+        EncryptedSubscriptionRepository::backup_closed(
+            database.clone(),
+            backup.clone(),
+            zeroize::Zeroizing::new([93; 32]),
+        )
+        .await
+        .expect("verified closed backup");
+        let repo = EncryptedSubscriptionRepository::open(
+            database.clone(),
+            zeroize::Zeroizing::new([93; 32]),
+        )
+        .await
+        .expect("reopen before import");
+        let service = SubscriptionService::new(repo.clone());
+        let (_sender, cancel) = crate::Cancellation::new();
+        let id = service
+            .approve_local_import("local".into(), &report, cancel, Some(backup.clone()))
+            .await
+            .expect("approve");
+        assert!(service.source_is_local(id).await.expect("local"));
+        let (_fetch_sender, fetch_cancel) = watch::channel(false);
+        assert!(matches!(
+            service
+                .refresh_with_host(id, None, &NoFetch, fetch_cancel)
+                .await,
+            Err(SubscriptionError::InvalidSource)
+        ));
+        assert!(
+            service
+                .schedule_metadata(id)
+                .await
+                .expect("metadata")
+                .expect("source")
+                .is_local()
+        );
+        assert!(service.set_source_hwid(id, true).await.is_err());
+        let remote = SubscriptionSource::new(
+            "remote".into(),
+            "https://example.com/sub".into(),
+            false,
+            FetchRoute::Direct,
+        )
+        .expect("remote");
+        assert!(service.change_source(id, 1, remote).await.is_err());
+        let record = repo.load(id).await.expect("load").expect("record");
+        let original_payload = record.source.payload.to_vec();
+        assert!(
+            serde_json::from_slice::<super::source_v1_control::SourceData>(&original_payload)
+                .is_err()
+        );
+        let unchanged = repo
+            .load(id)
+            .await
+            .expect("load after old reader")
+            .expect("record");
+        assert_eq!(unchanged.source.payload.as_slice(), original_payload);
+        assert_eq!(unchanged.snapshot.expect("snapshot").revision, 1);
+        assert_eq!(record.source.generation, 1);
+        assert_eq!(record.snapshot.as_ref().expect("snapshot").revision, 1);
+        assert_eq!(record.snapshot.expect("snapshot").body.as_slice(), original);
+        let (sender, cancel) = crate::Cancellation::new();
+        sender.send_replace(true);
+        assert!(
+            service
+                .approve_local_import(
+                    "cancelled".into(),
+                    &yonik_import::import_bytes(original.to_vec()).expect("report"),
+                    cancel,
+                    None
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(repo.list_ids().await.expect("ids"), [id]);
+        drop(service);
+        repo.close().await.expect("close");
+        let disk = fs::read(&database).expect("disk");
+        assert!(
+            !disk
+                .windows(b"encrypted-local-secret".len())
+                .any(|window| window == b"encrypted-local-secret")
+        );
+        let repo =
+            EncryptedSubscriptionRepository::open(database, zeroize::Zeroizing::new([93; 32]))
+                .await
+                .expect("reopen");
+        let service = SubscriptionService::new(repo.clone());
+        assert_eq!(
+            service
+                .offline(id)
+                .await
+                .expect("offline")
+                .report
+                .original()
+                .expose()
+                .as_bytes(),
+            original
+        );
+        if native {
+            let engines = std::path::PathBuf::from(
+                std::env::var("YONIK_LOCAL_CORE_ROOT").expect("pinned cores"),
+            );
+            let offline = service.offline(id).await.expect("offline");
+            let intent = yonik_import::ServerIntent::from_server(&offline.report.servers[0])
+                .expect("intent");
+            let server = intent.into_server().expect("managed server");
+            for (engine, relative) in [
+                (yonik_engine::Engine::Xray, "xray-26.10.31/xray"),
+                (yonik_engine::Engine::SingBox, "sing-box-1.14.4/sing-box"),
+            ] {
+                let config = yonik_engine::compile(
+                    &server,
+                    engine,
+                    std::num::NonZeroU16::new(10808).expect("port"),
+                )
+                .expect("compile");
+                let config_path = path.join("check.json");
+                let mut output = fs::File::create(&config_path).expect("config");
+                config.write_sensitive(&mut output).expect("write config");
+                drop(output);
+                let mut command = std::process::Command::new(engines.join(relative));
+                if relative.starts_with("xray") {
+                    command.args(["run", "-test", "-config"]);
+                } else {
+                    command.args(["check", "-c"]);
+                }
+                let checked = command.arg(config_path).output().expect("config check");
+                assert!(
+                    checked.status.success(),
+                    "Нативная проверка конфигурации не пройдена"
+                );
+            }
+        }
+        drop(service);
+        repo.close().await.expect("close");
+        fs::remove_dir_all(path).expect("очистка своего каталога");
+    }
+}
+
+#[cfg(test)]
+mod source_v1_control {
+    use super::*;
+    // Точная схема reader de8dadbc; отдельный тип не принимает local v2.
+    #[allow(dead_code)]
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct SourceData {
+        version: u8,
+        name: String,
+        url: String,
+        local_exception: bool,
+        proxy: bool,
+        #[serde(default)]
+        hwid_enabled: bool,
+        #[serde(default)]
+        hwid: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schedule: Option<ScheduleState>,
+    }
+
+    #[test]
+    fn old_reader_accepts_v1_and_rejects_local_v2() {
+        let remote = SubscriptionSource::new(
+            "remote".into(),
+            "https://example.com/sub".into(),
+            false,
+            FetchRoute::Direct,
+        )
+        .expect("remote");
+        assert!(serde_json::from_slice::<SourceData>(&remote.encode().expect("encode")).is_ok());
+        let local = SubscriptionSource::local("local".into()).expect("local");
+        assert!(serde_json::from_slice::<SourceData>(&local.encode().expect("encode")).is_err());
+    }
+}

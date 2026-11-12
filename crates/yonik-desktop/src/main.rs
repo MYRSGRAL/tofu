@@ -93,6 +93,10 @@ mod bridge_impl {
         }
 
         pub fn dispatch(mut self: Pin<&mut Self>, request: QString) {
+            if request.len() > (6 * yonik_import::MAX_INPUT_BYTES + 4096) as isize {
+                self.report_error("invalid_input");
+                return;
+            }
             let Some(host) = self.host.as_ref() else {
                 self.report_dispatch_error(&request.to_string(), "startup");
                 return;

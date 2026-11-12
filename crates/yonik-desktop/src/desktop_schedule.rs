@@ -135,6 +135,9 @@ impl DesktopSchedule {
                 .map_err(super::map_subscription)?;
             let count = page.len();
             for token in page {
+                if token.is_local() {
+                    continue;
+                }
                 let id = token.id;
                 let generation = token.generation;
                 if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -213,6 +216,9 @@ impl DesktopSchedule {
             .await
             .map_err(super::map_subscription)?
         {
+            if token.is_local() {
+                return Ok(());
+            }
             let generation = token.generation;
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -289,6 +295,67 @@ impl DesktopSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn local_v2_is_excluded_on_load_and_reload() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("yonik-local-due-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .expect("каталог");
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("repo");
+        repo.close().await.expect("close for backup");
+        let backup = path.join("backup3");
+        yonik_linux::EncryptedSubscriptionRepository::backup_closed(
+            path.join("db"),
+            backup.clone(),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("backup");
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .expect("reopen");
+        let service = SubscriptionService::new(repo);
+        let report = yonik_import::import_bytes(b"trojan://secret@example.com:443".to_vec())
+            .expect("report");
+        let (_sender, cancel) = yonik_linux::Cancellation::new();
+        let id = service
+            .approve_local_import("local".into(), &report, cancel, Some(backup))
+            .await
+            .expect("approve");
+        let mut schedule = DesktopSchedule::new().expect("schedule");
+        schedule
+            .load_at(&service, Duration::ZERO, 1000)
+            .await
+            .expect("load");
+        schedule
+            .reload_id(&service, id, Duration::ZERO)
+            .await
+            .expect("reload");
+        assert!(schedule.generations.is_empty());
+        assert!(schedule.deadline().is_none());
+        assert!(
+            service
+                .schedule_metadata(id)
+                .await
+                .expect("metadata")
+                .expect("source")
+                .state
+                .is_none()
+        );
+        service.close().await.expect("close");
+        std::fs::remove_dir_all(path).expect("очистка своего каталога");
+    }
 
     #[tokio::test]
     async fn startup_восстанавливает_due_и_нормализует_rollback() {
