@@ -143,7 +143,8 @@ strict V2 export. Backup request_id=1 complete, ready=true, owner=3 сохран
 contexts=1; штатная copy возвращает отказ и сохраняет clipboard A. Restore
 request_id=2 complete, ready=true, owner=5 сохраняет contexts=3; copy снова
 отказывает, clipboard неизменён. Snapshot до/после copy совпадает. Результат
-`STALE_REFUSED,STALE_REFUSED`, closed=true и terminal Qt exit=0. Повторного
+`STALE_REFUSED,STALE_REFUSED`, closed=true. Исходный terminal exit code
+не сохранён; последующий узкий повтор ниже подтверждает exit=0. Повторного
 fault, успевшего заменить stale context до copy, не наблюдалось; barrier не нужен.
 
 Первичная post-processing проверка остановилась на несовпадении Main старой
@@ -208,3 +209,20 @@ preferences с 0644, production Store::read требует 0600 и коррек�
 maintenance clipboard lifecycle теперь проверен отдельно RU и fresh EN.
 SecretService, Android и физические gates остаются открытыми. Root переводит
 PR141 на main после merge PR143; feature-parent merge не выполнялся.
+
+
+## RU terminal evidence: узкое исправление finding review
+
+Первый RU каталог не содержит process.json: closed в Qt-логе и assess-existing
+не удостоверяют exit code того процесса. Старый результат не выдаётся за exit=0.
+Root повторил только RU scenario на том же PR143 binary и frozen driver4dc9,
+через новый private bus без service activation, private HOME/XDG и offscreen.
+Новый прямой запуск, не assess-existing, сохранил process.json exit_code=0,
+closed и два STALE_REFUSED после matching complete backup/restore ACK.
+Clipboard остался равен export A; обе SQLite read-only integrity_check=ok.
+
+Evidence: /home/myrs/projects/yonik/local/validation/p11-maintenance-generation/fixed-transaction-ru-terminal-root/acceptance-manifest.json.
+Manifest связывает binary/Main, frozen harness и terminal/artifact hashes.
+Первая попытка root не дошла до GUI из-за отсутствия PYTHONPATH=tools;
+после явного задания import path выполнен один успешный GUI запуск.
+EN campaign и Rust-сборка не повторялись; старый RU каталог сохранён.
