@@ -62,6 +62,8 @@ pub struct HostConfig {
     cleanup_fault: Option<Arc<AtomicBool>>,
     #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
+    #[cfg(feature = "test-support")]
+    scheduler_owner_seed: Option<u64>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -77,6 +79,8 @@ impl HostConfig {
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
             scheduler_capacity: None,
+            #[cfg(feature = "test-support")]
+            scheduler_owner_seed: None,
         }
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
@@ -92,6 +96,21 @@ impl HostConfig {
         }
         let mut config = Self::new(data_dir, engine_dir).with_ephemeral_key(key);
         config.scheduler_capacity = Some(capacity);
+        Ok(config)
+    }
+    /// Локальный allocator отдельного ephemeral стенда; глобальный счётчик не меняется.
+    #[cfg(feature = "test-support")]
+    pub fn ephemeral_scheduler_owner_example(
+        data_dir: PathBuf,
+        engine_dir: PathBuf,
+        key: [u8; 32],
+        seed: u64,
+    ) -> Result<Self> {
+        if seed == 0 {
+            return Err(DesktopError("invalid_input"));
+        }
+        let mut config = Self::new(data_dir, engine_dir).with_ephemeral_key(key);
+        config.scheduler_owner_seed = Some(seed);
         Ok(config)
     }
     /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
@@ -3733,9 +3752,14 @@ async fn run(
     let mut subscription_visible = control.subscription_visible.subscribe();
     let origin = tokio::time::Instant::now();
     #[cfg(feature = "test-support")]
-    let owner = match config.scheduler_capacity {
-        Some(capacity) => DesktopSchedule::bounded(capacity),
-        None => DesktopSchedule::new(),
+    let owner = match config.scheduler_owner_seed {
+        Some(seed) => {
+            DesktopSchedule::from_owner_counter(&std::sync::atomic::AtomicU64::new(seed), 20_000)
+        }
+        None => match config.scheduler_capacity {
+            Some(capacity) => DesktopSchedule::bounded(capacity),
+            None => DesktopSchedule::new(),
+        },
     };
     #[cfg(not(feature = "test-support"))]
     let owner = DesktopSchedule::new();
