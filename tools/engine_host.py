@@ -348,7 +348,7 @@ def peer(
     workspace: Path,
     port: int = 24443,
     target_ports: str = "24444-24445",
-) -> Iterator[None]:
+) -> Iterator[subprocess.Popen]:
     if engine == "xray":
         config = {
             "log": {"loglevel": "none"},
@@ -397,7 +397,7 @@ def peer(
     ) as process:
         try:
             wait_listener(process, port)
-            yield
+            yield process
         finally:
             stop(process)
 

@@ -96,8 +96,14 @@ pub(super) struct DesktopSchedule {
 }
 impl DesktopSchedule {
     pub fn new() -> ScheduleResult<Self> {
+        Self::bounded(20_000)
+    }
+    pub(super) fn bounded(capacity: usize) -> ScheduleResult<Self> {
         static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
-        let identity = NEXT_OWNER
+        Self::from_owner_counter(&NEXT_OWNER, capacity)
+    }
+    pub(super) fn from_owner_counter(counter: &AtomicU64, capacity: usize) -> ScheduleResult<Self> {
+        let identity = counter
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
             })
@@ -107,7 +113,7 @@ impl DesktopSchedule {
                 error: DesktopError("startup"),
                 cause: Some(Cause::SchedulerInitializeExhausted),
             })?;
-        Self::with_limits(identity, 20_000)
+        Self::with_limits(identity, capacity)
     }
     fn with_limits(identity: NonZeroU64, capacity: usize) -> ScheduleResult<Self> {
         Ok(Self {
@@ -1251,5 +1257,35 @@ mod tests {
         owner.policy.battery_saver = false;
         owner.visible = false;
         assert_eq!(owner.deadline(), None);
+    }
+}
+
+#[cfg(test)]
+mod owner_allocator_tests {
+    use super::*;
+
+    #[test]
+    fn local_counter_exhaustion_preserves_terminal_value() {
+        let counter = AtomicU64::new(u64::MAX);
+        let failure = DesktopSchedule::from_owner_counter(&counter, 20_000)
+            .err()
+            .expect("исчерпанный allocator");
+        assert_eq!(failure.key(), "startup");
+        assert!(matches!(
+            failure.cause,
+            Some(Cause::SchedulerInitializeExhausted)
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn local_counter_allocates_last_supported_identity() {
+        let counter = AtomicU64::new(u64::MAX - 1);
+        let owner = DesktopSchedule::from_owner_counter(&counter, 20_000)
+            .expect("последний допустимый owner");
+        assert_eq!(owner.generation, u64::MAX - 1);
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+        assert!(DesktopSchedule::from_owner_counter(&counter, 20_000).is_err());
+        assert!(DesktopSchedule::new().is_ok());
     }
 }
