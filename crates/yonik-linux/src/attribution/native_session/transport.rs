@@ -421,11 +421,7 @@ pub(super) mod tests {
         drop(peer);
         let worker = thread.join().unwrap();
         eprintln!("retained wire worker: {worker:?}");
-        if worker == Err(Unavailable::Timeout) {
-            return Err(Unavailable::Timeout);
-        }
-        assert_eq!(worker, Err(Unavailable::Disconnected));
-        let reply = exchange?;
+        let reply = known_exchange_result(exchange, worker)?;
         assert_eq!(Header::decode(&reply, 0).unwrap().request_id, 43);
         if reply[96..98] == [3, 3] {
             return Err(Unavailable::Timeout);
@@ -440,6 +436,40 @@ pub(super) mod tests {
                 .as_bytes()
         );
         Ok(())
+    }
+    fn known_exchange_result(
+        exchange: Result<Vec<u8>, Unavailable>,
+        worker: Result<(), Unavailable>,
+    ) -> Result<Vec<u8>, Unavailable> {
+        match (exchange, worker) {
+            (Err(error), _)
+                if error != Unavailable::Timeout && error != Unavailable::Disconnected =>
+            {
+                Err(error)
+            }
+            (result, Err(Unavailable::Disconnected)) => result,
+            (_, Err(error)) => Err(error),
+            (_, Ok(())) => Err(Unavailable::Malformed),
+        }
+    }
+    #[test]
+    fn known_exchange_does_not_hide_malformed_behind_worker_timeout() {
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Malformed), Err(Unavailable::Timeout)),
+            Err(Unavailable::Malformed)
+        );
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Disconnected), Err(Unavailable::Timeout)),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(
+            known_exchange_result(Err(Unavailable::Timeout), Err(Unavailable::Authority)),
+            Err(Unavailable::Authority)
+        );
+        assert_eq!(
+            known_exchange_result(Ok(vec![1]), Err(Unavailable::Disconnected)),
+            Ok(vec![1])
+        );
     }
     #[test]
     fn socket_handshake_reply_correlation_and_replay_retire() {
