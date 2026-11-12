@@ -10,7 +10,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def dto_match_keys(source: str) -> set[str]:
+    # Сериализация Action не создаёт diagnostic key. Остальные arms проверяем.
+    for variant, value in (
+        ("Direct", "direct"),
+        ("Proxy", "proxy"),
+        ("Block", "block"),
+    ):
+        source = re.sub(rf'\bAction::{variant}\s*=>\s*"{value}"', "", source)
+    return set(re.findall(r'=>\s*"([a-z_]+)"', source))
+
+
 class FactoryCoverage(unittest.TestCase):
+    def test_action_serialization_does_not_hide_error_keys(self) -> None:
+        source = """
+            Action::Direct => "direct",
+            Action::Proxy => "proxy",
+            Action::Block => "block",
+            Failure::Direct => "direct",
+            Failure::Other => "missing_diagnostic",
+            Action::Direct => "unexpected_action",
+        """
+        self.assertEqual(
+            dto_match_keys(source),
+            {"direct", "missing_diagnostic", "unexpected_action"},
+        )
+
     def test_producer_keys_have_closed_catalog(self) -> None:
         """Извлекает литералы фабрик, включая match arms и operation ACK."""
         source = (ROOT / "crates/yonik-desktop/src/backend.rs").read_text()
@@ -39,7 +64,7 @@ class FactoryCoverage(unittest.TestCase):
             "source",
             "xray",
         }
-        dto_keys = set(re.findall(r'=>\s*"([a-z_]+)"', source)) - neutral
+        dto_keys = dto_match_keys(source) - neutral
         self.assertEqual(dto_keys - keys, set())
         editor = (ROOT / "crates/yonik-desktop/src/editor.rs").read_text()
         editor_keys = set(re.findall(r'(?:Err\(|\|_\|\s*)"([a-z_]+)"', editor))

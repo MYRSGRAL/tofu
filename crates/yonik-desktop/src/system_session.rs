@@ -20,6 +20,7 @@ pub struct SystemSession {
     revision: ProfileRevision,
     prepared: Option<Prepared>,
     state: State,
+    capability: Option<Instant>,
 }
 impl SystemSession {
     pub fn new(client: SystemClient, revision: ProfileRevision) -> Self {
@@ -28,7 +29,14 @@ impl SystemSession {
             revision,
             prepared: None,
             state: State::Unknown,
+            capability: None,
         }
+    }
+    pub fn system_tun_available(&self) -> bool {
+        !self.owner_lost()
+            && self
+                .capability
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(5))
     }
     pub fn owner_lost(&self) -> bool {
         self.client.owner_lost()
@@ -80,6 +88,34 @@ impl SystemSession {
         );
         Ok(())
     }
+    /// Inline Prepare привязан к той же ревизии и одноразовому handle.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_policy(
+        &mut self,
+        revision: ProfileRevision,
+        server: &ServerIntent,
+        engine: Engine,
+        policy: &yonik_linux::system_policy::InlinePolicy,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<(), ClientError> {
+        self.fence(revision)?;
+        self.prepared = None;
+        if !self
+            .client
+            .capabilities(deadline, cancel.clone())
+            .await?
+            .system_tun
+        {
+            return Err(ClientError::Unsupported);
+        }
+        self.prepared = Some(
+            self.client
+                .prepare_inline_policy(server, engine, true, policy, deadline, cancel)
+                .await?,
+        );
+        Ok(())
+    }
     pub async fn apply(
         &mut self,
         revision: ProfileRevision,
@@ -106,6 +142,11 @@ impl SystemSession {
         cancel: Cancellation,
     ) -> Result<State, ClientError> {
         self.state = State::Unknown;
+        self.capability = None;
+        let caps = self.client.capabilities(deadline, cancel.clone()).await?;
+        if caps.system_tun {
+            self.capability = Some(Instant::now());
+        }
         let result = self.client.state(deadline, cancel).await;
         self.record(result)
     }
