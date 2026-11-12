@@ -33,13 +33,34 @@ fn frame() -> [u8; FRAME_BYTES] {
     b
 }
 fn pair() -> (OwnedFd, OwnedFd) {
-    socketpair(
+    const QUEUE_LIMIT: usize = 256 * 1024;
+    const REQUEST_BYTES: usize = 64 * 1024;
+    let (a, b) = socketpair(
         AddressFamily::UNIX,
         SocketType::SEQPACKET,
         SocketFlags::CLOEXEC,
         None,
     )
-    .unwrap()
+    .unwrap();
+    // Моделируем большие defaults только на собственной паре, без sysctl.
+    for socket in [&a, &b] {
+        rustix::net::sockopt::set_socket_recv_buffer_size(socket, 1024 * 1024).unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(socket, 1024 * 1024).unwrap();
+        let recv = rustix::net::sockopt::socket_recv_buffer_size(socket).unwrap();
+        let send = rustix::net::sockopt::socket_send_buffer_size(socket).unwrap();
+        eprintln!("fixture до нормализации: recv={recv}, send={send}");
+        if recv <= QUEUE_LIMIT && send <= QUEUE_LIMIT {
+            eprintln!("kernel ограничил sensitivity-запрос; нормализация проверяется всегда");
+        }
+        // Admission проверяет очереди до чтения frame; Linux удваивает запрос.
+        rustix::net::sockopt::set_socket_recv_buffer_size(socket, REQUEST_BYTES).unwrap();
+        rustix::net::sockopt::set_socket_send_buffer_size(socket, REQUEST_BYTES).unwrap();
+        let recv = rustix::net::sockopt::socket_recv_buffer_size(socket).unwrap();
+        let send = rustix::net::sockopt::socket_send_buffer_size(socket).unwrap();
+        assert!(recv <= QUEUE_LIMIT && send <= QUEUE_LIMIT);
+        eprintln!("fixture после нормализации: recv={recv}, send={send}");
+    }
+    (a, b)
 }
 fn assert_sender(socket: &OwnedFd, pid: u32, uid: u32) {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
