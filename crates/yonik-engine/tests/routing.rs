@@ -171,3 +171,30 @@ fn probe_cannot_bypass_known_protected_destinations() {
     assert!(!access.allows_host("ONE.CORP.TEST."));
     assert!(access.allows_host("notcorp.test"));
 }
+
+#[test]
+fn p07_both_compilers_refuse_before_routes() {
+    use yonik_domain::{AndroidPackageId, PlatformSource};
+    let mut policy = Policy::default();
+    policy.user_rules.push(Rule {
+        id: 41,
+        enabled: true,
+        action: Action::Direct,
+        conditions: Conditions {
+            platform_sources: vec![PlatformSource::AndroidPackage {
+                package: AndroidPackageId::parse("org.example.app").unwrap(),
+            }],
+            ..Default::default()
+        },
+    });
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert_eq!(
+            compile(engine, &policy, PolicyMode::IpOnly).unwrap_err(),
+            PolicyCompileError::UnsupportedSelector(41)
+        );
+    }
+    policy.user_rules[0].enabled = false;
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert!(compile(engine, &policy, PolicyMode::IpOnly).is_ok());
+    }
+}

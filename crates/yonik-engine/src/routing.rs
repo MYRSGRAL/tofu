@@ -31,6 +31,7 @@ pub enum PolicyCapability {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyCompileError {
+    UnsupportedSelector(u64),
     Server(CompileError),
     Unsupported(PolicyCapability),
     InvalidPolicy,
@@ -40,6 +41,7 @@ pub enum PolicyCompileError {
 impl fmt::Display for PolicyCompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedSelector(id) => write!(f, "Неприменимый селектор правила {id}"),
             Self::Server(error) => error.fmt(f),
             Self::Unsupported(PolicyCapability::DnsContract) => f.write_str(
                 "Запрошенный DNS/Fake-IP контракт не поддерживается закреплённым адаптером",
@@ -481,6 +483,9 @@ fn validate_policy(
     mode: PolicyMode,
     tun_sources: bool,
 ) -> Result<(), PolicyCompileError> {
+    if let Some(id) = policy.unsupported_selector() {
+        return Err(PolicyCompileError::UnsupportedSelector(id));
+    }
     let mut selectors =
         policy.lan.len() + policy.private_networks.len() + policy.private_domains.len();
     if policy.user_rules.len() + policy.preset_rules.len() > 10000 {

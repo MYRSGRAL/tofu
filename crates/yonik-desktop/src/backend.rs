@@ -1255,6 +1255,7 @@ struct Actor {
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: Option<EncryptedSubscriptionRepository>,
+    format4_backup: Option<PathBuf>,
     routing_revision: Option<i64>,
     preferences: Preferences,
     preferences_store: Store,
@@ -1337,27 +1338,36 @@ impl Actor {
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
-        let revision = self
-            .routing_repository()
-            .save_routing_draft(expected, candidate.json().into_bytes())
-            .await
-            .map_err(|error| {
-                self.state.error_contexts.set_ack(
-                    Slot::RoutingAck,
-                    if error == yonik_linux::RepositoryError::Conflict {
-                        Cause::RoutingRepositoryConflict
-                    } else {
-                        Cause::RoutingRepositoryFailed
-                    },
-                    request_id,
-                    self.state.routing_generation,
-                );
-                DesktopError(if error == yonik_linux::RepositoryError::Conflict {
-                    "routing_stale"
+        let revision = if candidate.version == 2 {
+            self.routing_repository()
+                .save_routing_draft_v2(
+                    expected,
+                    candidate.json().into_bytes(),
+                    self.format4_backup.clone(),
+                )
+                .await
+        } else {
+            self.routing_repository()
+                .save_routing_draft(expected, candidate.json().into_bytes())
+                .await
+        }
+        .map_err(|error| {
+            self.state.error_contexts.set_ack(
+                Slot::RoutingAck,
+                if error == yonik_linux::RepositoryError::Conflict {
+                    Cause::RoutingRepositoryConflict
                 } else {
-                    "routing_storage"
-                })
-            })?;
+                    Cause::RoutingRepositoryFailed
+                },
+                request_id,
+                self.state.routing_generation,
+            );
+            DesktopError(if error == yonik_linux::RepositoryError::Conflict {
+                "routing_stale"
+            } else {
+                "routing_storage"
+            })
+        })?;
         self.routing_revision = Some(revision);
         self.state.routing_revision = Some(revision);
         self.state.routing_diagnostics = candidate.diagnostics();
@@ -2447,6 +2457,7 @@ mod settings_tests {
             event_log: yonik_linux::event_log::EventLog::new(),
             logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository: Some(routing_repository),
+            format4_backup: None,
             routing_revision: Some(0),
             preferences_store,
             preferences,
@@ -3373,6 +3384,7 @@ async fn run(
         event_log: yonik_linux::event_log::EventLog::new(),
         logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository: Some(routing_repository),
+        format4_backup: None,
         routing_revision: Some(0),
         preferences_store,
         preferences,
@@ -3926,6 +3938,7 @@ async fn run(
                     let owner = std::mem::replace(&mut scheduled, replacement);
                     let request_id = request.request_id;
                     let cancellation = yonik_linux::MaintenanceControl::default();
+                    let backup_destination = (request.operation == maintenance::Operation::Backup).then(|| request.destination.clone());
                     let mut job = tokio::spawn(maintenance_job::run(service, repository, owner, refreshing.take(), request, cancellation.clone(), origin.elapsed()));
                     actor.state.ready = false;
                     actor.state.busy = true;
@@ -3976,6 +3989,7 @@ async fn run(
                             actor.service = Some(service); actor.routing_repository = Some(repository); accept_maintenance_owner(&mut actor.state, &mut scheduled, owner);
                         }
                     }
+                    if result.is_ok() { actor.format4_backup = backup_destination; }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
                     if result.is_ok() && job_drained && envelope.generation == control.generation.load(Ordering::SeqCst) {
                         if let Some(path) = completed_backup { local_backup = Some(path); }
@@ -4282,6 +4296,9 @@ async fn run(
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
+                    Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage")),
+                    Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage")),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option")),
                     command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
                         let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
                         if let Err(error) = actor.check_routing_apply(&command).await { Err(error) }
@@ -4541,6 +4558,7 @@ mod routing_regressions {
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository: Some(routing_repository),
+                format4_backup: None,
                 routing_revision: Some(0),
                 preferences_store,
                 preferences,
@@ -4996,10 +5014,28 @@ mod inline_policy_conversion {
     use yonik_linux::system_client::ClientError;
 
     use serde::Serialize;
-    use yonik_domain::{Action, DomainPattern, Policy, Rule};
+    use yonik_domain::{Action, DomainPattern, PlatformSource, Policy, Rule};
     use yonik_engine::policy_wire::SystemPolicy;
     use yonik_linux::system_policy::InlinePolicy;
     pub(crate) fn inline_policy(policy: &Policy) -> Result<InlinePolicy, ClientError> {
+        if policy.unsupported_selector().is_some() {
+            return Err(ClientError::Unsupported);
+        }
+        let version = if policy
+            .user_rules
+            .iter()
+            .chain(&policy.preset_rules)
+            .any(|rule| !rule.conditions.platform_sources.is_empty())
+        {
+            2
+        } else {
+            1
+        };
+        #[derive(Serialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum WireSource<'a> {
+            AndroidPackage { package: &'a str },
+        }
         #[derive(Serialize)]
         struct WireRule<'a> {
             id: u64,
@@ -5009,6 +5045,8 @@ mod inline_policy_conversion {
             domain_suffix: Vec<&'a str>,
             ip_cidr: Vec<String>,
             executable_paths: &'a [String],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            platform_sources: Option<Vec<WireSource<'a>>>,
         }
         fn action(value: Action) -> &'static str {
             match value {
@@ -5017,7 +5055,7 @@ mod inline_policy_conversion {
                 Action::Block => "block",
             }
         }
-        fn rule(value: &Rule) -> WireRule<'_> {
+        fn rule(value: &Rule, version: u32) -> WireRule<'_> {
             let mut domain = Vec::new();
             let mut domain_suffix = Vec::new();
             for pattern in &value.conditions.domains {
@@ -5039,6 +5077,20 @@ mod inline_policy_conversion {
                     .map(ToString::to_string)
                     .collect(),
                 executable_paths: &value.conditions.executables,
+                platform_sources: (version == 2).then(|| {
+                    value
+                        .conditions
+                        .platform_sources
+                        .iter()
+                        .map(|source| match source {
+                            PlatformSource::AndroidPackage { package } => {
+                                WireSource::AndroidPackage {
+                                    package: package.as_str(),
+                                }
+                            }
+                        })
+                        .collect()
+                }),
             }
         }
         #[derive(Serialize)]
@@ -5072,10 +5124,18 @@ mod inline_policy_conversion {
             return Err(ClientError::Unsupported);
         }
         let wire = Wire {
-            version: 1,
+            version,
             default_action: action(policy.default_action),
-            user_rules: policy.user_rules.iter().map(rule).collect(),
-            preset_rules: policy.preset_rules.iter().map(rule).collect(),
+            user_rules: policy
+                .user_rules
+                .iter()
+                .map(|value| rule(value, version))
+                .collect(),
+            preset_rules: policy
+                .preset_rules
+                .iter()
+                .map(|value| rule(value, version))
+                .collect(),
             lan: policy.lan.iter().map(ToString::to_string).collect(),
             private_networks: policy
                 .private_networks
@@ -5114,6 +5174,7 @@ mod inline_policy_conversion {
                     enabled: true,
                     action: Action::Block,
                     conditions: Conditions {
+                        platform_sources: Vec::new(),
                         executables: vec!["/usr/bin/browser".into()],
                         destinations: vec!["192.0.2.0/24".parse().unwrap()],
                         domains: vec![DomainPattern::Suffix("example.org".parse().unwrap())],
@@ -5122,6 +5183,9 @@ mod inline_policy_conversion {
                 ..Policy::default()
             };
             let wire = inline_policy(&policy).unwrap();
+            let json = serde_json::to_value(wire.policy()).unwrap();
+            assert_eq!(json["version"], 1);
+            assert!(json["user_rules"][0].get("platform_sources").is_none());
             let restored = wire.policy().policy();
             assert_eq!(restored.user_rules[0].id, 7);
             assert_eq!(restored.user_rules[0].action, Action::Block);
@@ -5154,9 +5218,78 @@ mod inline_policy_conversion {
             ));
         }
         #[test]
+        fn неприменимый_selector_не_теряется_перед_apply() {
+            for preset in [false, true] {
+                let rule = Rule {
+                    id: 41,
+                    enabled: true,
+                    action: Action::Proxy,
+                    conditions: Conditions {
+                        platform_sources: vec![yonik_domain::PlatformSource::AndroidPackage {
+                            package: yonik_domain::AndroidPackageId::parse("org.example.app")
+                                .unwrap(),
+                        }],
+                        domains: vec![DomainPattern::Suffix("example.org".parse().unwrap())],
+                        ..Conditions::default()
+                    },
+                };
+                let mut policy = Policy::default();
+                if preset {
+                    policy.preset_rules.push(rule);
+                } else {
+                    policy.user_rules.push(rule);
+                }
+                assert!(matches!(
+                    inline_policy(&policy),
+                    Err(ClientError::Unsupported)
+                ));
+            }
+        }
+
+        #[test]
+        fn disabled_selector_сохраняется_в_inline_v2() {
+            for preset in [false, true] {
+                let rule = Rule {
+                    id: 41,
+                    enabled: false,
+                    action: Action::Proxy,
+                    conditions: Conditions {
+                        platform_sources: vec![yonik_domain::PlatformSource::AndroidPackage {
+                            package: yonik_domain::AndroidPackageId::parse("org.example.app")
+                                .unwrap(),
+                        }],
+                        ..Conditions::default()
+                    },
+                };
+                let mut policy = Policy::default();
+                if preset {
+                    policy.preset_rules.push(rule);
+                } else {
+                    policy.user_rules.push(rule);
+                }
+                let wire = inline_policy(&policy).unwrap();
+                let restored = wire.policy().policy();
+                let (before, after) = if preset {
+                    (&policy.preset_rules, &restored.preset_rules)
+                } else {
+                    (&policy.user_rules, &restored.user_rules)
+                };
+                assert_eq!(
+                    after[0].conditions.platform_sources,
+                    before[0].conditions.platform_sources
+                );
+                assert!(!after[0].enabled);
+                let json = serde_json::to_value(wire.policy()).unwrap();
+                assert_eq!(json["version"], 2);
+            }
+            let wire = inline_policy(&Policy::default()).unwrap();
+            assert_eq!(serde_json::to_value(wire.policy()).unwrap()["version"], 1);
+        }
+
+        #[test]
         fn не_обрезает_превышение_бюджета() {
-            let policy = Policy {
-                user_rules: (1..=129)
+            let mut policy = Policy {
+                user_rules: (1..=257)
                     .map(|id| Rule {
                         id,
                         enabled: true,
@@ -5170,6 +5303,8 @@ mod inline_policy_conversion {
                 inline_policy(&policy),
                 Err(ClientError::InvalidRequest)
             ));
+            policy.user_rules.pop();
+            assert!(inline_policy(&policy).is_ok());
         }
     }
 }

@@ -20,8 +20,8 @@ mod bridge_impl {
 
     static CONFIG: OnceLock<HostConfig> = OnceLock::new();
 
-    pub fn configure(config: HostConfig) -> Result<(), HostConfig> {
-        CONFIG.set(config)
+    pub fn configure(config: HostConfig) -> Result<(), Box<HostConfig>> {
+        CONFIG.set(config).map_err(Box::new)
     }
 
     pub struct DesktopBridgeRust {
