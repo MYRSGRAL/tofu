@@ -46,6 +46,10 @@ fn startup_failure_rejects_each_maintenance_request_with_matching_ack() {
         assert_eq!(state["maintenance_ack"]["request_id"], request_id);
         assert_eq!(state["maintenance_ack"]["phase"], "failed");
         assert_eq!(state["maintenance_ack"]["error"], "startup");
+        super::maintenance_job::assert_admission_context(
+            &state,
+            "maintenance_admission_unsupported",
+        );
     }
     host.shutdown();
     assert!(host.wait_closed(Duration::from_secs(5)));
@@ -98,7 +102,13 @@ fn unavailable_presets_keep_matching_ack() {
             },
             Command::PresetRollback { request_id: 73 },
         ] {
-            super::reject_unavailable_command(&mut state, &command, error);
+            super::reject_unavailable_command(
+                &mut state,
+                &command,
+                error,
+                super::Cause::MaintenanceAdmissionBusy,
+                7,
+            );
             let ack = state.presets.ack.as_ref().expect("matching ACK");
             assert_eq!(Some(ack.request_id), command.preset_request_id());
             assert_eq!(ack.error, Some(error));

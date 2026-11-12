@@ -895,3 +895,100 @@ fn persisted_интервал_больше_суток_и_граница() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn отмена_сохраняет_ошибку_допуска_до_ack() {
+    let (_dir, service) = service().await;
+    let id = source(&service, "socks5://127.0.0.1:1080#drain").await;
+    let token = service.schedule_metadata(id).await.unwrap().unwrap();
+    let mut runtime = runtime();
+    runtime
+        .schedule(id, token.generation, Duration::ZERO)
+        .unwrap();
+    let calls = Arc::new(AtomicU64::new(0));
+    runtime
+        .dispatch(
+            Duration::ZERO,
+            policy(),
+            &service,
+            Arc::new(CountingHost(calls.clone())),
+        )
+        .unwrap();
+    let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(_dir.0.join("db")).status().unwrap();
+    assert!(status.success());
+    runtime.cancel(id, Duration::ZERO).unwrap();
+    let event = tokio::time::timeout(
+        Duration::from_secs(2),
+        runtime.next_event(|| Duration::ZERO),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+    assert!(
+        matches!(
+            event,
+            SubscriptionScheduleEvent::AdmissionFailed {
+                error: SubscriptionError::Repository(_),
+                ..
+            }
+        ),
+        "Ошибка допуска потеряна: {event:?}"
+    );
+    assert!(!runtime.cancellation_pending(id));
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn отмена_старого_generation_не_публикует_ошибку_допуска() {
+    let (_dir, service) = service().await;
+    let id = source(&service, "socks5://127.0.0.1:1080#obsolete").await;
+    let token = service.schedule_metadata(id).await.unwrap().unwrap();
+    let mut runtime = runtime();
+    runtime
+        .schedule(id, token.generation, Duration::ZERO)
+        .unwrap();
+    let calls = Arc::new(AtomicU64::new(0));
+    runtime
+        .dispatch(
+            Duration::ZERO,
+            policy(),
+            &service,
+            Arc::new(CountingHost(calls.clone())),
+        )
+        .unwrap();
+    service
+        .change_source(
+            id,
+            token.generation,
+            SubscriptionSource::new(
+                "Новый".into(),
+                "http://127.0.0.1:9/new".into(),
+                true,
+                FetchRoute::Direct,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let failures = tokio::time::timeout(
+        Duration::from_secs(2),
+        runtime.shutdown_report(Duration::ZERO),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        failures.is_empty(),
+        "Устаревшая работа не является ошибкой нового поколения"
+    );
+    assert!(!runtime.cancellation_pending(id));
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert!(
+        runtime
+            .next_event(|| Duration::ZERO)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

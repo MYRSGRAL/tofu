@@ -244,6 +244,45 @@ where
 }
 
 #[cfg(test)]
+pub(super) fn assert_admission_context(state: &serde_json::Value, reason: &str) {
+    let raw = state.to_string();
+    if let Some(directory) = std::env::var_os("YONIK_MAINTENANCE_EVIDENCE") {
+        std::fs::write(
+            PathBuf::from(directory).join(format!("{reason}.json")),
+            &raw,
+        )
+        .expect("evidence");
+    }
+
+    let exported = crate::diagnostics::export_snapshot_v2(&raw).expect("actual admission V2");
+    let metadata: serde_json::Value = serde_json::from_str(&exported).expect("JSON");
+    let context = metadata["errors"]
+        .as_array()
+        .expect("errors")
+        .iter()
+        .find(|item| item["slot"] == "maintenance_ack")
+        .expect("matching ACK context");
+    assert_eq!(context["reason"], reason);
+    assert_eq!(context["stage"], "maintenance_admission");
+    assert_eq!(context["params"], serde_json::json!({}));
+    assert_eq!(
+        context["request_id"],
+        state["maintenance_ack"]["request_id"].to_string()
+    );
+    let index = state["error_contexts"]
+        .as_array()
+        .expect("contexts")
+        .iter()
+        .position(|item| item["slot"] == "maintenance_ack")
+        .expect("maintenance context");
+    for field in ["request_id", "generation", "slot"] {
+        let mut invalid = state.clone();
+        invalid["error_contexts"][index][field] = serde_json::json!("999999");
+        assert!(crate::diagnostics::export_snapshot_v2(&invalid.to_string()).is_none());
+    }
+}
+
+#[cfg(test)]
 type TestGate = (PathBuf, Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>);
 #[cfg(test)]
 static TEST_GATE: Mutex<Option<TestGate>> = Mutex::new(None);
@@ -310,6 +349,7 @@ mod tests {
                 .recv_timeout(Duration::from_secs(5))
                 .expect("busy ACK");
             if state["maintenance_ack"]["request_id"] == 2 {
+                assert_admission_context(&state, "maintenance_admission_draining");
                 break;
             }
         }
@@ -448,6 +488,7 @@ mod tests {
             assert_eq!(state["maintenance_ack"]["request_id"], id);
             assert_eq!(state["maintenance_ack"]["phase"], "failed");
             assert_eq!(state["maintenance_ack"]["error"], "busy");
+            assert_admission_context(&state, "maintenance_admission_reopen_unavailable");
         }
         assert!(!host.wait_closed(Duration::from_millis(20)));
         host.shutdown();
