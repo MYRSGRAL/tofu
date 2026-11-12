@@ -85,6 +85,7 @@ fn main() {
                 .qml_file("qml/MaintenanceView.qml")
                 .qml_file("qml/DiagnosticsExport.qml")
                 .qml_file("qml/LogsView.qml")
+                .qml_file("qml/PresetPanel.qml")
                 .qml_file("qml/NoticesView.qml"),
         )
         .file("src/bridge.rs")

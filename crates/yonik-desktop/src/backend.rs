@@ -9,6 +9,8 @@ mod batch_diagnostics;
 mod desktop_schedule;
 #[path = "logs.rs"]
 mod logs;
+#[path = "presets.rs"]
+mod presets;
 use crate::maintenance;
 use backend_startup::StartupObserver;
 pub use backend_startup::StartupPhase;
@@ -144,6 +146,34 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
+    PresetValidate {
+        request_id: u64,
+        expected_revision: i64,
+    },
+    PresetUpdate {
+        metadata: yonik_linux::presets::Metadata,
+        route: Route,
+        local_exception: bool,
+        request_id: u64,
+    },
+    PresetCancel {
+        request_id: u64,
+    },
+    PresetActivate {
+        enabled: bool,
+        expected_revision: i64,
+        request_id: u64,
+    },
+    PresetStatus,
+    PresetRollback {
+        #[serde(default)]
+        request_id: u64,
+    },
+    PresetPrepare {
+        target: String,
+        #[serde(default)]
+        request_id: u64,
+    },
     MaintenanceStart {
         request_id: u64,
         operation: maintenance::Operation,
@@ -318,6 +348,17 @@ enum Command {
     Shutdown,
 }
 impl Command {
+    fn preset_request_id(&self) -> Option<u64> {
+        match self {
+            Self::PresetPrepare { request_id, .. }
+            | Self::PresetCancel { request_id }
+            | Self::PresetRollback { request_id }
+            | Self::PresetUpdate { request_id, .. }
+            | Self::PresetValidate { request_id, .. }
+            | Self::PresetActivate { request_id, .. } => Some(*request_id),
+            _ => None,
+        }
+    }
     fn routing_request_id(&self) -> Option<u64> {
         match self {
             Self::RoutingApply { request_id, .. }
@@ -328,6 +369,25 @@ impl Command {
             | Self::RoutingDelete { request_id, .. } => Some(*request_id),
             _ => None,
         }
+    }
+    fn cancels_policy_connect(&self) -> bool {
+        matches!(
+            self,
+            Self::EditRouting { .. }
+                | Self::RoutingOrder { .. }
+                | Self::RoutingDefault { .. }
+                | Self::RoutingDelete { .. }
+                | Self::SelectProfile { .. }
+                | Self::SelectSource { .. }
+                | Self::Refresh
+                | Self::Reload
+                | Self::ApproveRefresh
+                | Self::SetSourceHwid { .. }
+                | Self::DeleteSource { .. }
+                | Self::SourceChange { .. }
+                | Self::PresetActivate { .. }
+                | Self::PresetRollback { .. }
+        )
     }
     fn is_source_operation(&self) -> bool {
         matches!(
@@ -573,6 +633,12 @@ impl Drop for DesktopHost {
 }
 
 fn validate(command: &Command) -> Result<()> {
+    if command
+        .preset_request_id()
+        .is_some_and(|request_id| request_id > 9_007_199_254_740_991)
+    {
+        return Err(DesktopError("invalid_input"));
+    }
     let text = |s: &str, max| s.len() <= max && !s.chars().any(char::is_control);
     let valid = match command {
         Command::MaintenanceStart {
@@ -595,7 +661,11 @@ fn validate(command: &Command) -> Result<()> {
                     _ => false,
                 }
         }
-        Command::MaintenanceCancel { request_id } => {
+        Command::PresetUpdate { request_id, .. }
+        | Command::PresetActivate { request_id, .. }
+        | Command::PresetValidate { request_id, .. }
+        | Command::PresetCancel { request_id }
+        | Command::MaintenanceCancel { request_id } => {
             *request_id > 0 && *request_id <= 9_007_199_254_740_991
         }
         Command::AddSource { name, url, .. } | Command::ImportSource { name, url, .. } => {
@@ -776,6 +846,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    presets: presets::Status,
     maintenance_available: bool,
     maintenance_ack: Option<maintenance::Ack>,
     #[serde(skip)]
@@ -859,6 +930,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            presets: presets::Status::default(),
             maintenance_available: false,
             maintenance_ack: None,
             logs: logs::Page::default(),
@@ -1212,6 +1284,7 @@ async fn open(
 }
 
 struct Actor {
+    presets: Option<Arc<presets::Controller>>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
     routing_repository: Option<EncryptedSubscriptionRepository>,
@@ -1229,6 +1302,39 @@ struct Actor {
     network: Option<NetworkWatch>,
 }
 impl Actor {
+    fn preset_scope(&self) -> Option<presets::ValidationScope> {
+        self.state
+            .routing_revision
+            .map(|routing_revision| presets::ValidationScope {
+                routing_revision,
+                profile: self.state.selected_profile,
+                source_revision: self.state.revision,
+                engine: match self.state.engine {
+                    EngineChoice::Xray => "xray",
+                    EngineChoice::SingBox => "sing-box",
+                },
+                port: self.state.port,
+            })
+    }
+    fn invalidate_preset(&mut self) {
+        self.state.presets.prepared = false;
+        self.state.presets.host_validated = false;
+        self.state.presets.validation_scope = None;
+        self.state.presets.compiler_error = None;
+        self.state.presets.decision = None;
+    }
+    fn preset_policy(&self, draft: &crate::editor::Draft) -> Result<yonik_domain::Policy> {
+        let base = draft.base_policy().map_err(DesktopError)?;
+        match &draft.ru_direct {
+            Some(reference) if reference.enabled => self
+                .presets
+                .as_ref()
+                .ok_or(DesktopError("storage"))?
+                .resolve(reference, base)
+                .map_err(|_| DesktopError("storage")),
+            _ => Ok(base),
+        }
+    }
     // Внешний цикл и методы Actor работают только online. Supervisor полностью
     // перехватывает dispatch между take slots и возвратом handles после join.
     fn service(&self) -> &SubscriptionService {
@@ -1294,7 +1400,8 @@ impl Actor {
         candidate: crate::editor::Draft,
         request_id: u64,
     ) -> Result<()> {
-        candidate.policy().map_err(DesktopError)?;
+        self.invalidate_preset();
+        self.preset_policy(&candidate)?;
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
@@ -1342,6 +1449,7 @@ impl Actor {
         request_id: u64,
         mutation: RoutingMutation,
     ) -> Result<()> {
+        self.invalidate_preset();
         self.state.error_contexts.clear(Slot::RoutingAck);
         let mut routing_cause = None;
         let saved_id = match &mutation {
@@ -1542,6 +1650,18 @@ impl Actor {
         );
     }
     fn emit(&mut self) {
+        if self.state.presets.stopping
+            && matches!(self.state.status, "Disconnected" | "NoManagedPolicy")
+        {
+            self.state.status = "Stopping";
+            self.state.can_stop = true;
+        }
+        if self.state.presets.host_validated
+            && self.state.presets.validation_scope != self.preset_scope()
+        {
+            self.state.presets.host_validated = false;
+            self.state.presets.validation_scope = None;
+        }
         self.state.can_connect = self.state.ready
             && self.selected.is_some()
             && !self.state.can_stop
@@ -1647,6 +1767,157 @@ impl Actor {
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
+            Command::PresetActivate {
+                enabled,
+                expected_revision,
+                request_id,
+            } => {
+                self.invalidate_preset();
+                let outcome = async {
+                    if request_id == 0 || request_id > 9_007_199_254_740_991 {
+                        return Err(DesktopError("invalid_input"));
+                    }
+                    if self.routing_revision != Some(expected_revision) {
+                        return Err(DesktopError("routing_stale"));
+                    }
+                    let mut candidate = self.state.routing.clone();
+                    if enabled {
+                        let snapshot = self
+                            .presets
+                            .as_ref()
+                            .ok_or(DesktopError("storage"))?
+                            .reference()
+                            .map_err(|_| DesktopError("storage"))?;
+                        candidate.ru_direct =
+                            Some(crate::editor::PresetReference { snapshot, enabled });
+                    } else if let Some(reference) = &mut candidate.ru_direct {
+                        reference.enabled = false;
+                    }
+                    self.save_routing(candidate, request_id).await
+                }
+                .await;
+                self.state.presets.ack = Some(presets::Ack {
+                    request_id,
+                    error: outcome.as_ref().err().map(|e| e.key()),
+                });
+                outcome
+            }
+            Command::PresetStatus
+            | Command::PresetRollback { .. }
+            | Command::PresetPrepare { .. } => {
+                let request_id = command.preset_request_id().unwrap_or(0);
+                self.invalidate_preset();
+                self.state.presets.operation_error = None;
+                let Some(controller) = self.presets.as_ref() else {
+                    self.state.presets.operation_error = Some("storage");
+                    self.state.presets.ack = Some(presets::Ack {
+                        request_id,
+                        error: Some("storage"),
+                    });
+                    return if request_id > 0 {
+                        Ok(())
+                    } else {
+                        Err(DesktopError("storage"))
+                    };
+                };
+                let result = match command {
+                    Command::PresetRollback { .. } => controller.rollback(),
+                    Command::PresetPrepare { target, .. } => {
+                        let ip = target.parse::<std::net::IpAddr>();
+                        let name = target.parse::<yonik_domain::DomainName>();
+                        if ip.is_err() && name.is_err() {
+                            self.state.presets.operation_error = Some("invalid_ip");
+                            self.state.presets.ack = Some(presets::Ack {
+                                request_id,
+                                error: Some("invalid_ip"),
+                            });
+                            return if request_id > 0 {
+                                Ok(())
+                            } else {
+                                Err(DesktopError("invalid_input"))
+                            };
+                        }
+                        let base = self.state.routing.base_policy().map_err(DesktopError)?;
+                        let policy = match &self.state.routing.ru_direct {
+                            Some(reference) => controller.resolve(reference, base),
+                            None => controller.prepare(base),
+                        };
+                        policy.map(|policy| {
+                            let mut status = controller.status();
+                            status.prepared = true;
+                            if policy
+                                .user_rules
+                                .iter()
+                                .chain(&policy.preset_rules)
+                                .any(|rule| rule.enabled && !rule.conditions.executables.is_empty())
+                            {
+                                status.decision = Some("Application witness required".into());
+                                return status;
+                            }
+                            use yonik_domain::{
+                                Destination, DestinationFlow, Evaluation, EvaluationContext,
+                                Resolution,
+                            };
+                            let destination = match (&ip, &name) {
+                                (Ok(address), _) => Destination::Ip {
+                                    address: *address,
+                                    name: None,
+                                },
+                                (_, Ok(name)) => Destination::Name {
+                                    name,
+                                    resolution: Resolution::Missing,
+                                },
+                                _ => return status,
+                            };
+                            status.decision = Some(
+                                match policy.evaluate_destination(
+                                    &DestinationFlow {
+                                        executable: None,
+                                        destination,
+                                    },
+                                    &EvaluationContext::default(),
+                                ) {
+                                    Evaluation::Decided { decision, .. } => {
+                                        format!("{:?} · {:?}", decision.action, decision.origin)
+                                    }
+                                    Evaluation::NeedResolution(_) => "DNS witness required".into(),
+                                    Evaluation::Rejected(_) => "Evaluation rejected".into(),
+                                },
+                            );
+                            status
+                        })
+                    }
+                    _ => Ok(controller.status()),
+                };
+                match result {
+                    Ok(status) => {
+                        self.state.presets = status;
+                        if request_id > 0 {
+                            self.state.presets.ack = Some(presets::Ack {
+                                request_id,
+                                error: None,
+                            });
+                        }
+                        Ok(())
+                    }
+                    Err(error) => {
+                        self.state.presets = controller.status();
+                        self.state.presets.operation_error = Some(presets::store_error(error));
+                        self.state.presets.ack = Some(presets::Ack {
+                            request_id,
+                            error: Some(presets::store_error(error)),
+                        });
+                        if request_id > 0 {
+                            return Ok(());
+                        }
+                        Err(DesktopError(match error {
+                            yonik_linux::presets::Error::Busy => "busy",
+                            _ => "storage",
+                        }))
+                    }
+                }
+            }
+
             Command::MaintenanceStart {
                 request_id,
                 operation,
@@ -1731,7 +2002,12 @@ impl Actor {
                 target,
             } => {
                 let result = if self.routing_revision == Some(expected_revision) {
-                    self.state.routing.explain(&target).map_err(DesktopError)
+                    self.preset_policy(&self.state.routing).and_then(|policy| {
+                        self.state
+                            .routing
+                            .explain_with_policy(&target, policy)
+                            .map_err(DesktopError)
+                    })
                 } else {
                     Err(DesktopError("routing_stale"))
                 };
@@ -2414,6 +2690,9 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
+                .ok()
+                .map(Arc::new),
             event_log: yonik_linux::event_log::EventLog::new(),
             logs_save: crate::backend::logs::SaveJob::default(),
             routing_repository: Some(routing_repository),
@@ -3178,6 +3457,12 @@ fn reject_unavailable_command(
     generation: u64,
 ) {
     state.maintenance_available = false;
+    if let Some(request_id) = command.preset_request_id() {
+        state.presets.ack = Some(presets::Ack {
+            request_id,
+            error: Some(error),
+        });
+    }
     if let Command::SourceChange { request_id, id, .. } = command {
         state.source_change_ack = Some(SourceChangeAck {
             request_id: *request_id,
@@ -3341,6 +3626,9 @@ async fn run(
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
     let mut actor = Actor {
+        presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
+            .ok()
+            .map(Arc::new),
         event_log: yonik_linux::event_log::EventLog::new(),
         logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository: Some(routing_repository),
@@ -3357,6 +3645,9 @@ async fn run(
         probe_url,
         network: network.clone(),
     };
+    if let Some(controller) = &actor.presets {
+        actor.state.presets = controller.status();
+    }
     match actor.routing_repository().routing_draft().await {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
@@ -3402,6 +3693,9 @@ async fn run(
     let mut refreshing: Option<RefreshTask> = None;
     let mut batch_running: Option<BatchRunning> = None;
     let mut tcp_running: Option<TcpRunning> = None;
+    let mut preset_job: Option<presets::Job> = None;
+    let mut preset_stopping = false;
+    let mut preset_validation: Option<presets::ValidationScope> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
     let mut quitting = false;
     let (system_policy_sender, mut system_policy) = watch::channel(Default::default());
@@ -3547,6 +3841,7 @@ async fn run(
                     actor.state.status = "Unknown";
                     if let Some(flight) = &system_flight { flight.cancel.send_replace(true); }
                 }
+                if let Some(job) = &preset_job { preset_stopping = true; actor.state.presets.stopping = true; job.stop(); }
                 proxy_session.send_replace(None);
                 let action = *priority.borrow_and_update();
                 quitting |= action.shutdown;
@@ -3577,10 +3872,10 @@ async fn run(
                 if let Some(mut session) = failed_session.take() {
                     if session.stop().await.is_err() { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 }
-                if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() {
+                if actor.state.connection_mode == ConnectionMode::Local && running.is_none() && failed_session.is_none() && preset_job.is_none() {
                     actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None;
                 }
-                if actor.state.connection_mode == ConnectionMode::Local { actor.state.status = if running.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" }; }
+                if actor.state.connection_mode == ConnectionMode::Local { actor.state.status = if running.is_some() || preset_job.is_some() { "Stopping" } else if failed_session.is_some() { "CleanupError" } else { "Disconnected" }; }
                 actor.emit();
             }
             result = async { match system_flight.as_mut() {
@@ -3797,9 +4092,10 @@ async fn run(
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
                 running = None;
                 if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
-                if failed_session.is_none() { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
+                if failed_session.is_none() && !preset_stopping { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
                 // Финальный event может ожидать в канале; сначала применяем его.
                 while let Ok(update) = events.try_recv() { actor.update(update); }
+                if preset_stopping { actor.state.status = "Stopping"; actor.state.can_stop = true; }
                 actor.emit();
             }
             result = async { (&mut refreshing.as_mut().expect("guard").2).await }, if refreshing.is_some() => {
@@ -3816,6 +4112,31 @@ async fn run(
                 }
                 actor.emit();
             }
+            mut ack = async { match preset_job.as_mut() {
+                Some(job) => job.complete().await,
+                None => std::future::pending().await,
+            } } => {
+                preset_job = None;
+                preset_stopping = false;
+                if actor.state.status == "Stopping" && running.is_none() && failed_session.is_none() && actor.state.connection_mode == ConnectionMode::Local {
+                    actor.state.status = "Disconnected";
+                    actor.state.can_stop = false;
+                }
+                if actor.state.connection_mode == ConnectionMode::System && actor.state.status == "Stopping" && system_flight.is_none() {
+                    actor.state.status = actor.state.system_state;
+                    actor.state.can_stop = system_active || system_stop;
+                }
+                if let Some(controller) = &actor.presets {
+                    actor.state.presets = controller.status();
+                }
+                if let Some(scope) = preset_validation.take() {
+                    if actor.preset_scope() != Some(scope) { ack.error = Some("routing_stale"); }
+                    actor.state.presets.host_validated = ack.error.is_none();
+                    if ack.error.is_none() { actor.state.presets.validation_scope = Some(scope); }
+                }
+                actor.state.presets.ack = Some(ack);
+                actor.emit();
+            }
             completion = actor.logs_save.complete(), if actor.logs_save.active() => {
                 if let Some((request_id, status)) = completion {
                     if actor.state.logs.request_id == request_id && actor.state.logs.status == "saving" {
@@ -3826,11 +4147,17 @@ async fn run(
                 }
             }
             Some(update) = events.recv() => {
-                actor.update(update); actor.emit();
+                actor.update(update);
+                if preset_stopping { actor.state.status = "Stopping"; actor.state.can_stop = true; }
+                actor.emit();
             }
             command = commands.recv(), if !quitting => {
                 let Some(envelope) = command else { control.interrupt(true); continue; };
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Some(request_id) = envelope.command.preset_request_id() {
+                        actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("cancelled") });
+                        actor.emit();
+                    }
                     if let Command::SourceChange { request_id, id, .. } = &envelope.command {
                         actor.state.source_change_ack = Some(SourceChangeAck { request_id: *request_id, id: *id, generation: None, error: Some("cancelled") });
                         actor.emit();
@@ -3852,7 +4179,7 @@ async fn run(
                 if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
                     let live = config.data_dir.join("subscriptions.sqlite");
-                    if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
+                    if !actor.state.maintenance_available || preset_job.is_some() || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
                         let cause = if actor.state.maintenance_available { Cause::MaintenanceAdmissionBusy } else { Cause::MaintenanceAdmissionUnavailable }; maintenance_refusal(&mut actor.state, request.request_id, cause, envelope.generation);
                         actor.emit(); continue;
                     }
@@ -3953,7 +4280,7 @@ async fn run(
                 }
                 let apply_request = match &envelope.command { Command::RoutingApply { request_id, .. } => Some(*request_id), _ => None };
                 // Отмена до первого await редактирования исключает отправку Apply после принятия edit.
-                if matches!(&envelope.command, Command::EditRouting { .. } | Command::RoutingOrder { .. } | Command::RoutingDefault { .. } | Command::RoutingDelete { .. } | Command::SelectProfile { .. } | Command::SelectSource { .. } | Command::Refresh | Command::Reload | Command::ApproveRefresh | Command::SetSourceHwid { .. } | Command::DeleteSource { .. }) {
+                if envelope.command.cancels_policy_connect() {
                     if let Some(flight) = system_flight.as_ref().filter(|f| f.connecting) {
                         flight.cancel.send_replace(true);
                         system_stop = true;
@@ -4132,6 +4459,50 @@ async fn run(
                             }
                         }
                     }
+                    Command::PresetValidate { request_id, expected_revision } => {
+                        actor.invalidate_preset();
+                        if preset_job.is_some() {
+                            actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("busy") });
+                        } else if actor.state.routing_revision != Some(expected_revision) {
+                            actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("routing_stale") });
+                        } else if let (Some(controller), Some(profile), Some(port), Some(probe)) = (&actor.presets, &actor.selected, NonZeroU16::new(actor.state.port), actor.state.port.checked_add(1).and_then(NonZeroU16::new)) {
+                            match controller.compile(&actor.state.routing, &profile.server, actor.state.engine.engine(), port, probe) {
+                                Ok(compiled) => {
+                                    preset_job = Some(presets::Job::validate(compiled, config.engine_dir.clone(), request_id));
+                                    preset_validation = actor.preset_scope();
+                                    actor.state.presets.busy = true; actor.state.presets.active_request_id = Some(request_id);
+                                    actor.state.presets.ack = None;
+                                },
+                                Err(error) => {
+                                    actor.state.presets.compiler_error = Some(error);
+                                    actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("engine_config") });
+                                },
+                            }
+                        } else { actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("profile_required") }); }
+                        Ok(())
+                    }
+                    Command::PresetUpdate { metadata, route, local_exception, request_id } => {
+                        if preset_job.is_some() {
+                            actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("busy") });
+                            Ok(())
+                        } else if let Some(controller) = &actor.presets {
+                            match presets::Job::start(controller.clone(), DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns), metadata,
+                                match route { Route::Direct => FetchRoute::Direct, Route::Proxy => FetchRoute::Proxy }, local_exception, request_id) {
+                                Ok(job) => { actor.invalidate_preset(); preset_job = Some(job); actor.state.presets.busy = true; actor.state.presets.active_request_id = Some(request_id); actor.state.presets.ack = None; Ok(()) },
+                                Err(error) => { actor.state.presets.ack = Some(presets::Ack { request_id, error: Some(error) }); Ok(()) },
+                            }
+                        } else {
+                            actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("storage") });
+                            actor.state.presets.operation_error = Some("storage");
+                            Ok(())
+                        }
+                    }
+                    Command::PresetCancel { request_id } => {
+                        if let Some(job) = &preset_job {
+                            if job.request_id == request_id { job.stop(); }
+                        }
+                        Ok(())
+                    }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy")) }
                         else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
@@ -4200,6 +4571,10 @@ async fn run(
                             }
                         } else { Err(DesktopError("profile_required")) }
                     }
+                    Command::PresetActivate { request_id, .. } | Command::PresetPrepare { request_id, .. } | Command::PresetRollback { request_id } if preset_job.is_some() => {
+                        actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("busy") }); Ok(())
+                    }
+                    Command::PresetStatus if preset_job.is_some() => Err(DesktopError("busy")),
                     command => {
                         if refreshing.is_some() && matches!(command, Command::SelectSource { .. } | Command::AddSource { .. } | Command::ApproveRefresh | Command::RenameSource { .. } | Command::DeleteSource { .. }) {
                             Err(DesktopError("busy"))
@@ -4312,6 +4687,7 @@ async fn run(
             actor.emit();
         }
         if quitting
+            && preset_job.is_none()
             && !actor.logs_save.active()
             && system_flight.is_none()
             && !system_stop
@@ -4410,6 +4786,7 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
                 routing_repository: Some(routing_repository),
@@ -4437,6 +4814,339 @@ mod routing_regressions {
     }
     fn put(id: u64, revision: i64, request: u64, create: bool) -> serde_json::Value {
         serde_json::json!({"command":"edit_routing","expected_revision":revision,"request_id":request,"create":create,"confirm_broad":false,"rule":{"id":id,"enabled":true,"executables":[],"domains":["example.org"],"destinations":[],"action":"proxy"}})
+    }
+    fn seed_preset(actor: &mut Actor, path: &std::path::Path) {
+        let directory = path.join("presets");
+        let store = yonik_linux::presets::Store::open(&directory).expect("store");
+        let resource = |sha256: &str| yonik_linux::presets::Resource {
+            url: "https://example.org/list".into(),
+            revision: "v1".into(),
+            sha256: sha256.into(),
+        };
+        store
+            .install(
+                yonik_linux::presets::Metadata {
+                    source_id: "fixture".into(),
+                    version: "v1".into(),
+                    format: "plain-domain-cidr-v1".into(),
+                    checked_at_unix: 1,
+                    enabled: false,
+                    domains: resource(
+                        "04e512879df7acb18392404d982a1b179e94c20b53ee03b75538624863d89e96",
+                    ),
+                    ips: resource(
+                        "1056040935d29c506274717d77a7388683810fd7ae430176f81a59de1270c994",
+                    ),
+                },
+                b"example.org\n".to_vec(),
+                b"0.0.0.0/0\n".to_vec(),
+            )
+            .expect("install");
+        actor.presets = Some(Arc::new(
+            super::presets::Controller::open(&directory).expect("controller"),
+        ));
+    }
+    #[tokio::test]
+    async fn preset_host_scope_is_invalidated_by_engine_or_port_change() {
+        let (mut actor, lock, path) = fixture().await;
+        actor.state.presets.host_validated = true;
+        actor.state.presets.validation_scope = actor.preset_scope();
+        actor.state.engine = match actor.state.engine {
+            EngineChoice::Xray => EngineChoice::SingBox,
+            EngineChoice::SingBox => EngineChoice::Xray,
+        };
+        actor.emit();
+        assert!(!actor.state.presets.host_validated);
+        actor.state.presets.host_validated = true;
+        actor.state.presets.validation_scope = actor.preset_scope();
+        actor.state.port = actor.state.port.checked_add(1).expect("port");
+        actor.emit();
+        assert!(!actor.state.presets.host_validated);
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[test]
+    fn preset_ack_identifiers_preserve_javascript_integer_precision() {
+        for command in [
+            serde_json::json!({"command":"preset_prepare","target":"8.8.8.8","request_id":9_007_199_254_740_992_u64}),
+            serde_json::json!({"command":"preset_rollback","request_id":9_007_199_254_740_992_u64}),
+        ] {
+            let command: Command = serde_json::from_value(command).expect("command");
+            assert!(super::validate(&command).is_err());
+        }
+    }
+    #[tokio::test]
+    async fn preset_activation_is_revision_checked_and_preserves_user_rules() {
+        let (mut actor, lock, path) = fixture().await;
+        seed_preset(&mut actor, &path);
+        send(&mut actor, put(1, 0, 1, true))
+            .await
+            .expect("user rule");
+        let rules = serde_json::to_value(&actor.state.routing.rules).expect("rules");
+        send(&mut actor, serde_json::json!({"command":"preset_activate", "enabled":true,"expected_revision":1,"request_id":2})).await.expect("activate");
+        let reference = actor
+            .state
+            .routing
+            .ru_direct
+            .as_ref()
+            .expect("reference")
+            .snapshot
+            .clone();
+        assert_eq!(reference.len(), 64);
+        let store = yonik_linux::presets::Store::open(&path.join("presets")).expect("catalog");
+        let (mut next, _) = store.active().expect("active").expect("metadata");
+        next.version = "v2".into();
+        next.domains.revision = "v2".into();
+        next.ips.revision = "v2".into();
+        store
+            .install(next, b"example.org\n".to_vec(), b"0.0.0.0/0\n".to_vec())
+            .expect("update");
+        assert_ne!(store.active_id().expect("current").expect("id"), reference);
+        let stored = actor
+            .routing_repository()
+            .routing_draft()
+            .await
+            .expect("saved")
+            .expect("draft");
+        let saved = crate::editor::Draft::parse(std::str::from_utf8(&stored.1).expect("utf8"))
+            .expect("draft reference");
+        assert_eq!(
+            saved.ru_direct.expect("pinned stored reference").snapshot,
+            reference
+        );
+        assert_eq!(
+            actor
+                .state
+                .routing
+                .ru_direct
+                .as_ref()
+                .expect("still pinned")
+                .snapshot,
+            reference
+        );
+        assert_eq!(
+            serde_json::to_value(&actor.state.routing.rules).expect("rules"),
+            rules
+        );
+        assert!(actor.state.routing.policy().is_err());
+        let policy = actor
+            .preset_policy(&actor.state.routing)
+            .expect("trusted resolve");
+        assert_eq!(policy.preset_rules.len(), 2);
+        assert_eq!(policy.user_rules[0].id, 1);
+        send(&mut actor, serde_json::json!({"command":"routing_explain","target":"8.8.8.8","request_id":91,"expected_revision":2})).await.expect("resolved explanation");
+        assert_eq!(
+            actor.state.routing_explanation["result"]["action"],
+            "Direct"
+        );
+        assert_eq!(
+            actor.state.routing_explanation["result"]["origin"],
+            "Preset(2)"
+        );
+        assert!(send(&mut actor, serde_json::json!({"command":"preset_activate", "enabled":false,"expected_revision":1,"request_id":3})).await.is_err());
+        assert!(
+            actor
+                .state
+                .routing
+                .ru_direct
+                .as_ref()
+                .expect("reference")
+                .enabled
+        );
+        assert_eq!(actor.state.presets.ack.as_ref().expect("ack").request_id, 3);
+        send(&mut actor, serde_json::json!({"command":"preset_activate", "enabled":false,"expected_revision":2,"request_id":4})).await.expect("disable");
+        assert!(
+            actor
+                .state
+                .routing
+                .policy()
+                .expect("disabled")
+                .preset_rules
+                .is_empty()
+        );
+        assert_eq!(
+            actor
+                .state
+                .routing
+                .ru_direct
+                .as_ref()
+                .expect("pinned")
+                .snapshot,
+            reference
+        );
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[tokio::test]
+    async fn preset_prepare_does_not_invent_application_witness() {
+        let (mut actor, lock, path) = fixture().await;
+        seed_preset(&mut actor, &path);
+        send(&mut actor, serde_json::json!({"command":"edit_routing", "request_id":1,"expected_revision":0,"create":true,"confirm_broad":false,"rule":{"id":1,"enabled":true,"executables":["/usr/bin/browser"],"domains":["example.org"],"destinations":[],"action":"block"}})).await.expect("user application rule");
+        send(
+            &mut actor,
+            serde_json::json!({"command":"preset_prepare","request_id":2,"target":"example.org"}),
+        )
+        .await
+        .expect("model");
+        assert_eq!(
+            actor.state.presets.decision.as_deref(),
+            Some("Application witness required")
+        );
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[tokio::test]
+    async fn preset_closed_catalog_is_storage_and_integrity_is_distinct() {
+        let (mut actor, lock, path) = fixture().await;
+        seed_preset(&mut actor, &path);
+        let catalog = path.join("presets");
+        let held = std::fs::File::open(&catalog).expect("directory lock");
+        rustix::fs::flock(&held, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+            .expect("writer lock");
+        assert_eq!(
+            send(&mut actor, serde_json::json!({"command":"preset_rollback"}))
+                .await
+                .expect_err("busy")
+                .key(),
+            "busy"
+        );
+        assert_eq!(actor.state.presets.operation_error, Some("busy"));
+        drop(held);
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(catalog.join("index")).expect("index"))
+                .expect("json");
+        std::fs::write(
+            catalog.join(index["active"].as_str().expect("id")),
+            b"corrupt",
+        )
+        .expect("fault");
+        assert_eq!(
+            send(
+                &mut actor,
+                serde_json::json!({"command":"preset_prepare","target":"8.8.8.8"})
+            )
+            .await
+            .expect_err("integrity")
+            .key(),
+            "storage"
+        );
+        assert_eq!(actor.state.presets.operation_error, Some("integrity"));
+        std::fs::remove_dir_all(catalog).expect("closed own catalog");
+        assert_eq!(
+            send(
+                &mut actor,
+                serde_json::json!({"command":"preset_prepare","target":"8.8.8.8"})
+            )
+            .await
+            .expect_err("closed")
+            .key(),
+            "storage"
+        );
+        assert_eq!(actor.state.presets.operation_error, Some("storage"));
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[tokio::test]
+    async fn preset_preparation_is_invalidated_by_draft_mutation_and_invalid_ip() {
+        let (mut actor, lock, path) = fixture().await;
+        seed_preset(&mut actor, &path);
+        send(
+            &mut actor,
+            serde_json::json!({"command":"preset_prepare", "target":"example.org"}),
+        )
+        .await
+        .expect("domain evaluator without invented DNS");
+        assert_eq!(
+            actor.state.presets.decision.as_deref(),
+            Some("Direct · Preset(1)")
+        );
+        send(
+            &mut actor,
+            serde_json::json!({"command":"preset_prepare", "target":"8.8.8.8"}),
+        )
+        .await
+        .expect("prepare");
+        assert!(actor.state.presets.prepared);
+        send(&mut actor, serde_json::json!({"command":"routing_default", "action":"block", "expected_revision":0,"request_id":1})).await.expect("Proxy→Block");
+        assert!(!actor.state.presets.prepared);
+        assert!(actor.state.presets.decision.is_none());
+        send(
+            &mut actor,
+            serde_json::json!({"command":"preset_prepare", "target":"8.8.8.8"}),
+        )
+        .await
+        .expect("prepare again");
+        assert!(
+            send(
+                &mut actor,
+                serde_json::json!({"command":"preset_prepare", "target":"invalid IP"})
+            )
+            .await
+            .is_err()
+        );
+        assert!(!actor.state.presets.prepared);
+        assert!(actor.state.presets.decision.is_none());
+        send(
+            &mut actor,
+            serde_json::json!({"command":"preset_prepare", "target":"invalid IP", "request_id":88}),
+        )
+        .await
+        .expect("typed error ACK");
+        assert_eq!(
+            actor
+                .state
+                .presets
+                .ack
+                .as_ref()
+                .expect("matching ACK")
+                .request_id,
+            88
+        );
+        assert_eq!(
+            actor
+                .state
+                .presets
+                .ack
+                .as_ref()
+                .expect("matching ACK")
+                .error,
+            Some("invalid_ip")
+        );
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("fixture");
+    }
+    #[tokio::test]
+    async fn preset_status_and_failed_preparation_preserve_routing_draft() {
+        let (mut actor, lock, path) = fixture().await;
+        actor.presets = Some(Arc::new(
+            super::presets::Controller::open(&path.join("presets")).expect("store"),
+        ));
+        send(&mut actor, put(1, 0, 1, true))
+            .await
+            .expect("user rule");
+        let before = actor.state.routing.json();
+        send(&mut actor, serde_json::json!({"command":"preset_status"}))
+            .await
+            .expect("status");
+        assert!(actor.state.presets.current.is_none());
+        assert!(
+            send(
+                &mut actor,
+                serde_json::json!({"command":"preset_prepare", "target":"8.8.8.8"})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(actor.state.routing.json(), before);
+        assert_eq!(actor.state.routing_revision, Some(1));
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("собственная fixture");
     }
     #[tokio::test]
     async fn inline_capture_берёт_текущий_сохранённый_черновик() {
@@ -5320,10 +6030,29 @@ mod maintenance_context_tests {
         drop(host);
         assert_eq!(fs::read(&destination).expect("исходник"), b"previous");
         fs::remove_file(destination).expect("очистка");
+        fs::remove_dir(root.join("data/presets")).expect("очистка пустого preset fixture");
         for entry in fs::read_dir(root.join("data")).expect("данные") {
             fs::remove_file(entry.expect("файл").path()).expect("очистка данных");
         }
         fs::remove_dir(root.join("data")).expect("очистка data");
         fs::remove_dir(root).expect("очистка root");
+    }
+}
+
+#[cfg(test)]
+mod integration_policy_cancel_tests {
+    use super::*;
+
+    #[test]
+    fn изменения_источника_и_presets_отменяют_inline_apply() {
+        for raw in [
+            serde_json::json!({"command":"source_change","request_id":1,"id":1,"expected_generation":1,"name":"Источник","url":"https://example.invalid/sub","local_exception":false,"route":"proxy"}),
+            serde_json::json!({"command":"preset_activate","request_id":2,"expected_revision":0,"enabled":true}),
+            serde_json::json!({"command":"preset_rollback","request_id":3}),
+        ] {
+            let command: Command = serde_json::from_value(raw).expect("fixture");
+            assert!(command.cancels_policy_connect());
+        }
+        assert!(!Command::PresetCancel { request_id: 4 }.cancels_policy_connect());
     }
 }
