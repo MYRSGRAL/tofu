@@ -27,7 +27,7 @@ FLOW = r"""
   }
   if(!state.ready) return
   if(step===0) {
-   require(state.error_contexts.length===2 && state.error_contexts.every(c=>c.reason==="scheduler_interval_invalid"),"actual A")
+   require(SUPPORTED ? state.error_contexts.length===0 : (state.error_contexts.length===2 && state.error_contexts.every(c=>c.reason==="scheduler_interval_invalid")),"actual input contexts")
    original=state; console.log("GEN A " + backend.snapshot_json)
    click("settingsButton"); step=1; return
   }
@@ -79,6 +79,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument(
+        "--supported-control",
+        action="store_true",
+        help="Исправный interval: обязательный positive backup/restore control",
+    )
     args = parser.parse_args()
     if os.environ.get("QT_QPA_PLATFORM") != "offscreen" or not os.environ.get(
         "DBUS_SESSION_BUS_ADDRESS"
@@ -110,12 +115,13 @@ def main() -> None:
     driver = out / "driver.qml"
     driver.write_text(
         DRIVER.split(" Timer {", 1)[0]
-        + FLOW.replace("BACKUP", json.dumps(str(out / "backup.sqlite"))).replace(
-            "RESTORED", json.dumps(str(out / "restored.sqlite"))
-        )
+        + FLOW.replace("SUPPORTED", "true" if args.supported_control else "false")
+        .replace("BACKUP", json.dumps(str(out / "backup.sqlite")))
+        .replace("RESTORED", json.dumps(str(out / "restored.sqlite")))
     )
     result = subprocess.run(
-        [str(args.binary.resolve()), str(out / "host")],
+        [str(args.binary.resolve()), str(out / "host")]
+        + (["supported"] if args.supported_control else []),
         env=dict(
             os.environ,
             LD_PRELOAD=str(library),
@@ -146,8 +152,12 @@ def main() -> None:
                 records.setdefault(marker, []).append(
                     json.loads(line.split(prefix, 1)[1])
                 )
-    for value in records["EXPORT A"]:
-        export_metadata(json.dumps(value).encode())
+    if not args.supported_control:
+        for value in records["EXPORT A"]:
+            export_metadata(json.dumps(value).encode())
+    if args.supported_control:
+        assert "BLOCKED" not in records, "healthy control failed"
+        assert all(not value["error_contexts"] for value in records["REPLACEMENT"])
     assert records["CLOSED"][-1]["closed"]
     if "BLOCKED" not in records:
         assert len(records["REPLACEMENT"]) == 2
