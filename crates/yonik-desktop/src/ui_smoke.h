@@ -163,6 +163,9 @@ inline bool perform(QQuickWindow* window, const QJsonObject& action)
         return true;
     }
     if (kind == QStringLiteral("click")) {
+        // Snapshot может показать кнопку раньше следующего layout frame.
+        for (auto* parent = item->parentItem(); parent; parent = parent->parentItem()) parent->ensurePolished();
+        item->ensurePolished();
         const auto point = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
         if (item->width() <= 0 || item->height() <= 0 || point.x() < 0 || point.y() < 0
             || point.x() >= window->width() || point.y() >= window->height()) return false;
