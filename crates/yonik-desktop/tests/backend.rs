@@ -2150,11 +2150,15 @@ fn logs_trusted_control_is_not_deserializable_from_ui() {
 }
 
 fn local_backup(app: &mut Harness, directory: &Directory) {
+    local_backup_at(app, directory, 0);
+}
+
+fn local_backup_at(app: &mut Harness, directory: &Directory, revision: i64) {
     fs::DirBuilder::new()
         .mode(0o700)
         .create(directory.0.join("copies"))
         .expect("отдельный приватный каталог копии");
-    app.send(json!({"command":"maintenance_start", "request_id":9001, "operation":"backup", "destination":directory.0.join("copies/before-local.sqlite"), "revision":0}));
+    app.send(json!({"command":"maintenance_start", "request_id":9001, "operation":"backup", "destination":directory.0.join("copies/before-local.sqlite"), "revision":revision}));
     let ack = app.wait(|v| {
         v["maintenance_ack"]["request_id"] == 9001
             && matches!(
@@ -2171,7 +2175,23 @@ fn local_text_partial_approval_reopen_and_network_controls_fail_closed() {
     let directory = Directory::new();
     let mut app = Harness::new(directory.config());
     app.wait(|v| v["ready"] == true);
-    local_backup(&mut app, &directory);
+    let requests = Arc::new(AtomicU64::new(0));
+    let observed = requests.clone();
+    let (url, server) = fixture_with_requests(
+        vec!["trojan://remote-control@example.com:443#remote"; 2],
+        move |_| {
+            observed.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    app.send(json!({"command":"import_source", "name":"Control", "url":url, "local_exception":true, "route":"direct"}));
+    let remote = app.wait(|v| v["busy"] == false && v["total"] == 1);
+    let remote_id = remote["source_id"].clone();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    local_backup_at(
+        &mut app,
+        &directory,
+        remote["revision"].as_i64().expect("revision"),
+    );
     app.send(json!({"command":"query", "search":"stale", "favorites_only":true, "offset":200}));
     app.wait(|v| v["offset"] == 200 && v["search"] == "stale");
     let original = "trojan://local-secret@example.com:443#local\ninvalid://rejected\n";
@@ -2192,21 +2212,78 @@ fn local_text_partial_approval_reopen_and_network_controls_fail_closed() {
     assert_eq!(saved["search"], "");
     assert_eq!(saved["favorites_only"], false);
     let id = saved["source_id"].as_i64().expect("source");
+    assert_eq!(saved["source_local"], true);
+    app.send(json!({"command":"rename_source", "id":id, "name":"Локальный переименован"}));
+    app.wait(|v| v["source_name"] == "Локальный переименован" && v["source_local"] == true);
+    app.send(json!({"command":"set_subscription_schedule", "interval_seconds":172800, "background":true}));
+    let denied = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(
+        denied["subscription_interval_seconds"],
+        saved["subscription_interval_seconds"]
+    );
+    assert_eq!(denied["revision"], saved["revision"]);
     app.send(json!({"command":"refresh"}));
     let rejected = app.wait(|v| v["error"] == "invalid_input");
     assert_eq!(rejected["revision"], saved["revision"]);
-    app.send(json!({"command":"source_change", "request_id":17, "id":id, "expected_generation":1, "name":"Не менять", "url":"https://example.com/new", "local_exception":false, "route":"direct", "hwid_enabled":false}));
+    app.send(json!({"command":"source_change", "request_id":17, "id":id, "expected_generation":saved["source_generation"], "name":"Не менять", "url":url, "local_exception":true, "route":"direct", "hwid_enabled":false}));
     let unchanged = app.wait(|v| v["source_change_ack"]["request_id"] == 17);
     assert_eq!(unchanged["source_change_ack"]["error"], "invalid_input");
     assert_eq!(unchanged["revision"], saved["revision"]);
+    app.send(json!({"command":"set_source_hwid", "enabled":true}));
+    let denied = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(denied["revision"], saved["revision"]);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    app.send(json!({"command":"select_source", "id":remote_id}));
+    app.wait(|v| v["source_id"] == remote_id && v["busy"] == false);
+    app.send(json!({"command":"refresh"}));
+    app.wait(|v| v["busy"] == false && v["revision"].as_u64().unwrap_or(0) > 1);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    server.join().expect("positive remote control");
+    app.send(json!({"command":"select_source", "id":id}));
+    app.wait(|v| v["source_id"] == id);
     app.close();
     let mut reopened = Harness::new(directory.config());
-    let snapshot = reopened.wait(|v| v["ready"] == true);
+    reopened.wait(|v| v["ready"] == true);
+    reopened.send(json!({"command":"select_source", "id":id}));
+    let snapshot = reopened.wait(|v| v["source_id"] == id && v["source_local"] == true);
     assert_eq!(snapshot["source_id"], id);
     assert_eq!(snapshot["total"], 1);
     reopened.send(json!({"command":"set_source_hwid", "enabled":true}));
     reopened.wait(|v| v["error"] == "invalid_input");
     reopened.close();
+    assert!(!app.snapshots.join("").contains("local-secret"));
+    assert!(!reopened.snapshots.join("").contains("local-secret"));
+    let database = directory.0.join("subscriptions.sqlite");
+    assert!(
+        !fs::read(&database)
+            .expect("encrypted database")
+            .windows(b"local-secret".len())
+            .any(|window| window == b"local-secret")
+    );
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(async {
+            let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+                database,
+                zeroize::Zeroizing::new([77; 32]),
+            )
+            .await
+            .expect("repository");
+            let record = repo.load(id).await.expect("load").expect("local source");
+            assert_eq!(
+                record.source.generation,
+                saved["source_generation"].as_i64().expect("generation")
+            );
+            let snapshot = record.snapshot.expect("snapshot");
+            assert_eq!(
+                snapshot.revision,
+                saved["revision"].as_i64().expect("revision")
+            );
+            assert_eq!(snapshot.body.as_slice(), original.as_bytes());
+            repo.close().await.expect("close");
+        });
 }
 
 #[test]
