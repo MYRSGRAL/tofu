@@ -366,6 +366,9 @@ impl SessionArtifact {
             .with_transport(self.protocol, None, Some(self.port))
     }
 }
+pub(super) struct HelperTunCustody {
+    bound: crate::managed_network::tun::BoundTun,
+}
 pub(super) struct ActiveSession {
     artifact: Arc<SessionArtifact>,
     ticket: WorkerTicket,
@@ -495,8 +498,40 @@ fn fresh_cancel() -> (tokio::sync::watch::Sender<bool>, Cancellation) {
 }
 
 impl Backend {
+    // Механический owner endpoint для согласуемого canonical handoff. Legacy
+    // by-name сюда не входит; admission и Session factory остаются закрытыми.
+    #[cfg_attr(not(test), allow(dead_code))]
+    async fn retain_canonical_queue(
+        &mut self,
+        plan: &SessionNetworkPlan,
+        executor: &TunExecutor,
+        cancel: &mut Cancellation,
+    ) -> Result<(), ServiceError> {
+        if self.tun_custody.is_some() || self.worker_uncertain || self.active.is_some() {
+            return Err(ServiceError::Busy);
+        }
+        let bound = plan
+            .bind_queue(
+                executor,
+                self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
+                cancel,
+            )
+            .await
+            .map_err(unavailable)?;
+        self.tun_custody = Some(HelperTunCustody { bound });
+        if let Some(custody) = self.tun_custody.as_mut() {
+            custody.bound.transferred();
+        }
+        Ok(())
+    }
+    // Вызывается только после успешного supervisor.recover; не admission API.
+    fn release_stopped_resources(&mut self) {
+        self.active = None;
+        self.tun_custody = None;
+    }
     pub(super) fn has_session(&self) -> bool {
-        self.active.is_some()
+        self.tun_custody.is_some()
+            || self.active.is_some()
             || self.journal.as_ref().is_some_and(|journal| {
                 journal.session_recovery().is_some()
                     || journal
@@ -1232,7 +1267,7 @@ impl RecoveryHost for BackendRecovery<'_> {
             .await
             .map_err(unavailable)?;
         self.backend.worker_uncertain = false;
-        self.backend.active = None;
+        self.backend.release_stopped_resources();
         Ok(())
     }
     async fn restrict(&mut self) -> Result<(), ServiceError> {
@@ -1245,6 +1280,9 @@ impl RecoveryHost for BackendRecovery<'_> {
             .await
     }
     async fn cleanup_network(&mut self) -> Result<(), ServiceError> {
+        if self.backend.worker_uncertain || self.backend.tun_custody.is_some() {
+            return Err(ServiceError::Busy);
+        }
         cleanup_records(
             self.owner,
             self.backend

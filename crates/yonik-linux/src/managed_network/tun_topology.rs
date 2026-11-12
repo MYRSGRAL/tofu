@@ -20,12 +20,68 @@ fn session_external_topology(
     session_external_topology_with_framing(topology, journal, tun_id, mtu, false)
 }
 pub(crate) fn session_external_topology_with_framing(
-    mut topology: LinuxTopology,
+    topology: LinuxTopology,
     journal: &Journal,
     tun_id: u64,
     mtu: u16,
     vnet_hdr: bool,
 ) -> Result<LinuxTopology, TunError> {
+    project(
+        topology,
+        journal,
+        tun_id,
+        mtu,
+        vnet_hdr,
+        QueuePhase::Detached,
+    )
+}
+// Attached phase нельзя получить из caller bool или ожидаемого счётчика.
+pub(super) enum QueuePhase<'a> {
+    Detached,
+    Attached(&'a super::custody::BoundTun),
+}
+pub(super) fn attached_topology(
+    topology: LinuxTopology,
+    journal: &Journal,
+    bound: &super::custody::BoundTun,
+) -> Result<LinuxTopology, TunError> {
+    bound.check_binding(journal, &topology)?;
+    project(
+        topology,
+        journal,
+        bound.tun_id,
+        bound.mtu,
+        bound.framing == yonik_nsfs::tun::Framing::Vnet10,
+        QueuePhase::Attached(bound),
+    )
+}
+// Pre-attach проверяет Journal и сам link. IPv6 routes могут появиться только
+// при carrier-on; полноту configured topology по-прежнему проверяет project.
+pub(super) fn detached_parent(
+    topology: &LinuxTopology,
+    journal: &Journal,
+    tun_id: u64,
+    mtu: u16,
+    vnet_hdr: bool,
+) -> Result<(), TunError> {
+    parent(
+        topology,
+        journal,
+        tun_id,
+        mtu,
+        vnet_hdr,
+        &QueuePhase::Detached,
+    )
+    .map(|_| ())
+}
+fn parent(
+    topology: &LinuxTopology,
+    journal: &Journal,
+    tun_id: u64,
+    mtu: u16,
+    vnet_hdr: bool,
+    phase: &QueuePhase<'_>,
+) -> Result<(u32, Vec<u8>), TunError> {
     if !(1280..=9000).contains(&mtu) {
         return Err(TunError::Invalid);
     }
@@ -74,11 +130,33 @@ pub(crate) fn session_external_topology_with_framing(
         || link.flags & 0x1091 != 0x1091
         || link.flags & !0x110d1 != 0
         || !matches!(link.operational_state, None | Some(0 | 2 | 6))
-        || !link_metadata(&link.unknown, journal.ownership().owner_uid(), vnet_hdr)
+        || !link_metadata(
+            &link.unknown,
+            journal.ownership().owner_uid(),
+            vnet_hdr,
+            phase,
+        )
     {
         return Err(TunError::Foreign);
     }
-    let link_name = link.name.clone();
+    if let QueuePhase::Attached(bound) = phase {
+        bound.queue.verify().map_err(|_| TunError::Evidence)?;
+        if link.flags & 0x10000 == 0 || !link.unknown.iter().any(|a| a.kind == 33 && a.value == [1])
+        {
+            return Err(TunError::Evidence);
+        }
+    }
+    Ok((index, link.name.clone()))
+}
+fn project(
+    mut topology: LinuxTopology,
+    journal: &Journal,
+    tun_id: u64,
+    mtu: u16,
+    vnet_hdr: bool,
+    phase: QueuePhase<'_>,
+) -> Result<LinuxTopology, TunError> {
+    let (index, link_name) = parent(&topology, journal, tun_id, mtu, vnet_hdr, &phase)?;
     let mut addresses = BTreeMap::new();
     let mut routes = BTreeMap::new();
     let mut rules = BTreeMap::new();
@@ -411,35 +489,41 @@ fn family_metadata(bytes: &[u8]) -> bool {
         })
     })
 }
-fn link_metadata(attrs: &[crate::NetworkAttribute], uid: u32, vnet_hdr: bool) -> bool {
+fn link_metadata(
+    attrs: &[crate::NetworkAttribute],
+    uid: u32,
+    vnet_hdr: bool,
+    phase: &QueuePhase<'_>,
+) -> bool {
     let mut seen = BTreeSet::new();
-    attrs.iter().all(|a| {
-        seen.insert(a.kind)
-            && match a.kind {
-                6 => [
-                    b"noop\0".as_slice(),
-                    b"noqueue\0",
-                    b"fq_codel\0",
-                    b"pfifo_fast\0",
-                ]
-                .contains(&a.value.as_slice()),
-                7 => a.value.len() == 96,
-                14 => a.value.len() == 32 && a.value.iter().all(|v| *v == 0),
-                17 | 39 => a.value == [0],
-                18 => tun_info(&a.value, uid, vnet_hdr),
-                23 => matches!(a.value.len(), 192 | 200),
-                26 => family_metadata(&a.value),
-                27 | 30 | 61 => a.value == [0; 4], // group, promiscuity, allmulti
-                31 | 32 => a.value == 1u32.to_ne_bytes(), // одна очередь
-                33 => a.value == [0] || a.value == [1],
-                43 => attributes(&a.value).is_some_and(|v| v == vec![(2, [0].as_slice())]),
-                13 | 35 | 40 | 41 | 47 | 48 | 50 | 51 | 58 | 59 | 60 | 63 | 64 | 66 => {
-                    a.value.len() == 4
+    (!matches!(phase, QueuePhase::Attached(_)) || attrs.iter().any(|a| a.kind == 18))
+        && attrs.iter().all(|a| {
+            seen.insert(a.kind)
+                && match a.kind {
+                    6 => [
+                        b"noop\0".as_slice(),
+                        b"noqueue\0",
+                        b"fq_codel\0",
+                        b"pfifo_fast\0",
+                    ]
+                    .contains(&a.value.as_slice()),
+                    7 => a.value.len() == 96,
+                    14 => a.value.len() == 32 && a.value.iter().all(|v| *v == 0),
+                    17 | 39 => a.value == [0],
+                    18 => tun_info(&a.value, uid, vnet_hdr),
+                    23 => matches!(a.value.len(), 192 | 200),
+                    26 => family_metadata(&a.value),
+                    27 | 30 | 61 => a.value == [0; 4], // group, promiscuity, allmulti
+                    31 | 32 => a.value == 1u32.to_ne_bytes(), // одна очередь
+                    33 => a.value == [0] || a.value == [1],
+                    43 => attributes(&a.value).is_some_and(|v| v == vec![(2, [0].as_slice())]),
+                    13 | 35 | 40 | 41 | 47 | 48 | 50 | 51 | 58 | 59 | 60 | 63 | 64 | 66 => {
+                        a.value.len() == 4
+                    }
+                    67 => a.value == [0] || a.value == [1],
+                    68 | 69 => a.value == [0; 2],
+                    32830 | 32833 => a.value.is_empty(), // пустые вложенные DPLL/devlink metadata
+                    _ => false,
                 }
-                67 => a.value == [0] || a.value == [1],
-                68 | 69 => a.value == [0; 2],
-                32830 | 32833 => a.value.is_empty(), // пустые вложенные DPLL/devlink metadata
-                _ => false,
-            }
-    })
+        })
 }
