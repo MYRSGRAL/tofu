@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual Corrupt/Full через неизменённый qrc Main и штатную кнопку экспорта."""
+"""Actual Corrupt/Full/interval через неизменённый qrc Main и штатную кнопку экспорта."""
 
 from __future__ import annotations
 
@@ -77,11 +77,13 @@ Item {
   const state=JSON.parse(backend.snapshot_json)
   if (state.closed) { console.log("UI CLOSED " + backend.snapshot_json); return }
   if(step===0) {
-   if(!state.error_contexts || state.error_contexts.length!==2) return
+   if(!state.ready) return
+   if(!state.error_contexts || state.error_contexts.length!==CONTEXT_COUNT) return
    require(state.error_contexts.every(c=>c.reason===REASON), "actual producer")
-   require(state.ready && !state.closed && state.scheduler_generation > 0,"actual ready scheduler")
-   require(state.error_contexts.every(c=>c.stage===(REASON==="scheduler_full"?"scheduler_admission":"scheduler_service")),"actual stage")
+   require(state.ready && !state.closed && (CONTEXT_COUNT===0 || state.scheduler_generation > 0),"actual ready scheduler")
+   require(state.error_contexts.every(c=>c.stage===STAGE),"actual stage")
    if(REASON==="scheduler_full") require(state.sources_total===2,"actual full sources")
+   if(REASON==="scheduler_interval_invalid") require(state.sources_total===1 && state.subscription_interval_seconds===86400,"actual repository and unchanged preferences bounds")
    console.log("UI SNAPSHOT " + backend.snapshot_json)
    click("settingsButton"); step++; return
   }
@@ -89,7 +91,7 @@ Item {
   if(step===2 || step===7) {
    const locale=LOCALE
    require(state.language===locale && window.language===locale, "real language")
-   require(state.error_contexts && state.error_contexts.length===2 && state.error_contexts.every(c=>c.reason===REASON), "context after preferences lifecycle")
+   require(state.error_contexts && state.error_contexts.length===CONTEXT_COUNT && state.error_contexts.every(c=>c.reason===REASON), "context after preferences lifecycle")
    require(find(window.contentItem,"copyDiagnosticsButton").text===(locale==="ru"?"Копировать диагностику":"Copy diagnostics"),"localized production button")
    click("copyDiagnosticsButton")
    require(find(window.contentItem,"diagnosticsExportResult").text===(locale==="ru"?"Скопировано":"Copied"),"onClicked success")
@@ -106,7 +108,7 @@ Item {
   if(step===5) {
    if(state.language!=="en") return
    console.log("UI LANGUAGE LIFECYCLE " + backend.snapshot_json)
-   console.log("UI CONTEXT RETAINED " + !!(state.error_contexts && state.error_contexts.length===2 && state.error_contexts.every(c=>c.reason===REASON)))
+   console.log("UI CONTEXT RETAINED " + !!(state.error_contexts && state.error_contexts.length===CONTEXT_COUNT && state.error_contexts.every(c=>c.reason===REASON)))
    console.log("UI FINAL SNAPSHOT " + backend.snapshot_json)
    step=8; backend.shutdown(); return
   }
@@ -122,14 +124,37 @@ Item {
 """
 
 
+CASES = {
+    "corrupt": ("scheduler_repository_corrupt", "scheduler_service"),
+    "full": ("scheduler_full", "scheduler_admission"),
+    "interval": ("scheduler_interval_invalid", "scheduler_validation"),
+}
+
+
+def production_driver(case: str, locale: str, supported: bool = False) -> str:
+    """Observer проверяет companion; положительные snapshots не присваиваются."""
+    reason, stage = CASES[case]
+    if locale not in ("ru", "en"):
+        raise ValueError("Неизвестный язык")
+    return (
+        DRIVER.replace("CONTEXT_COUNT", "0" if supported else "2")
+        .replace("REASON", json.dumps(reason))
+        .replace("STAGE", json.dumps(stage))
+        .replace("LOCALE", json.dumps(locale))
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("task", type=Path)
-    parser.add_argument("--case", choices=("corrupt", "full"), required=True)
+    parser.add_argument("--case", choices=tuple(CASES), required=True)
     parser.add_argument("--locale", choices=("ru", "en"), default="ru")
     parser.add_argument("--preferences", type=Path)
+    parser.add_argument("--supported", action="store_true")
     args = parser.parse_args()
+    if args.supported and args.case != "interval":
+        parser.error("supported контроль только для interval example")
     if args.locale == "en" and not args.preferences:
         parser.error("для EN нужны сохранённые preferences реального RU lifecycle")
     if os.environ.get("QT_QPA_PLATFORM") != "offscreen" or not os.environ.get(
@@ -158,13 +183,9 @@ def main() -> None:
         ],
         check=True,
     )
-    reason = "scheduler_full" if args.case == "full" else "scheduler_repository_corrupt"
+    reason, _ = CASES[args.case]
     driver = args.task / "driver.qml"
-    driver.write_text(
-        DRIVER.replace("REASON", json.dumps(reason)).replace(
-            "LOCALE", json.dumps(args.locale)
-        )
-    )
+    driver.write_text(production_driver(args.case, args.locale, args.supported))
     environment = dict(os.environ)
     if args.preferences:
         environment["YONIK_UI_PREFERENCES"] = str(args.preferences.resolve())
@@ -172,7 +193,11 @@ def main() -> None:
             (args.task / "host/data/preferences.json").resolve()
         )
     result = subprocess.run(
-        [str(args.binary.resolve()), str(args.task / "host")],
+        [
+            str(args.binary.resolve()),
+            str(args.task / "host"),
+            *(["supported"] if args.supported else []),
+        ],
         env=dict(
             environment,
             LD_PRELOAD=str(library.resolve()),
@@ -193,7 +218,10 @@ def main() -> None:
             line.split(prefix, 1)[1] for line in output.splitlines() if prefix in line
         )
         export_metadata(value.encode())
-        if any(error.get("reason") != reason for error in json.loads(value)["errors"]):
+        errors = json.loads(value)["errors"]
+        if len(errors) != (0 if args.supported else 2) or any(
+            error.get("reason") != reason for error in errors
+        ):
             raise RuntimeError("native clipboard потерял actual reason")
         (args.task / f"export-{locale}.json").write_text(value)
     for marker, filename in (

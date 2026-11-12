@@ -64,6 +64,8 @@ pub struct HostConfig {
     scheduler_capacity: Option<usize>,
     #[cfg(feature = "test-support")]
     scheduler_owner_seed: Option<u64>,
+    #[cfg(feature = "test-support")]
+    scheduler_interval: Option<Duration>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -81,6 +83,8 @@ impl HostConfig {
             scheduler_capacity: None,
             #[cfg(feature = "test-support")]
             scheduler_owner_seed: None,
+            #[cfg(feature = "test-support")]
+            scheduler_interval: None,
         }
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
@@ -112,6 +116,18 @@ impl HostConfig {
         let mut config = Self::new(data_dir, engine_dir).with_ephemeral_key(key);
         config.scheduler_owner_seed = Some(seed);
         Ok(config)
+    }
+    /// Только вход validator отдельного ephemeral example; diagnostic state не задаётся.
+    #[cfg(feature = "test-support")]
+    pub fn ephemeral_scheduler_interval_example(
+        data_dir: PathBuf,
+        engine_dir: PathBuf,
+        key: [u8; 32],
+        interval: Duration,
+    ) -> Self {
+        let mut config = Self::new(data_dir, engine_dir).with_ephemeral_key(key);
+        config.scheduler_interval = Some(interval);
+        config
     }
     /// Доверенный наблюдатель фаз без пользовательских данных; callback не должен блокировать.
     #[cfg(feature = "startup-diagnostics")]
@@ -3800,6 +3816,10 @@ async fn run(
         scheduled.interval =
             Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
+        #[cfg(feature = "test-support")]
+        if let Some(interval) = config.scheduler_interval {
+            scheduled.interval = interval;
+        }
         if let Err(error) = scheduled.runtime.set_interval(scheduled.interval) {
             actor.state.schedule_error(
                 desktop_schedule::ScheduleFailure::interval(error),
@@ -6093,6 +6113,25 @@ mod maintenance_context_tests {
 mod scheduler_example_limits {
     use super::HostConfig;
     use std::path::PathBuf;
+
+    #[test]
+    fn interval_example_changes_only_ephemeral_input() {
+        use std::time::Duration;
+        let default = HostConfig::new(PathBuf::from("data"), PathBuf::from("engines"));
+        assert_eq!(default.scheduler_interval, None);
+        for interval in [Duration::ZERO, Duration::from_secs(86400)] {
+            let config = HostConfig::ephemeral_scheduler_interval_example(
+                PathBuf::from("data"),
+                PathBuf::from("engines"),
+                [7; 32],
+                interval,
+            );
+            assert_eq!(config.scheduler_interval, Some(interval));
+            assert_eq!(config.scheduler_capacity, None);
+            assert!(config.ephemeral_key.is_some());
+            assert!(!config.system_subscription_policy);
+        }
+    }
 
     #[test]
     fn capacity_cannot_disable_or_raise_production_limit() {
