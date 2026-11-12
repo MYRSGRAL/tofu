@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import select
+import signal
 import socket
 import subprocess
 import tempfile
@@ -282,7 +283,7 @@ def run(binary: Path, engines: Path, output: Path, engine: str, language: str) -
                     root,
                     port=port,
                     target_ports=str(server.server_port),
-                ):
+                ) as vless_peer:
                     app = launch(
                         "application",
                         [
@@ -333,23 +334,62 @@ def run(binary: Path, engines: Path, output: Path, engine: str, language: str) -
                     core = children.pop()
                     core_fd = os.pidfd_open(core)
                     try:
+                        traffic_proofs: list[dict[str, object]] = []
 
                         def traffic() -> None:
-                            subprocess.run(
-                                [
-                                    "curl",
-                                    "--silent",
-                                    "--fail",
-                                    "--max-time",
-                                    "3",
-                                    "--noproxy",
-                                    "",
-                                    "--socks5-hostname",
-                                    f"127.0.0.1:{socks}",
-                                    f"http://127.0.0.1:{server.server_port}/",
-                                ],
-                                check=True,
-                                stdout=subprocess.DEVNULL,
+                            url = f"http://127.0.0.1:{server.server_port}/"
+                            direct = ["curl", "--silent", "--fail", "--max-time", "3"]
+                            proxied = [
+                                *direct,
+                                "--noproxy",
+                                "",
+                                "--socks5-hostname",
+                                f"127.0.0.1:{socks}",
+                                url,
+                            ]
+
+                            def expect_body(command: list[str]) -> None:
+                                response = subprocess.run(
+                                    command, check=True, capture_output=True, timeout=5
+                                )
+                                if response.stdout != handler.body:
+                                    raise RuntimeError("HTTP fixture вернул чужое тело")
+
+                            expect_body(proxied)
+                            # Приостановлен только собственный controlled peer.
+                            # Direct bypass продолжил бы работать и провалил этот gate.
+                            vless_peer.send_signal(signal.SIGSTOP)
+                            try:
+                                wait_for(
+                                    lambda: (
+                                        Path(f"/proc/{vless_peer.pid}/stat")
+                                        .read_text()
+                                        .rsplit(")", 1)[1]
+                                        .split()[0]
+                                        == "T"
+                                    ),
+                                    "Собственный VLESS peer не приостановлен",
+                                )
+                                expect_body([*direct, "--noproxy", "*", url])
+                                denied = subprocess.run(
+                                    proxied, capture_output=True, timeout=5
+                                )
+                                if denied.returncode == 0:
+                                    raise RuntimeError(
+                                        "HTTP обошёл недоступный VLESS peer"
+                                    )
+                            finally:
+                                vless_peer.send_signal(signal.SIGCONT)
+                            expect_body(proxied)
+                            traffic_proofs.append(
+                                {
+                                    "direct_fixture_available": True,
+                                    "peer_stopped_proxy_exit": denied.returncode,
+                                    "resumed_peer_exact_body": True,
+                                }
+                            )
+                            (output / "peer-traffic.json").write_text(
+                                json.dumps(traffic_proofs, indent=2)
                             )
 
                         def registrations() -> list[str]:

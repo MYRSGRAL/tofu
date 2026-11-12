@@ -74,3 +74,25 @@ production binary этой сборки; существующие Rust исхо�
 проверены `/proc` cwd/exe/fd: ссылок на собственный transient нет.
 `cargo +1.85.1 clean` выполнен через тот же slot-wrapper под flock;
 собственный task-root удалён. Evidence и production binary сохранены вне TTL.
+
+## Усиление peer oracle после review
+
+Первоначальный HTTP oracle доказывал SOCKS HTTP, но отдельно не исключал
+direct bypass. Сохранённые старые результаты не используются для этого claim.
+Новый gate проверяет точное HTTP body, затем приостанавливает SIGSTOP только
+собственный controlled VLESS peer. Прямой HTTP к fixture остаётся доступным,
+а тот же SOCKS HTTP обязан завершиться ошибкой. SIGCONT выполняется в finally;
+после возобновления peer точный body снова доступен через SOCKS.
+
+Матрица `xray-ru-peer-gate`, `xray-en-peer-gate`,
+`sing-box-ru-peer-gate`, `sing-box-en-peer-gate` — 4/4 PASS. В каждом
+`peer-traffic.json` сохранены три чувствительных контроля: до restart,
+после restart и после нового Connect. Все cleanup.json подтверждают reap
+собственных процессов. Дополнительный `direct-bypass-peer-gate` намеренно
+подменяет SOCKS запрос прямым: oracle отклоняет его с
+«HTTP обошёл недоступный VLESS peer». Его failure ожидаем и сохранён.
+
+Production binary прежний, Rust/C++/QML и core pins не менялись. Изменены
+только Python harness и возвращаемый handle собственного peer в тестовом
+context manager. Три continuity tests и Ruff 0.17.4 check/format — PASS.
+Новые source/evidence hashes: `peer-gate-manifest.json` в evidence root.
