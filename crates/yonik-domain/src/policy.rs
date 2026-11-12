@@ -39,9 +39,37 @@ pub struct Flow<'a> {
     pub destination: IpAddr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AndroidPackageId(String);
+impl AndroidPackageId {
+    pub fn parse(value: &str) -> Option<Self> {
+        let valid = (3..=253).contains(&value.len())
+            && value.contains('.')
+            && value.split('.').all(|part| {
+                part.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                    && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            });
+        valid.then(|| Self(value.to_owned()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PlatformSource {
+    AndroidPackage { package: AndroidPackageId },
+}
+impl PlatformSource {
+    pub fn selector_bytes(&self) -> usize {
+        match self {
+            Self::AndroidPackage { package } => package.as_str().len(),
+        }
+    }
+}
 #[derive(Debug, Default)]
 pub struct Conditions {
     pub executables: Vec<String>,
+    pub platform_sources: Vec<PlatformSource>,
     pub destinations: Vec<Cidr>,
     pub domains: Vec<DomainPattern>,
 }
@@ -95,6 +123,14 @@ pub struct Decision {
 }
 
 impl Policy {
+    pub fn unsupported_selector(&self) -> Option<u64> {
+        self.user_rules
+            .iter()
+            .chain(&self.preset_rules)
+            .find(|r| r.enabled && !r.conditions.platform_sources.is_empty())
+            .map(|r| r.id)
+    }
+
     /// Совместимый расчёт для literal IP без имени. Для DNS/fake и кода отказа
     /// используйте evaluate_destination; неоднозначность здесь даёт Block.
     pub fn evaluate(&self, flow: &Flow<'_>) -> Decision {

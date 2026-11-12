@@ -46,11 +46,15 @@ pub enum InputError {
     InvalidId,
     DuplicateId,
     InvalidExecutable,
+    UnsupportedSelector(u64),
 }
 
 /// Максимумы вызывающего кода только уменьшают жёсткие пределы.
 /// Ошибка входа означает отсутствие частичной диагностики.
 pub fn diagnose(policy: &Policy, limits: Limits) -> Result<Report, InputError> {
+    if let Some(id) = policy.unsupported_selector() {
+        return Err(InputError::UnsupportedSelector(id));
+    }
     let count = policy
         .user_rules
         .len()
@@ -175,6 +179,7 @@ pub fn diagnose(policy: &Policy, limits: Limits) -> Result<Report, InputError> {
                 origin(rule.id),
                 Some(rule.action),
                 Conditions {
+                    platform_sources: vec![],
                     executables: c.executables.clone(),
                     destinations: c.destinations.clone(),
                     domains: c.domains.clone(),

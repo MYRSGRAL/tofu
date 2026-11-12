@@ -678,6 +678,7 @@ mod host_gate {
             ..Default::default()
         };
         draft.rules.push(crate::editor::RuleInput {
+            platform_sources: None,
             id: 1,
             enabled: true,
             executables: vec![],

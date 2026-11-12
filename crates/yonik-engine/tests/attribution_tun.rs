@@ -71,3 +71,53 @@ fn executable_conditions_are_scoped_to_tun_and_keep_destination_and_or_values() 
             vec!["/usr/bin/a".into(), "/usr/bin/b".into()];
     }
 }
+
+#[test]
+fn p07_system_compilers_refuse_unsupported_even_with_matching_executable() {
+    use yonik_domain::{AndroidPackageId, PlatformSource};
+    let report = yonik_import::import_bytes(
+        b"vless://00112233-4455-6677-8899-aabbccddeeff@127.0.0.1:24443".to_vec(),
+    )
+    .unwrap();
+    let tun = SystemTun::new(1, 1500, 99, vec!["198.18.0.1/30".parse().unwrap()]).unwrap();
+    let mut policy = Policy::default();
+    policy.user_rules.push(Rule {
+        id: 41,
+        enabled: true,
+        action: Action::Direct,
+        conditions: Conditions {
+            executables: vec!["/usr/bin/client".into()],
+            platform_sources: vec![PlatformSource::AndroidPackage {
+                package: AndroidPackageId::parse("org.example.app").unwrap(),
+            }],
+            ..Default::default()
+        },
+    });
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert!(matches!(
+            compile_system_policy(
+                &report.servers[0],
+                engine,
+                NonZeroU16::new(10808).unwrap(),
+                NonZeroU16::new(10809).unwrap(),
+                &policy,
+                &tun
+            ),
+            Err(yonik_engine::PolicyCompileError::UnsupportedSelector(41))
+        ));
+    }
+    policy.user_rules[0].enabled = false;
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert!(
+            compile_system_policy(
+                &report.servers[0],
+                engine,
+                NonZeroU16::new(10808).unwrap(),
+                NonZeroU16::new(10809).unwrap(),
+                &policy,
+                &tun
+            )
+            .is_ok()
+        );
+    }
+}

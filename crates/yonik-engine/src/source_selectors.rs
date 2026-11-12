@@ -4,6 +4,9 @@ use serde_json::{Value, json};
 use yonik_domain::Policy;
 
 pub(crate) fn validate(policy: &Policy) -> Result<(), PolicyCompileError> {
+    if let Some(id) = policy.unsupported_selector() {
+        return Err(PolicyCompileError::UnsupportedSelector(id));
+    }
     let mut bytes = 0usize;
     for rule in policy.user_rules.iter().chain(&policy.preset_rules) {
         if rule.conditions.executables.len() > 32 {

@@ -60,6 +60,7 @@ fn single_evaluator_preserves_or_groups_and_app_and_priority() {
         enabled: true,
         action: Action::Block,
         conditions: Conditions {
+            platform_sources: vec![],
             executables: vec!["/app".into()],
             domains: vec![DomainPattern::Exact("inline.test".parse().unwrap())],
             destinations: vec!["192.0.2.0/24".parse().unwrap()],
