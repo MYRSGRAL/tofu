@@ -280,7 +280,8 @@ def main() -> None:
     ), "producer language changed"
     if args.locale == "en":
         assert all(
-            result in (
+            result
+            in (
                 "Copied",
                 "Export unavailable: verified metadata for this error are missing.",
             )
