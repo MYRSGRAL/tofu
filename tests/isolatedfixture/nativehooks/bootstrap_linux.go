@@ -39,11 +39,27 @@ func DecodeBootstrap(b []byte, fdCount int) (Bootstrap, error) {
 
 // CheckServer сверяет live pidfd и starttime. FD принадлежит custody вызывающего.
 // pidfd readable при exit, поэтому одного существующего /proc/PID недостаточно.
-func (b Bootstrap) CheckServer(pidfd *os.File) error {
-	if pidfd == nil {
+// controlFile удерживает ссылку runtime на FD до конца syscall, исключая Close/reuse.
+func controlFile(file *os.File, operation func(int) error) error {
+	if file == nil {
 		return ErrDenied
 	}
-	fd := int(pidfd.Fd())
+	raw, err := file.SyscallConn()
+	if err != nil {
+		return ErrDenied
+	}
+	var result error
+	if err = raw.Control(func(fd uintptr) { result = operation(int(fd)) }); err != nil {
+		return ErrDenied
+	}
+	return result
+}
+
+func (b Bootstrap) CheckServer(pidfd *os.File) error {
+	return controlFile(pidfd, b.checkServerFD)
+}
+
+func (b Bootstrap) checkServerFD(fd int) error {
 	var set syscall.FdSet
 	if fd < 0 || fd >= len(set.Bits)*64 {
 		return ErrDenied
@@ -93,27 +109,35 @@ func (b Bootstrap) CheckServer(pidfd *os.File) error {
 
 // ReceiveAuthenticated принимает владение всеми полученными FD даже при отказе.
 // Возвращённые FD переходят вызывающему только после всех проверок.
-func (b Bootstrap) ReceiveAuthenticated(channel, pidfd *os.File) (Frame, []*os.File, error) {
+func (b Bootstrap) ReceiveAuthenticated(channel, pidfd *os.File) (frame Frame, files []*os.File, err error) {
+	err = controlFile(channel, func(fd int) error {
+		var receiveErr error
+		frame, files, receiveErr = b.receiveAuthenticatedFD(fd, pidfd)
+		return receiveErr
+	})
+	return
+}
+
+func (b Bootstrap) receiveAuthenticatedFD(fd int, pidfd *os.File) (Frame, []*os.File, error) {
 	fail := func(files []*os.File) (Frame, []*os.File, error) {
 		for _, f := range files {
 			_ = f.Close()
 		}
 		return Frame{}, nil, ErrDenied
 	}
-	if channel == nil || b.CheckServer(pidfd) != nil {
+	if b.CheckServer(pidfd) != nil {
 		return fail(nil)
 	}
-	kind, err := syscall.GetsockoptInt(int(channel.Fd()), syscall.SOL_SOCKET, syscall.SO_TYPE)
+	kind, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_TYPE)
 	if err != nil || kind != syscall.SOCK_SEQPACKET {
 		return fail(nil)
 	}
-	pass, err := syscall.GetsockoptInt(int(channel.Fd()), syscall.SOL_SOCKET, syscall.SO_PASSCRED)
+	pass, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_PASSCRED)
 	if err != nil || pass != 1 {
 		return fail(nil)
 	}
 	data := make([]byte, MaxFrameBytes+1)
 	control := make([]byte, syscall.CmsgSpace(4*16)+syscall.CmsgSpace(syscall.SizeofUcred))
-	fd := int(channel.Fd())
 	var ready syscall.FdSet
 	if fd < 0 || fd >= len(ready.Bits)*64 {
 		return fail(nil)

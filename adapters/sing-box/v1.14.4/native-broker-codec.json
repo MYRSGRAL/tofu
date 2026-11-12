@@ -5,20 +5,20 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "87203d57cf094b9f01ab84dcc89cb902f1552ecab11080cc36c2034eb520a581",
+  "patch_sha256": "c1d3133d0a8230ed43622193f475be85723bd6bdbc5b65db191bcbf00a6c194e",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
     "wire.go": "1fec3cea44325662f8d9b62d74ed4571193b7790464173952b1d932f9d25b283",
     "wire_test.go": "f4e7783de6be2db9a76df97c55bc8ba55753c1dc844440b05e060695ae0cce41",
     "frozen-vectors.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216",
-    "bootstrap_linux.go": "70b989f474fe79739e898fd37eae62a922680efed8302cd33400dc3d2fbef139",
+    "bootstrap_linux.go": "6a867a7f974c2e6f5642b16502b7f001c65d00370e8db734516e75b5c883678b",
     "bootstrap_linux_test.go": "b6f0b01e824737449928a9f2fac4153d8a5d2dbc93f54ce2d30bfab77718d575",
     "routing.go": "f17bcd6b3c4026a3e8a7461c0d49e24ac643711a7f7ca3a1303904095b4876bb",
     "routing_test.go": "e69f550bbf0e4d1868bd5f9cb53af3c77ec74b92f4af84a5f0919b85cd50e388",
     "export_test.go": "34a6ef93d12608f7106805476a4df74dfd2a8f230c46a31d44f07159f2c12c3b",
     "callsite_test.go": "0fcbd407ee47aa9f6958d5b7dde3fca9d27dce523656d1ae6972466dd246ed5f",
-    "closed_tun_linux.go": "c33e0626f8eddb075144efa35943416d38e5f69e0f8d4130d30f31aa1140ec6c",
+    "closed_tun_linux.go": "10cb68401679f2476cb7e741d64d6e76efb98cabf191e560c51b0ec618def0bb",
     "closed_tun_linux_test.go": "6d28956c14703abed6b0e7d903a255c6c958ee300c27609cc775a46016abcc69",
     "tun_callsite_test.go": "2d9027155354a7c4874eb1a4f3cfcea90fa6f61da0cdc01782a90c4797fd4099",
     "socket_callsite_test.go": "d4d7e5133d4867bf055b31c59965b9673705d346f617469e0631f37a240fc826",
@@ -26,7 +26,8 @@
     "dns_callsite_test.go": "b52f8581e82dd81d199cb5c03372bf047317eda2cbf6e2198b4cd290d5a9edb2",
     "revoke_callsite_test.go": "3caebd9c9ed32d457c0818767c74466b4a0c9e7e1296c62dd94c7aa09d9ee027",
     "pipeline_test.go": "0ba1310a9870177b24ed14ab0788574c7622b8d0b163d039a72d2669ee855eb6",
-    "named_downstream_test.go": "c46e95dd296335185eaa9dc3e6f9422751b68369846932c95a936edb11f02384"
+    "named_downstream_test.go": "c46e95dd296335185eaa9dc3e6f9422751b68369846932c95a936edb11f02384",
+    "monitor_close_linux_test.go": "3667bf7e5f2c742f2c384d80cc62ad1487afd2b3eab06fd64b6cc92f788f23c8"
   },
   "native_protocol": null,
   "adapter_features": {},
