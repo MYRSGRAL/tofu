@@ -60,10 +60,11 @@ Qt offscreen с настоящими input/review controls и FileDialog accepta
 
 ## Выполненная приёмка
 
-Dependency: ordinary merge coherent API `010242a8ee06a18b4656a42c4451a802d36a85e3`
-из PR131. Остальной P07 routing UI не входит в назначенную реализацию.
-Repository/backup code принадлежит W1; этот PR использует его entrypoint без
-изменений. `backup: Option<PathBuf>` — кандидат, который repository заново
+Используется API `010242a8ee06a18b4656a42c4451a802d36a85e3` из принятого
+PR131. База синхронизирована ordinary merge с main, включая Policy Apply,
+typed scheduler и принятую P07 интеграцию. Repository/backup code принадлежит
+W1; этот PR использует его entrypoint без изменений. Кандидат backup берётся
+из общего приватного `Actor::format4_backup`, заполненного maintenance-flow. `backup: Option<PathBuf>` — кандидат, который repository заново
 проверяет внутри IMMEDIATE transaction; UI bool не является authority.
 
 В review есть создание копии через существующий maintenance supervisor:

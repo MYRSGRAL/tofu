@@ -3449,7 +3449,6 @@ async fn run(
     );
     let mut local_task: Option<LocalTask> = None;
     let mut local_pending: Option<(String, yonik_import::ImportReport)> = None;
-    let mut local_backup: Option<PathBuf> = None;
     let mut batch_running: Option<BatchRunning> = None;
     let mut tcp_running: Option<TcpRunning> = None;
     let mut tcp_priority = control.tcp_priority.subscribe();
@@ -3922,7 +3921,6 @@ async fn run(
                 }
                 if let Command::MaintenanceStart { request_id, operation, source, destination, revision } = &envelope.command {
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
-                    let completed_backup = if *operation == maintenance::Operation::Backup { Some(destination.clone()) } else { None };
                     let live = config.data_dir.join("subscriptions.sqlite");
                     if local_task.is_some() || !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
                         let cause = if actor.state.maintenance_available { Cause::MaintenanceAdmissionBusy } else { Cause::MaintenanceAdmissionUnavailable }; maintenance_refusal(&mut actor.state, request.request_id, cause, envelope.generation);
@@ -3991,9 +3989,6 @@ async fn run(
                     }
                     if result.is_ok() { actor.format4_backup = backup_destination; }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
-                    if result.is_ok() && job_drained && envelope.generation == control.generation.load(Ordering::SeqCst) {
-                        if let Some(path) = completed_backup { local_backup = Some(path); }
-                    }
 
                     // Completion принадлежит единственному join handle этого request;
                     // внешние callbacks не могут завершить следующую generation.
@@ -4172,7 +4167,7 @@ async fn run(
                         let result = {
                             let (sender, cancel) = Cancellation::new();
                             let mut interruption = control.priority.subscribe();
-                            let operation = actor.service().approve_local_import(name.clone(), report, cancel, local_backup.clone());
+                            let operation = actor.service().approve_local_import(name.clone(), report, cancel, actor.format4_backup.clone());
                             tokio::pin!(operation);
                             tokio::select! {
                                 biased;
