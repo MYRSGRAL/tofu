@@ -2276,6 +2276,7 @@ fn local_cancel_ack_prevents_stale_report_from_replacing_next_import() {
     app.wait(|v| v["ready"] == true);
     local_backup(&mut app, &directory);
     app.send(json!({"command":"import_text", "name":"Отменённый", "text":"trojan://old-secret@example.com:443#old\n".repeat(20_000)}));
+    app.wait(|v| v["busy"] == true);
     app.send(json!({"command":"cancel_local_import"}));
     app.wait(|v| v["busy"] == false && v["pending"].is_null());
     app.send(json!({"command":"import_text", "name":"Новый", "text":"trojan://new-secret@example.com:443#new"}));
