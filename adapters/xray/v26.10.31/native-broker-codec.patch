@@ -4412,3 +4412,179 @@ new file mode 100644
 +		}
 +	}
 +}
+diff --git a/common/yonikbroker/named_downstream_test.go b/common/yonikbroker/named_downstream_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/named_downstream_test.go
+@@ -0,0 +1,171 @@
++package nativehooks_test
++
++import (
++	"fmt"
++	mdns "github.com/miekg/dns"
++	"github.com/xtls/xray-core/common/buf"
++	xnet "github.com/xtls/xray-core/common/net"
++	H "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/features/routing"
++	"github.com/xtls/xray-core/infra/conf/serial"
++	_ "github.com/xtls/xray-core/main/distro/all"
++	"io"
++	"net"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestNamedDownstream(t *testing.T) {
++	for _, network := range []string{"tcp", "udp"} {
++		for _, rawMode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "cache/known", "cache/cancel", "cache/revoke", "cache/epoch", "cache/unknown", "cache/unavailable", "cache/stale", "changed-answer"} {
++			t.Run(network+"/"+rawMode, func(t *testing.T) {
++				mode := strings.TrimPrefix(rawMode, "cache/")
++				cached := strings.HasPrefix(rawMode, "cache/")
++				ctx, change := H.ClosedDNSFixture(t)
++				var egress atomic.Int32
++				tcp, e := net.Listen("tcp", "0.0.0.0:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer tcp.Close()
++				port := tcp.Addr().(*net.TCPAddr).Port
++				udp, e := net.ListenPacket("udp", fmt.Sprintf("0.0.0.0:%d", port))
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer udp.Close()
++				go func() {
++					for {
++						c, e := tcp.Accept()
++						if e != nil {
++							return
++						}
++						egress.Add(1)
++						go func() { defer c.Close(); io.Copy(c, c) }()
++					}
++				}()
++				go func() {
++					b := make([]byte, 64)
++					for {
++						n, a, e := udp.ReadFrom(b)
++						if e != nil {
++							return
++						}
++						egress.Add(1)
++						udp.WriteTo(b[:n], a)
++					}
++				}()
++				listener, e := net.Listen("tcp", "127.0.0.1:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				entered, release := make(chan struct{}, 8), make(chan struct{})
++				server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					entered <- struct{}{}
++					<-release
++					r := new(mdns.Msg)
++					r.SetReply(q)
++					answer := "127.0.0.1"
++					if mode == "changed-answer" {
++						answer = "127.0.0.2"
++					}
++					rr, _ := mdns.NewRR("private.test. 60 IN A " + answer)
++					r.Answer = []mdns.RR{rr}
++					w.WriteMsg(r)
++				})}
++				go server.ActivateAndServe()
++				defer server.Shutdown()
++				config, e := serial.LoadJSONConfig(strings.NewReader(fmt.Sprintf(`{"dns":{"queryStrategy":"UseIPv4","servers":["tcp+local://%s"]},"routing":{"domainStrategy":"IPOnDemand","rules":[{"type":"field","ip":["127.0.0.1/32"],"outboundTag":"allowed"}]},"outbounds":[{"tag":"deny","protocol":"blackhole"},{"tag":"allowed","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]}`, listener.Addr())))
++				if e != nil {
++					t.Fatal(e)
++				}
++				instance, e := core.NewWithContext(ctx, config)
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer instance.Close()
++				if e = instance.Start(); e != nil {
++					t.Fatal(e)
++				}
++				done := make(chan error, 1)
++				run := func() {
++					go func() {
++						dst := xnet.TCPDestination(xnet.DomainAddress("private.test"), xnet.Port(port))
++						if network == "udp" {
++							dst.Network = xnet.Network_UDP
++						}
++						link, e := instance.GetFeature(routing.DispatcherType()).(routing.Dispatcher).Dispatch(ctx, dst)
++						if e != nil {
++							done <- e
++							return
++						}
++						b := buf.New()
++						b.Write([]byte("named"))
++						e = link.Writer.WriteMultiBuffer(buf.MultiBuffer{b})
++						if e == nil {
++							var mb buf.MultiBuffer
++							mb, e = link.Reader.ReadMultiBuffer()
++							buf.ReleaseMulti(mb)
++						}
++						done <- e
++					}()
++				}
++				run()
++				select {
++				case <-entered:
++				case <-time.After(3 * time.Second):
++					t.Fatal("DNS barrier не достигнут")
++				}
++				warmQuestions := 0
++				if cached {
++					close(release)
++					select {
++					case e := <-done:
++						if e != nil {
++							t.Fatal(e)
++						}
++					case <-time.After(4 * time.Second):
++						t.Fatal("cache warm echo timeout")
++					}
++					egress.Store(0)
++					warmQuestions = len(entered)
++				}
++
++				change(mode)
++				if cached {
++					run()
++				} else {
++					close(release)
++				}
++				if mode == "known" {
++					select {
++					case e := <-done:
++						if e != nil {
++							t.Fatal(e)
++						}
++					case <-time.After(3 * time.Second):
++						t.Fatal("нет echo")
++					}
++					if egress.Load() == 0 {
++						t.Fatal("нет egress")
++					}
++				} else {
++					select {
++					case <-done:
++					case <-time.After(time.Second):
++					}
++					if egress.Load() != 0 {
++						t.Fatalf("запрещённый egress %d", egress.Load())
++					}
++				}
++				if cached && len(entered) != warmQuestions {
++					t.Fatal("cache flow выполнил новый DNS exchange")
++				}
++				t.Logf("native routing→beforeDial→%s egress=%d mode=%s", network, egress.Load(), mode)
++			})
++		}
++	}
++}

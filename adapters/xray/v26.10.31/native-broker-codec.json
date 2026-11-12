@@ -5,7 +5,7 @@
     "crates/yonik-linux/src/attribution/native_wire.rs": "c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1",
     "tests/fixtures/native-broker-v1.json": "d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216"
   },
-  "patch_sha256": "c1079dc4012a22c8361156014bd3cae87b84661b46ada7278a11b988d1b4b251",
+  "patch_sha256": "88a4d542c256bf27ed1b55ebf08ea2c01acb1c139a55b3cc27c268a700d9f250",
   "package_files_sha256": {
     "proof.go": "d7f63d92d8e59fc01a0dd72c776f99a0aa98f6bfafbe1817922b0528a15abc93",
     "proof_test.go": "aa5052cdbb33f7782f0df1de0cd63f888eb10c1455bc3dc2fa6624625b687587",
@@ -26,7 +26,8 @@
     "freedom_callsite_test.go": "6e61b431a977ed14492d58988c751ca0fe591db6af52eedd00a018a311872420",
     "socket.go": "1c3f4dbbffc00749ab6336205270dc3b55a28fefb3484443fd9b3ed02542d431",
     "revoke_callsite_test.go": "bc065df25f4093128d2abfcbafc3acbf3d7c70ab5fcad042db67681257018c73",
-    "pipeline_test.go": "f932fa60cfcb4d4f35ec2d203d06d10040b2a3d0809c427eaca1fa7f2b17e9f4"
+    "pipeline_test.go": "f932fa60cfcb4d4f35ec2d203d06d10040b2a3d0809c427eaca1fa7f2b17e9f4",
+    "named_downstream_test.go": "b61ee3d072771685be7200f4cc68054d72763f9c4488dfa6f0de5371b9034b68"
   },
   "native_protocol": null,
   "adapter_features": {},
