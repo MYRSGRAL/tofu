@@ -20,10 +20,18 @@ pub struct RuleInput {
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PresetReference {
+    pub snapshot: String,
+    pub enabled: bool,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Draft {
     pub version: u8,
     pub rules: Vec<RuleInput>,
     pub default_action: String,
+    #[serde(default)]
+    pub ru_direct: Option<PresetReference>,
 }
 impl Default for Draft {
     fn default() -> Self {
@@ -31,6 +39,7 @@ impl Default for Draft {
             version: 1,
             rules: vec![],
             default_action: "proxy".into(),
+            ru_direct: None,
         }
     }
 }
@@ -52,15 +61,17 @@ impl Draft {
         }
         use yonik_domain::policy_diagnostics::{Limits, WarningKind, diagnose};
         match self
-            .policy()
+            .base_policy()
             .ok()
             .and_then(|p| diagnose(&p, Limits::default()).ok())
         {
-            Some(report) => serde_json::json!({"incomplete": report.truncated,
+            Some(report) => {
+                serde_json::json!({"incomplete": report.truncated || self.ru_direct.as_ref().is_some_and(|r| r.enabled),
                 "warnings": report.warnings.iter().map(|w| serde_json::json!({
                     "rule_id": w.rule_id, "earlier": format!("{:?}", w.earlier),
                     "kind": match w.kind { WarningKind::Shadowed => "shadowed", WarningKind::PotentialOverlap => "potential_overlap" }
-                })).collect::<Vec<_>>()}),
+                })).collect::<Vec<_>>()})
+            }
             None => {
                 serde_json::json!({"incomplete": true, "warnings": [], "error": "diagnostics_input"})
             }
@@ -68,13 +79,19 @@ impl Draft {
     }
     /// Синтетический ввод, не наблюдение потока. DNS и приложение не выдумываются.
     pub fn explain(&self, target: &str) -> Result<serde_json::Value, &'static str> {
+        self.explain_with_policy(target, self.policy()?)
+    }
+    pub fn explain_with_policy(
+        &self,
+        target: &str,
+        policy: Policy,
+    ) -> Result<serde_json::Value, &'static str> {
         use yonik_domain::{
             Destination, DestinationFlow, Evaluation, EvaluationContext, Resolution,
         };
         if target.len() > 253 {
             return Err("limit");
         }
-        let policy = self.policy()?;
         if let Some(id) = policy.unsupported_selector() {
             return Ok(
                 serde_json::json!({"status":"unsupported", "reason":"unsupported_selector", "rule_id":id}),
@@ -156,10 +173,27 @@ impl Draft {
             return Err("limit");
         }
         let draft: Self = serde_json::from_str(raw).map_err(|_| "format")?;
-        draft.policy()?;
+        draft.base_policy()?;
         Ok(draft)
     }
+    /// Enabled reference требует trusted resolver; пропуск preset запрещён.
     pub fn policy(&self) -> Result<Policy, &'static str> {
+        if self
+            .ru_direct
+            .as_ref()
+            .is_some_and(|reference| reference.enabled)
+        {
+            return Err("routing_storage");
+        }
+        self.base_policy()
+    }
+    pub fn base_policy(&self) -> Result<Policy, &'static str> {
+        if self.ru_direct.as_ref().is_some_and(|reference| {
+            reference.snapshot.len() != 64
+                || !reference.snapshot.bytes().all(|b| b.is_ascii_hexdigit())
+        }) {
+            return Err("invalid_input");
+        }
         if ![1, 2].contains(&self.version) || self.rules.len() > 256 {
             return Err("limit");
         }
@@ -311,7 +345,7 @@ impl Draft {
         } else {
             candidate.rules.push(input);
         }
-        candidate.policy()?;
+        candidate.base_policy()?;
         *self = candidate;
         Ok(())
     }
@@ -377,4 +411,21 @@ pub fn catalog(
     Ok(
         serde_json::json!({"total":filtered.len(),"offset":offset,"incomplete":incomplete,"items":filtered.into_iter().skip(offset).take(32).collect::<Vec<_>>()}),
     )
+}
+
+#[cfg(test)]
+mod preset_reference_tests {
+    #[test]
+    fn preset_reference_roundtrips_separately_from_user_rules() {
+        let json = format!(
+            r#"{{"version":1,"rules":[],"default_action":"proxy","ru_direct":{{"snapshot":"{}","enabled":true}}}}"#,
+            "a".repeat(64)
+        );
+        let draft = super::Draft::parse(&json).expect("отдельная preset reference");
+        assert!(draft.rules.is_empty());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&draft.json()).expect("json")["ru_direct"]["snapshot"],
+            "a".repeat(64)
+        );
+    }
 }

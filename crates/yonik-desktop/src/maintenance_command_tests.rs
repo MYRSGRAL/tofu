@@ -89,3 +89,29 @@ fn rejects_nonlocal_restore_and_inexact_request_identity() {
         );
     }
 }
+
+#[test]
+fn unavailable_presets_keep_matching_ack() {
+    for error in ["busy", "startup", "cleanup_failed"] {
+        let mut state = super::Snapshot::new(true);
+        for command in [
+            Command::PresetCancel { request_id: 71 },
+            Command::PresetValidate {
+                request_id: 72,
+                expected_revision: 0,
+            },
+            Command::PresetRollback { request_id: 73 },
+        ] {
+            super::reject_unavailable_command(
+                &mut state,
+                &command,
+                error,
+                super::Cause::MaintenanceAdmissionBusy,
+                7,
+            );
+            let ack = state.presets.ack.as_ref().expect("matching ACK");
+            assert_eq!(Some(ack.request_id), command.preset_request_id());
+            assert_eq!(ack.error, Some(error));
+        }
+    }
+}
