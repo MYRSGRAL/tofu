@@ -82,6 +82,7 @@ pub struct EvaluationContext<'a> {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyFault {
+    UnsupportedSelector(u64),
     DnsPolicyUnresolved,
     DnsPolicyAmbiguous,
     UnknownFakeMapping,
@@ -162,6 +163,9 @@ impl Policy {
         context: &EvaluationContext<'_>,
         resources: &impl crate::ResourceConditions,
     ) -> Evaluation {
+        if let Some(id) = self.unsupported_selector() {
+            return Evaluation::Rejected(PolicyFault::UnsupportedSelector(id));
+        }
         let literal;
         let (name, resolution) = match &flow.destination {
             Destination::Ip { address, name } => {

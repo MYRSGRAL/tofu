@@ -33,6 +33,12 @@ struct Rule {
     domain_suffix: Vec<String>,
     ip_cidr: Vec<String>,
     executable_paths: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::platform_source::deserialize_sources"
+    )]
+    platform_sources: Option<Vec<crate::platform_source::PlatformSourceInput>>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,10 +67,10 @@ impl Serialize for SystemPolicy {
 }
 impl SystemPolicy {
     pub fn parse(text: &str) -> Result<Self, PolicyInputError> {
-        if !bounded_depth(text, 4) {
+        if !bounded_depth(text, 5) {
             return Err(PolicyInputError::InvalidJson);
         }
-        if text.len() > 64 * 1024 {
+        if text.len() > 262144 {
             return Err(PolicyInputError::TooLarge);
         }
         let value: serde_json::Value =
@@ -87,12 +93,21 @@ impl SystemPolicy {
             }
         }
         let wire: Wire = serde_json::from_str(text).map_err(|_| PolicyInputError::InvalidJson)?;
-        if wire.user_rules.len() + wire.preset_rules.len() > 128 {
+        if wire.user_rules.len() + wire.preset_rules.len() > 256 {
             return Err(PolicyInputError::Limit);
         }
+        if ![1, 2].contains(&wire.version)
+            || wire
+                .user_rules
+                .iter()
+                .chain(&wire.preset_rules)
+                .any(|r| (wire.version == 2) != r.platform_sources.is_some())
+        {
+            return Err(PolicyInputError::InvalidPolicy);
+        }
         let rules = |rows: &[Rule]| {
-            rows.iter().map(|r| json!({"id":r.id,"enabled":r.enabled,"action":r.action,
-            "conditions":{"domain":r.domain,"domain_suffix":r.domain_suffix,"ip_cidr":r.ip_cidr,"executable_paths":r.executable_paths}})).collect::<Vec<_>>()
+            rows.iter().map(|r| { let mut value = json!({"id":r.id,"enabled":r.enabled,"action":r.action,
+            "conditions":{"domain":r.domain,"domain_suffix":r.domain_suffix,"ip_cidr":r.ip_cidr,"executable_paths":r.executable_paths}}); if let Some(sources) = &r.platform_sources { value["conditions"]["platform_sources"] = json!(sources); } value }).collect::<Vec<_>>()
         };
         let input = json!({"version":wire.version,"default_action":wire.default_action,
             "user_rules":rules(&wire.user_rules),"preset_rules":rules(&wire.preset_rules),
@@ -102,6 +117,9 @@ impl SystemPolicy {
                 .map_err(|_| PolicyInputError::InvalidJson)?
                 .as_slice(),
         )?;
+        if let Some(id) = policy.unsupported_selector() {
+            return Err(PolicyInputError::UnsupportedSelector(id));
+        }
         crate::source_selectors::validate(&policy).map_err(|_| PolicyInputError::InvalidPolicy)?;
         Ok(Self { wire, policy })
     }
@@ -175,5 +193,22 @@ mod tests {
                 .requires_attribution()
         );
         assert!(SystemPolicy::parse(&text.replace("/usr/bin/client", "/usr/../client")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod p07_tests {
+    use super::*;
+    #[test]
+    fn typed_v2_wire_and_activation_guard() {
+        let text = r#"{"version":2,"default_action":"direct","user_rules":[{"id":41,"enabled":false,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":[],"platform_sources":[{"kind":"android_package","package":"org.example.app"}]}],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}"#;
+        let policy = SystemPolicy::parse(text).unwrap();
+        assert_eq!(serde_json::to_string(&policy).unwrap(), text);
+        assert!(matches!(
+            SystemPolicy::parse(&text.replace("false", "true")),
+            Err(PolicyInputError::UnsupportedSelector(41))
+        ));
+        assert!(SystemPolicy::parse(&text.replace("\"version\":2", "\"version\":1")).is_err());
+        assert!(SystemPolicy::parse(&text.replace("android_package", "future")).is_err());
     }
 }

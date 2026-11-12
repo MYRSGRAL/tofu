@@ -16,6 +16,7 @@ const MAX_EXECUTABLE_BYTES: usize = 4096;
 /// Ошибки намеренно не содержат исходный JSON и ошибки нижележащего reader.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyInputError {
+    UnsupportedSelector(u64),
     Io,
     TooLarge,
     InvalidJson,
@@ -26,6 +27,7 @@ pub enum PolicyInputError {
 impl fmt::Display for PolicyInputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::UnsupportedSelector(_) => "Неприменимый платформенный селектор",
             Self::Io => "Не удалось прочитать политику",
             Self::TooLarge => "Превышен размер входной политики",
             Self::InvalidJson => "Некорректная структура JSON политики",
@@ -100,6 +102,11 @@ struct InputConditions {
     ip_cidr: Vec<String>,
     #[serde(default)]
     executable_paths: Vec<String>,
+    #[serde(
+        default,
+        deserialize_with = "crate::platform_source::deserialize_sources"
+    )]
+    platform_sources: Option<Vec<crate::platform_source::PlatformSourceInput>>,
 }
 
 #[derive(Deserialize)]
@@ -130,8 +137,16 @@ pub fn read_policy(reader: impl Read) -> Result<Policy, PolicyInputError> {
     }
     let input: InputPolicy =
         serde_json::from_slice(&bytes).map_err(|_| PolicyInputError::InvalidJson)?;
-    if input.version != 1 {
+    if ![1, 2].contains(&input.version) {
         return Err(PolicyInputError::InvalidPolicy);
+    }
+    for rule in input.user_rules.iter().chain(&input.preset_rules) {
+        if (input.version == 2) != rule.conditions.platform_sources.is_some() {
+            return Err(PolicyInputError::InvalidPolicy);
+        }
+    }
+    if input.version == 2 && bytes.len() > 262144 {
+        return Err(PolicyInputError::TooLarge);
     }
     check_limits(&input)?;
     Ok(Policy {
@@ -172,6 +187,33 @@ fn check_limits(input: &InputPolicy) -> Result<(), PolicyInputError> {
     if input.user_rules.len() + input.preset_rules.len() > MAX_RULES {
         return Err(PolicyInputError::Limit);
     }
+    if input.version == 2 {
+        let rules: Vec<_> = input.user_rules.iter().chain(&input.preset_rules).collect();
+        if rules.len() > 256 {
+            return Err(PolicyInputError::Limit);
+        }
+        let sources: Vec<_> = rules
+            .iter()
+            .flat_map(|r| r.conditions.platform_sources.iter().flatten())
+            .collect();
+        let bytes = sources.iter().map(|s| s.bytes()).sum::<usize>()
+            + rules
+                .iter()
+                .map(|r| {
+                    let c = &r.conditions;
+                    c.domain
+                        .iter()
+                        .chain(&c.domain_suffix)
+                        .chain(&c.ip_cidr)
+                        .chain(&c.executable_paths)
+                        .map(String::len)
+                        .sum::<usize>()
+                })
+                .sum::<usize>();
+        if sources.len() > 4096 || bytes > 200000 {
+            return Err(PolicyInputError::Limit);
+        }
+    }
     let mut selectors =
         input.lan.len() + input.private_networks.len() + input.private_domains.len();
     for rule in input.user_rules.iter().chain(&input.preset_rules) {
@@ -199,6 +241,18 @@ fn convert_rules(input: Vec<InputRule>) -> Result<Vec<Rule>, PolicyInputError> {
                 return Err(PolicyInputError::InvalidPolicy);
             }
             let conditions = rule.conditions;
+            let sources = conditions.platform_sources.as_deref().unwrap_or_default();
+            if sources.len() > 16 {
+                return Err(PolicyInputError::Limit);
+            }
+            let platform_sources = sources
+                .iter()
+                .map(|s| s.typed().map_err(|_| PolicyInputError::InvalidPolicy))
+                .collect::<Result<Vec<_>, _>>()?;
+            if platform_sources.iter().collect::<HashSet<_>>().len() != platform_sources.len() {
+                return Err(PolicyInputError::InvalidPolicy);
+            }
+
             if conditions.executable_paths.iter().any(|path| {
                 !path.starts_with('/')
                     || path.len() > MAX_EXECUTABLE_BYTES
@@ -222,6 +276,7 @@ fn convert_rules(input: Vec<InputRule>) -> Result<Vec<Rule>, PolicyInputError> {
                 enabled: rule.enabled,
                 action: rule.action.into(),
                 conditions: Conditions {
+                    platform_sources,
                     executables: conditions.executable_paths,
                     destinations: conditions
                         .ip_cidr
