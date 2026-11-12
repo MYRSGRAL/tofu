@@ -16,6 +16,10 @@ pub enum Slot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    SchedulerInitialize,
+    SchedulerAdmission,
+    SchedulerService,
+    SchedulerValidation,
     Startup,
     StorageOpen,
     EngineStart,
@@ -23,6 +27,7 @@ pub enum Stage {
     Cleanup,
     HelperRpc,
     RoutingSave,
+    MaintenanceAdmission,
     MaintenanceCopy,
     MaintenanceReopen,
     MaintenanceDrain,
@@ -35,6 +40,30 @@ pub enum Stage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cause {
+    SchedulerInitializeInvalidLimits,
+    SchedulerInitializeExhausted,
+    SchedulerInvalidLimits,
+    SchedulerFull,
+    SchedulerDuplicate,
+    SchedulerExhausted,
+    SchedulerStale,
+    SchedulerIntervalInvalid,
+    SchedulerServiceInvalidSource,
+    SchedulerServiceCorruptSnapshot,
+    SchedulerServiceNotFound,
+    SchedulerServiceNoSnapshot,
+    SchedulerServiceExhausted,
+    SchedulerServiceForeignApproval,
+    SchedulerServiceStaleUpdate,
+    SchedulerServiceWorker,
+    SchedulerRepositoryInvalidInput,
+    SchedulerRepositoryUnsafePath,
+    SchedulerRepositoryUnsupportedVersion,
+    SchedulerRepositoryCorrupt,
+    SchedulerRepositoryStorage,
+    SchedulerRepositoryConflict,
+    SchedulerRepositoryNotFound,
+
     DataDirectoryRelative,
     DataDirectoryCreate,
     DataDirectoryMetadata,
@@ -71,6 +100,16 @@ pub enum Cause {
     RoutingRepositoryMissing,
     RoutingRepositoryConflict,
     RoutingRepositoryFailed,
+    MaintenanceAdmissionBusy,
+    MaintenanceAdmissionRevision,
+    MaintenanceAdmissionIdentity,
+    MaintenanceAdmissionInvalidInput,
+    MaintenanceAdmissionUnavailable,
+    MaintenanceAdmissionUnsupported,
+    MaintenanceAdmissionDraining,
+    MaintenanceAdmissionReopenUnavailable,
+    MaintenanceAdmissionStale,
+    MaintenanceAdmissionSchedulerUnavailable,
     MaintenanceCopyInvalidInput,
     MaintenanceCopyUnsafePath,
     MaintenanceCopyUnsupportedVersion,
@@ -129,22 +168,69 @@ pub enum Cause {
 
 impl Cause {
     pub fn allows(self, slot: Slot) -> bool {
+        if matches!(
+            self,
+            Self::MaintenanceAdmissionUnsupported | Self::MaintenanceAdmissionReopenUnavailable
+        ) {
+            return matches!(slot, Slot::MaintenanceAck | Slot::Error | Slot::Connection);
+        }
         match self.identity().2 {
-            Stage::MaintenanceCopy | Stage::MaintenanceDrain | Stage::MaintenanceReopen => {
-                slot == Slot::MaintenanceAck
-            }
+            Stage::MaintenanceAdmission
+            | Stage::MaintenanceCopy
+            | Stage::MaintenanceDrain
+            | Stage::MaintenanceReopen => slot == Slot::MaintenanceAck,
             Stage::LogsRead => slot == Slot::LogsRead,
             Stage::LogsSave => slot == Slot::LogsSave,
+            Stage::SchedulerAdmission | Stage::SchedulerService | Stage::SchedulerValidation => {
+                matches!(slot, Slot::Error | Slot::Source)
+            }
+            Stage::SchedulerInitialize => matches!(slot, Slot::Error | Slot::Source),
             Stage::StorageWrite => matches!(slot, Slot::Error | Slot::Connection | Slot::Source),
             Stage::RoutingSave => matches!(slot, Slot::Error | Slot::Connection | Slot::RoutingAck),
             _ => matches!(slot, Slot::Error | Slot::Connection),
         }
     }
     pub fn needs_generation(self) -> bool {
-        !matches!(self.identity().2, Stage::Startup | Stage::StorageOpen)
+        !matches!(
+            self.identity().2,
+            Stage::Startup | Stage::StorageOpen | Stage::SchedulerInitialize
+        )
     }
     fn identity(self) -> (&'static str, &'static str, Stage) {
         match self {
+            Self::SchedulerInitializeInvalidLimits | Self::SchedulerInitializeExhausted => {
+                ("STARTUP", "startup", Stage::SchedulerInitialize)
+            }
+            Self::SchedulerInvalidLimits
+            | Self::SchedulerFull
+            | Self::SchedulerDuplicate
+            | Self::SchedulerExhausted
+            | Self::SchedulerStale => ("STORAGE", "storage", Stage::SchedulerAdmission),
+            Self::SchedulerIntervalInvalid | Self::SchedulerServiceInvalidSource => {
+                ("INVALID_INPUT", "invalid_input", Stage::SchedulerValidation)
+            }
+            Self::SchedulerServiceCorruptSnapshot => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceNotFound => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceNoSnapshot => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceExhausted => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceForeignApproval => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryInvalidInput => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerRepositoryUnsafePath => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryUnsupportedVersion => {
+                ("STORAGE", "storage", Stage::SchedulerService)
+            }
+            Self::SchedulerRepositoryCorrupt => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryStorage => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryConflict => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerRepositoryNotFound => ("STORAGE", "storage", Stage::SchedulerService),
             Self::RepositoryOpenInvalidInput => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsafePath => ("STORAGE", "storage", Stage::StorageOpen),
             Self::RepositoryOpenUnsupportedVersion => ("STORAGE", "storage", Stage::StorageOpen),
@@ -187,6 +273,32 @@ impl Cause {
                 "preferences_write",
                 Stage::StorageWrite,
             ),
+            Self::MaintenanceAdmissionBusy => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionRevision => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionIdentity => (
+                "INVALID_INPUT",
+                "invalid_input",
+                Stage::MaintenanceAdmission,
+            ),
+            Self::MaintenanceAdmissionInvalidInput => (
+                "INVALID_INPUT",
+                "invalid_input",
+                Stage::MaintenanceAdmission,
+            ),
+            Self::MaintenanceAdmissionUnavailable => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionUnsupported => {
+                ("STARTUP", "startup", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionDraining => ("BUSY", "busy", Stage::MaintenanceAdmission),
+            Self::MaintenanceAdmissionReopenUnavailable => {
+                ("BUSY", "busy", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionStale => {
+                ("CANCELLED", "cancelled", Stage::MaintenanceAdmission)
+            }
+            Self::MaintenanceAdmissionSchedulerUnavailable => {
+                ("STARTUP", "startup", Stage::MaintenanceAdmission)
+            }
             Self::MaintenanceCopyInvalidInput => {
                 ("INVALID_INPUT", "invalid_input", Stage::MaintenanceCopy)
             }

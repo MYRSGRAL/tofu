@@ -1,4 +1,72 @@
-use super::{DesktopError, Result};
+use super::DesktopError;
+use crate::diagnostics::context::Cause;
+use yonik_linux::SubscriptionSchedulerError;
+
+#[derive(Debug)]
+pub(super) struct ScheduleFailure {
+    pub error: DesktopError,
+    pub cause: Option<Cause>,
+}
+impl ScheduleFailure {
+    pub fn key(&self) -> &'static str {
+        self.error.key()
+    }
+    pub fn interval(error: SubscriptionSchedulerError) -> Self {
+        Self {
+            error: DesktopError("invalid_input"),
+            cause: match error {
+                SubscriptionSchedulerError::InvalidLimits => Some(Cause::SchedulerIntervalInvalid),
+                _ => None,
+            },
+        }
+    }
+    pub fn service(error: yonik_linux::SubscriptionError) -> Self {
+        use yonik_linux::{RepositoryError as R, SubscriptionError as E};
+        let cause = match error {
+            E::InvalidSource => Some(Cause::SchedulerServiceInvalidSource),
+            E::CorruptSnapshot => Some(Cause::SchedulerServiceCorruptSnapshot),
+            E::NotFound => Some(Cause::SchedulerServiceNotFound),
+            E::NoSnapshot => Some(Cause::SchedulerServiceNoSnapshot),
+            E::Exhausted => Some(Cause::SchedulerServiceExhausted),
+            E::ForeignApproval => Some(Cause::SchedulerServiceForeignApproval),
+            E::StaleUpdate => Some(Cause::SchedulerServiceStaleUpdate),
+            E::Worker => Some(Cause::SchedulerServiceWorker),
+            E::Repository(R::InvalidInput) => Some(Cause::SchedulerRepositoryInvalidInput),
+            E::Repository(R::UnsafePath) => Some(Cause::SchedulerRepositoryUnsafePath),
+            E::Repository(R::UnsupportedVersion) => {
+                Some(Cause::SchedulerRepositoryUnsupportedVersion)
+            }
+            E::Repository(R::Corrupt) => Some(Cause::SchedulerRepositoryCorrupt),
+            E::Repository(R::Storage) => Some(Cause::SchedulerRepositoryStorage),
+            E::Repository(R::Conflict) => Some(Cause::SchedulerRepositoryConflict),
+            E::Repository(R::NotFound) => Some(Cause::SchedulerRepositoryNotFound),
+            E::Fetch(_) | E::Import(_) => None,
+        };
+        Self {
+            error: super::map_subscription(error),
+            cause,
+        }
+    }
+    pub fn runtime(error: SubscriptionSchedulerError) -> Self {
+        let cause = match error {
+            SubscriptionSchedulerError::InvalidLimits => Cause::SchedulerInvalidLimits,
+            SubscriptionSchedulerError::Full => Cause::SchedulerFull,
+            SubscriptionSchedulerError::Duplicate => Cause::SchedulerDuplicate,
+            SubscriptionSchedulerError::Exhausted => Cause::SchedulerExhausted,
+            SubscriptionSchedulerError::Stale => Cause::SchedulerStale,
+        };
+        Self {
+            error: DesktopError("storage"),
+            cause: Some(cause),
+        }
+    }
+}
+impl From<DesktopError> for ScheduleFailure {
+    fn from(error: DesktopError) -> Self {
+        Self { error, cause: None }
+    }
+}
+type ScheduleResult<T> = std::result::Result<T, ScheduleFailure>;
 use std::{
     collections::BTreeMap,
     num::NonZeroU64,
@@ -14,6 +82,7 @@ const BACKGROUND_WINDOW_DURATION: Duration = Duration::from_secs(60);
 /// Один bounded владелец; один fetch/review исключает очередь скрытых отчётов.
 pub(super) struct DesktopSchedule {
     pub runtime: SubscriptionScheduler,
+    pub generation: u64,
     pub interval: Duration,
     pub background_enabled: bool,
     pub window_until: Option<Duration>,
@@ -26,7 +95,7 @@ pub(super) struct DesktopSchedule {
     pub deferred: Option<SubscriptionScheduleEvent>,
 }
 impl DesktopSchedule {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> ScheduleResult<Self> {
         static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
         let identity = NEXT_OWNER
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -34,10 +103,26 @@ impl DesktopSchedule {
             })
             .ok()
             .and_then(NonZeroU64::new)
-            .ok_or(DesktopError("startup"))?;
+            .ok_or(ScheduleFailure {
+                error: DesktopError("startup"),
+                cause: Some(Cause::SchedulerInitializeExhausted),
+            })?;
+        Self::with_limits(identity, 20_000)
+    }
+    fn with_limits(identity: NonZeroU64, capacity: usize) -> ScheduleResult<Self> {
         Ok(Self {
-            runtime: SubscriptionScheduler::new(identity, 20_000, 1)
-                .map_err(|_| DesktopError("startup"))?,
+            generation: identity.get(),
+            runtime: SubscriptionScheduler::new(identity, capacity, 1).map_err(|error| {
+                ScheduleFailure {
+                    error: DesktopError("startup"),
+                    cause: match error {
+                        SubscriptionSchedulerError::InvalidLimits => {
+                            Some(Cause::SchedulerInitializeInvalidLimits)
+                        }
+                        _ => None,
+                    },
+                }
+            })?,
             generations: BTreeMap::new(),
             interval: Duration::from_secs(86400),
             background_enabled: false,
@@ -50,7 +135,7 @@ impl DesktopSchedule {
             deferred: None,
         })
     }
-    pub fn replacement(&self) -> Result<Self> {
+    pub fn replacement(&self) -> ScheduleResult<Self> {
         let mut replacement = Self::new()?;
         replacement.policy = self.policy;
         replacement.visible = self.visible;
@@ -58,7 +143,7 @@ impl DesktopSchedule {
         replacement
             .runtime
             .set_interval(self.interval)
-            .map_err(|_| DesktopError("invalid_input"))?;
+            .map_err(ScheduleFailure::interval)?;
         replacement.background_enabled = self.background_enabled;
         replacement.window_until = self.window_until;
         replacement.next_window = self.next_window;
@@ -102,7 +187,7 @@ impl DesktopSchedule {
         &mut self,
         service: &SubscriptionService,
         now: Duration,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         self.window_until = None;
         // Готовый review не отменяется. Остальные записи возвращаются из persisted
         // due после ACK; резервирование перед fetch предотвращает restart loop.
@@ -114,7 +199,11 @@ impl DesktopSchedule {
         }
         self.load(service, now).await
     }
-    pub async fn load(&mut self, service: &SubscriptionService, now: Duration) -> Result<()> {
+    pub async fn load(
+        &mut self,
+        service: &SubscriptionService,
+        now: Duration,
+    ) -> ScheduleResult<()> {
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -126,13 +215,13 @@ impl DesktopSchedule {
         service: &SubscriptionService,
         now: Duration,
         wall: u64,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         let mut offset = 0;
         loop {
             let page = service
                 .schedule_metadata_page(offset)
                 .await
-                .map_err(super::map_subscription)?;
+                .map_err(ScheduleFailure::service)?;
             let count = page.len();
             for token in page {
                 if token.is_local() {
@@ -156,7 +245,7 @@ impl DesktopSchedule {
                             service
                                 .persist_schedule(token, state)
                                 .await
-                                .map_err(super::map_subscription)?;
+                                .map_err(ScheduleFailure::service)?;
                             Some(state)
                         }
                         Some(state) => Some(state),
@@ -171,7 +260,7 @@ impl DesktopSchedule {
                             service
                                 .persist_schedule(token, state)
                                 .await
-                                .map_err(super::map_subscription)?;
+                                .map_err(ScheduleFailure::service)?;
                             Some(state)
                         }
                     };
@@ -193,7 +282,7 @@ impl DesktopSchedule {
                                 failures: state.map_or(0, |state| state.failures),
                             },
                         )
-                        .map_err(|_| DesktopError("storage"))?;
+                        .map_err(ScheduleFailure::runtime)?;
                     entry.insert(generation);
                 }
             }
@@ -210,11 +299,11 @@ impl DesktopSchedule {
         service: &SubscriptionService,
         id: i64,
         now: Duration,
-    ) -> Result<()> {
+    ) -> ScheduleResult<()> {
         if let Some(token) = service
             .schedule_metadata(id)
             .await
-            .map_err(super::map_subscription)?
+            .map_err(ScheduleFailure::service)?
         {
             if token.is_local() {
                 return Ok(());
@@ -238,7 +327,7 @@ impl DesktopSchedule {
                         },
                     )
                     .await
-                    .map_err(super::map_subscription)?;
+                    .map_err(ScheduleFailure::service)?;
             }
             let due = state.map_or_else(
                 || now.saturating_add(self.interval),
@@ -258,28 +347,49 @@ impl DesktopSchedule {
                             failures: state.map_or(0, |state| state.failures),
                         },
                     )
-                    .map_err(|_| DesktopError("storage"))?;
+                    .map_err(ScheduleFailure::runtime)?;
                 entry.insert(generation);
             }
         }
         Ok(())
     }
-    pub async fn cancel(&mut self, id: i64, clock: impl Fn() -> Duration) -> Result<()> {
+    pub async fn shutdown(&mut self, now: Duration) -> ScheduleResult<()> {
+        let failures = self
+            .runtime
+            .shutdown_report(now)
+            .await
+            .map_err(ScheduleFailure::runtime)?;
+        self.fetching = false;
+        self.review = None;
+        self.deferred = None;
+        self.generations.clear();
+        match failures.into_iter().next() {
+            Some(error) => Err(ScheduleFailure::service(error)),
+            None => Ok(()),
+        }
+    }
+    pub async fn cancel(&mut self, id: i64, clock: impl Fn() -> Duration) -> ScheduleResult<()> {
         self.runtime
             .cancel(id, clock())
-            .map_err(|_| DesktopError("storage"))?;
+            .map_err(ScheduleFailure::runtime)?;
         // Queued ID уже удалён: чужой fetch остаётся в общем select, где доступны
         // приоритетные Stop/Shutdown. Только собственная active/review работа ждёт ack.
+        let mut failure = None;
         if self.runtime.cancellation_pending(id) {
             if let Some(event) = self
                 .runtime
                 .next_event(clock)
                 .await
-                .map_err(|_| DesktopError("storage"))?
+                .map_err(ScheduleFailure::runtime)?
             {
-                if !matches!(event, SubscriptionScheduleEvent::Cancelled { id: current } if current == id)
-                {
-                    self.deferred = Some(event);
+                match event {
+                    SubscriptionScheduleEvent::AdmissionFailed { id: current, error }
+                        if current == id =>
+                    {
+                        failure = Some(ScheduleFailure::service(error))
+                    }
+                    SubscriptionScheduleEvent::Cancelled { id: current } if current == id => {}
+                    event => self.deferred = Some(event),
                 }
             }
             self.fetching = false;
@@ -288,7 +398,7 @@ impl DesktopSchedule {
             self.review = None;
         }
         self.generations.remove(&id);
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
 }
 
@@ -355,6 +465,466 @@ mod tests {
         );
         service.close().await.expect("close");
         std::fs::remove_dir_all(path).expect("очистка своего каталога");
+    }
+
+    #[tokio::test]
+    async fn stale_command_waits_for_admission_ack_without_publishing_failure() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path =
+            std::env::temp_dir().join(format!("p11-stale-command-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let current = std::sync::atomic::AtomicU64::new(1);
+        let outcome = super::super::await_current_schedule(
+            owner.cancel(id, || {
+                // Приоритетная команда принята после исходной проверки, до ACK.
+                current.store(2, std::sync::atomic::Ordering::SeqCst);
+                Duration::ZERO
+            }),
+            &current,
+            1,
+        )
+        .await;
+        assert!(
+            outcome.is_none(),
+            "Устаревшая команда не публикует admission failure"
+        );
+        assert!(
+            !owner.runtime.cancellation_pending(id),
+            "ACK/drain обязателен даже для stale результата"
+        );
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_cancel_admission_failure_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let current = std::sync::atomic::AtomicU64::new(1);
+        let failure = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::super::await_current_schedule(owner.cancel(id, || Duration::ZERO), &current, 1),
+        )
+        .await
+        .unwrap()
+        .expect("Текущее поколение сохраняет admission failure")
+        .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerRepositoryCorrupt));
+        assert!(!owner.runtime.cancellation_pending(id));
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+        assert!(export.contains("scheduler_repository_corrupt"));
+        let mut stale: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        stale["scheduler_generation"] = serde_json::json!(owner.generation + 1);
+        assert!(crate::diagnostics::export_snapshot_v2(&stale.to_string()).is_none());
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_shutdown_admission_failure_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-shutdown-drain-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let token = service.schedule_metadata(id).await.unwrap().unwrap();
+        let mut owner = DesktopSchedule::new().unwrap();
+        owner.visible = true;
+        owner.policy.online = true;
+        owner
+            .runtime
+            .schedule(id, token.generation, Duration::ZERO)
+            .unwrap();
+        owner
+            .runtime
+            .dispatch(
+                Duration::ZERO,
+                owner.policy(),
+                &service,
+                std::sync::Arc::new(yonik_linux::FetchHost::new(Duration::from_secs(1)).unwrap()),
+            )
+            .unwrap();
+        let status = std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let failure = tokio::time::timeout(Duration::from_secs(2), owner.shutdown(Duration::ZERO))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerRepositoryCorrupt));
+        assert!(!owner.runtime.cancellation_pending(id));
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+        assert!(export.contains("scheduler_repository_corrupt"));
+        let mut stale: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        stale["scheduler_generation"] = serde_json::json!(owner.generation + 1);
+        assert!(crate::diagnostics::export_snapshot_v2(&stale.to_string()).is_none());
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_persisted_corrupt_store_and_invalid_interval_context() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-service-payload-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        repo.create_source(b"{}".to_vec()).await.unwrap();
+        // Повреждаем только encrypted payload собственной persisted fixture.
+        let status = std::process::Command::new("python3").args(["-c",
+            "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"])
+            .arg(path.join("db")).status().unwrap();
+        assert!(status.success());
+        let service = SubscriptionService::new(repo);
+        let mut owner = DesktopSchedule::with_limits(NonZeroU64::new(77).unwrap(), 1).unwrap();
+        let failure = owner
+            .load_at(&service, Duration::ZERO, 100)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.cause,
+            Some(Cause::SchedulerRepositoryCorrupt),
+            "typed persisted-store failure lost its context"
+        );
+        assert!(
+            owner
+                .reload_id(&service, 1, Duration::ZERO)
+                .await
+                .unwrap_err()
+                .cause
+                .is_some()
+        );
+        let mut failures = vec![("store", failure)];
+        owner.interval = Duration::ZERO;
+        let invalid = owner.replacement().err().unwrap();
+        assert_eq!(invalid.key(), "invalid_input");
+        assert!(
+            invalid.cause.is_some(),
+            "validator failure lost its context"
+        );
+        failures.push(("interval", invalid));
+        for (name, failure) in failures {
+            let mut state = super::super::Snapshot::new(true);
+            state.schedule_error(failure, Some(77));
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            let output = captured.clone();
+            let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+                *output.lock().unwrap() = raw;
+            });
+            state.emit(&callback);
+            let raw = captured.lock().unwrap().clone();
+            let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+            let document: serde_json::Value = serde_json::from_str(&export).unwrap();
+            for item in document["errors"].as_array().unwrap() {
+                assert_eq!(
+                    item["reason"],
+                    if name == "store" {
+                        "scheduler_repository_corrupt"
+                    } else {
+                        "scheduler_interval_invalid"
+                    }
+                );
+                assert_eq!(item["params"], serde_json::json!({}));
+            }
+            if let Ok(directory) = std::env::var("YONIK_SCHEDULER_EVIDENCE") {
+                std::fs::write(
+                    std::path::Path::new(&directory).join(format!("actual-{name}-export.json")),
+                    &export,
+                )
+                .unwrap();
+                std::fs::write(
+                    std::path::Path::new(&directory).join(format!("actual-{name}-snapshot.json")),
+                    &raw,
+                )
+                .unwrap();
+            }
+            let mut bad: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            bad["scheduler_generation"] = serde_json::json!(78);
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["scheduler_generation"] = serde_json::json!(77);
+            bad["error_contexts"][0]["slot"] = serde_json::json!("routing_ack");
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["error_contexts"] = serde_json::json!([]);
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn actual_restore_full_exports_only_current_generation() {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = std::env::temp_dir().join(format!("p11-scheduler-full-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo.clone());
+        for name in ["Первый", "Второй"] {
+            service
+                .add(
+                    yonik_linux::SubscriptionSource::new(
+                        name.into(),
+                        "http://127.0.0.1:9/sub".into(),
+                        true,
+                        yonik_linux::FetchRoute::Direct,
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        let mut owner = DesktopSchedule::with_limits(NonZeroU64::new(77).unwrap(), 1).unwrap();
+        let failure = owner
+            .load_at(&service, Duration::ZERO, 100)
+            .await
+            .unwrap_err();
+        assert_eq!(failure.cause, Some(Cause::SchedulerFull));
+        assert_eq!(failure.key(), "storage");
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, Some(owner.generation));
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let raw = captured.lock().unwrap().clone();
+        let export = crate::diagnostics::export_snapshot_v2(&raw).expect("actual producer V2");
+        let value: serde_json::Value = serde_json::from_str(&export).unwrap();
+        for error in value["errors"].as_array().unwrap() {
+            assert_eq!(error["reason"], "scheduler_full");
+            assert_eq!(error["generation"], "77");
+            assert_eq!(error["params"], serde_json::json!({}));
+        }
+        assert_eq!(value["errors"].as_array().unwrap().len(), 2);
+        if let Ok(directory) = std::env::var("YONIK_SCHEDULER_EVIDENCE") {
+            std::fs::write(
+                std::path::Path::new(&directory).join("actual-scheduler-full.json"),
+                &export,
+            )
+            .unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join("actual-scheduler-snapshot.json"),
+                &raw,
+            )
+            .unwrap();
+        }
+        let mut sibling: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        sibling["scheduler_generation"] = serde_json::json!(78);
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        sibling["scheduler_generation"] = serde_json::json!(77);
+        sibling["error_contexts"][0]["slot"] = serde_json::json!("routing_ack");
+        assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        let catalog: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../docs/specs/diagnostic-message-catalog.json"
+        ))
+        .unwrap();
+        let message = catalog["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["message_key"] == "storage")
+            .unwrap();
+        assert!(!message["ru"].as_str().unwrap().is_empty());
+        assert!(!message["en"].as_str().unwrap().is_empty());
+        let outcome = super::super::maintenance_job::run(
+            service,
+            repo,
+            owner,
+            None,
+            super::super::maintenance::Request {
+                request_id: 1,
+                operation: super::super::maintenance::Operation::Backup,
+                source: None,
+                destination: path.join("backup.sqlite"),
+                revision: 0,
+            },
+            yonik_linux::MaintenanceControl::default(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(outcome.result, Ok(()));
+        assert!(outcome.drained);
+        let (service, repo, replacement) = outcome.handles.expect("успешная замена maintenance B");
+        assert_ne!(replacement.generation, 77);
+        let mut owner = DesktopSchedule::new().expect("освобождённый placeholder");
+        super::super::accept_maintenance_owner(&mut state, &mut owner, replacement);
+        state.emit(&callback);
+        assert!(
+            crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap()).is_none(),
+            "контексты A должны отклоняться после принятия maintenance B"
+        );
+        owner
+            .runtime
+            .shutdown(Duration::ZERO)
+            .await
+            .expect("закрытие B");
+        drop(owner);
+        state.command_error(true, "storage");
+        state.emit(&callback);
+        assert!(crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap()).is_none());
+        service.close().await.unwrap();
+        repo.close().await.expect("закрытие repository");
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn actual_initialize_invalid_limits_has_closed_context() {
+        let failure = match DesktopSchedule::with_limits(NonZeroU64::new(88).unwrap(), 0) {
+            Err(failure) => failure,
+            Ok(_) => panic!("нулевой лимит принят"),
+        };
+        assert_eq!(failure.cause, Some(Cause::SchedulerInitializeInvalidLimits));
+        assert_eq!(failure.key(), "startup");
+        let mut state = super::super::Snapshot::new(true);
+        state.schedule_error(failure, None);
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let export = crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap())
+            .expect("initialize V2");
+        let value: serde_json::Value = serde_json::from_str(&export).unwrap();
+        for error in value["errors"].as_array().unwrap() {
+            assert_eq!(error["stage"], "scheduler_initialize");
+            assert_eq!(error["reason"], "scheduler_initialize_invalid_limits");
+            assert!(error["generation"].is_null());
+        }
     }
 
     #[tokio::test]
