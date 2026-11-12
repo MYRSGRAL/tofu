@@ -966,6 +966,7 @@ struct Snapshot {
     preferences_durability_warning: bool,
     build_id: &'static str,
     source_hwid_enabled: bool,
+    source_local: bool,
     source_generation: Option<i64>,
     ready: bool,
     busy: bool,
@@ -1049,6 +1050,7 @@ impl Snapshot {
             preferences_durability_warning: false,
             build_id: env!("YONIK_BUILD_ID"),
             source_hwid_enabled: false,
+            source_local: false,
             source_generation: None,
             ready: false,
             busy: false,
@@ -1804,6 +1806,7 @@ impl Actor {
         self.state.total = 0;
         self.state.revision = 0;
         self.state.source_hwid_enabled = false;
+        self.state.source_local = false;
         self.state.source_name = None;
         let Some(id) = self.state.source_id else {
             return Ok(());
@@ -1816,6 +1819,11 @@ impl Actor {
         let summary = self
             .service()
             .source_summary(id)
+            .await
+            .map_err(map_subscription)?;
+        self.state.source_local = self
+            .service()
+            .source_is_local(id)
             .await
             .map_err(map_subscription)?;
         self.state.source_hwid_enabled = summary.hwid_enabled;
@@ -4431,7 +4439,7 @@ async fn run(
                 }
                 // Запрет до scheduler.cancel/reserve и любого сетевого эффекта.
                 let local_forbidden = match &envelope.command {
-                    Command::Refresh | Command::SetSourceHwid { .. } => actor.state.source_id,
+                    Command::Refresh | Command::SetSourceHwid { .. } | Command::SetSubscriptionSchedule { .. } => actor.state.source_id,
                     Command::SourceChange { id, .. } => Some(*id),
                     _ => None,
                 };
