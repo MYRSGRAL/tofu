@@ -34,6 +34,37 @@ class V2(unittest.TestCase):
             ],
         }
 
+    def test_backend_thread_start_failure_contract(self) -> None:
+        reason = "backend_thread_start_failed"
+        self.assertEqual(
+            CONTEXTS[reason],
+            {
+                "code": "STARTUP",
+                "message_key": "startup",
+                "stage": "startup",
+                "slots": ["error", "connection"],
+                "generation_required": False,
+            },
+        )
+        doc = self.document()
+        doc["errors"] = [
+            {
+                **doc["errors"][0],
+                "slot": slot,
+                "code": "STARTUP",
+                "message_key": "startup",
+                "stage": "startup",
+                "reason": reason,
+            }
+            for slot in ("error", "connection")
+        ]
+        self.assertEqual(json.loads(export_metadata(json.dumps(doc).encode())), doc)
+        for slot in ("source", "routing_ack", "logs_read"):
+            bad = copy.deepcopy(doc)
+            bad["errors"][0]["slot"] = slot
+            with self.assertRaises(ExportError):
+                export_metadata(json.dumps(bad).encode())
+
     def test_all_causes(self) -> None:
         for reason, identity in CONTEXTS.items():
             doc = self.document()

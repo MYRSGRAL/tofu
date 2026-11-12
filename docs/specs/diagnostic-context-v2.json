@@ -643,6 +643,16 @@
     ],
     "generation_required": true
   },
+  "backend_thread_start_failed": {
+    "code": "STARTUP",
+    "message_key": "startup",
+    "stage": "startup",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": false
+  },
   "runtime_panicked": {
     "code": "STARTUP",
     "message_key": "startup",

@@ -8,6 +8,10 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use yonik_desktop::{DesktopHost, HostConfig};
 
+#[path = "bridge_pending.rs"]
+mod bridge_pending;
+use bridge_pending::PendingSnapshot;
+
 static CONFIG: OnceLock<HostConfig> = OnceLock::new();
 
 pub fn configure(config: HostConfig) -> Result<(), Box<HostConfig>> {
@@ -17,12 +21,6 @@ pub fn configure(config: HostConfig) -> Result<(), Box<HostConfig>> {
 pub struct DesktopBridgeRust {
     pub(crate) snapshot_json: QString,
     host: Option<DesktopHost>,
-}
-
-#[derive(Default)]
-struct PendingSnapshot {
-    value: Option<String>,
-    queued: bool,
 }
 
 impl Default for DesktopBridgeRust {
@@ -45,16 +43,15 @@ impl ffi::DesktopBridge {
         };
         let thread = self.qt_thread();
         let pending = Arc::new(Mutex::new(PendingSnapshot::default()));
+        let startup_pending = Arc::clone(&pending);
         match DesktopHost::start(config.clone(), move |snapshot| {
             let Ok(mut state) = pending.lock() else {
                 log::error!("Повреждено состояние доставки GUI");
                 return;
             };
-            state.value = Some(snapshot);
-            if state.queued {
+            if !state.publish(snapshot) {
                 return;
             }
-            state.queued = true;
             drop(state);
             let next = Arc::clone(&pending);
             // Отказ queue означает, что QObject уже уничтожен; worker не трогает Qt напрямую.
@@ -63,22 +60,33 @@ impl ffi::DesktopBridge {
                     log::error!("Повреждено состояние доставки GUI");
                     return;
                 };
-                let snapshot = state.value.take();
-                state.queued = false;
+                let snapshot = state.take_queued();
                 drop(state);
                 if let Some(snapshot) = snapshot {
                     object.set_snapshot_json(QString::from(&snapshot));
                 }
             }) {
                 if let Ok(mut state) = pending.lock() {
-                    state.queued = false;
-                    state.value = None;
+                    state.queue_rejected();
                 }
                 log::debug!("Доставка события GUI завершена: {error:?}");
             }
         }) {
             Ok(host) => self.as_mut().rust_mut().host = Some(host),
-            Err(_) => self.report_error("startup"),
+            Err(_) => {
+                let snapshot = match startup_pending.lock() {
+                    Ok(mut state) => state.take_start_failure(),
+                    Err(_) => {
+                        log::error!("Повреждено состояние доставки GUI");
+                        None
+                    }
+                };
+                if let Some(snapshot) = snapshot {
+                    self.set_snapshot_json(QString::from(&snapshot));
+                } else {
+                    self.report_error("startup");
+                }
+            }
         }
     }
 
