@@ -113,6 +113,16 @@ mod bridge_impl {
             true
         }
 
+        pub fn copy_diagnostics_v2(self: Pin<&mut Self>) -> bool {
+            let Some(metadata) =
+                yonik_desktop::diagnostics::export_snapshot_v2(&self.snapshot_json().to_string())
+            else {
+                return false;
+            };
+            ffi::copy_diagnostic_metadata(&QString::from(&metadata));
+            true
+        }
+
         pub fn shutdown(self: Pin<&mut Self>) {
             if let Some(host) = self.host.as_ref() {
                 host.shutdown();
@@ -128,18 +138,27 @@ mod bridge_impl {
                 request,
                 message,
             );
-            self.set_snapshot_json(QString::from(&snapshot));
+            let mut replacement: serde_json::Value =
+                serde_json::from_str(&snapshot).unwrap_or_default();
+            yonik_desktop::diagnostics::invalidate_contexts(&mut replacement, None);
+            self.set_snapshot_json(QString::from(&replacement.to_string()));
         }
 
         fn report_error(self: Pin<&mut Self>, message: &str) {
-            let mut snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+            let snapshot = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
                 &self.snapshot_json().to_string(),
             )
             .unwrap_or_default();
+            let mut replacement = serde_json::Value::Object(snapshot);
+            yonik_desktop::diagnostics::invalidate_contexts(
+                &mut replacement,
+                Some(yonik_desktop::diagnostics::context::Slot::Error),
+            );
+            let Some(snapshot) = replacement.as_object_mut() else {
+                return;
+            };
             snapshot.insert("error".into(), serde_json::Value::String(message.into()));
-            self.set_snapshot_json(QString::from(
-                &serde_json::Value::Object(snapshot).to_string(),
-            ));
+            self.set_snapshot_json(QString::from(&replacement.to_string()));
         }
     }
 }

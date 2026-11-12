@@ -75,10 +75,41 @@ impl Server {
             ));
             assert!(value["kill_switch"].is_boolean());
             yonik_import::ServerIntent::parse_json(&value["server"].to_string()).unwrap();
+        } else if value["mode"] == "system_profile_policy" {
+            assert_eq!(value.as_object().unwrap().len(), 6);
+            let policy =
+                yonik_engine::policy_wire::SystemPolicy::parse(&value["policy"].to_string())
+                    .unwrap();
+            assert_eq!(policy.policy().user_rules[0].id, 77);
+            assert_eq!(
+                policy.policy().user_rules[0].conditions.destinations[0].to_string(),
+                "192.0.2.0/24"
+            );
         } else {
             assert_eq!(value["mode"], "public_protection");
         }
         serde_json::json!({"version":1,"handle":vec![42;32]}).to_string()
+    }
+    #[zbus(name = "BundleCapabilitiesV1")]
+    async fn bundle_capabilities_v1(&self, _request: &str) -> String {
+        serde_json::json!({"version":1,"canonical_fd_transport":self.system_tun}).to_string()
+    }
+    #[zbus(name = "PrepareBundleV1")]
+    async fn prepare_bundle_v1(
+        &self,
+        request: &str,
+        resources: Vec<zbus::zvariant::OwnedFd>,
+    ) -> String {
+        let request =
+            yonik_linux::bundle_request::BundleRequest::parse(request, resources.len()).unwrap();
+        self.effects.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let response = self.response.lock().await.clone();
+        if response == "bundle_ok" {
+            serde_json::json!({"version":1,"handle":vec![42;32],"intent_digest":request.intent_digest,"runtime_config_digest":vec![7;32],"runtime_bundle_digest":vec![8;32]}).to_string()
+        } else {
+            response
+        }
     }
     async fn apply(&self, request: &str) -> String {
         let value: serde_json::Value = serde_json::from_str(request).unwrap();
@@ -567,4 +598,192 @@ async fn adapter_retained_policy_can_prepare_without_unlock() {
         adapter.unlock(deadline(), cancel).await,
         Ok(State::NoManagedPolicy)
     );
+}
+
+// COMPONENT: реальный client/adapter на private bus; fixture не доказывает production helper/TUN.
+#[tokio::test]
+async fn inline_policy_prepare_apply_одноразовый_и_инвалидируется_ревизией() {
+    use system_session::{ProfileRevision, SystemSession};
+    use yonik_linux::system_policy::InlinePolicy;
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    server
+        .object_server()
+        .at(
+            SERVICE_PATH,
+            Server {
+                system_tun: true,
+                response: Arc::new(Mutex::new(String::new())),
+                effects: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .await
+        .unwrap();
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let (_keep, cancel) = Cancellation::new();
+    let client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let revision = ProfileRevision {
+        source: 1,
+        profile: 1,
+        generation: 1,
+    };
+    let mut session = SystemSession::new(client, revision);
+    let report = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    let intent = yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap();
+    let policy = InlinePolicy::new(yonik_engine::policy_wire::SystemPolicy::parse(r#"{"version":1,"default_action":"proxy","user_rules":[{"id":77,"enabled":true,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":["192.0.2.0/24"],"executable_paths":[]}],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}"#).unwrap());
+    session
+        .prepare_policy(
+            revision,
+            &intent,
+            yonik_engine::Engine::Xray,
+            &policy,
+            deadline(),
+            cancel.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        session.apply(revision, deadline(), cancel.clone()).await,
+        Ok(State::VerifiedRules)
+    );
+    assert_eq!(
+        session.apply(revision, deadline(), cancel.clone()).await,
+        Err(ClientError::InvalidHandle)
+    );
+    session
+        .prepare_policy(
+            revision,
+            &intent,
+            yonik_engine::Engine::Xray,
+            &policy,
+            deadline(),
+            cancel.clone(),
+        )
+        .await
+        .unwrap();
+    let next = ProfileRevision {
+        generation: 2,
+        ..revision
+    };
+    session.revise(next);
+    assert_eq!(
+        session.apply(revision, deadline(), cancel.clone()).await,
+        Err(ClientError::Stale)
+    );
+    assert_eq!(
+        session.apply(next, deadline(), cancel.clone()).await,
+        Err(ClientError::InvalidHandle)
+    );
+}
+
+#[tokio::test]
+async fn bundle_fd_transport_echo_closed_reply_and_no_mutation_retry() {
+    use yonik_engine::{
+        Engine,
+        resource_bundle::{ExternalRef, ResourceBinding, ResourceKind, ResourceRule},
+    };
+    use yonik_linux::{
+        bundle_identity::CompileRequirements, bundle_request::BundleRequest,
+        resource_fd_receiver::CanonicalDescriptor,
+    };
+    let report = yonik_import::import_bytes(
+        b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
+    )
+    .unwrap();
+    let policy=yonik_engine::policy_wire::SystemPolicy::parse(r#"{"version":1,"default_action":"direct","user_rules":[{"id":1,"enabled":true,"action":"block","domain":[],"domain_suffix":[],"ip_cidr":[],"executable_paths":[]}],"preset_rules":[],"lan":[],"private_networks":[],"private_domains":[]}"#).unwrap();
+    let mut request = BundleRequest {
+        server: yonik_import::ServerIntent::from_server(&report.servers[0]).unwrap(),
+        policy,
+        engine: Engine::Xray,
+        native_pin: [27; 32],
+        revision: 1,
+        intent_digest: [0; 32],
+        requirements: CompileRequirements {
+            kill_switch: true,
+            system_tun: true,
+        },
+        bindings: vec![ResourceBinding {
+            rule: ResourceRule::User(1),
+            resource: 0,
+        }],
+        canonical: vec![CanonicalDescriptor {
+            digest: [1; 32],
+            bytes: 10,
+            records: 1,
+            kind: ResourceKind::Cidrs,
+            format_version: 1,
+        }],
+        expected_native: vec![ExternalRef {
+            engine: Engine::Xray,
+            digest: [2; 32],
+            bytes: 20,
+            records: 1,
+            kind: ResourceKind::Cidrs,
+            format_version: 1,
+        }],
+    };
+    request.intent_digest = request.digest().unwrap();
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    let response = Arc::new(Mutex::new("bundle_ok".to_string()));
+    let effects = Arc::new(AtomicUsize::new(0));
+    server
+        .object_server()
+        .at(
+            SERVICE_PATH,
+            Server {
+                system_tun: true,
+                response: response.clone(),
+                effects: effects.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let (_keep, cancel) = Cancellation::new();
+    let mut client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    // Это mock transport test: FD contents не являются production Prepare proof.
+    let files = [std::fs::File::open("/dev/null").unwrap()];
+    let prepared = client
+        .prepare_bundle(&request, &files, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    assert_eq!(prepared.intent_digest, request.intent_digest);
+    assert_eq!(prepared.runtime_config_digest, [7; 32]);
+    assert_eq!(
+        client
+            .apply_bundle(prepared, deadline(), cancel.clone())
+            .await
+            .unwrap(),
+        State::VerifiedRules
+    );
+    *response.lock().await=serde_json::json!({"version":1,"handle":vec![42;32],"intent_digest":vec![0;32],"runtime_config_digest":vec![7;32],"runtime_bundle_digest":vec![8;32]}).to_string();
+    assert!(matches!(
+        client
+            .prepare_bundle(&request, &files, deadline(), cancel.clone())
+            .await,
+        Err(ClientError::Protocol)
+    ));
+    *response.lock().await = "bundle_ok".to_string();
+    let before = effects.load(Ordering::SeqCst);
+    assert!(matches!(
+        client
+            .prepare_bundle(
+                &request,
+                &files,
+                Instant::now() + Duration::from_millis(30),
+                cancel.clone()
+            )
+            .await,
+        Err(ClientError::Deadline)
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(effects.load(Ordering::SeqCst), before + 1);
 }

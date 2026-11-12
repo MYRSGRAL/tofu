@@ -37,5 +37,7 @@ pub mod ffi {
         fn shutdown(self: Pin<&mut DesktopBridge>);
         #[qinvokable]
         fn copy_diagnostics(self: Pin<&mut DesktopBridge>) -> bool;
+        #[qinvokable]
+        fn copy_diagnostics_v2(self: Pin<&mut DesktopBridge>) -> bool;
     }
 }

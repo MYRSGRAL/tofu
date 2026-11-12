@@ -251,6 +251,9 @@ impl<C: VerifiedCatalog> ResourceConditions for BoundPolicy<'_, C> {
 }
 
 pub(crate) trait ResourceRoutes {
+    fn worker_slot(&self, _resource: &ExternalRef) -> Option<u32> {
+        None
+    }
     fn refs(&self, rule: ResourceRule, kind: ResourceKind) -> Vec<&ExternalRef>;
     fn manifest(&self) -> &[ExternalRef];
 }

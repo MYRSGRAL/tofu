@@ -65,6 +65,40 @@ pub(crate) struct PeerProcess {
     namespaces: [std::path::PathBuf; 3],
 }
 impl PeerProcess {
+    pub(crate) fn identity_digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(b"yonik-peer-context-v1\0");
+        hash.update(self.pid.to_be_bytes());
+        hash.update(self.uid.to_be_bytes());
+        hash.update(self.start.to_be_bytes());
+        for namespace in &self.namespaces {
+            let bytes = namespace.as_os_str().as_encoded_bytes();
+            hash.update((bytes.len() as u64).to_be_bytes());
+            hash.update(bytes);
+        }
+        hash.finalize().into()
+    }
+    pub(crate) fn verify_identity(&self) -> Result<(), AttributionFailure> {
+        self.verify_pidfd()?;
+        if start_time(self.pid)? != self.start
+            || fs::metadata(format!("/proc/{}", self.pid))
+                .map_err(|_| AttributionFailure::ProcUnavailable)?
+                .uid()
+                != self.uid
+        {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        for (name, expected) in ["net", "pid", "mnt"].iter().zip(&self.namespaces) {
+            if fs::read_link(format!("/proc/{}/ns/{name}", self.pid))
+                .map_err(|_| AttributionFailure::ProcUnavailable)?
+                != *expected
+            {
+                return Err(AttributionFailure::ProcessChanged);
+            }
+        }
+        self.verify_pidfd()
+    }
     fn verify_pidfd(&self) -> Result<(), AttributionFailure> {
         use std::os::fd::AsRawFd;
         let file = fs::File::open(format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))

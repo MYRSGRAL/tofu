@@ -1,4 +1,4 @@
-"""Настоящие Qt-действия и typed RPC на собственной шине, без TUN/helper."""
+"""COMPONENT: настоящие Qt-действия и typed RPC на private bus, без production TUN/helper."""
 
 from __future__ import annotations
 
@@ -53,8 +53,10 @@ def fixture(address: str, scenario: str, log: Path) -> None:
         def Prepare(self, request: str, ok: object, error: object) -> None:
             record("Prepare")
             value = json.loads(request)
-            assert set(value) == {"version", "mode", "engine", "kill_switch", "server"}
-            assert value["mode"] == "system_profile"
+            assert set(value) == {"version", "mode", "engine", "kill_switch", "server", "policy"}
+            assert value["mode"] == "system_profile_policy"
+            assert value["policy"]["version"] == 1
+            assert value["policy"]["default_action"] == ("block" if scenario == "policy" else "proxy")
             if scenario == "denied":
                 error(
                     dbus.exceptions.DBusException(
@@ -62,7 +64,7 @@ def fixture(address: str, scenario: str, log: Path) -> None:
                         name=NAME + ".Error",
                     )
                 )
-            elif scenario in ("cancel", "stale", "shutdown", "timeout"):
+            elif scenario in ("cancel", "stale", "policy-edit", "shutdown", "timeout"):
                 GLib.timeout_add(
                     35000 if scenario == "timeout" else 2000,
                     lambda: (ok(json.dumps(dict(version=1, handle=[42] * 32))), False)[
@@ -228,7 +230,15 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                 ui("click", "homeButton"),
                 ui("click", "mainConnectButton", when={"can_connect": True}),
             ]
-            if scenario in ("cancel", "applycancel", "stale", "shutdown"):
+            if scenario == "policy":
+                steps = steps[:5] + [
+                    ui("click", "systemStateButton", when={"connection_mode": "system"}),
+                    ui("click", "homeButton", when={"system_tun_available": True, "system_busy": False}),
+                    ui("click", "settingsRoutingButton"),
+                    {"command": {"command": "routing_default", "expected_revision": 0, "request_id": 91, "action": "block"}},
+                    ui("click", "routingApplyButton", when={"routing_revision": 1}, expect={"routingApplyButton": {"enabled": True}}),
+                ]
+            if scenario in ("cancel", "applycancel", "stale", "policy-edit", "shutdown"):
                 steps += [
                     ui(
                         "key",
@@ -252,6 +262,12 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                         },
                         "command": {"command": "shutdown"},
                     }
+                ]
+            elif scenario == "policy":
+                steps += [
+                    {"when": {"status": "TunnelStarting"}, "command": {"command": "stop"}},
+                    {"when": {"status": "VerifiedRules", "can_stop": False}, "command": {"command": "system_unlock"}},
+                    {"when": {"system_state": "NoManagedPolicy", "system_busy": False}, "command": {"command": "shutdown"}},
                 ]
             elif scenario == "shutdown":
                 steps += [
@@ -348,10 +364,12 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                     ]
                 when = {
                     "status": "Preparing"
-                    if scenario in ("cancel", "applycancel", "stale")
+                    if scenario in ("cancel", "applycancel", "stale", "policy-edit")
                     else "TunnelStarting"
                 }
-                if scenario == "stale":
+                if scenario == "policy-edit":
+                    steps += [{"when": when, "command": {"command": "routing_default", "expected_revision": 0, "request_id": 99, "action": "block"}}]
+                elif scenario == "stale":
                     steps += [
                         {
                             "when": when,
@@ -437,7 +455,7 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                 json.loads(line)["method"]
                 for line in (output / "rpc.jsonl").read_text().splitlines()
             ]
-            if scenario in ("cancel", "applycancel", "stale", "shutdown"):
+            if scenario in ("cancel", "applycancel", "stale", "policy-edit", "shutdown"):
                 records = [
                     json.loads(line)
                     for line in (output / "rpc.jsonl").read_text().splitlines()
@@ -456,6 +474,8 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                     < calls.index("OwnerReturned")
                     < calls.index("Unlock")
                 )
+            if scenario == "policy-edit":
+                assert "Prepare" in calls and "Apply" not in calls
             if scenario == "normal":
                 assert calls.count("Prepare") == 2 and calls.count("Apply") == 2
             if scenario == "unsupported":
@@ -464,7 +484,7 @@ def run(binary: Path, output: Path, scenario: str) -> None:
                     and "Apply" not in calls
                     and "Stop" not in calls
                 )
-            if scenario in ("denied", "cancel", "stale", "shutdown", "timeout"):
+            if scenario in ("denied", "cancel", "stale", "policy-edit", "shutdown", "timeout"):
                 assert "Apply" not in calls
             if scenario in ("normal", "recovery"):
                 assert all(

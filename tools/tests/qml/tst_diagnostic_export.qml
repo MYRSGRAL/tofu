@@ -13,7 +13,7 @@ TestCase {
         id: producer
         property int calls: 0
         property bool accepted: true
-        function copy_diagnostics() { calls++; return accepted }
+        function copy_diagnostics_v2() { calls++; return accepted }
     }
     UI.DiagnosticsExport { id: panel; anchors.fill: parent; backend: producer }
     function test_explicit_copy_and_languages() {
@@ -31,9 +31,9 @@ TestCase {
         compare(result.text, "Copied")
         producer.accepted = false
         mouseClick(button)
-        compare(result.text, "Export unavailable: unknown error.")
+        compare(result.text, "Export unavailable: verified metadata for this error are missing.")
         panel.english = false
         mouseClick(button)
-        compare(result.text, "Экспорт недоступен: неизвестная ошибка.")
+        compare(result.text, "Экспорт недоступен: нет проверенных метаданных этой ошибки.")
     }
 }

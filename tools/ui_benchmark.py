@@ -16,6 +16,10 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
+from resource_counters import Collector
+
+RESOURCE_COUNTERS = Collector()
+
 MAX_LINE = 8192
 MAX_STDOUT = 1024 * 1024
 MAX_STDERR = 1024 * 1024
@@ -217,6 +221,7 @@ def sample_process(pid: int) -> dict[str, Any]:
         clock_ticks_per_second=os.sysconf("SC_CLK_TCK"),
         gpu=None,
         hardware_power=None,
+        resource_counters=RESOURCE_COUNTERS.sample(pid),
     )
     return result
 
@@ -278,6 +283,9 @@ class Child:
         except BaseException:
             self.log.close()
             raise
+        self.stopped = False
+        self.reservation_lost = False
+        self.closing = False
         self.selector: selectors.BaseSelector | None = None
         self.buffer = bytearray()
         self.pending: list[dict[str, Any]] = []
@@ -336,9 +344,29 @@ class Child:
             if len(self.buffer) > MAX_LINE:
                 raise BenchmarkError("Слишком длинная JSONL строка")
 
+    def exit_code(self) -> int | None:
+        """Наблюдаем exit без reap: PID резервирует числовой PGID до cleanup."""
+        if self.reservation_lost:
+            raise BenchmarkError("Лидер уже reap: reservation PGID потеряна")
+        if self.stopped:
+            return self.process.returncode
+        try:
+            status = os.waitid(
+                os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+            )
+        except ChildProcessError as error:
+            self.reservation_lost = True
+            raise BenchmarkError("Внешний reap: reservation PGID потеряна") from error
+        if status is None:
+            return None
+        return (
+            status.si_status if status.si_code == os.CLD_EXITED else -status.si_status
+        )
+
     def alive(self) -> None:
-        if self.process.poll() is not None:
-            raise BenchmarkError(f"Преждевременный exit: {self.process.returncode}")
+        code = self.exit_code()
+        if code is not None:
+            raise BenchmarkError(f"Преждевременный exit: {code}")
 
     def send(self, command: dict[str, Any], timeout: float) -> int:
         self.pump(0)
@@ -400,7 +428,7 @@ class Child:
 
     def finish(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
-        while self.process.poll() is None:
+        while self.exit_code() is None:
             if time.monotonic() >= deadline:
                 raise BenchmarkError("Timeout завершения Quit")
             self.pump(min(0.1, deadline - time.monotonic()))
@@ -408,25 +436,39 @@ class Child:
         drain_deadline = time.monotonic() + min(1.0, timeout)
         while self.selector.get_map() and time.monotonic() < drain_deadline:
             self.pump(max(0, drain_deadline - time.monotonic()))
-        if self.pending or self.buffer or self.process.returncode != 0:
-            raise BenchmarkError(f"Некорректное завершение: {self.process.returncode}")
+        code = self.exit_code()
+        if self.pending or self.buffer or code != 0:
+            raise BenchmarkError(f"Некорректное завершение: {code}")
+        self.close()
 
     def close(self) -> None:
-        # Группа создана этим драйвером; сигнал посылается даже после exit лидера.
+        if self.stopped or self.closing:
+            return
+        self.closing = True
         try:
+            if self.process.returncode is not None or self.reservation_lost:
+                self.stopped = True
+                raise BenchmarkError("Лидер уже reap: reservation PGID потеряна")
             try:
-                os.killpg(self.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                self.process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                pass
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            self.process.wait(timeout=3)
+                try:
+                    self.exit_code()
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                # Exit лидера не означает exit потомков. Даём всей группе
+                # ограниченный TERM grace, сохраняя лидера unreaped.
+                time.sleep(1)
+            finally:
+                try:
+                    self.exit_code()
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                finally:
+                    # До reap запрещаем повторные сигналы, в том числе при unwind.
+                    self.stopped = True
+                    if not self.reservation_lost:
+                        self.process.wait(timeout=3)
         finally:
             if self.selector is not None:
                 self.selector.close()
@@ -471,6 +513,11 @@ def environment() -> dict[str, Any]:
             )
         },
         power_supply=power,
+        resource_counter_contract={
+            "schema_version": 1,
+            "wakeups": "all_threads_schedstats_nr_wakeups_when_enabled",
+            "energy": "independent_kernel_sources_not_total_platform_energy",
+        },
         power_profile=read_optional(Path("/sys/firmware/acpi/platform_profile")),
     )
 
@@ -498,7 +545,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         limitations=[
             "frame/shown ack не заменяет screenshot QA и проверку toolkit callback",
             "main_thread_context_switches_proxy — переключения только главного потока, НЕ wakeups и не сумма всех потоков",
-            "GPU и hardware power недоступны",
+            "GPU недоступен; hardware_power сохранён как legacy null, см. resource_counters",
+            "resource_counters availability не заменяет hardware gate; энергия зон не суммируется",
             "lock проверяется на границах интервалов <=60 секунд; краткая блокировка между проверками может быть не замечена",
         ],
     )

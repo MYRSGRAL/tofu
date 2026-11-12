@@ -282,6 +282,9 @@ ApplicationWindow {
             keyring_locked: ["Хранилище секретов заблокировано. Разблокируйте системный кошелёк и повторите запуск.", "Secret storage is locked. Unlock the system wallet and restart."],
             keyring_missing: ["Системное хранилище секретов недоступно.", "System secret storage is unavailable."],
             storage: ["Ошибка локального хранилища. Проверьте доступ к данным приложения.", "Local storage error. Check access to application data."],
+            logs_save_failed: ["Не удалось сохранить страницу журнала. Проверьте выбранный путь.", "Could not save the log page. Check the selected path."],
+            logs_save_durability_unknown: ["Страница журнала опубликована, но надёжность записи не подтверждена.", "The log page was published, but write durability is unconfirmed."],
+            catalog: ["Не удалось прочитать каталог приложений.", "Could not read the application catalog."],
             preferences_write: ["Не удалось сохранить настройки. Изменение не применено. Проверьте preferences.json в каталоге данных.", "Could not save settings. The change was not applied. Check preferences.json in the data directory."],
             invalid_input: ["Проверьте введённые данные и адрес подписки.", "Check the input and subscription URL."],
             busy: ["Дождитесь завершения текущей операции.", "Wait for the current operation to finish."],
@@ -305,7 +308,7 @@ ApplicationWindow {
             system_timeout: ["Время ожидания helper истекло. Исход неизвестен.", "Helper timed out. Outcome unknown."],
             system_unavailable: ["Helper недоступен. Проверьте состояние сети.", "Helper unavailable. Check network state."],
             engine_config: ["Профиль несовместим с выбранным ядром. Проверьте параметры подключения.", "The profile is incompatible with the selected engine. Check connection settings."],
-            engine_failed: ["Не удалось запустить прокси-ядро. Проверьте профиль и наличие ядра.", "Could not start the proxy engine. Check the profile and engine installation."],
+            engine_failed: ["Прокси-ядро не запущено или завершилось с ошибкой. Проверьте профиль и наличие ядра.", "The proxy engine is not running or exited with an error. Check the profile and engine installation."],
             probe_target_invalid: ["Укажите корректный HTTPS URL (до 2048 символов) и ожидаемый статус 200–299.", "Enter a valid HTTPS URL (up to 2048 characters) and an expected status of 200–299."],
             check_http_status: ["Сайт проверки вернул неожиданный HTTP-статус. Редирект не считается успехом.", "The check endpoint returned an unexpected HTTP status. Redirects are not successful."],
             check_tls: ["Не удалось проверить TLS сайта проверки.", "TLS verification failed for the check endpoint."],
@@ -318,6 +321,8 @@ ApplicationWindow {
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
         const editorMessages = {
+            action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
+            format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
             routing_stale: ["Черновик изменился. Ввод сохранён в форме; откройте актуальное правило заново или явно создайте новое.", "The draft changed. Input is preserved in the form; reopen the current rule or explicitly create a new one."],
             routing_ack_identity: ["Ответ сохранения не совпал с правилом. Ввод сохранён; проверьте черновик.", "Save response did not match the rule. Input is preserved; check the draft."],
             routing_storage: ["Черновик не сохранён: повреждение или конфликт БД. Исходник сохранён; перезапустите приложение.", "Draft not saved: damaged database or conflict. Original preserved; restart the application."],
@@ -328,7 +333,7 @@ ApplicationWindow {
             limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
         }
         const pair = messages[key] || editorMessages[key]
-        return pair ? tr(pair[0], pair[1]) : tr("Операция не выполнена. Проверьте настройки и повторите попытку.", "Operation failed. Check the settings and try again.")
+        return pair ? tr(pair[0], pair[1]) : tr("Категория ошибки отсутствует в каталоге сообщений.", "The error category is missing from the message catalog.")
     }
 
     DesktopBridge {
@@ -954,8 +959,13 @@ ApplicationWindow {
                     ActionButton { text: window.tr("Как новое", "As new"); onClicked: { editor.selectedId = 0; editor.formRevision = window.state.routing_revision; editor.saveError = "" } }
                 }
                 PlainLabel { objectName: "routingSaveError"; Layout.fillWidth: true; visible: !!editor.saveError || !!(window.routingFeedback && window.routingFeedback.error); text: window.errorText(editor.saveError || (window.routingFeedback ? window.routingFeedback.error : "")) }
-                ActionButton { text: window.tr("Применить к сети", "Apply to network"); enabled: false }
-                SmallLabel { Layout.fillWidth: true; text: window.tr("Недоступно: system_tun=false. Системный путь и атрибуция потоков ещё не подтверждены. Изменения черновика сеть не меняют.", "Unavailable: system_tun=false. System routing and flow attribution are not verified. Draft edits do not change the network.") }
+                ActionButton {
+                    objectName: "routingApplyButton"
+                    text: window.tr("Применить к сети", "Apply to network")
+                    enabled: window.state.ready && !window.state.busy && !window.routingPending && window.state.connection_mode === "system" && window.state.system_tun_available && !window.state.system_busy && !window.state.can_stop && !window.state.system_recovery_pending && !!window.state.selected_profile && window.state.source_generation !== null
+                    onClicked: window.sendRouting({command: "routing_apply", source_generation: window.state.source_generation, snapshot_revision: window.state.revision, selected_profile_id: window.state.selected_profile})
+                }
+                SmallLabel { Layout.fillWidth: true; text: window.tr("Применение требует свежего подтверждения helper. TunnelStarting и VerifiedRules не подтверждают подключение или атрибуцию приложений.", "Apply requires fresh helper capabilities. TunnelStarting and VerifiedRules do not confirm connectivity or application attribution.") }
             }
         }
     }
