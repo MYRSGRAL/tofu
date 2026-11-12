@@ -782,6 +782,7 @@ struct Snapshot {
     error_contexts: Contexts,
     error_generation: u64,
     helper_generation: Option<u64>,
+    scheduler_generation: Option<u64>,
     routing_generation: u64,
     maintenance_generation: u64,
     logs_generation: u64,
@@ -868,6 +869,7 @@ impl Snapshot {
             error_contexts: Contexts::default(),
             error_generation: 0,
             helper_generation: None,
+            scheduler_generation: None,
             routing_generation: 0,
             maintenance_generation: 0,
             logs_generation: 0,
@@ -987,6 +989,20 @@ impl Snapshot {
             failure.cause,
             None,
         );
+    }
+    fn schedule_error(
+        &mut self,
+        failure: desktop_schedule::ScheduleFailure,
+        generation: Option<u64>,
+    ) {
+        self.command_error(true, failure.key());
+        self.scheduler_generation = generation;
+        if let Some(cause) = failure.cause {
+            self.error_contexts
+                .set_generation(Slot::Error, cause, generation);
+            self.error_contexts
+                .set_generation(Slot::Source, cause, generation);
+        }
     }
     fn session_error(&mut self, cause: Cause, generation: u64) {
         self.contextual_error(false, ContextFailure::new(cause));
@@ -1478,7 +1494,8 @@ impl Actor {
             identity,
             Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
         )
-        .await?;
+        .await
+        .map_err(|failure| failure.error)?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -1635,32 +1652,25 @@ impl Actor {
                     destination,
                     revision,
                 };
-                let error = if request.operation == maintenance::Operation::Backup
+                let cause = if request.operation == maintenance::Operation::Backup
                     && request.source.is_some()
                 {
-                    "invalid_input"
+                    Cause::MaintenanceAdmissionInvalidInput
                 } else {
-                    "busy"
+                    Cause::MaintenanceAdmissionBusy
                 };
-                self.state
-                    .error_contexts
-                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-                self.state.maintenance_ack = Some(maintenance::Ack {
-                    request_id,
-                    phase: maintenance::Phase::Failed,
-                    error: Some(error),
-                });
+                let generation = self.state.maintenance_generation;
+                maintenance_refusal(&mut self.state, request_id, cause, generation);
                 Ok(())
             }
             Command::MaintenanceCancel { request_id } => {
-                self.state
-                    .error_contexts
-                    .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-                self.state.maintenance_ack = Some(maintenance::Ack {
+                let generation = self.state.maintenance_generation;
+                maintenance_refusal(
+                    &mut self.state,
                     request_id,
-                    phase: maintenance::Phase::Failed,
-                    error: Some("busy"),
-                });
+                    Cause::MaintenanceAdmissionBusy,
+                    generation,
+                );
                 Ok(())
             }
             #[cfg(feature = "test-support")]
@@ -2172,6 +2182,16 @@ impl Actor {
         }
         outcome
     }
+}
+
+// Всегда дожидается ACK/drain; проверка поколения относится только к публикации.
+async fn await_current_schedule<T>(
+    operation: impl std::future::Future<Output = T>,
+    current: &AtomicU64,
+    expected: u64,
+) -> Option<T> {
+    let outcome = operation.await;
+    (current.load(Ordering::SeqCst) == expected).then_some(outcome)
 }
 
 fn map_subscription(error: SubscriptionError) -> DesktopError {
@@ -2704,19 +2724,19 @@ async fn extend_schedule_interval(
     service: &SubscriptionService,
     identity: SubscriptionIdentity,
     interval: Duration,
-) -> Result<()> {
+) -> std::result::Result<(), desktop_schedule::ScheduleFailure> {
     if interval <= Duration::from_secs(86400) {
         return Ok(());
     }
     let Some(token) = service
         .schedule_metadata(identity.id)
         .await
-        .map_err(map_subscription)?
+        .map_err(desktop_schedule::ScheduleFailure::service)?
     else {
-        return Err(DesktopError("storage"));
+        return Err(DesktopError("storage").into());
     };
     if token.generation != identity.generation {
-        return Err(DesktopError("storage"));
+        return Err(DesktopError("storage").into());
     }
     let Some(state) = token
         .state
@@ -2733,7 +2753,7 @@ async fn extend_schedule_interval(
             },
         )
         .await
-        .map_err(map_subscription)
+        .map_err(desktop_schedule::ScheduleFailure::service)
 }
 
 /// Completion старого ресурса не отменяет очередь/review нового поколения.
@@ -2743,11 +2763,11 @@ async fn reconcile_manual_schedule(
     identity: SubscriptionIdentity,
     clock: impl Fn() -> Duration,
     storage_failed: bool,
-) -> Result<()> {
+) -> std::result::Result<(), desktop_schedule::ScheduleFailure> {
     if service
         .schedule_generation(identity.id)
         .await
-        .map_err(map_subscription)?
+        .map_err(desktop_schedule::ScheduleFailure::service)?
         != Some(identity.generation)
     {
         return Ok(());
@@ -3101,7 +3121,51 @@ async fn session(
     Ok(())
 }
 
-fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'static str) {
+impl maintenance::AdmissionError {
+    pub fn context(self) -> crate::diagnostics::context::Cause {
+        use crate::diagnostics::context::Cause;
+        match self {
+            Self::Busy => Cause::MaintenanceAdmissionBusy,
+            Self::Revision => Cause::MaintenanceAdmissionRevision,
+            Self::Identity => Cause::MaintenanceAdmissionIdentity,
+            Self::InvalidInput => Cause::MaintenanceAdmissionInvalidInput,
+        }
+    }
+}
+
+fn accept_maintenance_owner(
+    state: &mut Snapshot,
+    scheduled: &mut DesktopSchedule,
+    owner: DesktopSchedule,
+) {
+    state.scheduler_generation = Some(owner.generation);
+    *scheduled = owner;
+}
+
+fn maintenance_refusal(state: &mut Snapshot, request_id: u64, cause: Cause, generation: u64) {
+    let context = crate::diagnostics::context::ErrorContext::new(
+        Slot::MaintenanceAck,
+        cause,
+        Some(request_id),
+    );
+    state.maintenance_generation = generation;
+    state
+        .error_contexts
+        .set_ack(Slot::MaintenanceAck, cause, request_id, generation);
+    state.maintenance_ack = Some(maintenance::Ack {
+        request_id,
+        phase: maintenance::Phase::Failed,
+        error: Some(context.message_key),
+    });
+}
+
+fn reject_unavailable_command(
+    state: &mut Snapshot,
+    command: &Command,
+    error: &'static str,
+    cause: Cause,
+    generation: u64,
+) {
     state.maintenance_available = false;
     if let Command::SourceChange { request_id, id, .. } = command {
         state.source_change_ack = Some(SourceChangeAck {
@@ -3114,14 +3178,7 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
     if let Command::MaintenanceStart { request_id, .. }
     | Command::MaintenanceCancel { request_id } = command
     {
-        state
-            .error_contexts
-            .clear(crate::diagnostics::context::Slot::MaintenanceAck);
-        state.maintenance_ack = Some(maintenance::Ack {
-            request_id: *request_id,
-            phase: maintenance::Phase::Failed,
-            error: Some(error),
-        });
+        maintenance_refusal(state, *request_id, cause, generation);
     }
     if let Some(request_id) = command.routing_request_id() {
         state
@@ -3146,6 +3203,17 @@ fn reject_unavailable_command(state: &mut Snapshot, command: &Command, error: &'
         let _sent = reply.send(None);
     }
     state.command_error(false, error);
+    if matches!(
+        command,
+        Command::MaintenanceStart { .. } | Command::MaintenanceCancel { .. }
+    ) {
+        state
+            .error_contexts
+            .set_generation(Slot::Error, cause, Some(generation));
+        state
+            .error_contexts
+            .set_generation(Slot::Connection, cause, Some(generation));
+    }
 }
 
 async fn wait_startup_shutdown(
@@ -3160,7 +3228,7 @@ async fn wait_startup_shutdown(
             changed = priority.changed() => if changed.is_err() { break; },
             command = commands.recv(), if commands_open => {
                 if let Some(command) = command {
-                    reject_unavailable_command(state, &command.command, "startup");
+                    reject_unavailable_command(state, &command.command, "startup", Cause::MaintenanceAdmissionUnsupported, command.generation);
                     state.emit(callback);
                 } else { commands_open = false; }
             }
@@ -3342,7 +3410,7 @@ async fn run(
     let mut scheduled = match DesktopSchedule::new() {
         Ok(owner) => owner,
         Err(error) => {
-            actor.state.command_error(true, error.key());
+            actor.state.schedule_error(error, None);
             actor.state.ready = false;
             actor.state.closed = actor
                 .service
@@ -3360,7 +3428,9 @@ async fn run(
     scheduled.visible = *subscription_visible.borrow_and_update();
     let mut schedule_loaded = false;
     if let Err(error) = scheduled.load(actor.service(), origin.elapsed()).await {
-        actor.state.command_error(true, error.key());
+        actor
+            .state
+            .schedule_error(error, Some(scheduled.generation));
         actor.emit();
     } else {
         schedule_loaded = true;
@@ -3374,8 +3444,11 @@ async fn run(
         scheduled.interval =
             Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
-        if scheduled.runtime.set_interval(scheduled.interval).is_err() {
-            actor.state.command_error(true, "invalid_input");
+        if let Err(error) = scheduled.runtime.set_interval(scheduled.interval) {
+            actor.state.schedule_error(
+                desktop_schedule::ScheduleFailure::interval(error),
+                Some(scheduled.generation),
+            );
         }
         let now = origin.elapsed();
         let policy = scheduled.policy();
@@ -3387,7 +3460,9 @@ async fn run(
                     || policy.battery_saver))
         {
             if let Err(error) = scheduled.close_window(actor.service(), now).await {
-                actor.state.command_error(true, error.key());
+                actor
+                    .state
+                    .schedule_error(error, Some(scheduled.generation));
             }
         }
         if let Some(observer) = &config.schedule_observer {
@@ -3423,13 +3498,18 @@ async fn run(
             if scheduled.review.is_some() {
                 actor.state.pending = None;
             }
-            if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
-                actor.state.command_error(true, "storage");
+            if let Err(error) = scheduled.shutdown(origin.elapsed()).await {
+                actor
+                    .state
+                    .schedule_error(error, Some(scheduled.generation));
             }
             if let Ok(mut replacement) = scheduled.replacement() {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
-                    actor.state.command_error(true, error.key());
+                    actor
+                        .state
+                        .schedule_error(error, Some(replacement.generation));
                 }
+                actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
             }
             schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
@@ -3464,15 +3544,16 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() { actor.state.command_error(true, "storage"); }
+                if let Err(error) = scheduled.shutdown(origin.elapsed()).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
                     let policy = scheduled.policy;
                     let visible = scheduled.visible;
                     if let Ok(mut replacement) = DesktopSchedule::new() {
                         replacement.policy = policy; replacement.visible = visible;
-                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.command_error(true, error.key()); }
-                        scheduled = replacement;
+                        if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
+                        actor.state.scheduler_generation = Some(replacement.generation);
+                scheduled = replacement;
                     }
                 }
                 actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Connection); actor.state.connection_error = None;
@@ -3581,9 +3662,9 @@ async fn run(
                             }
                         }
                     }
-                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.command_error(true, map_subscription(error).key()),
+                    Ok(Some(yonik_linux::SubscriptionScheduleEvent::Failed { error, .. })) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::service(error), Some(scheduled.generation)),
                     Ok(_) => {},
-                    Err(_) => actor.state.command_error(true, "storage"),
+                    Err(error) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)),
                 }
                 actor.emit();
             }
@@ -3601,7 +3682,7 @@ async fn run(
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
-                        Err(_) => actor.state.command_error(true, "storage"),
+                        Err(error) => actor.state.schedule_error(desktop_schedule::ScheduleFailure::runtime(error), Some(scheduled.generation)),
                     }
                 }
             }
@@ -3719,7 +3800,7 @@ async fn run(
                     let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
                     if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 actor.emit();
             }
@@ -3743,7 +3824,7 @@ async fn run(
                         actor.emit();
                     }
                     if let Command::MaintenanceStart { request_id, .. } | Command::MaintenanceCancel { request_id } = &envelope.command {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *request_id, phase: maintenance::Phase::Failed, error: Some("cancelled") });
+                        maintenance_refusal(&mut actor.state, *request_id, Cause::MaintenanceAdmissionStale, envelope.generation);
                         actor.emit();
                     }
                     if let Some(request_id) = envelope.command.routing_request_id() {
@@ -3760,16 +3841,16 @@ async fn run(
                     let request = maintenance::Request { request_id: *request_id, operation: *operation, source: source.clone(), destination: destination.clone(), revision: *revision };
                     let live = config.data_dir.join("subscriptions.sqlite");
                     if !actor.state.maintenance_available || running.is_some() || failed_session.is_some() || system_active || system_flight.is_some() || batch_running.is_some() || tcp_running.is_some() || refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || actor.pending.is_some() || scheduled.review.is_some() || actor.logs_save.active() {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                        let cause = if actor.state.maintenance_available { Cause::MaintenanceAdmissionBusy } else { Cause::MaintenanceAdmissionUnavailable }; maintenance_refusal(&mut actor.state, request.request_id, cause, envelope.generation);
                         actor.emit(); continue;
                     }
-                    if let Err(error) = maintenance_controller.begin(&request, &live, actor.state.revision) {
-                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: request.request_id, phase: maintenance::Phase::Failed, error: Some(error) });
+                    if let Err(error) = maintenance_controller.begin_typed(&request, &live, actor.state.revision) {
+                        maintenance_refusal(&mut actor.state, request.request_id, error.context(), envelope.generation);
                         actor.emit(); continue;
                     }
-                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; };
-                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned(); actor.emit(); continue; } };
+                    let Some(service) = actor.service.take() else { maintenance_controller.drained(request.request_id, Err("busy")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionUnavailable, envelope.generation); actor.emit(); continue; };
+                    let Some(repository) = actor.routing_repository.take() else { actor.service = Some(service); maintenance_controller.drained(request.request_id, Err("busy")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionUnavailable, envelope.generation); actor.emit(); continue; };
+                    let replacement = match DesktopSchedule::new() { Ok(schedule) => schedule, Err(_) => { actor.service = Some(service); actor.routing_repository = Some(repository); maintenance_controller.drained(request.request_id, Err("startup")); maintenance_refusal(&mut actor.state, request.request_id, Cause::MaintenanceAdmissionSchedulerUnavailable, envelope.generation); actor.emit(); continue; } };
                     let owner = std::mem::replace(&mut scheduled, replacement);
                     let request_id = request.request_id;
                     let cancellation = yonik_linux::MaintenanceControl::default();
@@ -3803,9 +3884,9 @@ async fn run(
                                         actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = maintenance_controller.ack().cloned();
                                     }
                                     Command::MaintenanceStart { request_id: id, .. } | Command::MaintenanceCancel { request_id: id } => {
-                                        actor.state.error_contexts.clear(crate::diagnostics::context::Slot::MaintenanceAck); actor.state.maintenance_ack = Some(maintenance::Ack { request_id: *id, phase: maintenance::Phase::Failed, error: Some("busy") });
+                                        maintenance_refusal(&mut actor.state, *id, Cause::MaintenanceAdmissionDraining, command.generation);
                                     }
-                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy"),
+                                    _ => reject_unavailable_command(&mut actor.state, &command.command, "busy", Cause::MaintenanceAdmissionReopenUnavailable, command.generation),
                                 }
                                 actor.emit();
                             }
@@ -3819,7 +3900,7 @@ async fn run(
                         job_drained = outcome.drained;
                         result = outcome.result;
                         if let Some((service, repository, owner)) = outcome.handles {
-                            actor.service = Some(service); actor.routing_repository = Some(repository); scheduled = owner;
+                            actor.service = Some(service); actor.routing_repository = Some(repository); accept_maintenance_owner(&mut actor.state, &mut scheduled, owner);
                         }
                     }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();
@@ -3845,7 +3926,7 @@ async fn run(
                                 }
                                 command = commands.recv(), if commands_open => {
                                     if let Some(command) = command {
-                                        reject_unavailable_command(&mut actor.state, &command.command, "busy");
+                                        reject_unavailable_command(&mut actor.state, &command.command, "busy", Cause::MaintenanceAdmissionReopenUnavailable, command.generation);
                                         actor.emit();
                                     } else { quitting = true; commands_open = false; }
                                 }
@@ -3897,6 +3978,7 @@ async fn run(
                 }
 
                 if matches!(&envelope.command, Command::LogsRead { .. } | Command::LogsSave { .. }) { actor.state.logs_generation = envelope.generation; }
+                if matches!(&envelope.command, Command::MaintenanceCancel { .. }) { actor.state.maintenance_generation = envelope.generation; }
                 let context_request_id = envelope.command.routing_request_id();
                 if context_request_id.is_some() { actor.state.routing_generation = envelope.generation; actor.state.error_contexts.clear(Slot::RoutingAck); }
 
@@ -3918,13 +4000,15 @@ async fn run(
                 };
                 if let Some(id) = cancel_id {
                     let cancelled_review = scheduled.review == Some(id);
-                    if let Err(error) = scheduled.cancel(id, || origin.elapsed()).await {
+                    let Some(cancelled) = await_current_schedule(scheduled.cancel(id, || origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                    if let Err(error) = cancelled {
                         if source_change.is_some() { if let Some(ack) = actor.state.source_change_ack.as_mut() { ack.error = Some(error.key()); } }
-                        actor.state.command_error(true, error.key()); actor.emit(); continue;
+                        actor.state.schedule_error(error, Some(scheduled.generation)); actor.emit(); continue;
                     }
                     if (scheduled.deferred.is_some() || scheduled.fetching) && matches!(&envelope.command, Command::Refresh | Command::SetSourceHwid { .. }) {
-                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
-                            actor.state.command_error(true, error.key());
+                        let Some(reloaded) = await_current_schedule(scheduled.reload_id(actor.service(), id, origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                        if let Err(error) = reloaded {
+                            actor.state.schedule_error(error, Some(scheduled.generation));
                         } else { actor.state.command_error(true, "busy"); }
                         actor.emit(); continue;
                     }
@@ -4107,14 +4191,15 @@ async fn run(
                 };
                 if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.command_error(true, error.key()); }
+                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 let mut schedule_reload_error = None;
                 if reload_schedule || cancel_id.is_some() {
                     if let Some(id) = cancel_id.or(actor.state.source_id) {
-                        if let Err(error) = scheduled.reload_id(actor.service(), id, origin.elapsed()).await {
+                        let Some(reloaded) = await_current_schedule(scheduled.reload_id(actor.service(), id, origin.elapsed()), &control.generation, envelope.generation).await else { continue; };
+                        if let Err(error) = reloaded {
                             schedule_reload_error = Some(error.key());
-                            actor.state.command_error(true, error.key());
+                            actor.state.schedule_error(error, Some(scheduled.generation));
                         }
                     }
                 }
@@ -4229,8 +4314,10 @@ async fn run(
             break;
         }
     }
-    if scheduled.runtime.shutdown(origin.elapsed()).await.is_err() {
-        actor.state.command_error(true, "storage");
+    if let Err(error) = scheduled.shutdown(origin.elapsed()).await {
+        actor
+            .state
+            .schedule_error(error, Some(scheduled.generation));
     }
     // Отмена с acknowledgement: Drop может отложить zbus cleanup до следующего poll.
     provider_stop.send_replace(true);
@@ -5067,6 +5154,27 @@ mod maintenance_context_tests {
         let mut sibling = state.clone();
         sibling["maintenance_ack"]["request_id"] = serde_json::json!(78);
         assert!(crate::diagnostics::export_snapshot_v2(&sibling.to_string()).is_none());
+        for (id, revision, reason, key) in [
+            (
+                78,
+                ready["revision"].as_i64().expect("revision") + 1,
+                "maintenance_admission_revision",
+                "busy",
+            ),
+            (
+                77,
+                ready["revision"].as_i64().expect("revision"),
+                "maintenance_admission_identity",
+                "invalid_input",
+            ),
+        ] {
+            host.dispatch(&serde_json::json!({"command":"maintenance_start","request_id":id,"operation":"backup","destination":destination,"revision":revision}).to_string()).expect("admission command");
+            let refused = wait(&|value| {
+                value["maintenance_ack"]["request_id"] == id
+                    && value["maintenance_ack"]["error"] == key
+            });
+            super::maintenance_job::assert_admission_context(&refused, reason);
+        }
         let legacy = crate::diagnostics::export_snapshot(&state.to_string()).expect("V1");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&legacy).expect("JSON"),
