@@ -3,10 +3,13 @@
 import importlib.util
 import io
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 SPEC = importlib.util.spec_from_file_location(
     "arch", Path(__file__).parents[1] / "check_arch_package.py"
@@ -16,7 +19,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(arch)
 
 PKGINFO = b"""pkgname = yonik
-pkgver = 0.1.0.r20261110-2
+pkgver = 0.1.0.r20261111-1
 arch = x86_64
 """ + b"".join(
     f"depend = {name}\n".encode()
@@ -65,7 +68,7 @@ class ArchiveTests(unittest.TestCase):
                         before, after = {
                             "wrong_name": (b"pkgname = yonik", b"pkgname = other"),
                             "wrong_version": (
-                                b"pkgver = 0.1.0.r20261110-2",
+                                b"pkgver = 0.1.0.r20261111-1",
                                 b"pkgver = 99-1",
                             ),
                             "wrong_arch": (b"arch = x86_64", b"arch = aarch64"),
@@ -127,7 +130,7 @@ class ArchiveTests(unittest.TestCase):
         root = Path(__file__).parents[2].resolve()
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
-            (work / "yonik-eec7a56b6b03f2b022a87682f9097ce78b61fa0b").symlink_to(root)
+            (work / "yonik-6cf65a4cf9760a7df68b8eee10f012770b38604d").symlink_to(root)
             release = work / "target/release"
             release.mkdir(parents=True)
             for name in ("yonik-desktop", "yonik-helper", "yonik-worker"):

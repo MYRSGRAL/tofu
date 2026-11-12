@@ -11,6 +11,22 @@ pub enum Operation {
     Restore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionError {
+    Busy,
+    Revision,
+    Identity,
+    InvalidInput,
+}
+impl AdmissionError {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Busy | Self::Revision => "busy",
+            Self::Identity | Self::InvalidInput => "invalid_input",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -24,13 +40,17 @@ pub struct Request {
 impl Request {
     /// Проверка формы до I/O; secure_path/nofollow и NOREPLACE остаются в repository.
     pub fn validate(&self, live: &Path, revision: i64) -> Result<(), &'static str> {
+        self.validate_typed(live, revision)
+            .map_err(AdmissionError::key)
+    }
+    pub fn validate_typed(&self, live: &Path, revision: i64) -> Result<(), AdmissionError> {
         if self.revision != revision {
-            return Err("busy");
+            return Err(AdmissionError::Revision);
         }
         let source = match (self.operation, self.source.as_deref()) {
             (Operation::Backup, None) => live,
             (Operation::Restore, Some(source)) => source,
-            _ => return Err("invalid_input"),
+            _ => return Err(AdmissionError::InvalidInput),
         };
         for path in [source, self.destination.as_path()] {
             if !path.is_absolute()
@@ -43,11 +63,11 @@ impl Request {
                 })
                 || path.file_name().is_none()
             {
-                return Err("invalid_input");
+                return Err(AdmissionError::InvalidInput);
             }
         }
         if self.destination == live || self.destination == source {
-            return Err("invalid_input");
+            return Err(AdmissionError::InvalidInput);
         }
         Ok(())
     }
@@ -96,15 +116,24 @@ impl Controller {
         live: &Path,
         revision: i64,
     ) -> Result<(), &'static str> {
+        self.begin_typed(request, live, revision)
+            .map_err(AdmissionError::key)
+    }
+    pub fn begin_typed(
+        &mut self,
+        request: &Request,
+        live: &Path,
+        revision: i64,
+    ) -> Result<(), AdmissionError> {
         if self.busy() {
-            return Err("busy");
+            return Err(AdmissionError::Busy);
         }
-        request.validate(live, revision)?;
+        request.validate_typed(live, revision)?;
         if self
             .last_request_id
             .is_some_and(|last| request.request_id <= last)
         {
-            return Err("invalid_input");
+            return Err(AdmissionError::Identity);
         }
         self.last_request_id = Some(request.request_id);
         self.ack = Some(Ack {

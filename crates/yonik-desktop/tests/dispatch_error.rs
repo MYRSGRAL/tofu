@@ -59,3 +59,17 @@ fn unavailable_host_completes_logs_request_without_reusing_old_export() {
     assert_eq!(ack["logs"]["status"], "error");
     assert!(ack["logs"]["export"].is_null());
 }
+
+#[test]
+fn routing_apply_получает_точный_ack_при_queue_full_и_startup() {
+    for error in ["busy", "startup"] {
+        let value = dispatch_error::snapshot(
+            r#"{"ready":true,"routing_ack":{"request_id":7}}"#,
+            r#"{"command":"routing_apply","request_id":81}"#,
+            error,
+        );
+        let ack: Value = serde_json::from_str(&value).expect("DTO");
+        assert_eq!(ack["routing_ack"]["request_id"], 81);
+        assert_eq!(ack["routing_ack"]["error"], error);
+    }
+}
