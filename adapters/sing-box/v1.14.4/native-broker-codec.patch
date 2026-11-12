@@ -1,6 +1,5 @@
 diff --git a/common/yonikbroker/proof.go b/common/yonikbroker/proof.go
 new file mode 100644
-index 0000000..f06729a
 --- /dev/null
 +++ b/common/yonikbroker/proof.go
 @@ -0,0 +1,177 @@
@@ -183,7 +182,6 @@ index 0000000..f06729a
 +func (s *Session) Context() context.Context { return s.ctx }
 diff --git a/common/yonikbroker/proof_test.go b/common/yonikbroker/proof_test.go
 new file mode 100644
-index 0000000..e1e71fd
 --- /dev/null
 +++ b/common/yonikbroker/proof_test.go
 @@ -0,0 +1,152 @@
@@ -341,7 +339,6 @@ index 0000000..e1e71fd
 +}
 diff --git a/common/yonikbroker/wire.go b/common/yonikbroker/wire.go
 new file mode 100644
-index 0000000..42190f3
 --- /dev/null
 +++ b/common/yonikbroker/wire.go
 @@ -0,0 +1,348 @@
@@ -695,7 +692,6 @@ index 0000000..42190f3
 +func (s *Sequence) Retire() { s.pending = 0; s.retired = true }
 diff --git a/common/yonikbroker/wire_test.go b/common/yonikbroker/wire_test.go
 new file mode 100644
-index 0000000..7ed0af0
 --- /dev/null
 +++ b/common/yonikbroker/wire_test.go
 @@ -0,0 +1,256 @@
@@ -957,7 +953,6 @@ index 0000000..7ed0af0
 +}
 diff --git a/common/yonikbroker/frozen-vectors.json b/common/yonikbroker/frozen-vectors.json
 new file mode 100644
-index 0000000..63bf81e
 --- /dev/null
 +++ b/common/yonikbroker/frozen-vectors.json
 @@ -0,0 +1,135 @@
@@ -1098,7 +1093,6 @@ index 0000000..63bf81e
 +}
 diff --git a/common/yonikbroker/bootstrap_linux.go b/common/yonikbroker/bootstrap_linux.go
 new file mode 100644
-index 0000000..d935550
 --- /dev/null
 +++ b/common/yonikbroker/bootstrap_linux.go
 @@ -0,0 +1,164 @@
@@ -1268,7 +1262,6 @@ index 0000000..d935550
 +}
 diff --git a/common/yonikbroker/bootstrap_linux_test.go b/common/yonikbroker/bootstrap_linux_test.go
 new file mode 100644
-index 0000000..30f3ee1
 --- /dev/null
 +++ b/common/yonikbroker/bootstrap_linux_test.go
 @@ -0,0 +1,218 @@
@@ -1492,7 +1485,6 @@ index 0000000..30f3ee1
 +}
 diff --git a/common/yonikbroker/callsite_test.go b/common/yonikbroker/callsite_test.go
 new file mode 100644
-index 0000000..7bae4fd
 --- /dev/null
 +++ b/common/yonikbroker/callsite_test.go
 @@ -0,0 +1,105 @@
@@ -1603,10 +1595,9 @@ index 0000000..7bae4fd
 +}
 diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
 new file mode 100644
-index 0000000..6bc24fa
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,91 @@
 +package nativehooks
 +
 +import (
@@ -1659,12 +1650,50 @@ index 0000000..6bc24fa
 +		}
 +	}, func() int { c.mu.Lock(); defer c.mu.Unlock(); return calls }
 +}
++
++// ClosedRevokeFixture сохраняет authenticated ATTACH и wire Known issuer в test binary.
++func ClosedRevokeFixture(t *testing.T, mode string, protocol uint8) (context.Context, func()) {
++	ctx, _, control := closedTUNFixtureMode(t, "known/"+mode)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	_, p, _ := fixture(t)
++	p.Binding = c.bootstrap.Binding
++	p.Flow.Protocol = protocol
++	c.mu.Lock()
++	c.flow = p.Flow
++	c.mu.Unlock()
++	return ctx, func() {
++		control()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("revoke deadline")
++		}
++		if err := c.session.Revoke(); err != nil {
++			t.Fatal(err)
++		}
++		c.session.mu.Lock()
++		remaining := len(c.session.flows)
++		c.session.mu.Unlock()
++		if remaining != 0 {
++			t.Fatalf("owned flows после revoke: %d", remaining)
++		}
++		c.mu.Lock()
++		next := c.next
++		c.mu.Unlock()
++		t.Cleanup(func() {
++			c.mu.Lock()
++			defer c.mu.Unlock()
++			if c.next != next {
++				t.Error("lookup после revoke")
++			}
++		})
++	}
++}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
-index 0000000..964da67
 --- /dev/null
 +++ b/common/yonikbroker/routing.go
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,112 @@
 +package nativehooks
 +
 +import (
@@ -1714,6 +1743,9 @@ index 0000000..964da67
 +		c.sequence.Retire()
 +		_ = c.session.Revoke()
 +		return ErrDenied
++	}
++	if err := c.session.Guard(time.Now(), stage, false, Flow{}, Evidence{}); err != nil {
++		return err
 +	}
 +	if !c.required {
 +		return c.session.Guard(time.Now(), stage, false, Flow{}, Evidence{})
@@ -1765,9 +1797,17 @@ index 0000000..964da67
 +	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
 +	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
 +}
++
++// DNSGuard сохраняет обязательность после revoke: закрытый marker остаётся в context.
++// Обычные native DNS callers без handoff сохраняют штатную семантику.
++func DNSGuard(ctx context.Context) error {
++	if ctx.Value(routingKey{}) == nil {
++		return nil
++	}
++	return guardEntry(ctx, AfterDNS)
++}
 diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
 new file mode 100644
-index 0000000..a379e5c
 --- /dev/null
 +++ b/common/yonikbroker/routing_test.go
 @@ -0,0 +1,58 @@
@@ -1960,7 +2000,6 @@ index fe95cb8..7fb0924 100644
 +}
 diff --git a/common/yonikbroker/closed_tun_linux.go b/common/yonikbroker/closed_tun_linux.go
 new file mode 100644
-index 0000000..5e6f13a
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux.go
 @@ -0,0 +1,222 @@
@@ -2188,10 +2227,9 @@ index 0000000..5e6f13a
 +}
 diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/closed_tun_linux_test.go
 new file mode 100644
-index 0000000..86fbcf0
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux_test.go
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,272 @@
 +//go:build linux && !android
 +
 +package nativehooks
@@ -2213,6 +2251,10 @@ index 0000000..86fbcf0
 +}
 +func closedTUNFixtureMode(t *testing.T, mode string) (context.Context, *os.File, func()) {
 +	t.Helper()
++	known := len(mode) > 6 && mode[:6] == "known/"
++	if known {
++		mode = mode[6:]
++	}
 +	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
 +		t.Skip("нужен isolated namespace launcher")
 +	}
@@ -2258,14 +2300,22 @@ index 0000000..86fbcf0
 +	be.PutUint64(hello[144:], uint64(OwnerTTL))
 +	be.PutUint64(hello[152:], uint64(BootstrapTTL))
 +	be.PutUint64(hello[160:], OwnedTUN)
++	if known {
++		be.PutUint64(hello[160:], AllFeatures)
++		be.PutUint64(hello[168:], 1)
++	}
 +	attach := makeFrame(AttachKind, 0, b.Binding, 128)
 +	be.PutUint32(attach[96:], 1)
 +	be.PutUint32(attach[100:], uint32(iface.Index))
 +	be.PutUint32(attach[104:], 0x1001)
 +	be.PutUint32(attach[108:], uint32(iface.MTU))
 +	copy(attach[112:], iface.Name)
++	issuerCtx, stopIssuer := context.WithCancel(context.Background())
++	issuerDone := make(chan struct{})
++	t.Cleanup(func() { stopIssuer(); <-issuerDone })
 +	done := make(chan error, 1)
 +	go func() {
++		defer close(issuerDone)
 +		if e := syscall.Sendmsg(pair[1], hello, nil, nil, 0); e != nil {
 +			done <- e
 +			return
@@ -2282,8 +2332,43 @@ index 0000000..86fbcf0
 +		}
 +		_, e = syscall.Read(pair[1], buffer)
 +		done <- e
++		if known && e == nil {
++			for {
++				if issuerCtx.Err() != nil {
++					return
++				}
++				n, _, e := syscall.Recvfrom(pair[1], buffer, syscall.MSG_DONTWAIT)
++				if e == syscall.EAGAIN {
++					time.Sleep(time.Millisecond)
++					continue
++				}
++				if e != nil || n == 0 {
++					return
++				}
++				request, e := DecodeFrame(buffer[:n], 0)
++				if e != nil || request.Header.Kind != LookupKind {
++					return
++				}
++				reply := makeFrame(ReplyKind, request.Header.RequestID, b.Binding, 168)
++				reply[96] = 1
++				be.PutUint16(reply[100:], 8)
++				be.PutUint64(reply[104:], uint64(OwnerTTL))
++				be.PutUint32(reply[120:], b.ServerPID)
++				be.PutUint64(reply[128:], b.ServerStarttime)
++				be.PutUint64(reply[136:], 1)
++				be.PutUint64(reply[144:], 2)
++				copy(reply[160:], "/fixture")
++				if syscall.Sendmsg(pair[1], reply, nil, nil, 0) != nil {
++					return
++				}
++			}
++		}
 +	}()
 +	ctx, cancel := context.WithCancel(context.Background())
++	if mode == "deadline" {
++		cancel()
++		ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
++	}
 +	t.Cleanup(cancel)
 +	result, err := closedAttach(ctx, record, receiver, pidfd)
 +	if err != nil {
@@ -2308,8 +2393,11 @@ index 0000000..86fbcf0
 +		}
 +	})
 +	revoke := cancel
++	if mode == "deadline" {
++		revoke = func() {}
++	}
 +	if mode == "eof" {
-+		revoke = func() { _ = sender.Close() }
++		revoke = func() { stopIssuer(); <-issuerDone; _ = sender.Close() }
 +	}
 +	if mode == "revoke" {
 +		revoke = func() {
@@ -2416,7 +2504,6 @@ index 0000000..86fbcf0
 +}
 diff --git a/common/yonikbroker/tun_callsite_test.go b/common/yonikbroker/tun_callsite_test.go
 new file mode 100644
-index 0000000..42333e9
 --- /dev/null
 +++ b/common/yonikbroker/tun_callsite_test.go
 @@ -0,0 +1,47 @@
@@ -2610,7 +2697,6 @@ index a8f2643..e07a9d7 100644
  }
 diff --git a/common/dialer/socket_guard.go b/common/dialer/socket_guard.go
 new file mode 100644
-index 0000000..2a3a5bf
 --- /dev/null
 +++ b/common/dialer/socket_guard.go
 @@ -0,0 +1,67 @@
@@ -2742,10 +2828,9 @@ index ded2518..5d9c183 100644
  		}
 diff --git a/common/yonikbroker/socket.go b/common/yonikbroker/socket.go
 new file mode 100644
-index 0000000..4868a9e
 --- /dev/null
 +++ b/common/yonikbroker/socket.go
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,57 @@
 +package nativehooks
 +
 +import (
@@ -2767,28 +2852,44 @@ index 0000000..4868a9e
 +		_ = socket.Close()
 +		return nil, ErrDenied
 +	}
++	if c.session.Guard(time.Now(), BeforeDial, false, Flow{}, Evidence{}) != nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
 +	lookup := c.lookup
 +	if lookup == nil {
 +		lookup = c.lookupAuthenticated
 +	}
-+	proof, err := lookup(ctx, c.flow)
++	var proof Evidence
++	var err error
++	if c.required {
++		proof, err = lookup(ctx, c.flow)
++	}
 +	if err != nil || ctx.Err() != nil {
 +		_ = socket.Close()
 +		_ = c.session.Revoke()
 +		return nil, ErrDenied
 +	}
-+	handle, err := c.session.Track(time.Now(), c.required, c.flow, proof, socket)
++	stop := context.AfterFunc(ctx, func() { _ = c.session.Revoke() })
++	owned := &socketCancellation{Closer: socket, stop: stop}
++	handle, err := c.session.Track(time.Now(), c.required, c.flow, proof, owned)
 +	if err != nil {
-+		_ = socket.Close()
++		_ = owned.Close()
 +		_ = c.session.Revoke()
 +		return nil, err
 +	}
-+	stop := context.AfterFunc(ctx, func() { _ = c.session.Revoke() })
-+	return func() error { stop(); return c.session.Release(handle) }, nil
++	return func() error { return c.session.Release(handle) }, nil
 +}
++
++// Отзыв освобождает также регистрацию callback на ещё живом parent context.
++type socketCancellation struct {
++	io.Closer
++	stop func() bool
++}
++
++func (s *socketCancellation) Close() error { s.stop(); return s.Closer.Close() }
 diff --git a/common/yonikbroker/socket_callsite_test.go b/common/yonikbroker/socket_callsite_test.go
 new file mode 100644
-index 0000000..661c5d0
 --- /dev/null
 +++ b/common/yonikbroker/socket_callsite_test.go
 @@ -0,0 +1,326 @@
@@ -3120,7 +3221,6 @@ index 0000000..661c5d0
 +}
 diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
 new file mode 100644
-index 0000000..1df27bb
 --- /dev/null
 +++ b/common/yonikbroker/dns_callsite_test.go
 @@ -0,0 +1,268 @@
@@ -3392,23 +3492,6 @@ index 0000000..1df27bb
 +		}
 +	}
 +}
-diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
-index 964da67..cb7a5bc 100644
---- a/common/yonikbroker/routing.go
-+++ b/common/yonikbroker/routing.go
-@@ -98,3 +98,12 @@ func (c *routingConsumer) lookupAuthenticated(ctx context.Context, flow Flow) (E
- 	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
- 	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
- }
-+
-+// DNSGuard сохраняет обязательность после revoke: закрытый marker остаётся в context.
-+// Обычные native DNS callers без handoff сохраняют штатную семантику.
-+func DNSGuard(ctx context.Context) error {
-+	if ctx.Value(routingKey{}) == nil {
-+		return nil
-+	}
-+	return guardEntry(ctx, AfterDNS)
-+}
 diff --git a/dns/router.go b/dns/router.go
 index 3ac2d07..701c399 100644
 --- a/dns/router.go
@@ -3560,3 +3643,123 @@ index c7bce0a..e6d7db9 100644
  		metadata.DestinationAddresses = addresses
  		r.logger.DebugContext(ctx, "resolved [", strings.Join(F.MapToString(metadata.DestinationAddresses), " "), "]")
  	}
+diff --git a/common/yonikbroker/revoke_callsite_test.go b/common/yonikbroker/revoke_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/revoke_callsite_test.go
+@@ -0,0 +1,115 @@
++package nativehooks_test
++
++import (
++	"context"
++	D "github.com/sagernet/sing-box/common/dialer"
++	H "github.com/sagernet/sing-box/common/yonikbroker"
++	"github.com/sagernet/sing-box/option"
++	M "github.com/sagernet/sing/common/metadata"
++	"io"
++	"net"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestActualOpenedFlowsRevoke(t *testing.T) {
++	for _, mode := range []string{"cancel", "eof", "revoke", "deadline"} {
++		for _, network := range []string{"tcp", "udp"} {
++			t.Run(mode+"/"+network, func(t *testing.T) {
++				protocol := uint8(6)
++				if network == "udp" {
++					protocol = 17
++				}
++				ctx, revoke := H.ClosedRevokeFixture(t, mode, protocol)
++				var address string
++				var port int
++				var wg sync.WaitGroup
++				if network == "tcp" {
++					l, err := net.Listen("tcp", "127.0.0.1:0")
++					if err != nil {
++						t.Fatal(err)
++					}
++					defer l.Close()
++					address = l.Addr().String()
++					port = l.Addr().(*net.TCPAddr).Port
++					wg.Add(4)
++					go func() {
++						for {
++							c, e := l.Accept()
++							if e != nil {
++								return
++							}
++							go func() { defer wg.Done(); defer c.Close(); _, _ = io.Copy(c, c) }()
++						}
++					}()
++				} else {
++					l, err := net.ListenPacket("udp", "127.0.0.1:0")
++					if err != nil {
++						t.Fatal(err)
++					}
++					defer l.Close()
++					address = l.LocalAddr().String()
++					port = l.LocalAddr().(*net.UDPAddr).Port
++					go func() {
++						b := make([]byte, 1024)
++						for {
++							n, a, e := l.ReadFrom(b)
++							if e != nil {
++								return
++							}
++							_, _ = l.WriteTo(b[:n], a)
++						}
++					}()
++				}
++				_ = address
++				_ = port
++				dial := func() (net.Conn, error) {
++					d, err := D.NewDefault(context.Background(), option.DialerOptions{})
++					if err != nil {
++						return nil, err
++					}
++					return d.DialContext(ctx, network, M.ParseSocksaddr(address))
++				}
++				connections := make([]net.Conn, 4)
++				for i := range connections {
++					c, e := dial()
++					if e != nil {
++						t.Fatal(e)
++					}
++					connections[i] = c
++					defer c.Close()
++					_ = c.SetDeadline(time.Now().Add(time.Second))
++					if _, e = c.Write([]byte{42}); e != nil {
++						t.Fatal(e)
++					}
++					b := make([]byte, 1)
++					if _, e = io.ReadFull(c, b); e != nil || b[0] != 42 {
++						t.Fatalf("positive traffic: %v", e)
++					}
++				}
++				revoke()
++				for _, c := range connections {
++					_ = c.SetDeadline(time.Now().Add(time.Second))
++					if _, e := c.Write([]byte{43}); e == nil {
++						t.Fatal("revoked socket writes")
++					}
++					if _, e := c.Read(make([]byte, 1)); e == nil {
++						t.Fatal("revoked socket reads")
++					}
++					if e := c.Close(); e != nil {
++						t.Fatal(e)
++					}
++				}
++				if c, e := dial(); e == nil {
++					c.Close()
++					t.Fatal("dial after revoke")
++				}
++				if H.RoutingEntry(ctx) == nil || H.DNSGuard(ctx) == nil || H.BeforeSocketDial(ctx) == nil {
++					t.Fatal("guard after revoke")
++				}
++				wg.Wait()
++			})
++		}
++	}
++}
