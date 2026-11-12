@@ -3789,18 +3789,14 @@ async fn run(
     let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
     let mut maintenance_controller = maintenance::Controller::default();
     loop {
-        scheduled.interval =
-            Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
+        let interval = Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
         #[cfg(feature = "test-support")]
-        if let Some(interval) = config.scheduler_interval {
-            scheduled.interval = interval;
-        }
-        if let Err(error) = scheduled.runtime.set_interval(scheduled.interval) {
-            actor.state.schedule_error(
-                desktop_schedule::ScheduleFailure::interval(error),
-                Some(scheduled.generation),
-            );
+        let interval = config.scheduler_interval.unwrap_or(interval);
+        if let Err(error) = scheduled.set_interval(interval) {
+            actor
+                .state
+                .schedule_error(error, Some(scheduled.generation));
         }
         let now = origin.elapsed();
         let policy = scheduled.policy();

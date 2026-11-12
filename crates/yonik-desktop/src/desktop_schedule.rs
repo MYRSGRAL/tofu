@@ -152,6 +152,13 @@ impl DesktopSchedule {
         replacement.next_window = self.next_window;
         Ok(replacement)
     }
+    pub fn set_interval(&mut self, interval: Duration) -> ScheduleResult<()> {
+        self.runtime
+            .set_interval(interval)
+            .map_err(ScheduleFailure::interval)?;
+        self.interval = interval;
+        Ok(())
+    }
     pub fn policy(&self) -> SubscriptionPolicy {
         SubscriptionPolicy {
             ui_visible: self.visible,
@@ -401,6 +408,22 @@ impl DesktopSchedule {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn отклонённый_интервал_сохраняет_настройки_владельца() {
+        let mut owner = super::DesktopSchedule::new().expect("scheduler");
+        let accepted = owner.interval;
+        let failure = owner.set_interval(std::time::Duration::ZERO).unwrap_err();
+        assert_eq!(failure.cause, Some(super::Cause::SchedulerIntervalInvalid));
+        assert_eq!(owner.interval, accepted);
+        let replacement = owner.replacement().expect("после отказа настройки валидны");
+        assert_eq!(replacement.interval, accepted);
+        assert_ne!(replacement.generation, owner.generation);
+        let updated = std::time::Duration::from_secs(172800);
+        owner.set_interval(updated).expect("валидное изменение");
+        assert_eq!(owner.interval, updated);
+        assert_eq!(owner.replacement().expect("замена").interval, updated);
+    }
+
     use super::*;
 
     #[tokio::test]
