@@ -1382,6 +1382,7 @@ ApplicationWindow {
                 TextField { id: sourceUrl; objectName: "sourceUrlInput"; Layout.fillWidth: true; maximumLength: 8192; echoMode: reveal.checked ? TextInput.Normal : TextInput.Password; selectByMouse: true; inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData; Accessible.name: window.tr("Секретная ссылка подписки", "Secret subscription URL") }
                 CheckBox { id: reveal; objectName: "revealSourceUrl"; text: window.tr("Показать", "Show") }
             }
+            ActionButton { objectName: "manualEntryButton"; text: window.tr("Сервер вручную", "Manual server"); enabled: window.editable && !window.state.pending; onClicked: { addDialog.close(); manualEntry.open() } }
             PlainLabel { text: window.tr("Текст или файл конфигурации", "Configuration text or file") }
             TextArea {
                 id: localImportText; objectName: "localImportTextInput"
@@ -1440,6 +1441,11 @@ ApplicationWindow {
         }
         }
         onOpened: { sourceUrl.clear(); sourceName.clear(); sourceHwid.checked = false; if (window.pasteOnOpen) sourceUrl.paste(); window.pasteOnOpen = false; sourceUrl.forceActiveFocus() }
+    }
+    ManualEntry {
+        id: manualEntry
+        english: window.language === "en"
+        onSubmitted: function(name, text) { window.submitLocalImport({command: "import_text", name: name, text: text}) }
     }
     FileDialog {
         id: localImportFile; objectName: "localImportFileDialog"
