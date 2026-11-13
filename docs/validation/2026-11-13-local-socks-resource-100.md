@@ -101,12 +101,31 @@ Evidence: `/home/myrs/projects/yonik/local/evidence/local-socks-resource-peer-ne
 Binding фиксирует обновлённый Python harness, неизменённый Rust source и старый
 retained binary; пересборки Rust не было. Ruff format/check и diff-check PASS.
 
-Аварийный внешний timeout отдельно проверен: probe запускается в собственной
-session; перед cleanup producer останавливается, session members проверяются по
-PID/starttime и удерживаемым pidfd. SIGKILL и terminal readiness проверяются для
-host и core, даже если у core отдельная process group. Результат: два коротких
-cleanup-теста PASS; parent-only negative control оставляет занятый listener и
-обнаруживается oracle, исправленный helper освобождает listener.
-После исправления оба real peer-negative/restored-positive controls повторены
-на прежнем Rust binary: PASS. Новые hashes/логи — в `cleanup-fixed/binding.json`.
-Ни Rust rebuild, ни 2×100 ресурсная кампания не повторялись.
+### Аварийный timeout: окончательная граница очистки
+
+Промежуточный helper со сканированием `/proc` и pidfd заменён: timeout pipes не
+доказывает живой host, а исчерпание FD могло прервать очистку. Эти два finding
+сохраняются как причина смены границы владения, а не объявляются закрытыми старым
+двухтестовым прогоном `cleanup-fixed`.
+
+Только отрицательный probe теперь запускается через util-linux `unshare` в
+собственных user/PID/mount namespaces с `--map-current-user` и
+`--kill-child=KILL`. UID не изменяется; network namespace и host services не
+меняются. При смерти supervisor PDEATHSIG завершает namespace init, а kernel
+завершает все её процессы, независимо от отдельных process groups. После
+внешнего timeout helper ограниченно ждёт pipe EOF и отсутствия живых members
+своей session; сканирование используется только для наблюдения, не для kill по
+переиспользуемым PID. Новые pidfd для cleanup не нужны. Ошибка проверки не
+оставляет SIGSTOP host: этот механизм удалён.
+
+Три коротких теста PASS: parent-only negative control обнаруживает оставшийся
+listener; timeout нового helper освобождает listener core с отдельной process
+group; ранний выход host с унаследованными core pipes также освобождает listener.
+Если unprivileged namespaces недоступны, эти тесты явно SKIP, а настоящий
+peer-negative gate отказывает до принятия результата. Это зависимость fixture,
+не расширение production authority.
+
+Оба real peer-negative/restored-positive controls повторены на прежнем Rust
+binary: PASS. Окончательные hashes/логи — `pidns-cleanup/binding.json`.
+Ни Rust rebuild, ни 2×100 ресурсная кампания не повторялись. Fixed kernel probes
+из nsfs не вызываются; отдельное разрешение на их runtime по-прежнему отсутствует.
