@@ -1,0 +1,835 @@
+{
+  "schema_version": 1,
+  "original_inventory": {
+    "original_frozen_source": "cceede520842a17e4ef548807f63f64b2be19226",
+    "provenance": "R2 original inventory in parent conversation; bda669/684 are review-task identifiers, NOT git refs",
+    "boundaries": [
+      {
+        "id": "scheduler_fetch",
+        "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+        "boundary": "ScheduleFailure::service Fetch",
+        "incoming_pr": "149"
+      },
+      {
+        "id": "manual_subscription",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "map_subscription before DesktopError; manual command/task result",
+        "incoming_pr": "150"
+      },
+      {
+        "id": "probe_results",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "session ProbeResult Response/Timeout/Tls/Transport",
+        "incoming_pr": "152"
+      },
+      {
+        "id": "probe_host_error",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "session.check HostError other than expected Cancelled",
+        "incoming_pr": "152"
+      },
+      {
+        "id": "maintenance_shutdown",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "runtime.shutdown outer error",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_admission_report",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "shutdown_report admission failures previously discarded",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_service_close",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "service.close result",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_repository_close",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "repository.close result",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_reload",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "schedule.load failure cause propagation",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_replacement",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "schedule.replacement failure cause propagation",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_rollback",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "two rollback close calls: primary replacement wins; drain remains false on close failure",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_task_join",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "maintenance JoinError before Outcome; no false drain",
+        "incoming_pr": "145"
+      }
+    ],
+    "separate": [
+      {
+        "id": "scheduler_import",
+        "pr": 148
+      },
+      {
+        "id": "thread_start_before_actor",
+        "pr": 154
+      }
+    ],
+    "constraints": [
+      "Count production boundaries, not enum variants",
+      "Unknown UI code safe generic fallback allowed; loss of known typed cause on publication is the gap",
+      "No fabricated errno from Storage/Transport",
+      "Actual GUI every enum not normative; representative producer/export controls accepted",
+      "Helper issuer-dependent cases separate from independent producer fixes",
+      "FR16 rotation separate from P11 metadata export"
+    ]
+  },
+  "main": "5fd6153839a8c55f67ba31ddbe9ae2d403328a1f",
+  "P11_closed": false,
+  "integrated_final_gate": false,
+  "boundaries": [
+    {
+      "id": "scheduler_fetch",
+      "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+      "boundary": "ScheduleFailure::service Fetch",
+      "incoming_pr": "149",
+      "status": "incoming",
+      "sourceSHA": "0d4c8028e43713e74fb4b0bbe23894ef271a6ac1",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "2012e79d752a2627938d13332b09ca26268b6af9"
+        },
+        {
+          "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+          "blobSHA": "bd25055d78c25bec80962642fccfb7c794f08485"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "3c267aac83e5c3135c54c4b1cfe747f555db7862"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "fbfa0eb03d165430e44349e8d9cd3d2963ec468f"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/desktop_schedule.rs"
+      ],
+      "publication": "ScheduleFailure::service → schedule_error → Error/Source; scheduler_generation",
+      "representative_contract": {
+        "scheduler_service_fetch_failed": {
+          "code": "FETCH",
+          "message_key": "fetch",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_required": {
+          "code": "HWID_REQUIRED",
+          "message_key": "hwid_required",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_limit": {
+          "code": "HWID_LIMIT",
+          "message_key": "hwid_limit",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_rejected": {
+          "code": "HWID_REJECTED",
+          "message_key": "hwid_rejected",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_redirect": {
+          "code": "HWID_REDIRECT",
+          "message_key": "hwid_redirect",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_unsupported_proxy": {
+          "code": "UNSUPPORTED_PROXY",
+          "message_key": "unsupported_proxy",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "manual_subscription",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "map_subscription before DesktopError; manual command/task result",
+      "incoming_pr": "150",
+      "status": "closed",
+      "sourceSHA": "724638ac69b8d7afb1d09020e94c0f09d4d64c35",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "2012e79d752a2627938d13332b09ca26268b6af9"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "f80aeae0da5741556d5c9e9657e19a9ea548a805"
+        },
+        {
+          "path": "crates/yonik-desktop/src/source_failure.rs",
+          "blobSHA": "9919805a8ea9f6cb42ca71a8499d6c6df50ba547"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "2f6d8a1572b6d7c16746da09c75befea93fd32ff"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/backend.rs"
+      ],
+      "publication": "SourceFailure::subscription/selection/schedule → Snapshot::source_failure → Error + Source/Connection; command/scheduler generation",
+      "representative_contract": {
+        "source_service_invalid_source": {
+          "code": "INVALID_INPUT",
+          "message_key": "invalid_input",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "source_repository_storage": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "source_fetch_failed": {
+          "code": "FETCH",
+          "message_key": "fetch",
+          "stage": "source_fetch",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "source_service_import_failed": {
+          "code": "IMPORT",
+          "message_key": "import",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "probe_results",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "session ProbeResult Response/Timeout/Tls/Transport",
+      "incoming_pr": "152",
+      "status": "incoming",
+      "sourceSHA": "edc301b85afa34fbfb5049276070c10b27bbf125",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "5948600db8ed1ecf6dbb28dd23372358c28fbd64"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "7c8d7c813c8cb76a41c207286d647c2bd11a5bd6"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "4abcec850316aef3324d0b80829731930d208ee2"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/backend.rs"
+      ],
+      "publication": "probe_health_update/probe_operation_error → SessionUpdate → apply_session_update (generation/key fence) → Error/Connection",
+      "representative_contract": {
+        "probe_http_status": {
+          "code": "CHECK_HTTP_STATUS",
+          "message_key": "check_http_status",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_timeout": {
+          "code": "CHECK_TIMEOUT",
+          "message_key": "check_timeout",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_tls": {
+          "code": "CHECK_TLS",
+          "message_key": "check_tls",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_transport": {
+          "code": "CHECK_TRANSPORT",
+          "message_key": "check_transport",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "probe_host_error",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "session.check HostError other than expected Cancelled",
+      "incoming_pr": "152",
+      "status": "incoming",
+      "sourceSHA": "edc301b85afa34fbfb5049276070c10b27bbf125",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "5948600db8ed1ecf6dbb28dd23372358c28fbd64"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "7c8d7c813c8cb76a41c207286d647c2bd11a5bd6"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "4abcec850316aef3324d0b80829731930d208ee2"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/backend.rs"
+      ],
+      "publication": "probe_health_update/probe_operation_error → SessionUpdate → apply_session_update (generation/key fence) → Error/Connection",
+      "representative_contract": {
+        "probe_check_failed": {
+          "code": "CHECK_FAILED",
+          "message_key": "check_failed",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_shutdown",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "runtime.shutdown outer error",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_scheduler_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_admission_report",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "shutdown_report admission failures previously discarded",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_scheduler_admission_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_service_close",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "service.close result",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_service_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_repository_close",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "repository.close result",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_repository_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_reload",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "schedule.load failure cause propagation",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_reload_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_replacement",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "schedule.replacement failure cause propagation",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_replacement_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_rollback",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "two rollback close calls: primary replacement wins; drain remains false on close failure",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "crates/yonik-desktop/src/maintenance_job.rs",
+          "blobSHA": "0e0c2501dba89c92d53655f7403ec23c39d43d62"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/maintenance_job.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_replacement_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "maintenance_task_join",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "maintenance JoinError before Outcome; no false drain",
+      "incoming_pr": "145",
+      "status": "incoming",
+      "sourceSHA": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "92cae2d49c11bf9bd21d3d10f986448d5a8124b3"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "a8de0d614a4aada6b05ee9d6a00d1e0ef32f8d24"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "ac0f31da169252fe10dd6fdc24ebb56562b37afd"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/backend.rs"
+      ],
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_task_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "scheduler_import",
+      "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+      "incoming_pr": "148",
+      "boundary": "SubscriptionError::Import",
+      "status": "closed",
+      "sourceSHA": "a8c5a291b96c11cb1706a3d9c7be7bd281949368",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "f98f944ad2245383befaf11867bc0d9ce2441e30"
+        },
+        {
+          "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+          "blobSHA": "1176fdb07a4798312e1acf03430f754028e90a26"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "908aaf79848c7920e7d9d1f7e041cbb0e8924b39"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "b4ed3088fb5aa978a4810b700808b40cb28a8683"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/desktop_schedule.rs"
+      ],
+      "publication": "ScheduleFailure::service → schedule_error → Error/Source; scheduler_generation",
+      "representative_contract": {
+        "scheduler_service_import_failed": {
+          "code": "IMPORT",
+          "message_key": "import",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    },
+    {
+      "id": "thread_start_before_actor",
+      "file": "crates/yonik-desktop/src/backend_startup.rs",
+      "incoming_pr": "154",
+      "boundary": "thread::Builder::spawn Err before actor",
+      "status": "closed",
+      "sourceSHA": "5fd6153839a8c55f67ba31ddbe9ae2d403328a1f",
+      "evidence": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "blobSHA": "b45b320b6b2116e57eab31137f1547b650331191"
+        },
+        {
+          "path": "crates/yonik-desktop/src/backend_startup.rs",
+          "blobSHA": "741ee725c1f5bd2cb44dce837fe175fa26aee16f"
+        },
+        {
+          "path": "crates/yonik-desktop/src/bridge_impl.rs",
+          "blobSHA": "8b08e39fc87ba56a85bcd33b5f6df6f5287b90b2"
+        },
+        {
+          "path": "crates/yonik-desktop/src/bridge_pending.rs",
+          "blobSHA": "3465c144ddc676e26eecb8218da70f17dd81f613"
+        },
+        {
+          "path": "crates/yonik-desktop/src/error_context.rs",
+          "blobSHA": "de88932b52adb64dd4f7fe514865dd0607adb950"
+        },
+        {
+          "path": "docs/specs/diagnostic-context-v2.json",
+          "blobSHA": "817fb7a4960fc9fb74e822ca92131d50445c250a"
+        }
+      ],
+      "changed_since_original": [
+        "crates/yonik-desktop/src/backend_startup.rs"
+      ],
+      "publication": "finish_thread_start Err → StartupFailure::snapshot → callback → bridge pending synchronous take → Error/Connection; no generation",
+      "representative_contract": {
+        "backend_thread_start_failed": {
+          "code": "STARTUP",
+          "message_key": "startup",
+          "stage": "startup",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": false
+        }
+      },
+      "verification": "git show exact source; existing producer tests inspected; fresh Python gate on accepted main only"
+    }
+  ],
+  "related": {
+    "PR160": {
+      "sourceSHA": "8fff27dbe58892a6831e9171530f6dad8c9da900",
+      "status": "incoming",
+      "scope": "FR16 disk rotation; separate from P11 export; backend diff only disk guard initialization/shutdown"
+    }
+  },
+  "open": [
+    {
+      "id": "integrated-final-gate",
+      "status": "open",
+      "reason": "Incoming 145/149/152 and FR16 remain separate; root must run final integrated-head gate"
+    }
+  ],
+  "checks": {
+    "python": "docs/evidence/p11-closure/python.log",
+    "translations": "docs/evidence/p11-closure/translations.log",
+    "incoming_contracts": "docs/evidence/p11-closure/incoming-contracts.log"
+  },
+  "limits": [
+    "Closed means accepted source mapping, not complete P11",
+    "Fresh Python contract gate main and incoming 145/149/152; incoming production code only inspected, not merged/executed",
+    "No probe-v2 changes or new syscalls",
+    "No production edits",
+    "No repeated GUI campaigns",
+    "ruff absent in PATH",
+    "No Rust builds or TTL artifacts"
+  ]
+}

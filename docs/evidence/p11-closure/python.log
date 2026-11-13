@@ -1,0 +1,27 @@
+test_catalog_identity_and_exact_locales (tools.tests.test_p11_acceptance_closure.AcceptanceClosure.test_catalog_identity_and_exact_locales) ... ok
+test_every_slot_and_generation_requirement (tools.tests.test_p11_acceptance_closure.AcceptanceClosure.test_every_slot_and_generation_requirement) ... ok
+test_source_producer_causes_exist_in_contract (tools.tests.test_p11_acceptance_closure.AcceptanceClosure.test_source_producer_causes_exist_in_contract) ... ok
+test_action_serialization_does_not_hide_error_keys (tools.tests.test_p11_factory_coverage.FactoryCoverage.test_action_serialization_does_not_hide_error_keys) ... ok
+test_producer_keys_have_closed_catalog (tools.tests.test_p11_factory_coverage.FactoryCoverage.test_producer_keys_have_closed_catalog)
+Извлекает литералы фабрик, включая match arms и operation ACK. ... ok
+test_all_causes (tools.tests.test_diagnostic_export_v2.V2.test_all_causes) ... ok
+test_backend_thread_start_failure_contract (tools.tests.test_diagnostic_export_v2.V2.test_backend_thread_start_failure_contract) ... ok
+test_closed_enum_and_catalog_coverage (tools.tests.test_diagnostic_export_v2.V2.test_closed_enum_and_catalog_coverage) ... ok
+test_full_u64_canonical (tools.tests.test_diagnostic_export_v2.V2.test_full_u64_canonical) ... ok
+test_version_unknown_fields_and_duplicate_rejection (tools.tests.test_diagnostic_export_v2.V2.test_version_unknown_fields_and_duplicate_rejection) ... ok
+test_whole_rejection (tools.tests.test_diagnostic_export_v2.V2.test_whole_rejection) ... ok
+test_backend_error_factories_are_covered (tools.tests.test_check_diagnostic_export.ExportTests.test_backend_error_factories_are_covered) ... ok
+test_bounds_and_malformed_json (tools.tests.test_check_diagnostic_export.ExportTests.test_bounds_and_malformed_json) ... ok
+test_canaries_and_unknown_fields (tools.tests.test_check_diagnostic_export.ExportTests.test_canaries_and_unknown_fields) ... ok
+test_catalog_and_maximum_document (tools.tests.test_check_diagnostic_export.ExportTests.test_catalog_and_maximum_document) ... ok
+test_cli_no_partial_output_or_input_echo (tools.tests.test_check_diagnostic_export.ExportTests.test_cli_no_partial_output_or_input_echo) ... ok
+test_controls (tools.tests.test_check_diagnostic_export.ExportTests.test_controls) ... ok
+test_every_catalog_key_and_strict_pair (tools.tests.test_check_diagnostic_export.ExportTests.test_every_catalog_key_and_strict_pair) ... ok
+test_known_error_gap (tools.tests.test_check_diagnostic_export.ExportTests.test_known_error_gap) ... ok
+test_roundtrip_and_languages (tools.tests.test_check_diagnostic_export.ExportTests.test_roundtrip_and_languages) ... ok
+test_strict_types_and_schema (tools.tests.test_check_diagnostic_export.ExportTests.test_strict_types_and_schema) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.327s
+
+OK
