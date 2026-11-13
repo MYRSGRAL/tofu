@@ -1,0 +1,22 @@
+{
+  "base_sha": "8ca7f3f83097b040b1566aa2c6a918b78653b1eb",
+  "harness_sha256": "27a7c983c00b5d920ee403a3dedd1338fd66d5a5e37ef687bd7ea14fa28e4e77",
+  "builder_sha256": "ecb3a5ead0ca6083eb81c3222a7547f08529718d5135b76b009c6213064c80cd",
+  "compile_budget_seconds": 900,
+  "package_check_budget_seconds": 180,
+  "runtime_deadlines_changed": false,
+  "installation_performed": false,
+  "patches": {
+    "adapters/sing-box/v1.14.4/external-tun-configuration.patch": "9d27b8c00af801e1be107ccc6b4271aa445ee62b173d5319783064b1c376c9f5",
+    "adapters/sing-box/v1.14.4/native-broker-codec.json": "e83f8f18029feea0c810fa3c8fadbb43d89f19e18741077cfbd9289514366a02",
+    "adapters/sing-box/v1.14.4/native-broker-codec.patch": "79f4898e197cb9f678adc051d4a5f31674aa0a779152afdbef5705be9ee70040",
+    "adapters/sing-box/v1.14.4/resolution-pin.patch": "5140701ddb43dd9d8f830c3fe7cd8a6dc979e490538e7210c2a3ade3b0dd620a",
+    "adapters/sing-box/v1.14.4/resolution-provenance.patch": "9ee270822013eaf16a451f8faffcfaf31cb6df9d3a0b8ee51947ea54378f82b7",
+    "adapters/sing-box/v1.14.4/source-lock.json": "1e15c9286753c38c7aa00feab2d27ebbc87ade667517c53f25938f16d4169944",
+    "adapters/sing-box/v1.14.4/strict-complete-dns.patch": "32043478abfe5acc73666b302dbb9185acafb112f384bee7ae7d679e0c38c8c7",
+    "adapters/xray/v26.10.31/native-broker-codec.json": "7dfdaf65d2a163e7b2363bd12f70e493a4ec6ad298174dfda65544e1a83c1888",
+    "adapters/xray/v26.10.31/native-broker-codec.patch": "5fc31e65d528e511d8253fa318d757f5b5ef505ee009e0ddb941fefb42840785",
+    "adapters/xray/v26.10.31/source-lock.json": "2c93f708f4ad92ad7d503f90cfe91f65d38981b5c78b00a8dd34830c7130692e"
+  },
+  "invocation": "flock -s /var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113 python /home/myrs/projects/yonik/local/evidence/full-pinned-158-20261113/acceptance.py"
+}

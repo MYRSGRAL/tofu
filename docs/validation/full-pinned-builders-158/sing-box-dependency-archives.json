@@ -1,0 +1,2438 @@
+[
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/filippo.io/edwards25519/@v/v1.2.0.info",
+    "sha256": "73c137b2997bc44d976e01eb56251e5191e92cb22457550ecc3427b95191fc14"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/filippo.io/edwards25519/@v/v1.2.0.mod",
+    "sha256": "7492c767dc361b86e96933ca1790d492c2f7c368c3ec0e00e1050eddad7baa7d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/filippo.io/edwards25519/@v/v1.2.0.zip",
+    "sha256": "98f2d3ca9b88daa031b0fb2fb521b7ea386af1fed61b6f445a20bef7fa381c17"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/!ryua!nerin/go-krypto/@v/v1.3.0.info",
+    "sha256": "1e8af735f74c28da9b3428c29dbe3b76da5a2b0a3a3d51b513c2cfbc2b3d3c7c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/!ryua!nerin/go-krypto/@v/v1.3.0.mod",
+    "sha256": "536483d794f17cf79a218d491512afce793755240e32bc632b062729e74a07f7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/!ryua!nerin/go-krypto/@v/v1.3.0.zip",
+    "sha256": "4f98d5d243e2706b588fba752dd8a75c0e2e76542a990a3c6494fc0aac3e9a9b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/ajg/form/@v/v1.5.1.info",
+    "sha256": "4482d70b901e10199c677fb26006a086b2bf2e41a507a1e763ef1ed341215eb4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/ajg/form/@v/v1.5.1.mod",
+    "sha256": "3a41f1740316039d5638369ab78214c93a701a00c79f89e7d624ebff31ddc2f1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/ajg/form/@v/v1.5.1.zip",
+    "sha256": "b063b07639670ce9b6a0065b4dc35ef9e4cebc0c601be27f5494a3e6a87eb78b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anchore/go-lzo/@v/v0.1.0.info",
+    "sha256": "61d6ed29084340c053911dca929f4fe145042d37bd4ee31b55e53c18220fe784"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anchore/go-lzo/@v/v0.1.0.mod",
+    "sha256": "789691936a70c39f25d5ac9f38dfa5c629528f6b96225712b27ebaaafb462e5e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anchore/go-lzo/@v/v0.1.0.zip",
+    "sha256": "74e5636203039daeb2339a7953b653d39a1d15c23856e74135e6c5f9fe749216"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/andybalholm/brotli/@v/v1.1.0.info",
+    "sha256": "f412e1335582ab36a6d4acce2cde420b180a3c3150fe3478e2b62eb1b8b2918d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/andybalholm/brotli/@v/v1.1.0.mod",
+    "sha256": "c7ba66b75415a96047acf8b325093a9eba0976141b286bc58521f2e6efde9488"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/andybalholm/brotli/@v/v1.1.0.zip",
+    "sha256": "61bc9b753662e2101c63bfc9562f660e9ceca9866010948f1aaccb05cf9e263a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anmitsu/go-shlex/@v/v0.0.0-20200514113438-38f4b401e2be.info",
+    "sha256": "d65189087c1796af0d29641ea0cb5d4de976f87dac8618089f0983f1acc75e46"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anmitsu/go-shlex/@v/v0.0.0-20200514113438-38f4b401e2be.mod",
+    "sha256": "605bf0aa0d98223540f5daf7fa97091eafbbf48989c7d17652af992ca764afb6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anmitsu/go-shlex/@v/v0.0.0-20200514113438-38f4b401e2be.zip",
+    "sha256": "2a5cf7c9a2709f649fd508cbacb2be96e4fba4d534a28a122ee4d7574af40b5e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anthropics/anthropic-sdk-go/@v/v1.26.0.info",
+    "sha256": "162c2d6bf4851f6a1be6eade9450c05c57a9494344da100426f366946aef6771"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anthropics/anthropic-sdk-go/@v/v1.26.0.mod",
+    "sha256": "5d3743b787b1c64eb40797e7bd3e464f0bcaeb82d67d35960d9fa975c102b54c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anthropics/anthropic-sdk-go/@v/v1.26.0.zip",
+    "sha256": "9c3249d5270113d5a24a2b5bc65298289a879310bf0930fbd8d0542228029205"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anytls/sing-anytls/@v/v0.0.11.info",
+    "sha256": "894eff4d3fb5806a83423495a480a87b38c3d6315bbd07e57314c7827ec5366e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anytls/sing-anytls/@v/v0.0.11.mod",
+    "sha256": "166eb1c4595a895630b5d98098c0228ed0692d9a6b270cbc3dc12c28c4c5d79a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/anytls/sing-anytls/@v/v0.0.11.zip",
+    "sha256": "5b588f1a803956f48efa5ee3b0bc7bd95df894ebb647e383e3ed4660b83589d2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/axiomhq/hyperloglog/@v/v0.0.0-20240319100328-84253e514e02.info",
+    "sha256": "aa71b12311a8df2a31474f370585db4350e95933360c4362d450118a98bb382c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/axiomhq/hyperloglog/@v/v0.0.0-20240319100328-84253e514e02.mod",
+    "sha256": "7a2cf89532d8f73548d0368a80bb77566a7a1a6803b8267ddaba998534a6c343"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/axiomhq/hyperloglog/@v/v0.0.0-20240319100328-84253e514e02.zip",
+    "sha256": "94d387d574deadfc4e719503149fafdcddaf04c06a323966781a41026d2ba493"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/certmagic/@v/v0.25.3-0.20260421143802-60d9d8b415d6.info",
+    "sha256": "aa38306c7a470a93b66bcdc97eaff30c221bd882db63cf0a825d4bfbf1acf3c9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/certmagic/@v/v0.25.3-0.20260421143802-60d9d8b415d6.mod",
+    "sha256": "c25548a9f702ccf66b1e75dd1dccfb45223a274faa451d484484ae39ec356443"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/certmagic/@v/v0.25.3-0.20260421143802-60d9d8b415d6.zip",
+    "sha256": "84893e0d9edffc2deb8577de98c029ce932aaa876f5e9c189eb17817eb57c0e6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/zerossl/@v/v0.1.5.info",
+    "sha256": "874f4c5c80177c569ad9f43d767c71998d80e271949341f9de771c2694c07e27"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/zerossl/@v/v0.1.5.mod",
+    "sha256": "a88b3c5a9a7aedabaa3457347106338d801db5e448cc31ac6b8be61ad78d6d9b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/caddyserver/zerossl/@v/v0.1.5.zip",
+    "sha256": "96e5fc179f77464888efe39d426151797b003171076ea451e3ca4132b18b7b4e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/clipperhouse/uax29/v2/@v/v2.2.0.info",
+    "sha256": "b7a98f2cf0f70b7a88239e2a0bc08934eeb92ff834243e0d3fa9644fff73f117"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/clipperhouse/uax29/v2/@v/v2.2.0.mod",
+    "sha256": "f3c5f4e4f9e7fb16aea5fd9dc5f24c3ff9c157b1a67576c0f2140117589507a0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/clipperhouse/uax29/v2/@v/v2.2.0.zip",
+    "sha256": "0b26d739ddde86a3bd2c0cc4ce8ca711696a523499a9b26732fb25fc8b9531ab"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coder/websocket/@v/v1.8.14.info",
+    "sha256": "91e615a4ddb45e9e8ad536760224e5987ad465350d98e8a837aecf4fd0f738fa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coder/websocket/@v/v1.8.14.mod",
+    "sha256": "0cab443e389cef98e63828bd7ce82224bf192732a18795581314766eb14ea275"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coder/websocket/@v/v1.8.14.zip",
+    "sha256": "b729277821461eb21a816c16e29a02029dd6abbb1a43b526c1e0a6b794942de0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-iptables/@v/v0.7.1-0.20240112124308-65c67c9f46e6.info",
+    "sha256": "7911b734fc32d985c63a738e514c0321dcefc3c72246d77fe92956c09282af21"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-iptables/@v/v0.7.1-0.20240112124308-65c67c9f46e6.mod",
+    "sha256": "b72bc9bc2ec923366b39a0dd6979db3533c74f6b4d680a4b1d8056a7b169e259"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-iptables/@v/v0.7.1-0.20240112124308-65c67c9f46e6.zip",
+    "sha256": "6d0ae6344f1d355f72e6aaba583ce73822861511337ca92cc1c4727fc8ba66dd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-oidc/v3/@v/v3.17.0.info",
+    "sha256": "3c5194066763c356076366bcf2300fcffda88f68e20536aea4561efd3227f94d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-oidc/v3/@v/v3.17.0.mod",
+    "sha256": "abf1c02b28d3b11a627fbe7355d0fa5366796ef85938ac5902485eb52fb21fd2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/coreos/go-oidc/v3/@v/v3.17.0.zip",
+    "sha256": "fba667f687448a228315d6f0cfd00a5fa9ab8ad9b511e38575a699afc0b30aeb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/creack/pty/@v/v1.1.24.info",
+    "sha256": "1c916a1e65da9cf22d6b223a900d750b8f174ec093cc66969cc3e1fc4d141569"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/creack/pty/@v/v1.1.24.mod",
+    "sha256": "a3979fd32c00f35d17eb3b97d0b3cc6f4efb057bf78271361fa773531e601531"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/creack/pty/@v/v1.1.24.zip",
+    "sha256": "754e25253e76a5583b80d57d3add3afe68fc4d9f2a490968a9d1eda8c8fd8815"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/cretz/bine/@v/v0.2.0.info",
+    "sha256": "d5d8cba18dc2a804e14a148f7ab3ea06581fb9d421c6eaa2099ff18e79948b20"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/cretz/bine/@v/v0.2.0.mod",
+    "sha256": "07e73281def4431673a9f039c3077ed29dccdb2b2228ad8f8885ae7a53271b60"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/cretz/bine/@v/v0.2.0.zip",
+    "sha256": "ca84127199d440ffb7937f31dac06f8e362b5def4c9bf09b687429e37575124a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/netx-go/@v/v0.1.1.info",
+    "sha256": "82e5fce1f9d2edf33327ef9c6bfa5706c036e44e1a044ba62e2a5f893c94faff"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/netx-go/@v/v0.1.1.mod",
+    "sha256": "3bbe66fb3fbe4b41fd88797adc8369d2ab1ef143d15eee4ec141d51141e02d49"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/netx-go/@v/v0.1.1.zip",
+    "sha256": "802ced24f0bfa5530723625d2d36b012340185d6cef42d5d3cb58e644b2a23d8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/tfo-go/v2/@v/v2.3.2.info",
+    "sha256": "5def2abe1f90c0a12fb178b923025f5c8022739f37eee446e6687258e8de1859"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/tfo-go/v2/@v/v2.3.2.mod",
+    "sha256": "666d7f2dfbd23432c1b6e7bea93646e828df3414f93654f98819a1301879fbf2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/database64128/tfo-go/v2/@v/v2.3.2.zip",
+    "sha256": "4904e23e365ed31913ef986cda7833140702e6aeb27fc341f0e35aac0fe89c69"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-camellia/@v/v0.0.0-20191119043421-69a8a13fb23d.info",
+    "sha256": "99f4c13242abd9d3aacd8f079f5bba4f4b350e2482616ae90c160970ed20aa2a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-camellia/@v/v0.0.0-20191119043421-69a8a13fb23d.mod",
+    "sha256": "4bf6e67b2e00dd0ae26d5dc58ab9fc0502be12402aa8fa1ffec9fcf162c74472"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-camellia/@v/v0.0.0-20191119043421-69a8a13fb23d.zip",
+    "sha256": "be22e00ee49e337febae1dc49c0df536b729304f2e8f00473c12fd4e59a2ef28"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-metro/@v/v0.0.0-20180109044635-280f6062b5bc.info",
+    "sha256": "e84df0fe658be238b38e17bf6ea96df93226d221bf5ea73485241ece1fed6da7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-metro/@v/v0.0.0-20180109044635-280f6062b5bc.mod",
+    "sha256": "f44dd57800f038c9f34d7cdcf9765df536a5e2b273498339e7dc3b7e5ebde7d8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/dgryski/go-metro/@v/v0.0.0-20180109044635-280f6062b5bc.zip",
+    "sha256": "3f97b3cdeaee7b4fbf4fa06b7c52e3ee6bca461a100077892e861c6c8fc03722"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/florianl/go-nfqueue/v2/@v/v2.1.0.info",
+    "sha256": "a17d30b52a5e57d58ccfa519e9905d3e3cc4c384838cf4b4ee797061a8dd0101"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/florianl/go-nfqueue/v2/@v/v2.1.0.mod",
+    "sha256": "fd8c1d520ba6bc2a185b6dc63325f2f7a83e922677e4b4ef7c73c9db8c218240"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/florianl/go-nfqueue/v2/@v/v2.1.0.zip",
+    "sha256": "899df093b356670468db3cc9ec01581643511980c8f10b06613d6a1c8033bc2c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fsnotify/fsnotify/@v/v1.9.0.info",
+    "sha256": "5c1c5e0814ee40dfdca882a0e6314b88ff0e1902261e118d2178710b23e52466"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fsnotify/fsnotify/@v/v1.9.0.mod",
+    "sha256": "da3713c5c57d252d25520de0e6b397b033858b3aff5dddf21164abe3297c9ff9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fsnotify/fsnotify/@v/v1.9.0.zip",
+    "sha256": "94e64824b23591b7aa504e3321d5ec3f57de88f4d49882eaefbbf6820dab746e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fxamacker/cbor/v2/@v/v2.9.0.info",
+    "sha256": "3ad15672a3518a677499eeeee59e17c450f996c83237fe5ebab71922e8d93d1c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fxamacker/cbor/v2/@v/v2.9.0.mod",
+    "sha256": "d7bbc7167a38275831838773356370c370d2ce3ed28c60486f52cdd5a799c92b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/fxamacker/cbor/v2/@v/v2.9.0.zip",
+    "sha256": "5b0ec6424bd522aeeeab30cbdcad6f40bf976a9a2ddf125ab27b97826140d97a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gaissmai/bart/@v/v0.26.1.info",
+    "sha256": "e5e733a2679d8afc0b35f4fc398d1296adea1d8b6533066e9d46132255abe383"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gaissmai/bart/@v/v0.26.1.mod",
+    "sha256": "bf5dcfa9d5bf5343e63843297e0a4d2a3a6e314eae0286a9c5c93f9a0de47433"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gaissmai/bart/@v/v0.26.1.zip",
+    "sha256": "7cead7fb3f4be36f3864efaf1344d72ca7ba03ab5a557338c80ca6d4bda59cca"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/chi/v5/@v/v5.2.5.info",
+    "sha256": "299414aba22d8fa9a3a1469a3a0f62f9cd64c1be2dda74035f1a7c078af362ac"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/chi/v5/@v/v5.2.5.mod",
+    "sha256": "477f2f84de342a9f815bb0ff83038cffc4365d3445edcec202abdd18fa1a8030"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/chi/v5/@v/v5.2.5.zip",
+    "sha256": "f78c1525f8b3af815bcf3406c0aba1f272eff96413ff51874677bf8a314fcad8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/render/@v/v1.0.3.info",
+    "sha256": "aa5be45de4ad6998a280bf67baf2a07ba6e459b38baa867dc521e93b66408d42"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/render/@v/v1.0.3.mod",
+    "sha256": "d72fdabc5e18d1d616a0589bb88f4a3feeda1637faffc1b28bd897ac1e6cab1c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-chi/render/@v/v1.0.3.zip",
+    "sha256": "6d0bfe49b2b06e125acd7b348aba5eb255891018b3cd7ff86b62599c33922be7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-jose/go-jose/v4/@v/v4.1.3.info",
+    "sha256": "ba7f0ccd046781a5007ac032a24749f70742befb6056ed60d580a4d84ea60622"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-jose/go-jose/v4/@v/v4.1.3.mod",
+    "sha256": "e069e6002d29495b8c2dc6cf0d3b56a075ec5be7abb6c2eb1a1c0845cb66b8b3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go-jose/go-jose/v4/@v/v4.1.3.zip",
+    "sha256": "ec019b110f6cdc3f55f067f52573be4474d5051b9b7c7fc11eb846b13c56beb4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go4org/hashtriemap/@v/v0.0.0-20251130024219-545ba229f689.info",
+    "sha256": "357e70eabcbc326a60a85ff069aacf9830e720bd4f8969aa98500c273119d530"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go4org/hashtriemap/@v/v0.0.0-20251130024219-545ba229f689.mod",
+    "sha256": "23b2cb5de53f13924f249ced386711c51a6b2d70cd0e161457a3a8d10b64a2bf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/go4org/hashtriemap/@v/v0.0.0-20251130024219-545ba229f689.zip",
+    "sha256": "700297f21d2b96537dc99217716d2ae148c5e82a01cd5f4c608e69526e6b9f1f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/httphead/@v/v0.1.0.info",
+    "sha256": "977aef4d50ffb98d7d88cf90880ab862f1a2a760d3a0b2b5ab7951dcacdb9cc3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/httphead/@v/v0.1.0.mod",
+    "sha256": "3d0248b03954819231ecd05dba139ad1b169bd654c3837b1c3d26bb0967928fa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/httphead/@v/v0.1.0.zip",
+    "sha256": "a4646f1d12786fee639c489219e7c667b10f7dc19578a4e7222bd17c5d9bdf8a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/pool/@v/v0.2.1.info",
+    "sha256": "0580a155022eb38e41b1b19b4887efb3d8f9fe0f634d92af668183939e2779ab"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/pool/@v/v0.2.1.mod",
+    "sha256": "cd3762f5b971bce0fae059e54445ccb6efc5a5a43ef65711ed407ead049c5633"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gobwas/pool/@v/v0.2.1.zip",
+    "sha256": "79b505a9f42b141affca1eedd2edc87ae922482d052e16e3b6e5e3c9dcec89e1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/godbus/dbus/v5/@v/v5.2.2.info",
+    "sha256": "cf1089214706c7c724443cc011ca409692e4bd55ec96d292078c40797f9113a6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/godbus/dbus/v5/@v/v5.2.2.mod",
+    "sha256": "d008ac84f404c6fbc7a1f378099dd21794843d10d6cdc129cfc403d39656f5a6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/godbus/dbus/v5/@v/v5.2.2.zip",
+    "sha256": "5c6f37c725a481fb0f1e7866ae273429525d8cc6a6cace87da28e53370f5596a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gofrs/uuid/v5/@v/v5.5.1.info",
+    "sha256": "e980048760387f8be8ba70e228463f7d6328aea814cf74b504fa57525801f372"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gofrs/uuid/v5/@v/v5.5.1.mod",
+    "sha256": "cc84b18e3fc7541089d546a03e1430cc5de9f40d0612b7c1f3f48232a0e2cebe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/gofrs/uuid/v5/@v/v5.5.1.zip",
+    "sha256": "1f3a1af9f73c5934482bccfeb3bca76779d0ea6668e1f21d7e8771052c6c8ada"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/golang/groupcache/@v/v0.0.0-20241129210726-2c02b8208cf8.info",
+    "sha256": "14cdbd417180018a567d37599705f1c2503c175e7b74cfceec7639ee6248b13e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/golang/groupcache/@v/v0.0.0-20241129210726-2c02b8208cf8.mod",
+    "sha256": "4e019acbe58a7af43d2316b6f825797636072cb48c31ea6ff7aae7d75ad51a89"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/golang/groupcache/@v/v0.0.0-20241129210726-2c02b8208cf8.zip",
+    "sha256": "163367355442a630b12b0b452892cd98e99fcfdf7e40b68d358be73479cc1c23"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/btree/@v/v1.1.3.info",
+    "sha256": "c4706d9dd1f2b284f94c4a6ad1a1ff2f50a5a78f3765948e6d1477e3375fccec"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/btree/@v/v1.1.3.mod",
+    "sha256": "671a2227c5628cbb94ce027ab4232858c4f0dd0cbb98aaa83d7a265d7ec194d7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/btree/@v/v1.1.3.zip",
+    "sha256": "11b736bc8252b52fecdf346d3707ccf3a2b6d458ba21b4f843616fc12eeb30b2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/certificate-transparency-go/@v/v1.3.2.info",
+    "sha256": "a7fbab6df872fe9eace14859c3a183ac63b243360fa5e5bb038e8d992ba0138e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/certificate-transparency-go/@v/v1.3.2.mod",
+    "sha256": "10a89e55c52c44b2e3b0a5d148958bc3be51c2b8884de68e5dc534a0e038cb8f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/certificate-transparency-go/@v/v1.3.2.zip",
+    "sha256": "3ed01f6ab05444275466dd46a6c2ce7593c58ffa8c0563528dbc2499e6c1100a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/gopacket/@v/v1.1.19.info",
+    "sha256": "3bf757af65cfe7cfde6f5aa3ca7bf64fb8d2a2da31ca5d7717bf637d962a1fa9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/gopacket/@v/v1.1.19.mod",
+    "sha256": "1eb2466754ad6e4901225f958aea5ff449d206093d8565d6c3ac14762b1fdb15"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/gopacket/@v/v1.1.19.zip",
+    "sha256": "fc8cbe2239683199e677cb39f9303ae8d4a365f3c8cd8a2dcfa1f14c41bcff88"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/nftables/@v/v0.2.1-0.20240414091927-5e242ec57806.info",
+    "sha256": "15e47e41062b2e1e72f6343c0cb925b0c3ac29bab3c6c01fbaef02a2db78f531"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/nftables/@v/v0.2.1-0.20240414091927-5e242ec57806.mod",
+    "sha256": "bfa85a94c6a0e66b2b931456ef0a1a4d808a0bb9162b0b0ee76ca7ae31151b2b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/nftables/@v/v0.2.1-0.20240414091927-5e242ec57806.zip",
+    "sha256": "ceb96b39a6f9004d8c217a6ae61b91a69c250bc30fbf3a04cd87cbbfddea73c8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/uuid/@v/v1.6.0.info",
+    "sha256": "3703c19d7d948a8bc5354b7e515d5297d3c5a8316958bcdd69eec2a7629513d7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/uuid/@v/v1.6.0.mod",
+    "sha256": "73da47b6338b00a082fd451aa35a3273d3adc09b8e9bba98dab01091e402af6e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/google/uuid/@v/v1.6.0.zip",
+    "sha256": "d0f02f377217f42702e259684e06441edbf5140dddcc34ba9bea56038b38a6ed"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hashicorp/yamux/@v/v0.1.2.info",
+    "sha256": "6f44989b6f9b2e61b24b1c0215ff385dd1184d3588f0f0cacbe9f786274a87aa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hashicorp/yamux/@v/v0.1.2.mod",
+    "sha256": "31a9f29ca536613f168950c06ce5044e36c7d965c3bb57a37a91c63268ec4eaa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hashicorp/yamux/@v/v0.1.2.zip",
+    "sha256": "8ba2b4b2d37260d4aeabf85ac9c26841a287a264c02bc629f40f19d2bd977df4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hdevalence/ed25519consensus/@v/v0.2.0.info",
+    "sha256": "ba70d70b3359e950c9b953d7a7fbc9029ef5ca6856f410b2febb412119cb52b7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hdevalence/ed25519consensus/@v/v0.2.0.mod",
+    "sha256": "be371084b2cd094b627c56090e34606cfe27d37ed694953e1496fe93d33095e1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/hdevalence/ed25519consensus/@v/v0.2.0.zip",
+    "sha256": "111cafade3ba9c7c3adf66b6a424386e30829c46c60b80dabe288e1837d30e33"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/huin/goupnp/@v/v1.3.0.info",
+    "sha256": "a6c878b1dfdc504a016294037bc8b1a79c5dcffb79740e3931c21f77116c47fb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/huin/goupnp/@v/v1.3.0.mod",
+    "sha256": "4ba36b6a3e1561c56b53048f085eb4e85dba0de340e2bacdc86a5fadb3956b16"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/huin/goupnp/@v/v1.3.0.zip",
+    "sha256": "df663b90b9b3bf16e1cfa810a6c3dd904993e8c1155dbf65566ce0361f163dce"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/insomniacslk/dhcp/@v/v0.0.0-20260220084031-5adc3eb26f91.info",
+    "sha256": "c487aa280464426e413a3148f11c7622e6c49c0ee638eb143cf5dc7216098f4e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/insomniacslk/dhcp/@v/v0.0.0-20260220084031-5adc3eb26f91.mod",
+    "sha256": "11936967e0e5942cabe27704610ad7fdc262d273edbe1c5940377ae194897d90"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/insomniacslk/dhcp/@v/v0.0.0-20260220084031-5adc3eb26f91.zip",
+    "sha256": "911962b5821178a49b95922452f66bae6f350ad1c4da84475ea3cd0ad2bba7e9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jackpal/go-nat-pmp/@v/v1.0.2.info",
+    "sha256": "15c2291b9eaa1857b6c08a260a26685ded520fc65622c32deec5d974acd22d8b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jackpal/go-nat-pmp/@v/v1.0.2.mod",
+    "sha256": "9a2903ce03ead9667568e7ac2d428dbe145e27fc83bb765f670de79923716a14"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jackpal/go-nat-pmp/@v/v1.0.2.zip",
+    "sha256": "f778f0f492597d7158e2d6abbac3850bdf8a669c296790eba85c95152872ddfb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jsimonetti/rtnetlink/@v/v1.4.1.info",
+    "sha256": "b6b9b539fcb7ff284c26d00023b792ea7d2d2fb571cae266a01c7b7c2188ad1c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jsimonetti/rtnetlink/@v/v1.4.1.mod",
+    "sha256": "3ff0b5b4edb3a57111d237bd5aa7d66b6bb5d5a23bb5aa643c6c9b18ad066bb6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/jsimonetti/rtnetlink/@v/v1.4.1.zip",
+    "sha256": "b27130e80a69c0fab7e071bc90dd30288628ae7e1003dff727e5d49f3d99087d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/compress/@v/v1.19.1.info",
+    "sha256": "5c986e5730d95806e9930ed0f7c023cedc278ecf1c560cb6222a127dc6bda3e6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/compress/@v/v1.19.1.mod",
+    "sha256": "0d66d6069d9e2fb875c5b464d15b2c80232cfc8991e6f88336ce461ca810e0cf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/compress/@v/v1.19.1.zip",
+    "sha256": "a77e019f60dff8bdf00ad137985c808957cc657381daa4281824843bc6b46910"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/cpuid/v2/@v/v2.3.0.info",
+    "sha256": "d1e758a2d9f4ebd60a6c4308ba89975539ccb59287c9f0af869da2a3f1b0405a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/cpuid/v2/@v/v2.3.0.mod",
+    "sha256": "ff61d47f254f2333bf44a8ff4187a2f2e973693807c10025033bb37143577237"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/klauspost/cpuid/v2/@v/v2.3.0.zip",
+    "sha256": "e6766f75ecfadf12fd045e4bdd9383f2a5bd3f9bd4c88a6db72861c84cf41486"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/koron/go-ssdp/@v/v0.0.4.info",
+    "sha256": "1917f924e724878b6647d9329bed1170fcec58184a980c497b9cc6fb511539f9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/koron/go-ssdp/@v/v0.0.4.mod",
+    "sha256": "0e82f7a9ad1f20f4b71348f9df0425037c48a38915f2a56ab28449bd192bc2f0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/koron/go-ssdp/@v/v0.0.4.zip",
+    "sha256": "4a4c4a048c0ac4632d8e9f0be4fd64804a2cb872e660be4b79d83a29bc347ad4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/kr/fs/@v/v0.1.0.info",
+    "sha256": "2420b80ee71cc069d2c8a998f9ef9ad0881f1054b43b077c9069227719be7c93"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/kr/fs/@v/v0.1.0.mod",
+    "sha256": "b5bced587ede9949a28f1a460313c49b08f5715b9880dbb57978327f8582efc0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/kr/fs/@v/v0.1.0.zip",
+    "sha256": "d376bd98e81aea34585fc3b04bab76363e9e87cde69383964e57e9779f2af81e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/acmedns/@v/v0.5.0.info",
+    "sha256": "61b78814fc841b5574d44e3fd7024c9feb5505af009aa663d537ca90017e5423"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/acmedns/@v/v0.5.0.mod",
+    "sha256": "5f3601f8ebdc05a3f7fa18f7e445252ce065a0e145b3eafc0c19cdc4be6105cd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/acmedns/@v/v0.5.0.zip",
+    "sha256": "8313f998d0aa1e450c64d5987060228055d559a087b925164bebf686acd63d8c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/alidns/@v/v1.0.6.info",
+    "sha256": "b89d3118f62091bcad499ed9b72b27321f3f15c831fd906f78195dd596897f7a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/alidns/@v/v1.0.6.mod",
+    "sha256": "4892372bee22496cf49204bb7cf5b541bc38dbd80c6d8fe6f2ecdfd3dcef8940"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/alidns/@v/v1.0.6.zip",
+    "sha256": "d6fa4379b355786ba150ccac23da83f69592e169cd28e1f62554ce04392cb5a5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/cloudflare/@v/v0.2.2.info",
+    "sha256": "f8f9126a9306ba32774c94767323d9ba75232cb667194d59104db8cf3df710f9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/cloudflare/@v/v0.2.2.mod",
+    "sha256": "74bb36ce2cac0e8804e8bc1e0aa6bbc8d7e992a284f1f9e0935e2c27609311ee"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/cloudflare/@v/v0.2.2.zip",
+    "sha256": "eedcf4aa400cac994e2b8c4378f683c57199f40e41cb7e75f1a54eb45fdd9c98"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/libdns/@v/v1.1.1.info",
+    "sha256": "c2aa2c8e41aa581d2a13897f5d8e2c32774981774e31c78215be6546e58f35d7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/libdns/@v/v1.1.1.mod",
+    "sha256": "a399d6c02c1e6c66c35cb297ed55c0c812b551695f20e3ff8cc40349ba48f3f9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libdns/libdns/@v/v1.1.1.zip",
+    "sha256": "3122839648415fd29ffeec46014a54e040611775ad696e0345502b9fe6011263"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-nat/@v/v1.0.1-0.20250821073202-01afc089f138.info",
+    "sha256": "c469eb308599c0f7759a88cb88e7aa35ae77ac8196a4c074a066401686474740"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-nat/@v/v1.0.1-0.20250821073202-01afc089f138.mod",
+    "sha256": "491ac6c1813a27894e9374b591087afe55bb476da61afbf922fb2a2206872ca4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-nat/@v/v1.0.1-0.20250821073202-01afc089f138.zip",
+    "sha256": "88d5bf91c45e056adb4bc4763fda3260b70d6c6f70d7bf758eb6b1d5e35aa0df"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-netroute/@v/v0.2.1.info",
+    "sha256": "0aa4d3ae41b8718bcfe1fbb0b3ce33833b934978c14085150474c9625e1c2431"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-netroute/@v/v0.2.1.mod",
+    "sha256": "4eedd0f70911ba2a39789a89105844faa55f87d0f348ef7cbe69815de2762347"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/libp2p/go-netroute/@v/v0.2.1.zip",
+    "sha256": "65067a36378b786df40a578bf4450269c4371cf415123c71c0847df0062b8ebd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/logrusorgru/aurora/@v/v2.0.3+incompatible.info",
+    "sha256": "8e5b0817a3f5e08b8bb0ba68d71c46d990d9eb1c14736453d3c8d5f7a8638e5c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/logrusorgru/aurora/@v/v2.0.3+incompatible.mod",
+    "sha256": "de69a149abcfb6500389425af4a48d80203ceccd1d8c2511e3e4bdcc4837f265"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/logrusorgru/aurora/@v/v2.0.3+incompatible.zip",
+    "sha256": "d921c42a82279d0ee2b15068660e600897b4141826a9f9fb06998da3c0c9ab41"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mattn/go-runewidth/@v/v0.0.27.info",
+    "sha256": "27daadde26dab914616edbf2c3a59a17e1a16252b2b2b7d12f2f5fa3df635a48"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mattn/go-runewidth/@v/v0.0.27.mod",
+    "sha256": "9091c793e255036ba8ced617fa3225972a745eaee5cad4cf264c1576e5c1347e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mattn/go-runewidth/@v/v0.0.27.zip",
+    "sha256": "78b1690bd2506faeeecff9cce615e5710c12fe25a5393abe3c2503d0ea4ee2ea"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/netlink/@v/v1.11.2.info",
+    "sha256": "a3b59752fd75f27f319ecff435224aab10eef86a7c85d2240a83549a054e9edd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/netlink/@v/v1.11.2.mod",
+    "sha256": "03043d103416a189dedb5a884419baa70de9af754238056f1d8fab7e58da7064"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/netlink/@v/v1.11.2.zip",
+    "sha256": "2fbb8a5962c22dfdeaecd18bc2a1215e863bfcfa2ba1a28a3703ce0ae014ba4a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/socket/@v/v0.6.0.info",
+    "sha256": "4a1ae6b56f0db42e5d962be71f302c646a0950f01ec5b76fe6100f65cb433be7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/socket/@v/v0.6.0.mod",
+    "sha256": "7b2e411d7e8c51d3d06545aabc5eaf336b3801b51b5c3492a6d6490eea513799"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mdlayher/socket/@v/v0.6.0.zip",
+    "sha256": "0b6d1f9f64462bcf94a8dc7dc9fc0084f35af3434ab67a724464a95d47bc87af"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/metacubex/utls/@v/v1.8.7.info",
+    "sha256": "28f311bb59b58f11c2ce4250f8279a0851c3b930854a10245f86b37c26d5c422"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/metacubex/utls/@v/v1.8.7.mod",
+    "sha256": "bcc0b7db23cdf8aa9c84bacc13f8651b2bda1d8b6ff3dbc430221d801f0f02a1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/metacubex/utls/@v/v1.8.7.zip",
+    "sha256": "2c29de950b4778b9d47b0a3cb02b8a50766c2cc3de622a5f12fdf9f5a785711e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mholt/acmez/v3/@v/v3.1.6.info",
+    "sha256": "157e8dbfe50be224ffc9a970ad5f0e6ebe76564fbc5c96fc7db3efb39c63028b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mholt/acmez/v3/@v/v3.1.6.mod",
+    "sha256": "31a8bfeccf2302b3252db4d655a2b8a76722d16a6bc19355110f1a3118937891"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mholt/acmez/v3/@v/v3.1.6.zip",
+    "sha256": "e122eb1244f36260351913a688fca9ff6aa75e17cd62946718e79fd308932acf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/miekg/dns/@v/v1.1.72.info",
+    "sha256": "47a0acc7c2cfaff08eb76c48ef19b732ba9fa04dee66b38ec01e36c8ee1f6f82"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/miekg/dns/@v/v1.1.72.mod",
+    "sha256": "226bacb99b8c5b372b58fa660895755cfc0997b45f9e71e7a144b4a68bdc963a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/miekg/dns/@v/v1.1.72.zip",
+    "sha256": "092608d919335ff22154862c59abe8b4d651be3ef0b75d22001a07c03106a3b6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mitchellh/go-ps/@v/v1.0.0.info",
+    "sha256": "4de400318013406652d87ea6911388a59a820d13bf59dd2ed2162397bdc63d9a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mitchellh/go-ps/@v/v1.0.0.mod",
+    "sha256": "4c9cf17f3fdf28ca0f95c15e1bf976e3b5065bebec1e76a8052373f32a9846c4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/mitchellh/go-ps/@v/v1.0.0.zip",
+    "sha256": "f2f0400b1d5e136419daed275c27a930b0f5447ac12bb8acd3ddbe39547b2834"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/openai/openai-go/v3/@v/v3.26.0.info",
+    "sha256": "2c40b64fbfe54ff83df0b2235b031762e950bbdbb9f45e28f15dc957846669ee"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/openai/openai-go/v3/@v/v3.26.0.mod",
+    "sha256": "572abe987773da81b63faaff49056dccc2cf59c9c40be180a0606ea67b8952b9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/openai/openai-go/v3/@v/v3.26.0.zip",
+    "sha256": "7ede21b06a6725e7e87414a3406ee3de508b715a247b9e8a63a0dd3db2cdee87"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/oschwald/maxminddb-golang/@v/v1.13.1.info",
+    "sha256": "48dcad7c79ff09775e847e38b24f3df1a7a6f705a9295e538fef05af51634f1d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/oschwald/maxminddb-golang/@v/v1.13.1.mod",
+    "sha256": "ddbd1f7e5c73e81fad617090a16eba9462caa13778c31731a728cd529ae629a9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/oschwald/maxminddb-golang/@v/v1.13.1.zip",
+    "sha256": "717e0e89131541827935e02a76aed474247009bae9653a76b0c0a9152ba49e20"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pierrec/lz4/v4/@v/v4.1.26.info",
+    "sha256": "afa13f8da90781114c5f1d9148526511bc95d43edd02f0435a36c2fb2c2a6aff"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pierrec/lz4/v4/@v/v4.1.26.mod",
+    "sha256": "d32329505d5af04449fe6ba227a97d170e0c98a99c123bf7908ac4ff44ae0f4b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pierrec/lz4/v4/@v/v4.1.26.zip",
+    "sha256": "cf67f99d8d4ed84775a51de3167b70907e5436dd2f501f37deffac46c0a51ae1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/dtls/v3/@v/v3.1.5.info",
+    "sha256": "11e9818c47c3a8f1a5828f0dbeec917bb98502ae38932e6defceacfa7a531383"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/dtls/v3/@v/v3.1.5.mod",
+    "sha256": "b1b2047d3189625f2a0ce2dc0d665a5ed2884ba63d12520ce1735345290c906b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/dtls/v3/@v/v3.1.5.zip",
+    "sha256": "447358c3191774c809538a061ecb89effb4a7257b22213e19f35a62faa37cdf5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/logging/@v/v0.2.4.info",
+    "sha256": "e95241539405fe75c15cc33b51178cd091def0aef38bb04e6f56a1d2e622c2a9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/logging/@v/v0.2.4.mod",
+    "sha256": "bfbce8d81a9eaf0b1ba6d3c4d0a58f7e7d6d1be06bec518db96f62f7feeb3d6f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/logging/@v/v0.2.4.zip",
+    "sha256": "b904074dd76009e71b4e4e0e004a2c7862bff0a8690b4f47410c46b172b3830c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/transport/v4/@v/v4.0.2.info",
+    "sha256": "2770a224324893d16d31a8833777100783bdafc49767de622b1f51eccb68cba9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/transport/v4/@v/v4.0.2.mod",
+    "sha256": "a3cbbcdfef23c4b414bc2584260dc4e1935f7dc7d4daf726e477707b357d086a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pion/transport/v4/@v/v4.0.2.zip",
+    "sha256": "5c44f0562179e9e2761f7d3c2d68ac030fdbd3be565771e536e88444666d73b5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pires/go-proxyproto/@v/v0.8.1.info",
+    "sha256": "d2008a681c88e7236bc4a965d9cca1d073180c11fc322fc25422f6e012d63fa2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pires/go-proxyproto/@v/v0.8.1.mod",
+    "sha256": "835dd458124aa077b6ea3616cca41c419295991c6946b7b668f42b3e5bac06e7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pires/go-proxyproto/@v/v0.8.1.zip",
+    "sha256": "a979a2f26160bfcb6f3829dd546d5f53c8b1879e7ad84466e359cf3f6237aa4c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pkg/sftp/@v/v1.13.10.info",
+    "sha256": "788ad900e73e318835a6ea92a787c198c7f0f4f12f0e20ccd8aff8888d4eb0d4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pkg/sftp/@v/v1.13.10.mod",
+    "sha256": "c15f2747ae98a576407667023f56682c43df8d03059308c64b3e22ef29bd842b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/pkg/sftp/@v/v1.13.10.zip",
+    "sha256": "390185d4b33cb550ebd27381b4aa80f245a9bda1ccb4dac65685bf94eeb81470"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/quic-go/qpack/@v/v0.6.0.info",
+    "sha256": "2eb2df18c1b82af40726754086b2a9b5e000bab70d34653b3d70849f2f391fdc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/quic-go/qpack/@v/v0.6.0.mod",
+    "sha256": "7cdce4a0772f217deb859f405b7d58c84d909fcdab5e547e3e3d3aeb1148e641"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/quic-go/qpack/@v/v0.6.0.zip",
+    "sha256": "3ac037cd1747420bc00bd6a793b4b197a2359fc354de12dc2187477417564914"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/safchain/ethtool/@v/v0.3.0.info",
+    "sha256": "e4629771709bd2473afa4392916261235e77ae05525017d9583289e3297a7206"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/safchain/ethtool/@v/v0.3.0.mod",
+    "sha256": "97bf7dcec80aab57bb5dcaa846394a8701a5c2c6ff87af0486e41dfcb011fb5c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/safchain/ethtool/@v/v0.3.0.zip",
+    "sha256": "bfa1a3fe314a3f2ac4c4385a6c4694708e4881bfd86c34668eca92656e398590"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/bbolt/@v/v0.0.0-20260915102804-500ee1e84832.info",
+    "sha256": "6199bb5d2fbdc829a087473c29a4964f5ca8d4c357cee9af771d55536dbd622b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/bbolt/@v/v0.0.0-20260915102804-500ee1e84832.mod",
+    "sha256": "85129979e7587fa3accb15ba084894322b497092135a5f5a2659b9781f59c4b2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/bbolt/@v/v0.0.0-20260915102804-500ee1e84832.zip",
+    "sha256": "851d37235ef87da3f68204dbcba165fe6e2de1264a5328b0df72f2e34c8dec05"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/cors/@v/v1.2.1.info",
+    "sha256": "741c4071bab1265b57db12662143f761ec4f5661e435155eed262ed48fa1d637"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/cors/@v/v1.2.1.mod",
+    "sha256": "47eb2d20c79ba241e6e699c2bdf848a0eea47d179f214e7b913f5d6fa542bc62"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/cors/@v/v1.2.1.zip",
+    "sha256": "5f4124cdeddbc6b55d65899df6b47782a59afe0e8ca54800286cc2a45f61703f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/fswatch/@v/v0.1.2.info",
+    "sha256": "f707f769e6d4f1340660a53ddaa66f3a0d8cf456df071fd83cf5292acb1fd2e8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/fswatch/@v/v0.1.2.mod",
+    "sha256": "c32fed68937f07d01ffccfcec7c6741363f6737d32858fe2c5911baddd549bd7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/fswatch/@v/v0.1.2.zip",
+    "sha256": "657ff3190c4c9583c855c0c1d9cd73ea56eb3933b29b2ce1a549cab1af065aac"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gliderssh/@v/v0.3.4-0.20261023092853-e0cad6d28647.info",
+    "sha256": "f7fefadc963eacc9267ad87f97bfbc3c930030950a20f92464195c0f34509411"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gliderssh/@v/v0.3.4-0.20261023092853-e0cad6d28647.mod",
+    "sha256": "d56a785506f76eaa043cedb664f78ae93f71dabbab3400836972a19800d943d4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gliderssh/@v/v0.3.4-0.20261023092853-e0cad6d28647.zip",
+    "sha256": "cbe7eb5bdc792eabacf49ff6e3bc52ba1099d5ae35fca67c09c71b6f3b1e8efb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gvisor/@v/v0.0.0-20260727.0-sing-box-mod.1.info",
+    "sha256": "6dbebe5af1d346b255035df54a39f1e85219c10c993c66106f804da359f4ec09"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gvisor/@v/v0.0.0-20260727.0-sing-box-mod.1.mod",
+    "sha256": "304fdcb314d1f04c31b24ae960eb1d3a25d63900585feae33a9a423304a49647"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/gvisor/@v/v0.0.0-20260727.0-sing-box-mod.1.zip",
+    "sha256": "4948bbbcd3d1f409e3a7c6c6a9a7ff3a872e54a852239bc9d18f25894d072329"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/netlink/@v/v0.0.0-20260814022025-64455d367bbf.info",
+    "sha256": "b2ecb954e6a5cbd0d73858d39153c346f73cda58cf9d7efbd9c119141ba3dc07"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/netlink/@v/v0.0.0-20260814022025-64455d367bbf.mod",
+    "sha256": "43e97dc4045dd409cea4b36c8de8f02e0bf6fe1e3eddfdc1a3a4585f747c2d2e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/netlink/@v/v0.0.0-20260814022025-64455d367bbf.zip",
+    "sha256": "0e3e454ff092407426a72b635b62b2ce113e06f6868bb68acad07a69e205bf65"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/nftables/@v/v0.3.0-mod.4.info",
+    "sha256": "f35df73c86f61b5a20644e499e10ccf658285572bd9cbd3421788a5893c7c907"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/nftables/@v/v0.3.0-mod.4.mod",
+    "sha256": "d98884c49915c4e873b5ea67c88b72946c4fd580e0af7e0feee6d81443f934fe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/nftables/@v/v0.3.0-mod.4.zip",
+    "sha256": "5771be1d9de33519fe36158c2e9fb9925df9480ca782467addf561a3e33c3a40"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/quic-go/@v/v0.61.0-sing-box-mod.12.info",
+    "sha256": "306c1c95d26738d1a197bc9852dd506c0c622b95c8df1c5cd56dba9ba460e078"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/quic-go/@v/v0.61.0-sing-box-mod.12.mod",
+    "sha256": "34b1c21ccffa98125b3f6c334d166f83a0820c8cc4bc88343ee4495fabd0ce0c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/quic-go/@v/v0.61.0-sing-box-mod.12.zip",
+    "sha256": "8629241e0de0e90c52eb51835925eb41fe525e933022ba28bc7b54ec9e29109b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing/@v/v0.9.7-0.20261023115459-5dc452e537bf.info",
+    "sha256": "be19d9bc450e0b730a9988a970f66519406c4f28e8bbe7fa2822b78cd03e2a4b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing/@v/v0.9.7-0.20261023115459-5dc452e537bf.mod",
+    "sha256": "33f9b3c2b1125a5d252e66b06a51393a107194fceb181577aac5452c71b160d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing/@v/v0.9.7-0.20261023115459-5dc452e537bf.zip",
+    "sha256": "1aeff50174f020b86dfc3444a365bb2f5fcef5f0338c02764ada5f64a7afa4dd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-cloudflared/@v/v0.1.4-0.20261021152903-2d40d788fcf6.info",
+    "sha256": "a10b90a2675e986d70efb5d8f951303941881c006a4b5268805b2e26a4bee487"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-cloudflared/@v/v0.1.4-0.20261021152903-2d40d788fcf6.mod",
+    "sha256": "bc954c4cfce6925a150787cfa5c9802559b9bee2cdb2dc4c9d4775d9977249e2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-cloudflared/@v/v0.1.4-0.20261021152903-2d40d788fcf6.zip",
+    "sha256": "68e041fdeb085c3f1edad5af9aa4827de26200afd47cf45f3622aac05af7b50a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-mux/@v/v0.3.10-0.20260929204512-caf09fe32475.info",
+    "sha256": "cb71422b7d68eed873427840046fa6d6257cde34b8b888971e38548f5100dd28"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-mux/@v/v0.3.10-0.20260929204512-caf09fe32475.mod",
+    "sha256": "420c22c5c09e98093dd9e153afe502acb43ec1095f154666ba0b4277c876adf8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-mux/@v/v0.3.10-0.20260929204512-caf09fe32475.zip",
+    "sha256": "38c6e7dc80d93082da3cdd62c24b5e2c5e94f9fdb8e73a35353286efab797db7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openconnect/@v/v0.1.1-0.20260929151225-cbd68c45de58.info",
+    "sha256": "74fa0cc12289007bccfe6ab1f41d7b2acaf045480eb2aee1672f275af8cd813d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openconnect/@v/v0.1.1-0.20260929151225-cbd68c45de58.mod",
+    "sha256": "875b3eb85936f26756d4f177013324f90a7586a43fc0dc5bc1c947bf75c7cb56"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openconnect/@v/v0.1.1-0.20260929151225-cbd68c45de58.zip",
+    "sha256": "9111ca5f02f11f99a22f1fc7e8b97b45b7b8af7a233dd3d380948d8344e13840"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openvpn/@v/v0.1.1-0.20261020061838-432d37b47c92.info",
+    "sha256": "5d2137f21e44e8a6b4a4bcfecd3bc01181c6dd9d3d6957489a765174caa07f98"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openvpn/@v/v0.1.1-0.20261020061838-432d37b47c92.mod",
+    "sha256": "a0ad46a91bdf2b6fc0db31d8908d267a09dae101130164de1731a5b55040b44e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-openvpn/@v/v0.1.1-0.20261020061838-432d37b47c92.zip",
+    "sha256": "c0732f083a028c0d84a8dc9b05ead912a007955914e152a92a768b7424440578"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-quic/@v/v0.7.2-0.20261020082049-7e0a5869a5f4.info",
+    "sha256": "9baf8b5990f12db43583155e80e0e8422643204d846bd6644b79bbf27e5e93e1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-quic/@v/v0.7.2-0.20261020082049-7e0a5869a5f4.mod",
+    "sha256": "c03756073a5030d4f20769faa8135c28d02dd91fc6a36ad919c7ae2ef7031c64"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-quic/@v/v0.7.2-0.20261020082049-7e0a5869a5f4.zip",
+    "sha256": "2388d5c5cd8e5768487da19642a848550987efd2398fba6bc55be363767829db"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks/@v/v0.2.9-0.20260929204512-65740e0f0e3e.info",
+    "sha256": "9553aa94d4d7180fae16c2f3526056ecf391da06098aab1d1692a412774562b6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks/@v/v0.2.9-0.20260929204512-65740e0f0e3e.mod",
+    "sha256": "14f7ba3b6780fd160c9cbc8096e67ecd07e25ca3dafd2ffedbfae930f628d7d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks/@v/v0.2.9-0.20260929204512-65740e0f0e3e.zip",
+    "sha256": "a559e290eb6362a1fe35c9f8478d7a5420517b3abe236253ef3e1db455311c4a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks2/@v/v0.2.2-0.20260929152114-a69d1086332b.info",
+    "sha256": "498497554939db8ebc633627c1b85ac8c565daf0958d2f8618e64ae6b1d856f9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks2/@v/v0.2.2-0.20260929152114-a69d1086332b.mod",
+    "sha256": "98c2e27e525b29345d3097cfd42da06f1f14715b10e0207580a36389999067e8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowsocks2/@v/v0.2.2-0.20260929152114-a69d1086332b.zip",
+    "sha256": "9cabba1c449cb3f5280ea1a89240849d894123ad7fac2e2272819b35fde5cf8d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowtls/@v/v0.2.2-0.20260928201441-a9c0127d5c99.info",
+    "sha256": "7eeb89f34f72fd1768f4039a107346123051f437b8b4a8d2a8566ae989b27bd2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowtls/@v/v0.2.2-0.20260928201441-a9c0127d5c99.mod",
+    "sha256": "76fbf9d8ae9f9aaf05bd5b9e03440c418db33fae918b25e2b217e5e268d12404"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-shadowtls/@v/v0.2.2-0.20260928201441-a9c0127d5c99.zip",
+    "sha256": "a728d8e8394b096fdbe8ac28e0076017321edfe9000f61e17c43e9d30781e5e4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-snell/@v/v0.0.0-20260904135315-bc5a12ac736f.info",
+    "sha256": "5a4930b113deb9fd1fc90309f10f794ac07702e3dda468a4b66460df9f71b787"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-snell/@v/v0.0.0-20260904135315-bc5a12ac736f.mod",
+    "sha256": "e68b446b695e6a25f0831533bf557533745c8cd58cb79b8785ef70d251ccd1ec"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-snell/@v/v0.0.0-20260904135315-bc5a12ac736f.zip",
+    "sha256": "3f2602328866e0262ca1c302702c7a9b0e62d8f320fdbbc18c896d302e25d6ba"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-tun/@v/v0.9.7-0.20261023115432-040db71fcd33.info",
+    "sha256": "f5b9d74060d6f52aa3c531774a578091909acf0b54f9599721d66ff8605d8d29"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-tun/@v/v0.9.7-0.20261023115432-040db71fcd33.mod",
+    "sha256": "8a0c0b76e272b6432c31bbf792e91c108018dcb631ad027c50f50e0d54997bc2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-tun/@v/v0.9.7-0.20261023115432-040db71fcd33.zip",
+    "sha256": "f100d921073f3c8068b45d374517084b9cb3b4915c5304db2b7da971e11384ed"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-usbip/@v/v0.0.0-20260817040617-28bd42667eca.info",
+    "sha256": "5833804012e643a66d5338445d64d0b5b679ef3263095e5224b33a66945b5d93"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-usbip/@v/v0.0.0-20260817040617-28bd42667eca.mod",
+    "sha256": "abe6f7f14d0ea699b418899a332455e7d11b8eba376815a22089554767089adf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-usbip/@v/v0.0.0-20260817040617-28bd42667eca.zip",
+    "sha256": "c3cb3fe1d9999fda98a232f813425d7376541f498b1c98e0fd2fe717b19aa7da"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-vmess/@v/v0.2.9-0.20261019223527-a0c58542bd9d.info",
+    "sha256": "b0ab78d30b55ef3987773c1cf7f7511138ccfe7004d125a22d081b90b41e2415"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-vmess/@v/v0.2.9-0.20261019223527-a0c58542bd9d.mod",
+    "sha256": "9c678f70449c52c57b1bf6dc40ac5bf55c0a61e3336a8dd0d082aa352e510471"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/sing-vmess/@v/v0.2.9-0.20261019223527-a0c58542bd9d.zip",
+    "sha256": "b1ed0cbabfcbf275d7aa1430d157913bc0b4b720e845ffc02a1f18ebf51b0924"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/smux/@v/v1.5.50-sing-box-mod.1.info",
+    "sha256": "2b378111fa45414575d07ec419821e75cbd3f89fb8ade605f5782e274a52a9ad"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/smux/@v/v1.5.50-sing-box-mod.1.mod",
+    "sha256": "7d3868ce6d71deb4e3462dab150cb733fe236a0e311e0ea04d7ad8ab3eee4a7c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/smux/@v/v1.5.50-sing-box-mod.1.zip",
+    "sha256": "43df443a40c24b561fb7509a8d0074443368f860e73cec2046e80654d1aec06f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/tailscale/@v/v1.102.1-sing-box-1.14-mod.5.0.20261019070639-79c1732442a9.info",
+    "sha256": "ecdde080095dcca467aa7354d1443590bb63bcf05e445b7b56bc1e83e73ae397"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/tailscale/@v/v1.102.1-sing-box-1.14-mod.5.0.20261019070639-79c1732442a9.mod",
+    "sha256": "a0e4ecef870a34486b166d16b9745fd8277dfe19b14ed954105c48aca68ee1cd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/tailscale/@v/v1.102.1-sing-box-1.14-mod.5.0.20261019070639-79c1732442a9.zip",
+    "sha256": "6585cf36d6ff04b13cd5c6efff7fb6f91a368af1b6ca6a0d174e095e07c022d4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/wireguard-go/@v/v0.0.8-0.20261022215841-e4d85ef2ed38.info",
+    "sha256": "bccd2e7dff2d28888d6091343df891ca08385f6944fe6c5cdfacbe292b0d16d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/wireguard-go/@v/v0.0.8-0.20261022215841-e4d85ef2ed38.mod",
+    "sha256": "632b090559dca7e370454ef80826058d1c01dcc16bd6a87c766f8b4a6009ebbe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/wireguard-go/@v/v0.0.8-0.20261022215841-e4d85ef2ed38.zip",
+    "sha256": "15a63e48271cb99f96604f0408eb83557c4a0ca88c3a2f558d79dc87234933c7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/ws/@v/v0.0.0-20231204124109-acfe8907c854.info",
+    "sha256": "509d94c9359b6bb54fc6dce81df40ad38189c86bf539278a415992ec4bb5fe54"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/ws/@v/v0.0.0-20231204124109-acfe8907c854.mod",
+    "sha256": "ecb9a4a688051d981c0e4cfd13579dcf8806aa727303583944b2451e1fbfc9fc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/sagernet/ws/@v/v0.0.0-20231204124109-acfe8907c854.zip",
+    "sha256": "b68f73fdda63af79356083de31029bafee27492c5f0013a23fb563e37fe60b66"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/smallstep/pkcs7/@v/v0.1.1.info",
+    "sha256": "f171ea5b386580a266dc13d332380deedf013aeb55f28e19bb51d4a15c163495"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/smallstep/pkcs7/@v/v0.1.1.mod",
+    "sha256": "833dc7bc05dd71f3c94d169d6aa23f952e73c9e6102c74a4815ea619fd01e265"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/smallstep/pkcs7/@v/v0.1.1.zip",
+    "sha256": "bc9cd16c7d8306edc4a7b0ca0d841236e6f9e7481ec6ccc5c460a86468cd7b42"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/cobra/@v/v1.10.2.info",
+    "sha256": "8e90f3ebbe4fb2976cd00cba616e6377664023c9ee2a65ac9fe839e1e3b045ea"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/cobra/@v/v1.10.2.mod",
+    "sha256": "cc6098fd1118fb3bb349c72bcd6e9c665d3a1b2a516ea9807ee24521ad2ddf8c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/cobra/@v/v1.10.2.zip",
+    "sha256": "a00aae6fcd631e0fde52c98604452ff70e1b73c3b8a560d68db15aff5e26872d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/pflag/@v/v1.0.10.info",
+    "sha256": "30055d4c1b7b6232468a685492b16c7d548f04ab1bff9ebba822cf980558f825"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/pflag/@v/v1.0.10.mod",
+    "sha256": "16c6dfc0eb58eb3c9113ce197d460c6725c647e4688ac26d31c8ed69f1ebbc68"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/spf13/pflag/@v/v1.0.10.zip",
+    "sha256": "a246b8c9d3daa87d6c634cdfee1bdf7fa53d5817eeef4fa0c6da43edd12de4ca"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/hujson/@v/v0.0.0-20260302212456-ecc657c15afd.info",
+    "sha256": "213bb1d8c01d2114c9015c5fac351eb5a3976a5d1dcd638aa07d6124fd3cb397"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/hujson/@v/v0.0.0-20260302212456-ecc657c15afd.mod",
+    "sha256": "300c72a8eef10aaa39678c4b61f0a3c225bd122786d37c2c3fc7773e70ff79c7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/hujson/@v/v0.0.0-20260302212456-ecc657c15afd.zip",
+    "sha256": "9f9c320dd90c86880b26107b931d6c056e99642d4c4e50fafcdf7de8ea0989e6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/netlink/@v/v1.1.1-0.20240822203006-4d49adab4de7.info",
+    "sha256": "e24a6e7b489dd5d26cd6fad9ecfb4dd18efb01c26f62da6ddcbddd043211e923"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/netlink/@v/v1.1.1-0.20240822203006-4d49adab4de7.mod",
+    "sha256": "0a6a5bdb6f9c267f00827e6ff79e84d0bf71a55ac1f880208bff9fa600d30b3d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/netlink/@v/v1.1.1-0.20240822203006-4d49adab4de7.zip",
+    "sha256": "a5195ef600f8d9a0fb8501eea85e4fe0321a74bd57dec88f07b8569d0ee4f55e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/peercred/@v/v0.0.0-20250107143737-35a0c7bd7edc.info",
+    "sha256": "c1d5571be27e6d47f148ab4f54ed16024bc796dcd6d3765e83176e0295d92d75"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/peercred/@v/v0.0.0-20250107143737-35a0c7bd7edc.mod",
+    "sha256": "01f3d17cce127160210b43d5edada3fa84ac705f7ed1147f8fe4efdf765eb95b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/peercred/@v/v0.0.0-20250107143737-35a0c7bd7edc.zip",
+    "sha256": "87d0f4f3b1d59ea45c9a87b775b615bebd721a5870dafedc63cc860ec4aac281"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/web-client-prebuilt/@v/v0.0.0-20250124233751-d4cd19a26976.info",
+    "sha256": "9eb0a6368c045a18a4d6429fa3d815580cbeded71e37c3c8d47355f7f3fb2c68"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/web-client-prebuilt/@v/v0.0.0-20250124233751-d4cd19a26976.mod",
+    "sha256": "2e7117874ed4f3f78fc2b0a96d2419b8ee5fb9f71f7df91e4a5e87c6b7e90d9d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tailscale/web-client-prebuilt/@v/v0.0.0-20250124233751-d4cd19a26976.zip",
+    "sha256": "1d02f0804bb41e0743b7d889b8e2dbd8466a89793f03997f4c1fd10f9e8974c3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/gjson/@v/v1.18.0.info",
+    "sha256": "4f98db7dec39c069b852f6ea4bde886d82f5c4f5563e80e9ab93432dc2c70b03"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/gjson/@v/v1.18.0.mod",
+    "sha256": "d94eecd8050cffc957b99bed8a308efeaa669ac13854290d081a2ded5478af93"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/gjson/@v/v1.18.0.zip",
+    "sha256": "ab8092b3e42f83f003466757c63ec819a45d1e83caa63c6c131cebbe760f1df2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/match/@v/v1.1.1.info",
+    "sha256": "eb17a4f496f0600222a38bd92a8980da8a2c735ef580e2a3c7c29ebeeae4e2f2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/match/@v/v1.1.1.mod",
+    "sha256": "02364e515327d9988d1f6bd37af9c584f8b98d3b4f43f9e1f18e26d76aec0f44"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/match/@v/v1.1.1.zip",
+    "sha256": "2ba41f7f27330d49e0e432cbf96bf90720a33e4a97be58fe53f63a7e66f04d37"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/pretty/@v/v1.2.1.info",
+    "sha256": "bf554e21f3f5ded7ea542de864da30666115d9459ad58df7e1661968c3227cd9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/pretty/@v/v1.2.1.mod",
+    "sha256": "6e5c5fa493d8f18e8974b38ed63e8c71863cce59e659d98d0ef8417bf81e3ecf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/pretty/@v/v1.2.1.zip",
+    "sha256": "9327579bf9e610de753eeb7c35c8cf1e3f56e6e5623cbf65e47bc8076023d1ab"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/sjson/@v/v1.2.5.info",
+    "sha256": "dc3d3890037073331c351137a5330be59abab11bca5973d352f90d41a9f4128f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/sjson/@v/v1.2.5.mod",
+    "sha256": "38b09323ab8ef8f803b3d86bae2c94765d3815a2d5b751fd4f07039f4551cc6f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tidwall/sjson/@v/v1.2.5.zip",
+    "sha256": "fc40fda87c7de55362f6386e069d674772f25c9d76411ee823acb9ac78b20565"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tjfoc/gmsm/@v/v1.4.1.info",
+    "sha256": "9149b956f2b77b4984263e9dcd02bb12a2e367c646ce5b582623d84ca46f7390"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tjfoc/gmsm/@v/v1.4.1.mod",
+    "sha256": "b319fbb61091a5581939ece45de36f41545dd77478cfaffc5d49061796f5f69e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/tjfoc/gmsm/@v/v1.4.1.zip",
+    "sha256": "ba1f3ccf698a62bcb28c594d995f21587021ad759e777aa64367c8a7332cc10b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/u-root/uio/@v/v0.0.0-20240224005618-d2acac8f3701.info",
+    "sha256": "1c713fb04a528e74ca64775080248266df488edd3310c7682177db94b0ab60d1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/u-root/uio/@v/v0.0.0-20240224005618-d2acac8f3701.mod",
+    "sha256": "397f39997810b09538441accd2343d71bad78943c4f224939740580a2f45a6c3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/u-root/uio/@v/v0.0.0-20240224005618-d2acac8f3701.zip",
+    "sha256": "f6e8f912e968744999d508c3df54f0308aaf337052a8d0bd3edd72583adfd9cd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/vishvananda/netns/@v/v0.0.5.info",
+    "sha256": "3ab38817c94017b33f0b411bc44b1f38803047ac048a6fe8709264ef619930bc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/vishvananda/netns/@v/v0.0.5.mod",
+    "sha256": "de8a0c0518c7841b4f04762ee7367c4ff1953381082e066793fa1c93e93883c2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/vishvananda/netns/@v/v0.0.5.zip",
+    "sha256": "07804b88c922c2a6780efe392ffef9d126eac584384eb3eb17bcadd34cfa9422"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/x448/float16/@v/v0.8.4.info",
+    "sha256": "06f9483061813e32210ae41f092abb82609a062ac7dff685be18290c7c65c132"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/x448/float16/@v/v0.8.4.mod",
+    "sha256": "f8a8238aa734c1d2463d48f8808e35124546bd5222b13e4c097746ded5a57e1e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/x448/float16/@v/v0.8.4.zip",
+    "sha256": "73b24a41037ea999ab66851e3798a0973dbb1f214925915b01f0820f7b2f1500"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/youmark/pkcs8/@v/v0.0.0-20240726163527-a2c0da244d78.info",
+    "sha256": "4e1e6f4100e6b903ad990271fdb39e2519f22acbf7943b342c3255e5cf708cda"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/youmark/pkcs8/@v/v0.0.0-20240726163527-a2c0da244d78.mod",
+    "sha256": "ac53991d6663f30fd358884c3bfa4fd0651f042a56ac3632c56b3f9824205abc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/youmark/pkcs8/@v/v0.0.0-20240726163527-a2c0da244d78.zip",
+    "sha256": "cdcf5e96850f9f60bc96ab512e4bd06ee19dd2dbe855260c3589c6c79a1bcfb5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/zeebo/blake3/@v/v0.2.4.info",
+    "sha256": "2aa491dbe31af1da06afdc30d7198367aaed75d0d59ff8e4ac545390c3fdabca"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/zeebo/blake3/@v/v0.2.4.mod",
+    "sha256": "9e2d9f5afaefb91d63405907f73f80f1d1471fd2bec2642068106dd19d1df141"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/github.com/zeebo/blake3/@v/v0.2.4.zip",
+    "sha256": "65aaa3487c097fa0140f52041e8e6fe8214c244a29223fd4caaa60986192a08f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/multierr/@v/v1.11.0.info",
+    "sha256": "f27049930a037d9d851561b9fc5c4cc77cd41bb1e58a4a858783d5149525b418"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/multierr/@v/v1.11.0.mod",
+    "sha256": "58a30dde730aba57576715d90841774f6344a879fec5633a2c66b37ec30c11f0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/multierr/@v/v1.11.0.zip",
+    "sha256": "2249b5d2fdce61f6ee661a679d8552599af084a761cbbc871da77641bddce0c3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/@v/v1.27.1.info",
+    "sha256": "49a6813afd78246bfbb6fff105b17e99c2e431ce0ed701c64e4a67a36d4bbbe9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/@v/v1.27.1.mod",
+    "sha256": "ad805944459a14360eeb0677b7c6fc4ff7a9da80fb03764afa7d91cf02e285c7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/@v/v1.27.1.zip",
+    "sha256": "38760227142d38369069374c005707bc6b3c270a75f34fa3f17c48c863143cdc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/exp/@v/v0.3.0.info",
+    "sha256": "b2a20fce867610ad8d1024e69a113e6a2c2da8a4e4c6bead5d5a492b8ed6df9f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/exp/@v/v0.3.0.mod",
+    "sha256": "5dfb164a526b208436988b2d2d97409912a66d7ea31af84571eb5ae7b52fd184"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go.uber.org/zap/exp/@v/v0.3.0.zip",
+    "sha256": "1a71ce6ea8df554dc002af9d18d6f1083a9b2782ee0c971b929314e86e8aebd3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/mem/@v/v0.0.0-20240501181205-ae6ca9944745.info",
+    "sha256": "ab26f568cb97a70a42ce9efc2767e44a406e6365efb019274d804051a49fe7bf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/mem/@v/v0.0.0-20240501181205-ae6ca9944745.mod",
+    "sha256": "4caf98eb924c6539689fe4851b2acdff647b72ed38f95faad5442ea0c6efd105"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/mem/@v/v0.0.0-20240501181205-ae6ca9944745.zip",
+    "sha256": "9b5037a57122457fdc5c2c0a31e3996b44cf9dfcdee5c53ed72adfd88d077795"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/netipx/@v/v0.0.0-20231129151722-fdeea329fbba.info",
+    "sha256": "b2df55e564ad2d96f0216bc6722b7fdcd4d053325174662defe1367287a571ff"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/netipx/@v/v0.0.0-20231129151722-fdeea329fbba.mod",
+    "sha256": "567ffe55c30a5346e382d4e54ef8a82a80704c9a3979e30bb66309a9a244a70b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/go4.org/netipx/@v/v0.0.0-20231129151722-fdeea329fbba.zip",
+    "sha256": "e15f57de368c92b826010181906f26112ba3a0d7fde7d94c8a8c60c525dc4044"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/crypto/@v/v0.54.0.info",
+    "sha256": "a2a08976bc05ffe33a35c0bf13d9557bdc954dda54f7404fdaa8bdcc8b125e84"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/crypto/@v/v0.54.0.mod",
+    "sha256": "d852b93b93f9cd911708ffd45409439956d4e9c8497c5b87f348fc83d0adc577"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/crypto/@v/v0.54.0.zip",
+    "sha256": "ecf4030c1c6b55b897826b95f01d7416cf2785b4675b0f9ac218ddf754a03abb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/exp/@v/v0.0.0-20260410095643-746e56fc9e2f.info",
+    "sha256": "f5b46684061c81f87ff617d058f0b8c8fab801d74869b2bdaefa1b02eda32653"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/exp/@v/v0.0.0-20260410095643-746e56fc9e2f.mod",
+    "sha256": "2e2539b47bf2e73f6bcbf108d277013c44100f5f2684b0bb92d219b6187e088a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/exp/@v/v0.0.0-20260410095643-746e56fc9e2f.zip",
+    "sha256": "de285d08489fcd4d420a8561501e75b5124db0a48121dfc26e811959f518db4e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/mod/@v/v0.37.0.info",
+    "sha256": "4e3c092050646db6a64f7c42c2538fc0323ec7d7e4ffb04bcc1f76141d640e6a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/mod/@v/v0.37.0.mod",
+    "sha256": "538472fdf094dd5e49dc40e70468fa931a93c241eba07fb946a98747c94ab4df"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/mod/@v/v0.37.0.zip",
+    "sha256": "91e8e4e9b74a8706dae808b66538d4ab22befd00c11f34134eb97ff572d52e85"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/net/@v/v0.57.0.info",
+    "sha256": "ae325f3eb85c75802b692f8f83ae358e93f19a7671215b6f8d5845db86f5acef"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/net/@v/v0.57.0.mod",
+    "sha256": "bfc4c34b9fa5d70e4837542577560e92f743e24f584a39877850650c19a444a1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/net/@v/v0.57.0.zip",
+    "sha256": "f8d652c629374b43846ef4f2efd419e8d1c81779eb728306d09f0de1cc1bab80"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/oauth2/@v/v0.36.0.info",
+    "sha256": "61d5b2b9cf0de3c5bad7717c19d06ffd492a333f830e7b1035cbf330c90b0775"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/oauth2/@v/v0.36.0.mod",
+    "sha256": "90ff0f4a036bc1c24e6c006fe18d97d6d11683431f8f197b7ad48a341da72682"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/oauth2/@v/v0.36.0.zip",
+    "sha256": "15bf65ff103e5dafc809d78cd037a1d1e88ccb8451824e851156002a13304504"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sync/@v/v0.22.0.info",
+    "sha256": "14c94a5f031afb49c81ce00b342ca7f6befc7a2ee6c1114507ca518c92fdbf1d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sync/@v/v0.22.0.mod",
+    "sha256": "a3e29e76060bd561060454b1fa2bdcd66674f60c9ca93833b8106355e34c603c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sync/@v/v0.22.0.zip",
+    "sha256": "4bc67d258ce7867cfc1a43765c43d98b4c49b90c46dd0b86f896a5a4909fade0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sys/@v/v0.47.0.info",
+    "sha256": "2f567627966f180616deee8874e9547fe34b2271f17ce14901979890510fc959"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sys/@v/v0.47.0.mod",
+    "sha256": "57f4393ea18d5446a12363b35c23a616d843fa1669c7121a70a2bc3a9677d665"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/sys/@v/v0.47.0.zip",
+    "sha256": "cdac013ddced0262926ec29ffcda645da39670e61c7e5b761e572b6b1809bb1b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/term/@v/v0.45.0.info",
+    "sha256": "ae4c0e1046e4e4df7d773ae0cdcbebc308ac88659ea765ddcbe3af226cee13d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/term/@v/v0.45.0.mod",
+    "sha256": "62c3f9d1a5ae12264ab48e2c8acc08c9f201bda9619de171544eb5714b74aec5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/term/@v/v0.45.0.zip",
+    "sha256": "b3a3af689728b43012ae1b21482571a35c033c545e98e021606bd4fcf1f79108"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/text/@v/v0.40.0.info",
+    "sha256": "fc11b65b2ba549dd6031a1ae6b39c2f22885800167138fdb8b83c6ae65e2c384"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/text/@v/v0.40.0.mod",
+    "sha256": "e69fb09b14637cab6245a1253c22d80121b79d9fe3ddd19b558629e15baadaf3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/text/@v/v0.40.0.zip",
+    "sha256": "07757384728d0f52dd85c1f3f163405e6396b2b0fb7eb7d6b610f2a711d69ee3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/time/@v/v0.15.0.info",
+    "sha256": "89fe02bf3456a353438b3d1c84f7b2d3cb8aaadf5bd7ab81ddd530b52c8838b2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/time/@v/v0.15.0.mod",
+    "sha256": "6149b2491c92f67545fc5da0083a791e369b3f99670d30f52bde0604c48c9e69"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.org/x/time/@v/v0.15.0.zip",
+    "sha256": "8cfb20e915fa5d6c3fd264304233f8d71a3385e48a37819239c532ad9da27f84"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.zx2c4.com/wireguard/wgctrl/@v/v0.0.0-20241231184526-a9ab2273dd10.info",
+    "sha256": "d55811db1464ae9c26036c74eff3d8a40577b7580057f4fddc80e6a5b5048d35"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.zx2c4.com/wireguard/wgctrl/@v/v0.0.0-20241231184526-a9ab2273dd10.mod",
+    "sha256": "408711081215d7c52af02446ccfbc76d77f687e3ce54d8c43c2a983d464d7cbc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/golang.zx2c4.com/wireguard/wgctrl/@v/v0.0.0-20241231184526-a9ab2273dd10.zip",
+    "sha256": "891d7800e23b98615e60cbe3016ffa05bd58826673b62bf3c30d2d13d7bdc954"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/genproto/googleapis/rpc/@v/v0.0.0-20251202230838-ff82c1b0f217.info",
+    "sha256": "c4894dc900cdcadfa00bbf116ac431927e47f9e4c9b6b3b6bc4fb04064f92bb6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/genproto/googleapis/rpc/@v/v0.0.0-20251202230838-ff82c1b0f217.mod",
+    "sha256": "71783d00d20c3a1b393d1ad82131a69b5f01954caed5d65bce699d7fc4344cb7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/genproto/googleapis/rpc/@v/v0.0.0-20251202230838-ff82c1b0f217.zip",
+    "sha256": "29f02d8e0e2f6e9cc0ee24abc29989e5e44d168eec35c12046efee3fea201aef"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/grpc/@v/v1.79.1.info",
+    "sha256": "e40379739dfefc5615e71af1f18022a004bed60a22aad636f9cdead61584241e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/grpc/@v/v1.79.1.mod",
+    "sha256": "15480c80064d2087c6122d069a8da86479eebaa74ca3c2b15a5627afa36988e7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/grpc/@v/v1.79.1.zip",
+    "sha256": "df09b5b9369cb149e9219224e9622736bd67c435380e9f09cb0723660fd58d44"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/protobuf/@v/v1.36.11.info",
+    "sha256": "2156715d128777c2a6fae6107d12a0ab60c2b1deed4fba5a2b2481c68911082a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/protobuf/@v/v1.36.11.mod",
+    "sha256": "a75c105a852fbd8da8d8cfac09c2eab9a206cfd27ed37c973737e23f632ca96e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/google.golang.org/protobuf/@v/v1.36.11.zip",
+    "sha256": "14983d36c56a814ed91b6d652f2b8f895baba1b84eb43b28a0b132c8637cd274"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/lukechampine.com/blake3/@v/v1.3.0.info",
+    "sha256": "1fb9f0f943e935d710f872b6eea6277adf1c1d34ff641089d7f654e9820a8f26"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/lukechampine.com/blake3/@v/v1.3.0.mod",
+    "sha256": "a28a0ba97d6172b509b564052bf67a0771eba014d273b72449182a592cee2423"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/lukechampine.com/blake3/@v/v1.3.0.zip",
+    "sha256": "2fb0c0a64de6f558aadf0fc161caaf1d477adaed6b8ee60648e0fb44376de32b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/zombiezen.com/go/capnproto2/@v/v2.18.2+incompatible.info",
+    "sha256": "5f57f1560ae66dbfd414c6b29228667cdc424e0b6785292e39048a40cd9d5297"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/zombiezen.com/go/capnproto2/@v/v2.18.2+incompatible.mod",
+    "sha256": "70c5a30a8703fddc97f82a1e71b4be308735db841831f3212333eb701252a3cf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/cache/download/zombiezen.com/go/capnproto2/@v/v2.18.2+incompatible.zip",
+    "sha256": "b0109f13110df4d243b5d1cc49b875bcc07c4c9713eeecc42e16a2b5022f4082"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/filippo.io/edwards25519@v1.2.0/go.mod",
+    "sha256": "7492c767dc361b86e96933ca1790d492c2f7c368c3ec0e00e1050eddad7baa7d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/!ryua!nerin/go-krypto@v1.3.0/go.mod",
+    "sha256": "536483d794f17cf79a218d491512afce793755240e32bc632b062729e74a07f7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/anchore/go-lzo@v0.1.0/go.mod",
+    "sha256": "789691936a70c39f25d5ac9f38dfa5c629528f6b96225712b27ebaaafb462e5e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/andybalholm/brotli@v1.1.0/go.mod",
+    "sha256": "c7ba66b75415a96047acf8b325093a9eba0976141b286bc58521f2e6efde9488"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/anmitsu/go-shlex@v0.0.0-20200514113438-38f4b401e2be/go.mod",
+    "sha256": "605bf0aa0d98223540f5daf7fa97091eafbbf48989c7d17652af992ca764afb6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/anthropics/anthropic-sdk-go@v1.26.0/go.mod",
+    "sha256": "5d3743b787b1c64eb40797e7bd3e464f0bcaeb82d67d35960d9fa975c102b54c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/anytls/sing-anytls@v0.0.11/go.mod",
+    "sha256": "166eb1c4595a895630b5d98098c0228ed0692d9a6b270cbc3dc12c28c4c5d79a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/axiomhq/hyperloglog@v0.0.0-20240319100328-84253e514e02/go.mod",
+    "sha256": "7a2cf89532d8f73548d0368a80bb77566a7a1a6803b8267ddaba998534a6c343"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/caddyserver/certmagic@v0.25.3-0.20260421143802-60d9d8b415d6/go.mod",
+    "sha256": "c25548a9f702ccf66b1e75dd1dccfb45223a274faa451d484484ae39ec356443"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/caddyserver/zerossl@v0.1.5/go.mod",
+    "sha256": "a88b3c5a9a7aedabaa3457347106338d801db5e448cc31ac6b8be61ad78d6d9b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/clipperhouse/uax29/v2@v2.2.0/go.mod",
+    "sha256": "f3c5f4e4f9e7fb16aea5fd9dc5f24c3ff9c157b1a67576c0f2140117589507a0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/coder/websocket@v1.8.14/go.mod",
+    "sha256": "0cab443e389cef98e63828bd7ce82224bf192732a18795581314766eb14ea275"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/coreos/go-iptables@v0.7.1-0.20240112124308-65c67c9f46e6/go.mod",
+    "sha256": "b72bc9bc2ec923366b39a0dd6979db3533c74f6b4d680a4b1d8056a7b169e259"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/coreos/go-oidc/v3@v3.17.0/go.mod",
+    "sha256": "abf1c02b28d3b11a627fbe7355d0fa5366796ef85938ac5902485eb52fb21fd2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/creack/pty@v1.1.24/go.mod",
+    "sha256": "a3979fd32c00f35d17eb3b97d0b3cc6f4efb057bf78271361fa773531e601531"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/cretz/bine@v0.2.0/go.mod",
+    "sha256": "07e73281def4431673a9f039c3077ed29dccdb2b2228ad8f8885ae7a53271b60"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/database64128/netx-go@v0.1.1/go.mod",
+    "sha256": "3bbe66fb3fbe4b41fd88797adc8369d2ab1ef143d15eee4ec141d51141e02d49"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/database64128/tfo-go/v2@v2.3.2/go.mod",
+    "sha256": "666d7f2dfbd23432c1b6e7bea93646e828df3414f93654f98819a1301879fbf2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/florianl/go-nfqueue/v2@v2.1.0/go.mod",
+    "sha256": "fd8c1d520ba6bc2a185b6dc63325f2f7a83e922677e4b4ef7c73c9db8c218240"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/fsnotify/fsnotify@v1.9.0/go.mod",
+    "sha256": "da3713c5c57d252d25520de0e6b397b033858b3aff5dddf21164abe3297c9ff9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/fxamacker/cbor/v2@v2.9.0/go.mod",
+    "sha256": "d7bbc7167a38275831838773356370c370d2ce3ed28c60486f52cdd5a799c92b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/gaissmai/bart@v0.26.1/go.mod",
+    "sha256": "bf5dcfa9d5bf5343e63843297e0a4d2a3a6e314eae0286a9c5c93f9a0de47433"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/go-chi/chi/v5@v5.2.5/go.mod",
+    "sha256": "477f2f84de342a9f815bb0ff83038cffc4365d3445edcec202abdd18fa1a8030"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/go-chi/render@v1.0.3/go.mod",
+    "sha256": "d72fdabc5e18d1d616a0589bb88f4a3feeda1637faffc1b28bd897ac1e6cab1c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/go-jose/go-jose/v4@v4.1.3/go.mod",
+    "sha256": "e069e6002d29495b8c2dc6cf0d3b56a075ec5be7abb6c2eb1a1c0845cb66b8b3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/go4org/hashtriemap@v0.0.0-20251130024219-545ba229f689/go.mod",
+    "sha256": "23b2cb5de53f13924f249ced386711c51a6b2d70cd0e161457a3a8d10b64a2bf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/gobwas/httphead@v0.1.0/go.mod",
+    "sha256": "3d0248b03954819231ecd05dba139ad1b169bd654c3837b1c3d26bb0967928fa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/godbus/dbus/v5@v5.2.2/go.mod",
+    "sha256": "d008ac84f404c6fbc7a1f378099dd21794843d10d6cdc129cfc403d39656f5a6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/gofrs/uuid/v5@v5.5.1/go.mod",
+    "sha256": "cc84b18e3fc7541089d546a03e1430cc5de9f40d0612b7c1f3f48232a0e2cebe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/golang/groupcache@v0.0.0-20241129210726-2c02b8208cf8/go.mod",
+    "sha256": "4e019acbe58a7af43d2316b6f825797636072cb48c31ea6ff7aae7d75ad51a89"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/google/btree@v1.1.3/go.mod",
+    "sha256": "671a2227c5628cbb94ce027ab4232858c4f0dd0cbb98aaa83d7a265d7ec194d7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/google/certificate-transparency-go@v1.3.2/go.mod",
+    "sha256": "10a89e55c52c44b2e3b0a5d148958bc3be51c2b8884de68e5dc534a0e038cb8f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/google/gopacket@v1.1.19/go.mod",
+    "sha256": "1eb2466754ad6e4901225f958aea5ff449d206093d8565d6c3ac14762b1fdb15"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/google/nftables@v0.2.1-0.20240414091927-5e242ec57806/go.mod",
+    "sha256": "bfa85a94c6a0e66b2b931456ef0a1a4d808a0bb9162b0b0ee76ca7ae31151b2b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/google/uuid@v1.6.0/go.mod",
+    "sha256": "73da47b6338b00a082fd451aa35a3273d3adc09b8e9bba98dab01091e402af6e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/hashicorp/yamux@v0.1.2/go.mod",
+    "sha256": "31a9f29ca536613f168950c06ce5044e36c7d965c3bb57a37a91c63268ec4eaa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/hdevalence/ed25519consensus@v0.2.0/go.mod",
+    "sha256": "be371084b2cd094b627c56090e34606cfe27d37ed694953e1496fe93d33095e1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/huin/goupnp@v1.3.0/go.mod",
+    "sha256": "4ba36b6a3e1561c56b53048f085eb4e85dba0de340e2bacdc86a5fadb3956b16"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/insomniacslk/dhcp@v0.0.0-20260220084031-5adc3eb26f91/go.mod",
+    "sha256": "11936967e0e5942cabe27704610ad7fdc262d273edbe1c5940377ae194897d90"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/jsimonetti/rtnetlink@v1.4.1/go.mod",
+    "sha256": "3ff0b5b4edb3a57111d237bd5aa7d66b6bb5d5a23bb5aa643c6c9b18ad066bb6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/flate/testdata/fuzz/FuzzEncoding.zip",
+    "sha256": "acfdb98da61dacf8356c355f79dfd2d14e9678e0b7a5138ae24b7f05bf56d9fb"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/flate/testdata/fuzz/encode-raw-corpus.zip",
+    "sha256": "22e15782fb97d1d63589a2a6bdac7dff7ad67146bc988909370e10ddf706b00b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/flate/testdata/regression.zip",
+    "sha256": "f8d078cc0e73e41d50e7ce4b9623ca20be1776ba80bb3e1a4c2dfb85389ed037"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/fse/testdata/fse_compress.zip",
+    "sha256": "ccae39f06e124689c711c8de6ab225fc2919908d4b91e8358ed7fbf6c6706aac"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/fse/testdata/fse_decompress.zip",
+    "sha256": "5b34bf78b4fb76a0a752135f99fc9eafec2d775ea12cd4d9b2af6b6a4042492c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/go.mod",
+    "sha256": "0d66d6069d9e2fb875c5b464d15b2c80232cfc8991e6f88336ce461ca810e0cf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/huff0/testdata/decompress1x_regression.zip",
+    "sha256": "6fb7313cc87369d59a483704c431750df07325e8457d72eae666bf2d8d2617d0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/huff0/testdata/fse_compress.zip",
+    "sha256": "067353d40eb29792b41ee71c1be7b19b5008776bced86cb3841fc81193a4d88a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/huff0/testdata/huff0_decompress1x.zip",
+    "sha256": "215e3d78257b242ee9dce43c9911ec16e35ca44cd30acf01416f932ed0bdf462"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/huff0/testdata/regression.zip",
+    "sha256": "47a5ccce1cec9aee14c666a3593c4785a2cb787e06c2b6eb345dba827b3697b8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/dec-block-regressions.zip",
+    "sha256": "9f4af6ac0eb658cf6be5560dbf6a2ce9fca072757916091b3a68a694c8f1abe1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/enc_regressions.zip",
+    "sha256": "4c0de8cfb4c1a7b1d2afffe20a3328779065bf439082076d4789047d5a9b01e8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/fuzz/FuzzLZ4Block.zip",
+    "sha256": "cc371552546291d8f2dd2639627819c9b2e9a9b0ee53836adb1bcbb3198932e9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/fuzz/block-corpus-enc.zip",
+    "sha256": "af943bbeb9248ead8839082a8e470811e6feced7ed1bf8700415f99040c5ac1f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/fuzz/block-corpus-raw.zip",
+    "sha256": "9139a08e658da8bb6af1f3a316c4adcc23ac5fe4609142533ea394f5d1b8411d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/fuzz/dict-corpus-oss.zip",
+    "sha256": "eb3ddf641e19fc01a1d010999cd99e16c240bca219cfacd59c9026cb4ee3051a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2/testdata/fuzz/lz4-convert-corpus-raw.zip",
+    "sha256": "0a75eea35bb33957b0e054674ff864fa6e69dfa997e430110b36c0c3da587f3b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/s2sx.mod",
+    "sha256": "ef0e9e4a837fb274d86505ce02ab34e6612b3bdfd2a2b76a831063ac211e6da5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/snappy/xerial/testdata/FuzzDecode_raw.zip",
+    "sha256": "05daab90b68a84201a3facc036c8279fc1d34cf6571f7922d6ee2c21d4881158"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/snappy/xerial/testdata/FuzzDecoder.zip",
+    "sha256": "34915e0f685e1d00d53c8f0052cf4856d9989cde33613be3bbb5468c1f516930"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/snappy/xerial/testdata/block-corpus-raw.zip",
+    "sha256": "9fb7bac65172803c60a6f45b605a2476e7c1b693f51a99259f7b64eaca0a7c8c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/FuzzReader-enc.zip",
+    "sha256": "1c03d6abf4f5447d9ab61d1ab68004ef4c39bfa410b8ffbe6eb74826c53bd26c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/FuzzReader-raw.zip",
+    "sha256": "8b2655dc4480530e1a1d682ee27a823bcebddd1c4afb606e202e057419501e14"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/comment-truncated.zip",
+    "sha256": "898b98f14b279d1a79c9e9d3e15d92f7ec630bb6990226ecb693a80c4bf0696c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/crc32-not-streamed.zip",
+    "sha256": "bbf109e827cd301e67ef3b08082db8e0bacd9d7fe7e517278bf41821d3207898"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/dd.zip",
+    "sha256": "dcec917ea7852418f21c2b8fe67c8355fd6ff0e875c5bc3718e1b8684a064171"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/dupdir.zip",
+    "sha256": "80a6fbb7eb70527702bb1312d0ecf41c282b5c6910e47abe93858ce296cfbc93"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/go-no-datadesc-sig.zip",
+    "sha256": "2afdbe9ff49bd922f23484bdd3b5e02f203b55c81a91e202636646c8197bab74"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/go-with-datadesc-sig.zip",
+    "sha256": "6be41a66578438afdda77edfaec1857ca553fa091dc31a2bd7db0d8a3a3e9a30"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/readme.zip",
+    "sha256": "9ee76aa8a1c2ce04924b43424bf9d1b3138f812a80d6239f06f1133876f50d40"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/subdir.zip",
+    "sha256": "d57eff008fa79aab7d863c5e003d2bc35a5f734a9eac8b62289b9c6c395bb71f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/symlink.zip",
+    "sha256": "c871234a8d0c8787eacb357e53245d6663803fef1750518204a1aa97ec321f62"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/test-badbase.zip",
+    "sha256": "d11fa637a1153619ed3443401942d242238519feb24233bc1965a693b5f0d326"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/test-baddirsz.zip",
+    "sha256": "60452121e8533c13ae22ce41a2539278049ffb63a08e1fea3d7239b7e627e55a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/test-prefix.zip",
+    "sha256": "d88728cfbbc295b8e146bde1e21fd4514ea60cc9909eb9ddb7537b0d448bfcea"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/test-trailing-junk.zip",
+    "sha256": "acb77caa34accd11067629705ceb3d7cb01868134ae56fca3f9c6348dbd585d4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/test.zip",
+    "sha256": "e36d2ee9fbc41f7fe0b2717dc4b1fdc1978c9396dd28f3398b1f3a1a29dc146c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-22738.zip",
+    "sha256": "ffecd2607b24eb31a12d3d94b8cf951c48b2e17c66b19d71150fb98da0a727e3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-7zip.zip",
+    "sha256": "12e1b7b71a0943547acca38516aef5d89d2466c79dae5279a915389b7beace4d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-go.zip",
+    "sha256": "45c2b43fd74e27b3a511a2f3f31de08651689366e4344ff5e4a644b3be35f4b9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-infozip.zip",
+    "sha256": "0e129eb30eeda61f7bec57f7708047750e4cf6add713a289d4b879b394459846"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-osx.zip",
+    "sha256": "c374ae7910a6b6b8499c0bb7757474456450c994bf39dbe4d9a1ab8361f50856"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-win7.zip",
+    "sha256": "28774f00d29804f65a6af708a125d9b56ea20a98b1681ae4ab0e001474710e2a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-winrar.zip",
+    "sha256": "058b9c059e88fcd17d8e8bee4239f31073969c8affa4993498dbb7e5c1508518"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/time-winzip.zip",
+    "sha256": "b1ae5e20dc1608e8fda463f6d19c667f1dd2ce290981565528a1e11ac7452bfa"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/unix.zip",
+    "sha256": "ae84fe91799e805724d20949195c4476aa4e7c124a9229c79987a4f7e0cdb178"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/utf8-7zip.zip",
+    "sha256": "fda31b416bcacec89be0a8e1a9fe8f16b07b1761b34285a073f3cdde25209c4e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/utf8-infozip.zip",
+    "sha256": "d73791c790a2e4593a207d5e9ef7a5fdcb937db571be85747421b951655c98f6"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/utf8-osx.zip",
+    "sha256": "5da98564f0188c6ea25c5a681adac2bcf402a22b7e16bfdf087034be9e8b17a5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/utf8-winrar.zip",
+    "sha256": "f41036f0d011ae1c98de383360b1e26eb41f216cea17ab909f8fcf027ba20791"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/utf8-winzip.zip",
+    "sha256": "f04b2fca5ebaac681e7ca1f859bc0a1abe4193800255a449b2a3a871dc3f64a0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/winxp.zip",
+    "sha256": "d60fd70a6de4cc16363b5a424bcf703f5345f01c6a0595f5246ae12822bf719d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/zip64-2.zip",
+    "sha256": "941bf893b024dcb2269684357b6df18ca747ce873d6bdc626796572bf3a3f9e3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zip/testdata/zip64.zip",
+    "sha256": "d1a659d5a2d292682a17d789834d97b97650b6a8d188799ac1166fd85ace7dbd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/bad.zip",
+    "sha256": "15019a1a919893a9ea0b19d6b81900d0e82f127fcfbbd69a83495630eab847ad"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/benchdecoder.zip",
+    "sha256": "e337e6309a468388c38161eb6ff5e01b9712273d6118c3a430a2081cbfdfe178"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/comp-crashers.zip",
+    "sha256": "6e7c366ca7a0ea228a2af556c4ba795e54fa1e3193fb3b1f475d8db16b68d414"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/decode-regression.zip",
+    "sha256": "d73513c2c4c6ebf0d391e0316ffa6bac85a5fe1329d6a776cb7ca1c0dd7a1d87"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/decoder.zip",
+    "sha256": "e7eda39301d29fdd6fa4de3e14a619e25ca852f05cadb63494b985b8baea17a7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/dict-tests-small.zip",
+    "sha256": "4bf138cc3ab5756a4295c299bcf8620e438616bcb39c72dbd37fb18489bb4345"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/fuzz/decode-corpus-encoded.zip",
+    "sha256": "b2e7e16a29ac8ba58f08c92c4fd91fe7277e00a58457afc7b58b498a8bd9916e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/fuzz/decode-corpus-raw.zip",
+    "sha256": "5e207c40e971091ea28bf53ee534be49f1eaaf2850604a8927699ba3cb661959"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/fuzz/decode-oss.zip",
+    "sha256": "2b46fe89c88775df01e18f00c11ed65b97b8d60228c14e6ab4cc7d7ebb3412ab"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/fuzz/encode-corpus-encoded.zip",
+    "sha256": "b5cbdd4e1827617fc62f3db5983649d3d4504c638e3d3ca768280607d3a96ae0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/fuzz/encode-corpus-raw.zip",
+    "sha256": "6c2ba99842f0d77e42a505570e10dda00d5a87ba98223f4955de6bef9f96ad56"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/good.zip",
+    "sha256": "a02cf94d9b6d300b06e1322bcf8f6a9417d4d4a5357235ce11bc10f9817c02c8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/headers.zip",
+    "sha256": "224bb0edb050c01dac3f2e23a0f937b4408a31908851028a31c918cb676782d1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/large.zip",
+    "sha256": "4132ef459ca092439ee6c5740b3454d159a0a776b37573de4847e8b6ed24f1d2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/regression.zip",
+    "sha256": "999dbe71a87e92d4cf7620a9b6bb1d7752045775a734ee96b69cb2f37043296f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/seqs-want.zip",
+    "sha256": "6654cbd6d690f6b5b46391b0750410ca412fc94a695a6b130032760d9624699a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/compress@v1.19.1/zstd/testdata/seqs.zip",
+    "sha256": "3ec12864b1fd3abd94e6cf650844ea5b1fc285ffbf260f0d5a726ad91c773172"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/klauspost/cpuid/v2@v2.3.0/go.mod",
+    "sha256": "ff61d47f254f2333bf44a8ff4187a2f2e973693807c10025033bb37143577237"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/koron/go-ssdp@v0.0.4/go.mod",
+    "sha256": "0e82f7a9ad1f20f4b71348f9df0425037c48a38915f2a56ab28449bd192bc2f0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/kr/fs@v0.1.0/go.mod",
+    "sha256": "b5bced587ede9949a28f1a460313c49b08f5715b9880dbb57978327f8582efc0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libdns/acmedns@v0.5.0/go.mod",
+    "sha256": "5f3601f8ebdc05a3f7fa18f7e445252ce065a0e145b3eafc0c19cdc4be6105cd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libdns/alidns@v1.0.6/go.mod",
+    "sha256": "4892372bee22496cf49204bb7cf5b541bc38dbd80c6d8fe6f2ecdfd3dcef8940"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libdns/cloudflare@v0.2.2/go.mod",
+    "sha256": "74bb36ce2cac0e8804e8bc1e0aa6bbc8d7e992a284f1f9e0935e2c27609311ee"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libdns/libdns@v1.1.1/go.mod",
+    "sha256": "a399d6c02c1e6c66c35cb297ed55c0c812b551695f20e3ff8cc40349ba48f3f9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libp2p/go-nat@v1.0.1-0.20250821073202-01afc089f138/go.mod",
+    "sha256": "491ac6c1813a27894e9374b591087afe55bb476da61afbf922fb2a2206872ca4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/libp2p/go-netroute@v0.2.1/go.mod",
+    "sha256": "4eedd0f70911ba2a39789a89105844faa55f87d0f348ef7cbe69815de2762347"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/mattn/go-runewidth@v0.0.27/go.mod",
+    "sha256": "9091c793e255036ba8ced617fa3225972a745eaee5cad4cf264c1576e5c1347e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/mdlayher/netlink@v1.11.2/go.mod",
+    "sha256": "03043d103416a189dedb5a884419baa70de9af754238056f1d8fab7e58da7064"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/mdlayher/socket@v0.6.0/go.mod",
+    "sha256": "7b2e411d7e8c51d3d06545aabc5eaf336b3801b51b5c3492a6d6490eea513799"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/metacubex/utls@v1.8.7/go.mod",
+    "sha256": "bcc0b7db23cdf8aa9c84bacc13f8651b2bda1d8b6ff3dbc430221d801f0f02a1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/mholt/acmez/v3@v3.1.6/go.mod",
+    "sha256": "31a8bfeccf2302b3252db4d655a2b8a76722d16a6bc19355110f1a3118937891"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/miekg/dns@v1.1.72/go.mod",
+    "sha256": "226bacb99b8c5b372b58fa660895755cfc0997b45f9e71e7a144b4a68bdc963a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/mitchellh/go-ps@v1.0.0/go.mod",
+    "sha256": "4c9cf17f3fdf28ca0f95c15e1bf976e3b5065bebec1e76a8052373f32a9846c4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/openai/openai-go/v3@v3.26.0/go.mod",
+    "sha256": "572abe987773da81b63faaff49056dccc2cf59c9c40be180a0606ea67b8952b9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/oschwald/maxminddb-golang@v1.13.1/go.mod",
+    "sha256": "ddbd1f7e5c73e81fad617090a16eba9462caa13778c31731a728cd529ae629a9"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pierrec/lz4/v4@v4.1.26/go.mod",
+    "sha256": "d32329505d5af04449fe6ba227a97d170e0c98a99c123bf7908ac4ff44ae0f4b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pion/dtls/v3@v3.1.5/go.mod",
+    "sha256": "b1b2047d3189625f2a0ce2dc0d665a5ed2884ba63d12520ce1735345290c906b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pion/logging@v0.2.4/go.mod",
+    "sha256": "bfbce8d81a9eaf0b1ba6d3c4d0a58f7e7d6d1be06bec518db96f62f7feeb3d6f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pion/transport/v4@v4.0.2/go.mod",
+    "sha256": "a3cbbcdfef23c4b414bc2584260dc4e1935f7dc7d4daf726e477707b357d086a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pires/go-proxyproto@v0.8.1/go.mod",
+    "sha256": "835dd458124aa077b6ea3616cca41c419295991c6946b7b668f42b3e5bac06e7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/pkg/sftp@v1.13.10/go.mod",
+    "sha256": "c15f2747ae98a576407667023f56682c43df8d03059308c64b3e22ef29bd842b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/quic-go/qpack@v0.6.0/go.mod",
+    "sha256": "7cdce4a0772f217deb859f405b7d58c84d909fcdab5e547e3e3d3aeb1148e641"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/safchain/ethtool@v0.3.0/go.mod",
+    "sha256": "97bf7dcec80aab57bb5dcaa846394a8701a5c2c6ff87af0486e41dfcb011fb5c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/bbolt@v0.0.0-20260915102804-500ee1e84832/go.mod",
+    "sha256": "85129979e7587fa3accb15ba084894322b497092135a5f5a2659b9781f59c4b2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/cors@v1.2.1/go.mod",
+    "sha256": "47eb2d20c79ba241e6e699c2bdf848a0eea47d179f214e7b913f5d6fa542bc62"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/fswatch@v0.1.2/go.mod",
+    "sha256": "c32fed68937f07d01ffccfcec7c6741363f6737d32858fe2c5911baddd549bd7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/gliderssh@v0.3.4-0.20261023092853-e0cad6d28647/go.mod",
+    "sha256": "d56a785506f76eaa043cedb664f78ae93f71dabbab3400836972a19800d943d4"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/gvisor@v0.0.0-20260727.0-sing-box-mod.1/go.mod",
+    "sha256": "304fdcb314d1f04c31b24ae960eb1d3a25d63900585feae33a9a423304a49647"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/netlink@v0.0.0-20260814022025-64455d367bbf/go.mod",
+    "sha256": "43e97dc4045dd409cea4b36c8de8f02e0bf6fe1e3eddfdc1a3a4585f747c2d2e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/nftables@v0.3.0-mod.4/go.mod",
+    "sha256": "d98884c49915c4e873b5ea67c88b72946c4fd580e0af7e0feee6d81443f934fe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/quic-go@v0.61.0-sing-box-mod.12/go.mod",
+    "sha256": "34b1c21ccffa98125b3f6c334d166f83a0820c8cc4bc88343ee4495fabd0ce0c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-cloudflared@v0.1.4-0.20261021152903-2d40d788fcf6/go.mod",
+    "sha256": "bc954c4cfce6925a150787cfa5c9802559b9bee2cdb2dc4c9d4775d9977249e2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-mux@v0.3.10-0.20260929204512-caf09fe32475/go.mod",
+    "sha256": "420c22c5c09e98093dd9e153afe502acb43ec1095f154666ba0b4277c876adf8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-openconnect@v0.1.1-0.20260929151225-cbd68c45de58/go.mod",
+    "sha256": "875b3eb85936f26756d4f177013324f90a7586a43fc0dc5bc1c947bf75c7cb56"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-openvpn@v0.1.1-0.20261020061838-432d37b47c92/go.mod",
+    "sha256": "a0ad46a91bdf2b6fc0db31d8908d267a09dae101130164de1731a5b55040b44e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-quic@v0.7.2-0.20261020082049-7e0a5869a5f4/go.mod",
+    "sha256": "c03756073a5030d4f20769faa8135c28d02dd91fc6a36ad919c7ae2ef7031c64"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-shadowsocks2@v0.2.2-0.20260929152114-a69d1086332b/go.mod",
+    "sha256": "98c2e27e525b29345d3097cfd42da06f1f14715b10e0207580a36389999067e8"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-shadowsocks@v0.2.9-0.20260929204512-65740e0f0e3e/go.mod",
+    "sha256": "14f7ba3b6780fd160c9cbc8096e67ecd07e25ca3dafd2ffedbfae930f628d7d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-shadowtls@v0.2.2-0.20260928201441-a9c0127d5c99/go.mod",
+    "sha256": "76fbf9d8ae9f9aaf05bd5b9e03440c418db33fae918b25e2b217e5e268d12404"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-snell@v0.0.0-20260904135315-bc5a12ac736f/go.mod",
+    "sha256": "e68b446b695e6a25f0831533bf557533745c8cd58cb79b8785ef70d251ccd1ec"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-tun@v0.9.7-0.20261023115432-040db71fcd33/go.mod",
+    "sha256": "8a0c0b76e272b6432c31bbf792e91c108018dcb631ad027c50f50e0d54997bc2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-usbip@v0.0.0-20260817040617-28bd42667eca/go.mod",
+    "sha256": "abe6f7f14d0ea699b418899a332455e7d11b8eba376815a22089554767089adf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing-vmess@v0.2.9-0.20261019223527-a0c58542bd9d/go.mod",
+    "sha256": "9c678f70449c52c57b1bf6dc40ac5bf55c0a61e3336a8dd0d082aa352e510471"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/sing@v0.9.7-0.20261023115459-5dc452e537bf/go.mod",
+    "sha256": "33f9b3c2b1125a5d252e66b06a51393a107194fceb181577aac5452c71b160d3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/smux@v1.5.50-sing-box-mod.1/go.mod",
+    "sha256": "7d3868ce6d71deb4e3462dab150cb733fe236a0e311e0ea04d7ad8ab3eee4a7c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/tailscale@v1.102.1-sing-box-1.14-mod.5.0.20261019070639-79c1732442a9/go.mod",
+    "sha256": "a0e4ecef870a34486b166d16b9745fd8277dfe19b14ed954105c48aca68ee1cd"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/wireguard-go@v0.0.8-0.20261022215841-e4d85ef2ed38/go.mod",
+    "sha256": "632b090559dca7e370454ef80826058d1c01dcc16bd6a87c766f8b4a6009ebbe"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/sagernet/ws@v0.0.0-20231204124109-acfe8907c854/go.mod",
+    "sha256": "ecb9a4a688051d981c0e4cfd13579dcf8806aa727303583944b2451e1fbfc9fc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/smallstep/pkcs7@v0.1.1/go.mod",
+    "sha256": "833dc7bc05dd71f3c94d169d6aa23f952e73c9e6102c74a4815ea619fd01e265"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/spf13/cobra@v1.10.2/go.mod",
+    "sha256": "cc6098fd1118fb3bb349c72bcd6e9c665d3a1b2a516ea9807ee24521ad2ddf8c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/spf13/pflag@v1.0.10/go.mod",
+    "sha256": "16c6dfc0eb58eb3c9113ce197d460c6725c647e4688ac26d31c8ed69f1ebbc68"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tailscale/hujson@v0.0.0-20260302212456-ecc657c15afd/go.mod",
+    "sha256": "300c72a8eef10aaa39678c4b61f0a3c225bd122786d37c2c3fc7773e70ff79c7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tailscale/netlink@v1.1.1-0.20240822203006-4d49adab4de7/go.mod",
+    "sha256": "0a6a5bdb6f9c267f00827e6ff79e84d0bf71a55ac1f880208bff9fa600d30b3d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tailscale/peercred@v0.0.0-20250107143737-35a0c7bd7edc/go.mod",
+    "sha256": "01f3d17cce127160210b43d5edada3fa84ac705f7ed1147f8fe4efdf765eb95b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tailscale/web-client-prebuilt@v0.0.0-20250124233751-d4cd19a26976/go.mod",
+    "sha256": "2e7117874ed4f3f78fc2b0a96d2419b8ee5fb9f71f7df91e4a5e87c6b7e90d9d"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tidwall/gjson@v1.18.0/go.mod",
+    "sha256": "d94eecd8050cffc957b99bed8a308efeaa669ac13854290d081a2ded5478af93"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tidwall/match@v1.1.1/go.mod",
+    "sha256": "02364e515327d9988d1f6bd37af9c584f8b98d3b4f43f9e1f18e26d76aec0f44"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tidwall/pretty@v1.2.1/go.mod",
+    "sha256": "6e5c5fa493d8f18e8974b38ed63e8c71863cce59e659d98d0ef8417bf81e3ecf"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tidwall/sjson@v1.2.5/go.mod",
+    "sha256": "38b09323ab8ef8f803b3d86bae2c94765d3815a2d5b751fd4f07039f4551cc6f"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/tjfoc/gmsm@v1.4.1/go.mod",
+    "sha256": "b319fbb61091a5581939ece45de36f41545dd77478cfaffc5d49061796f5f69e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/u-root/uio@v0.0.0-20240224005618-d2acac8f3701/go.mod",
+    "sha256": "397f39997810b09538441accd2343d71bad78943c4f224939740580a2f45a6c3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/vishvananda/netns@v0.0.5/go.mod",
+    "sha256": "de8a0c0518c7841b4f04762ee7367c4ff1953381082e066793fa1c93e93883c2"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/x448/float16@v0.8.4/go.mod",
+    "sha256": "f8a8238aa734c1d2463d48f8808e35124546bd5222b13e4c097746ded5a57e1e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/youmark/pkcs8@v0.0.0-20240726163527-a2c0da244d78/go.mod",
+    "sha256": "ac53991d6663f30fd358884c3bfa4fd0651f042a56ac3632c56b3f9824205abc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/github.com/zeebo/blake3@v0.2.4/go.mod",
+    "sha256": "9e2d9f5afaefb91d63405907f73f80f1d1471fd2bec2642068106dd19d1df141"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/go.uber.org/multierr@v1.11.0/go.mod",
+    "sha256": "58a30dde730aba57576715d90841774f6344a879fec5633a2c66b37ec30c11f0"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/go.uber.org/zap/exp@v0.3.0/go.mod",
+    "sha256": "5dfb164a526b208436988b2d2d97409912a66d7ea31af84571eb5ae7b52fd184"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/go.uber.org/zap@v1.27.1/go.mod",
+    "sha256": "ad805944459a14360eeb0677b7c6fc4ff7a9da80fb03764afa7d91cf02e285c7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/go4.org/mem@v0.0.0-20240501181205-ae6ca9944745/go.mod",
+    "sha256": "4caf98eb924c6539689fe4851b2acdff647b72ed38f95faad5442ea0c6efd105"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/go4.org/netipx@v0.0.0-20231129151722-fdeea329fbba/go.mod",
+    "sha256": "567ffe55c30a5346e382d4e54ef8a82a80704c9a3979e30bb66309a9a244a70b"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/crypto@v0.54.0/go.mod",
+    "sha256": "d852b93b93f9cd911708ffd45409439956d4e9c8497c5b87f348fc83d0adc577"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/exp@v0.0.0-20260410095643-746e56fc9e2f/go.mod",
+    "sha256": "2e2539b47bf2e73f6bcbf108d277013c44100f5f2684b0bb92d219b6187e088a"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/mod@v0.37.0/go.mod",
+    "sha256": "538472fdf094dd5e49dc40e70468fa931a93c241eba07fb946a98747c94ab4df"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/net@v0.57.0/go.mod",
+    "sha256": "bfc4c34b9fa5d70e4837542577560e92f743e24f584a39877850650c19a444a1"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/oauth2@v0.36.0/go.mod",
+    "sha256": "90ff0f4a036bc1c24e6c006fe18d97d6d11683431f8f197b7ad48a341da72682"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/sync@v0.22.0/go.mod",
+    "sha256": "a3e29e76060bd561060454b1fa2bdcd66674f60c9ca93833b8106355e34c603c"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/sys@v0.47.0/go.mod",
+    "sha256": "57f4393ea18d5446a12363b35c23a616d843fa1669c7121a70a2bc3a9677d665"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/term@v0.45.0/go.mod",
+    "sha256": "62c3f9d1a5ae12264ab48e2c8acc08c9f201bda9619de171544eb5714b74aec5"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/text@v0.40.0/go.mod",
+    "sha256": "e69fb09b14637cab6245a1253c22d80121b79d9fe3ddd19b558629e15baadaf3"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.org/x/time@v0.15.0/go.mod",
+    "sha256": "6149b2491c92f67545fc5da0083a791e369b3f99670d30f52bde0604c48c9e69"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/golang.zx2c4.com/wireguard/wgctrl@v0.0.0-20241231184526-a9ab2273dd10/go.mod",
+    "sha256": "408711081215d7c52af02446ccfbc76d77f687e3ce54d8c43c2a983d464d7cbc"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/google.golang.org/genproto/googleapis/rpc@v0.0.0-20251202230838-ff82c1b0f217/go.mod",
+    "sha256": "71783d00d20c3a1b393d1ad82131a69b5f01954caed5d65bce699d7fc4344cb7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/google.golang.org/grpc@v1.79.1/go.mod",
+    "sha256": "15480c80064d2087c6122d069a8da86479eebaa74ca3c2b15a5627afa36988e7"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/google.golang.org/protobuf@v1.36.11/go.mod",
+    "sha256": "a75c105a852fbd8da8d8cfac09c2eab9a206cfd27ed37c973737e23f632ca96e"
+  },
+  {
+    "path": "build-native-adapter-cache/go-mod/lukechampine.com/blake3@v1.3.0/go.mod",
+    "sha256": "a28a0ba97d6172b509b564052bf67a0771eba014d273b72449182a592cee2423"
+  },
+  {
+    "path": "build-source-sing-box/go.mod",
+    "sha256": "e5f23c00072adeee7285fabe8ea8dab9049ed8ae5e86fbf06b7a033b6126d24c"
+  },
+  {
+    "path": "build-source-sing-box/test/go.mod",
+    "sha256": "8ca39e60f0210c9a7d1bb341dc2fa0e1fc320bb00fc2f4af0cfa2f65589506dd"
+  }
+]

@@ -12,6 +12,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+#[cfg(test)]
+thread_local! {static WITNESSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };}
+
 const MAX_PROCESSES: usize = 256;
 const MAX_TASKS: usize = 256;
 const MAX_FDS_PER_TASK: usize = 256;
@@ -28,6 +31,8 @@ fn witness(
     deadline: Instant,
     cancelled: &AtomicBool,
 ) -> Result<Option<(u64, u64)>, Unavailable> {
+    #[cfg(test)]
+    WITNESSES.with(|count| count.set(count.get() + 1));
     witness_dump::<true>(flow, deadline, cancelled)
 }
 
@@ -624,13 +629,52 @@ mod tests {
         );
         assert_eq!(calls, 0);
     }
+    fn observe(
+        client: &impl std::os::fd::AsRawFd,
+        f: Flow,
+        epoch: u64,
+        deadline: Instant,
+    ) -> Result<super::OwnerSnapshot, Unavailable> {
+        use std::os::unix::fs::MetadataExt;
+        let observed_from = Instant::now();
+        let pid = std::process::id();
+        let uid = rustix::process::getuid().as_raw();
+        let process = super::Process::capture(pid, uid).unwrap();
+        let exe = std::fs::File::open("/proc/self/exe").unwrap();
+        let m = exe.metadata().unwrap();
+        let result = witness(f, (observed_from + super::DEADLINE).min(deadline));
+        eprintln!(
+            "retained capture/witness elapsed={:?}, result={result:?}",
+            observed_from.elapsed()
+        );
+        let (inode, cookie) = result?.expect("socket fixture должен присутствовать");
+        assert_eq!(
+            std::fs::read_link(format!("/proc/{pid}/task/{pid}/fd/{}", client.as_raw_fd()))
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("socket:[{inode}]")
+        );
+        process.validate().unwrap();
+        Ok(super::OwnerSnapshot {
+            pidfd: process.pidfd,
+            executable_fd: exe,
+            pid,
+            start_time: process.start,
+            executable: (m.dev(), m.ino()),
+            cookie,
+            epoch,
+            socket_inode: inode,
+            task_id: pid,
+            task_start: process.start,
+            socket_fd: client.as_raw_fd() as u32,
+            observed_from,
+            observed_until: Instant::now(),
+        })
+    }
     fn retained_projection_attempt(deadline: Instant) -> Result<(), Unavailable> {
-        use super::super::{Broker, Process, TrustedContext};
-        use std::{
-            collections::VecDeque,
-            fs,
-            os::{fd::AsRawFd, unix::fs::MetadataExt},
-        };
+        use super::super::{Broker, TrustedContext};
+        use std::{collections::VecDeque, fs, os::unix::fs::MetadataExt};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client =
             std::sync::Arc::new(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
@@ -639,49 +683,7 @@ mod tests {
         let pid = std::process::id();
         let uid = rustix::process::getuid().as_raw();
         let context = TrustedContext::from_host(pid, uid, uid, 7, [1; 32], [2; 32]).unwrap();
-        fn observe(
-            client: &TcpStream,
-            f: Flow,
-            epoch: u64,
-            deadline: Instant,
-        ) -> Result<super::OwnerSnapshot, Unavailable> {
-            let observed_from = Instant::now();
-            let pid = std::process::id();
-            let uid = rustix::process::getuid().as_raw();
-            let process = Process::capture(pid, uid).unwrap();
-            let exe = fs::File::open("/proc/self/exe").unwrap();
-            let m = exe.metadata().unwrap();
-            let result = witness(f, (observed_from + super::DEADLINE).min(deadline));
-            eprintln!(
-                "retained capture/witness elapsed={:?}, result={result:?}",
-                observed_from.elapsed()
-            );
-            let (inode, cookie) = result?.expect("socket fixture должен присутствовать");
-            assert_eq!(
-                fs::read_link(format!("/proc/{pid}/task/{pid}/fd/{}", client.as_raw_fd()))
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                format!("socket:[{inode}]")
-            );
-            process.validate().unwrap();
-            Ok(super::OwnerSnapshot {
-                pidfd: process.pidfd,
-                executable_fd: exe,
-                pid,
-                start_time: process.start,
-                executable: (m.dev(), m.ino()),
-                cookie,
-                epoch,
-                socket_inode: inode,
-                task_id: pid,
-                task_start: process.start,
-                socket_fd: client.as_raw_fd() as u32,
-                observed_from,
-                observed_until: Instant::now(),
-            })
-        }
-        let mut snapshot = observe(&client, f, 7, deadline)?;
+        let mut snapshot = observe(&*client, f, 7, deadline)?;
         let mut broker = Broker {
             context,
             cache: VecDeque::new(),
@@ -699,6 +701,80 @@ mod tests {
             fs::read_link("/proc/self/exe").unwrap().to_str().unwrap()
         );
         assert!(ttl > Duration::ZERO && ttl <= Duration::from_millis(20));
+        // Мутации после выбора candidate обязаны достигать final validator.
+        for mutation in 0..7 {
+            let candidate = observe(&*client, f, 7, deadline)?;
+            broker.cache = VecDeque::from([(f, candidate)]);
+            super::super::CANDIDATE_HOOK.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move |s| match mutation {
+                    0 => s.start_time ^= 1,
+                    1 => s.socket_fd = u32::MAX,
+                    2 => s.cookie ^= 1,
+                    3 => s.executable.1 ^= 1,
+                    4 => s.epoch ^= 1,
+                    5 => s.observed_from -= Duration::from_millis(21),
+                    _ => s.executable_fd = std::fs::File::open("/dev/null").unwrap(),
+                }))
+            });
+            assert!(
+                matches!(
+                    broker.lookup_and_project(f, 7),
+                    super::super::ProjectedLookup::Unavailable(_)
+                ),
+                "mutation {mutation}"
+            );
+            assert!(broker.cache.is_empty());
+        }
+        let candidate = observe(&*client, f, 7, deadline)?;
+        broker.cache = VecDeque::from([(f, candidate)]);
+        super::WITNESSES.with(|n| n.set(0));
+        let result = broker.lookup_and_project(f, 7);
+        assert!(matches!(result, super::super::ProjectedLookup::Known(_)));
+        assert_eq!(super::WITNESSES.with(|n| n.get()), 1);
+        eprintln!("single RPC cache-hit witnesses=1");
+        let candidate = observe(&*client, f, 7, deadline)?;
+        let mut wrong = f;
+        wrong.remote_port ^= 1;
+        broker.cache = VecDeque::from([(wrong, candidate)]);
+        assert!(matches!(
+            broker.lookup_and_project(wrong, 7),
+            super::super::ProjectedLookup::Unavailable(_)
+        ));
+        let candidate = observe(&*client, f, 7, deadline)?;
+        broker.cache = VecDeque::from([(f, candidate)]);
+        assert!(matches!(
+            broker.lookup_and_project(f, 8),
+            super::super::ProjectedLookup::Unavailable(Unavailable::Authority)
+        ));
+        broker
+            .context
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(matches!(
+            broker.lookup_and_project(f, 7),
+            super::super::ProjectedLookup::Unavailable(Unavailable::Cancelled)
+        ));
+        assert!(broker.cache.is_empty());
+        broker
+            .context
+            .cancelled
+            .store(false, std::sync::atomic::Ordering::Release);
+        let closing = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_closing_peer, _) = listener.accept().unwrap();
+        let closing_flow = flow(
+            closing.local_addr().unwrap(),
+            closing.peer_addr().unwrap(),
+            6,
+        );
+        let candidate = observe(&closing, closing_flow, 7, deadline)?;
+        broker.cache = VecDeque::from([(closing_flow, candidate)]);
+        super::super::CANDIDATE_HOOK
+            .with(|h| *h.borrow_mut() = Some(Box::new(move |_| drop(closing))));
+        assert!(matches!(
+            broker.lookup_and_project(closing_flow, 7),
+            super::super::ProjectedLookup::Unavailable(_)
+        ));
+        assert!(broker.cache.is_empty());
         let wire_client = std::sync::Arc::clone(&client);
         let wire_broker = Broker {
             context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32]).unwrap(),
@@ -708,9 +784,8 @@ mod tests {
         crate::attribution::native_session::known_roundtrip(
             wire_broker,
             move |broker| {
-                let snapshot = observe(&wire_client, f, 1, deadline)?;
-                // Lookup и project повторно проверяют реальный snapshot; лишняя
-                // тестовая проверка здесь расходовала тот же production TTL.
+                let snapshot = observe(&*wire_client, f, 1, deadline)?;
+                // Candidate проверяется единственным final validator внутри RPC.
                 broker.cache = VecDeque::from([(f, snapshot)]);
                 Ok(())
             },
@@ -724,12 +799,12 @@ mod tests {
             broker.project(f, &stale, 7),
             Err(Unavailable::Timeout)
         ));
-        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot = observe(&*client, f, 7, deadline)?;
         assert!(broker.project(f, &snapshot, 8).is_err());
-        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot = observe(&*client, f, 7, deadline)?;
         snapshot.executable.1 ^= 1;
         assert!(broker.project(f, &snapshot, 7).is_err());
-        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot = observe(&*client, f, 7, deadline)?;
         let path = std::env::temp_dir().join(format!("yonik-deleted-exe-{}", pid));
         let file = fs::OpenOptions::new()
             .write(true)
@@ -739,7 +814,7 @@ mod tests {
         snapshot.executable_fd = file;
         // Реально заменённый retained FD не соответствует исходному executable.
         assert!(broker.project(f, &snapshot, 7).is_err());
-        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot = observe(&*client, f, 7, deadline)?;
         snapshot.executable_fd = fs::File::open(&path).unwrap();
         let metadata = snapshot.executable_fd.metadata().unwrap();
         snapshot.executable = (metadata.dev(), metadata.ino());
@@ -748,10 +823,138 @@ mod tests {
             broker.project(f, &snapshot, 7),
             Err(Unavailable::Coverage)
         ));
-        snapshot = observe(&client, f, 7, deadline)?;
+        snapshot = observe(&*client, f, 7, deadline)?;
         broker.revoke();
+        assert!(matches!(
+            broker.lookup_and_project(f, 7),
+            super::super::ProjectedLookup::Unavailable(Unavailable::Revoked)
+        ));
         assert!(broker.project(f, &snapshot, 7).is_err());
         Ok(())
+    }
+    #[test]
+    fn single_rpc_cookieless_tcp_udp_v4_v6() {
+        use super::super::{Broker, TrustedContext};
+        use std::{collections::VecDeque, os::fd::OwnedFd};
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            for protocol in [6, 17] {
+                let deadline = Instant::now() + Duration::from_secs(1);
+                retained_projection_retry(deadline, |deadline| {
+                    let (client, _peer, f): (OwnedFd, OwnedFd, Flow) = if protocol == 6 {
+                        let listener = TcpListener::bind(address).unwrap();
+                        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                        let (peer, _) = listener.accept().unwrap();
+                        let f = flow(
+                            client.local_addr().unwrap(),
+                            client.peer_addr().unwrap(),
+                            protocol,
+                        );
+                        (client.into(), peer.into(), f)
+                    } else {
+                        let client = UdpSocket::bind(address).unwrap();
+                        let peer = UdpSocket::bind(address).unwrap();
+                        client.connect(peer.local_addr().unwrap()).unwrap();
+                        let f = flow(
+                            client.local_addr().unwrap(),
+                            peer.local_addr().unwrap(),
+                            protocol,
+                        );
+                        (client.into(), peer.into(), f)
+                    };
+                    let client = std::sync::Arc::new(client);
+                    let retained = std::sync::Arc::clone(&client);
+                    assert!(f.cookie.is_none());
+                    let pid = std::process::id();
+                    let uid = rustix::process::getuid().as_raw();
+                    let broker = Broker {
+                        context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32])
+                            .unwrap(),
+                        cache: VecDeque::new(),
+                        last_cold: None,
+                    };
+                    crate::attribution::native_session::known_roundtrip(
+                        broker,
+                        move |broker| {
+                            let snapshot = observe(&*client, f, 1, deadline)?;
+                            broker.cache = VecDeque::from([(f, snapshot)]);
+                            // Сокет должен жить до завершения RPC, включая final witness.
+                            let _ = &client;
+                            Ok(())
+                        },
+                        f,
+                        deadline,
+                    )?;
+                    let mut cold = Broker {
+                        context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32])
+                            .unwrap(),
+                        cache: VecDeque::new(),
+                        last_cold: None,
+                    };
+                    super::WITNESSES.with(|n| n.set(0));
+                    let cold_result = cold.lookup_and_project(f, 1);
+                    let count = super::WITNESSES.with(|n| n.get());
+                    match cold_result {
+                        super::super::ProjectedLookup::Known(_) => {
+                            assert_eq!(count, 3);
+                            eprintln!("cold Known witnesses={count}");
+                        }
+                        super::super::ProjectedLookup::Unavailable(reason) => eprintln!(
+                            "cold unavailable={reason:?} witnesses={count}; cold Known не доказан"
+                        ),
+                        _ => panic!("существующий connected socket должен иметь candidate"),
+                    }
+                    drop(retained);
+                    eprintln!("cookieless Known family={} protocol={protocol}", f.family);
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+    }
+    #[test]
+    fn cookieless_retry_recovers_after_callback_timeout() {
+        use super::super::{Broker, TrustedContext};
+        use std::collections::VecDeque;
+        let mut attempts = 0;
+        retained_projection_retry(Instant::now() + Duration::from_secs(1), |deadline| {
+            attempts += 1;
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (_peer, _) = listener.accept().unwrap();
+            let f = flow(client.local_addr().unwrap(), client.peer_addr().unwrap(), 6);
+            let uid = rustix::process::getuid().as_raw();
+            let broker = Broker {
+                context: TrustedContext::from_host(
+                    std::process::id(),
+                    uid,
+                    uid,
+                    1,
+                    [3; 32],
+                    [2; 32],
+                )
+                .unwrap(),
+                cache: VecDeque::new(),
+                last_cold: None,
+            };
+            let retained = std::sync::Arc::new(client);
+            let client = std::sync::Arc::clone(&retained);
+            let force_timeout = attempts == 1;
+            crate::attribution::native_session::known_roundtrip(
+                broker,
+                move |broker| {
+                    // Управляемая ошибка callback проверяет retry, не причину задержки CI.
+                    if force_timeout {
+                        return Err(Unavailable::Timeout);
+                    }
+                    broker.cache = VecDeque::from([(f, observe(&*client, f, 1, deadline)?)]);
+                    Ok(())
+                },
+                f,
+                deadline,
+            )
+        })
+        .unwrap();
+        assert!((2..=3).contains(&attempts));
     }
     #[test]
     fn cache_rejects_reuse_executable_and_epoch_without_churn() {
@@ -804,6 +1007,40 @@ mod tests {
             revalidate(&context, f, &s),
             Err(Unavailable::Timeout)
         ));
+    }
+    #[test]
+    fn cookieless_dump_keeps_bound_interfaces_ambiguous() {
+        let f = flow(
+            "127.0.0.1:42000".parse().unwrap(),
+            "127.0.0.1:42001".parse().unwrap(),
+            17,
+        );
+        let mut dump = super::DiagDump {
+            flow: f,
+            found: None,
+            count: 0,
+        };
+        for interface in [1u32, 2] {
+            let mut message = vec![0; 88];
+            message[..4].copy_from_slice(&88u32.to_ne_bytes());
+            message[4..6].copy_from_slice(&20u16.to_ne_bytes());
+            message[8..12].copy_from_slice(&1u32.to_ne_bytes());
+            let body = &mut message[16..];
+            body[0] = f.family;
+            body[4..6].copy_from_slice(&f.local_port.to_be_bytes());
+            body[6..8].copy_from_slice(&f.remote_port.to_be_bytes());
+            body[8..24].copy_from_slice(&f.local);
+            body[24..40].copy_from_slice(&f.remote);
+            body[40..44].copy_from_slice(&interface.to_ne_bytes());
+            body[44..48].copy_from_slice(&interface.to_ne_bytes());
+            body[68..72].copy_from_slice(&interface.to_ne_bytes());
+            let result = dump.consume(&message, rustix::net::ReturnFlags::empty());
+            if interface == 1 {
+                assert!(matches!(result, Ok(super::DumpProgress::Pending)));
+            } else {
+                assert!(matches!(result, Err(Unavailable::AmbiguousSocket)));
+            }
+        }
     }
     #[test]
     fn actual_udp_reuseport_dump_preserves_ambiguity() {

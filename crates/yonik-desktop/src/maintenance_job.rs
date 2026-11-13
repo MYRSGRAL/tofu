@@ -6,10 +6,12 @@ pub(super) enum Failure {
     Copy(yonik_linux::MaintenanceError),
     Reopen(yonik_linux::RepositoryError),
     Access(yonik_linux::RepositoryError),
+    Boundary(Cause),
 }
 impl Failure {
     pub fn context(self) -> Cause {
         match self {
+            Self::Boundary(cause) => cause,
             Self::Copy(yonik_linux::MaintenanceError::Cancelled) => Cause::MaintenanceCancelled,
             Self::Copy(yonik_linux::MaintenanceError::Repository(
                 yonik_linux::RepositoryError::InvalidInput,
@@ -79,6 +81,15 @@ pub(super) struct Outcome {
         DesktopSchedule,
     )>,
     pub result: std::result::Result<(), &'static str>,
+}
+
+pub(super) fn joined(result: std::result::Result<Outcome, tokio::task::JoinError>) -> Outcome {
+    result.unwrap_or(Outcome {
+        cause: Some(Failure::Boundary(Cause::MaintenanceTaskFailed)),
+        drained: false,
+        handles: None,
+        result: Err("cleanup_failed"),
+    })
 }
 
 pub(super) async fn run(
@@ -177,7 +188,13 @@ where
         // Join — подтверждение освобождения service clone, включая commit ACK.
         let _result = task.await;
     }
-    let schedule_closed = schedule.runtime.shutdown(now).await.is_ok();
+    let report = schedule.runtime.shutdown_report(now).await;
+    let schedule_closed = report.is_ok();
+    let scheduler_failure = match report {
+        Err(_) => Some(Cause::MaintenanceSchedulerDrainFailed),
+        Ok(failures) if !failures.is_empty() => Some(Cause::MaintenanceSchedulerAdmissionFailed),
+        Ok(_) => None,
+    };
     let replacement = schedule.replacement();
     drop(schedule);
     let access = repository.maintenance_access().await;
@@ -194,10 +211,16 @@ where
             };
         }
     };
-    if !schedule_closed || !service_closed || !repository_closed {
+    if scheduler_failure.is_some() || !service_closed || !repository_closed {
         return Outcome {
-            cause: None,
-            drained: false,
+            cause: Some(Failure::Boundary(scheduler_failure.unwrap_or(
+                if !service_closed {
+                    Cause::MaintenanceServiceDrainFailed
+                } else {
+                    Cause::MaintenanceRepositoryDrainFailed
+                },
+            ))),
+            drained: schedule_closed && service_closed && repository_closed,
             handles: None,
             result: Err("cleanup_failed"),
         };
@@ -212,10 +235,15 @@ where
                         .load(&service, now.saturating_add(started.elapsed()))
                         .await;
                     Outcome {
-                        cause: if loaded.is_ok() { cause } else { None },
+                        cause: cause.or_else(|| {
+                            loaded
+                                .as_ref()
+                                .err()
+                                .map(|_| Failure::Boundary(Cause::MaintenanceScheduleReloadFailed))
+                        }),
                         drained: true,
                         handles: Some((service, repository, schedule)),
-                        result: if loaded.is_ok() {
+                        result: if result.is_err() || loaded.is_ok() {
                             result
                         } else {
                             Err("storage")
@@ -226,19 +254,21 @@ where
                     let service_closed = service.close().await.is_ok();
                     let repository_closed = repository.close().await.is_ok();
                     Outcome {
-                        cause: None,
+                        cause: cause.or(Some(Failure::Boundary(
+                            Cause::MaintenanceScheduleReplacementFailed,
+                        ))),
                         drained: service_closed && repository_closed,
                         handles: None,
-                        result: Err("storage"),
+                        result: result.and(Err("storage")),
                     }
                 }
             }
         }
         Err(error) => Outcome {
-            cause: Some(Failure::Reopen(error)),
+            cause: cause.or(Some(Failure::Reopen(error))),
             drained: true,
             handles: None,
-            result: Err("storage"),
+            result: result.and(Err("storage")),
         },
     }
 }
@@ -290,6 +320,251 @@ static TEST_GATE: Mutex<Option<TestGate>> = Mutex::new(None);
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn boundaries_preserve_admission_and_replacement_failures() {
+        for mode in [
+            "admission",
+            "replacement",
+            "copy_replacement",
+            "reload",
+            "copy_reload",
+        ] {
+            let directory =
+                std::env::temp_dir().join(format!("yonik-boundary-{mode}-{}", std::process::id()));
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&directory)
+                .expect("fixture");
+            let path = directory.join("source.sqlite");
+            let repository =
+                EncryptedSubscriptionRepository::open(path.clone(), Zeroizing::new([59; 32]))
+                    .await
+                    .expect("БД");
+            let service = SubscriptionService::new(repository.clone());
+            let mut schedule = DesktopSchedule::new().expect("scheduler");
+            if mode == "admission" || mode.ends_with("reload") {
+                let id = service
+                    .add(
+                        yonik_linux::SubscriptionSource::new(
+                            "Тест".into(),
+                            "http://127.0.0.1:9/sub".into(),
+                            true,
+                            yonik_linux::FetchRoute::Direct,
+                        )
+                        .expect("source"),
+                    )
+                    .await
+                    .expect("add");
+                if mode == "admission" {
+                    let token = service
+                        .schedule_metadata(id)
+                        .await
+                        .expect("metadata")
+                        .expect("token");
+                    schedule
+                        .runtime
+                        .schedule(id, token.generation, Duration::ZERO)
+                        .expect("schedule");
+                    schedule
+                        .runtime
+                        .dispatch(
+                            Duration::ZERO,
+                            yonik_linux::SubscriptionPolicy {
+                                online: true,
+                                ui_visible: true,
+                                ..Default::default()
+                            },
+                            &service,
+                            Arc::new(
+                                yonik_linux::FetchHost::new(Duration::from_secs(1)).expect("host"),
+                            ),
+                        )
+                        .expect("dispatch");
+                    corrupt_payload(&path);
+                }
+            }
+            if mode.ends_with("replacement") {
+                schedule.interval = Duration::ZERO;
+            }
+            let request = maintenance::Request {
+                request_id: 9,
+                operation: maintenance::Operation::Backup,
+                source: None,
+                destination: directory.join("backup.sqlite"),
+                revision: 0,
+            };
+            let outcome = run_with_leaf(
+                service,
+                repository,
+                schedule,
+                None,
+                request,
+                yonik_linux::MaintenanceControl::default(),
+                Duration::ZERO,
+                move |access, _, _| async move {
+                    assert_ne!(mode, "admission", "ошибка admission не допускает copy");
+                    if mode.ends_with("reload") {
+                        corrupt_payload(access.source());
+                    }
+                    if mode.starts_with("copy_") {
+                        (
+                            access,
+                            Err("busy"),
+                            Some(Failure::Copy(yonik_linux::MaintenanceError::Repository(
+                                yonik_linux::RepositoryError::Conflict,
+                            ))),
+                        )
+                    } else {
+                        (access, Ok(()), None)
+                    }
+                },
+            )
+            .await;
+            assert!(outcome.drained);
+            let expected = match mode {
+                "admission" => Cause::MaintenanceSchedulerAdmissionFailed,
+                "replacement" => Cause::MaintenanceScheduleReplacementFailed,
+                "reload" => Cause::MaintenanceScheduleReloadFailed,
+                _ => Cause::MaintenanceCopyConflict,
+            };
+            assert_eq!(
+                outcome.cause.expect("типизированная причина").context(),
+                expected
+            );
+            assert_eq!(
+                outcome.result,
+                Err(if mode == "admission" {
+                    "cleanup_failed"
+                } else if mode.starts_with("copy_") {
+                    "busy"
+                } else {
+                    "storage"
+                })
+            );
+            if let Some((service, repository, mut schedule)) = outcome.handles {
+                schedule
+                    .runtime
+                    .shutdown(Duration::ZERO)
+                    .await
+                    .expect("drain");
+                drop(schedule);
+                service.close().await.expect("close");
+                repository.close().await.expect("close");
+            }
+            let probe = EncryptedSubscriptionRepository::open(path, Zeroizing::new([59; 32]))
+                .await
+                .expect("rollback освободил все handles");
+            probe.close().await.expect("закрытие rollback probe");
+            for entry in fs::read_dir(&directory).expect("fixture") {
+                fs::remove_file(entry.expect("entry").path()).expect("cleanup");
+            }
+            fs::remove_dir(directory).expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn join_failure_keeps_owner_context_and_unconfirmed_drain() {
+        let task = tokio::spawn(async { panic!("контролируемый panic fixture") });
+        let outcome = joined(task.await);
+        assert_eq!(outcome.result, Err("cleanup_failed"));
+        assert_eq!(
+            outcome.cause.expect("cause").context(),
+            Cause::MaintenanceTaskFailed
+        );
+        assert!(!outcome.drained);
+        assert!(outcome.handles.is_none());
+    }
+
+    fn corrupt_payload(path: &std::path::Path) {
+        assert!(std::process::Command::new("python3").args(["-c", "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('UPDATE sources SET payload=zeroblob(40)'); c.commit()"]).arg(path).status().expect("fault fixture").success());
+    }
+
+    #[tokio::test]
+    async fn actual_backup_restore_preserves_records_and_reopens_owner() {
+        let directory =
+            std::env::temp_dir().join(format!("yonik-boundary-positive-{}", std::process::id()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .expect("fixture");
+        let mut repository = EncryptedSubscriptionRepository::open(
+            directory.join("source.sqlite"),
+            Zeroizing::new([73; 32]),
+        )
+        .await
+        .expect("БД");
+        let mut service = SubscriptionService::new(repository.clone());
+        service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Тест".into(),
+                    "http://127.0.0.1:9/sub".into(),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .expect("source"),
+            )
+            .await
+            .expect("add");
+        let mut schedule = DesktopSchedule::new().expect("scheduler");
+        let backup = directory.join("backup.sqlite");
+        let restored = directory.join("restored.sqlite");
+        for (operation, source, destination) in [
+            (maintenance::Operation::Backup, None, backup.clone()),
+            (
+                maintenance::Operation::Restore,
+                Some(backup),
+                restored.clone(),
+            ),
+        ] {
+            let outcome = run(
+                service,
+                repository,
+                schedule,
+                None,
+                maintenance::Request {
+                    request_id: 1,
+                    operation,
+                    source,
+                    destination,
+                    revision: 0,
+                },
+                yonik_linux::MaintenanceControl::default(),
+                Duration::ZERO,
+            )
+            .await;
+            assert_eq!(outcome.result, Ok(()));
+            assert!(outcome.cause.is_none());
+            assert!(outcome.drained);
+            (service, repository, schedule) = outcome.handles.expect("reopen owner");
+        }
+        schedule
+            .runtime
+            .shutdown(Duration::ZERO)
+            .await
+            .expect("drain");
+        drop(schedule);
+        service.close().await.expect("close");
+        repository.close().await.expect("close");
+        let restored = EncryptedSubscriptionRepository::open(restored, Zeroizing::new([73; 32]))
+            .await
+            .expect("restore");
+        assert_eq!(
+            restored
+                .source_records(0, 64)
+                .await
+                .expect("records")
+                .records
+                .len(),
+            1
+        );
+        restored.close().await.expect("close");
+        for entry in fs::read_dir(&directory).expect("fixture") {
+            fs::remove_file(entry.expect("entry").path()).expect("cleanup");
+        }
+        fs::remove_dir(directory).expect("cleanup");
+    }
+
     static TEST_SERIAL: Mutex<()> = Mutex::new(());
 
     #[test]

@@ -27,6 +27,7 @@ pub enum Stage {
     StorageOpen,
     EngineStart,
     EngineRun,
+    Probe,
     Cleanup,
     HelperRpc,
     RoutingSave,
@@ -83,7 +84,14 @@ pub enum Cause {
     SchedulerServiceForeignApproval,
     SchedulerServiceStaleUpdate,
     SchedulerServiceWorker,
+    SchedulerServiceHwidRequired,
+    SchedulerServiceHwidLimit,
+    SchedulerServiceHwidRejected,
+    SchedulerServiceHwidRedirect,
+    SchedulerServiceUnsupportedProxy,
+    SchedulerServiceFetchFailed,
     SchedulerServiceImportFailed,
+
     SchedulerRepositoryInvalidInput,
     SchedulerRepositoryUnsafePath,
     SchedulerRepositoryUnsupportedVersion,
@@ -109,6 +117,12 @@ pub enum Cause {
     EngineStartFailed,
     EngineStartExited,
     EngineExited,
+    ProbeHttpStatus,
+    ProbeTimeout,
+    ProbeTls,
+    ProbeTransport,
+    ProbeCheckFailed,
+    ProbeNetworkChanged,
     CleanupFailed,
     HelperUnsupported,
     HelperDenied,
@@ -159,6 +173,13 @@ pub enum Cause {
     MaintenanceAccessStorage,
     MaintenanceAccessConflict,
     MaintenanceAccessNotFound,
+    MaintenanceSchedulerDrainFailed,
+    MaintenanceSchedulerAdmissionFailed,
+    MaintenanceServiceDrainFailed,
+    MaintenanceRepositoryDrainFailed,
+    MaintenanceScheduleReloadFailed,
+    MaintenanceScheduleReplacementFailed,
+    MaintenanceTaskFailed,
     MaintenanceCancelled,
     LogsReadBusy,
     LogsSaveBusy,
@@ -285,6 +306,24 @@ impl Cause {
                 ("STORAGE", "storage", Stage::SchedulerService)
             }
             Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceHwidRequired => {
+                ("HWID_REQUIRED", "hwid_required", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidLimit => {
+                ("HWID_LIMIT", "hwid_limit", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidRejected => {
+                ("HWID_REJECTED", "hwid_rejected", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceHwidRedirect => {
+                ("HWID_REDIRECT", "hwid_redirect", Stage::SchedulerService)
+            }
+            Self::SchedulerServiceUnsupportedProxy => (
+                "UNSUPPORTED_PROXY",
+                "unsupported_proxy",
+                Stage::SchedulerService,
+            ),
+            Self::SchedulerServiceFetchFailed => ("FETCH", "fetch", Stage::SchedulerService),
             Self::SchedulerServiceImportFailed => ("IMPORT", "import", Stage::SchedulerService),
             Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
             Self::SchedulerRepositoryInvalidInput => {
@@ -389,6 +428,27 @@ impl Cause {
             Self::MaintenanceReopenStorage => ("STORAGE", "storage", Stage::MaintenanceReopen),
             Self::MaintenanceReopenConflict => ("STORAGE", "storage", Stage::MaintenanceReopen),
             Self::MaintenanceReopenNotFound => ("STORAGE", "storage", Stage::MaintenanceReopen),
+            Self::MaintenanceSchedulerDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceSchedulerAdmissionFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceServiceDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceRepositoryDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceScheduleReloadFailed => {
+                ("STORAGE", "storage", Stage::MaintenanceReopen)
+            }
+            Self::MaintenanceScheduleReplacementFailed => {
+                ("STORAGE", "storage", Stage::MaintenanceReopen)
+            }
+            Self::MaintenanceTaskFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
             Self::MaintenanceAccessInvalidInput => ("STORAGE", "storage", Stage::MaintenanceDrain),
             Self::MaintenanceAccessUnsafePath => ("STORAGE", "storage", Stage::MaintenanceDrain),
             Self::MaintenanceAccessUnsupportedVersion => {
@@ -439,6 +499,12 @@ impl Cause {
             Self::EngineStartFailed | Self::EngineStartExited => {
                 ("ENGINE_FAILED", "engine_failed", Stage::EngineStart)
             }
+            Self::ProbeHttpStatus => ("CHECK_HTTP_STATUS", "check_http_status", Stage::Probe),
+            Self::ProbeTimeout => ("CHECK_TIMEOUT", "check_timeout", Stage::Probe),
+            Self::ProbeTls => ("CHECK_TLS", "check_tls", Stage::Probe),
+            Self::ProbeTransport => ("CHECK_TRANSPORT", "check_transport", Stage::Probe),
+            Self::ProbeCheckFailed => ("CHECK_FAILED", "check_failed", Stage::Probe),
+            Self::ProbeNetworkChanged => ("NETWORK_CHANGED", "network_changed", Stage::Probe),
             Self::EngineExited => ("ENGINE_FAILED", "engine_failed", Stage::EngineRun),
             Self::CleanupFailed => ("CLEANUP_FAILED", "cleanup_failed", Stage::Cleanup),
             Self::HelperUnsupported => {
@@ -535,6 +601,34 @@ fn decimal_id<S: Serializer>(id: &Option<u64>, serializer: S) -> Result<S::Ok, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn maintenance_boundaries_require_matching_ack_identity() {
+        for cause in [
+            Cause::MaintenanceSchedulerDrainFailed,
+            Cause::MaintenanceSchedulerAdmissionFailed,
+            Cause::MaintenanceServiceDrainFailed,
+            Cause::MaintenanceRepositoryDrainFailed,
+            Cause::MaintenanceScheduleReloadFailed,
+            Cause::MaintenanceScheduleReplacementFailed,
+            Cause::MaintenanceTaskFailed,
+        ] {
+            let mut context = ErrorContext::new(Slot::MaintenanceAck, cause, Some(9));
+            context.generation = Some(7);
+            let value = serde_json::to_value(context).expect("контекст");
+            let mut snapshot = serde_json::json!({"maintenance_ack":{"request_id":9,"error":context.message_key},"maintenance_generation":7,"error_contexts":[value]});
+            assert!(
+                crate::diagnostics::export_snapshot_v2(&snapshot.to_string()).is_some(),
+                "{cause:?}"
+            );
+            for field in ["request_id", "generation", "slot", "code", "stage"] {
+                let previous = snapshot["error_contexts"][0][field].clone();
+                snapshot["error_contexts"][0][field] = serde_json::json!("999999");
+                assert!(crate::diagnostics::export_snapshot_v2(&snapshot.to_string()).is_none());
+                snapshot["error_contexts"][0][field] = previous;
+            }
+            assert_eq!(value["params"], serde_json::json!({}));
+        }
+    }
     #[test]
     fn replacement_clear_and_ack_identity() {
         let mut contexts = Contexts::default();

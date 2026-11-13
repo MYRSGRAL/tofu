@@ -21,7 +21,7 @@ impl ScheduleFailure {
         }
     }
     pub fn service(error: yonik_linux::SubscriptionError) -> Self {
-        use yonik_linux::{RepositoryError as R, SubscriptionError as E};
+        use yonik_linux::{FetchError as F, RepositoryError as R, SubscriptionError as E};
         let cause = match error {
             E::InvalidSource => Some(Cause::SchedulerServiceInvalidSource),
             E::CorruptSnapshot => Some(Cause::SchedulerServiceCorruptSnapshot),
@@ -40,8 +40,15 @@ impl ScheduleFailure {
             E::Repository(R::Storage) => Some(Cause::SchedulerRepositoryStorage),
             E::Repository(R::Conflict) => Some(Cause::SchedulerRepositoryConflict),
             E::Repository(R::NotFound) => Some(Cause::SchedulerRepositoryNotFound),
+            E::Fetch(F::HwidRequired) => Some(Cause::SchedulerServiceHwidRequired),
+            E::Fetch(F::HwidLimit) => Some(Cause::SchedulerServiceHwidLimit),
+            E::Fetch(F::HwidRejected) => Some(Cause::SchedulerServiceHwidRejected),
+            E::Fetch(F::HwidRedirect) => Some(Cause::SchedulerServiceHwidRedirect),
+            E::Fetch(F::UnsupportedPeerVerification) => {
+                Some(Cause::SchedulerServiceUnsupportedProxy)
+            }
+            E::Fetch(_) => Some(Cause::SchedulerServiceFetchFailed),
             E::Import(_) => Some(Cause::SchedulerServiceImportFailed),
-            E::Fetch(_) => None,
         };
         Self {
             error: super::map_subscription(error),
@@ -435,6 +442,130 @@ mod tests {
     }
 
     use super::*;
+
+    #[tokio::test]
+    async fn fetch_causes_strict_v2_generation_fence() {
+        use std::os::unix::fs::DirBuilderExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use yonik_linux::{FetchError as F, SubscriptionError};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+        });
+        let path = std::env::temp_dir().join(format!("p11-fetch-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .unwrap();
+        let repo = yonik_linux::EncryptedSubscriptionRepository::open(
+            path.join("db"),
+            zeroize::Zeroizing::new([7; 32]),
+        )
+        .await
+        .unwrap();
+        let service = SubscriptionService::new(repo);
+        let id = service
+            .add(
+                yonik_linux::SubscriptionSource::new(
+                    "Проверка Fetch".into(),
+                    format!("http://{address}/"),
+                    true,
+                    yonik_linux::FetchRoute::Direct,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_sender, cancel) = tokio::sync::watch::channel(false);
+        let actual = match service.refresh(id, Duration::from_secs(5), cancel).await {
+            Err(SubscriptionError::Fetch(error)) => error,
+            _ => panic!("ожидался настоящий FetchError"),
+        };
+        assert_eq!(actual, F::HttpStatus);
+        server.await.unwrap();
+        service.close().await.unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+        let cases = [
+            (actual, "fetch"),
+            (F::HwidRequired, "hwid_required"),
+            (F::HwidLimit, "hwid_limit"),
+            (F::HwidRejected, "hwid_rejected"),
+            (F::HwidRedirect, "hwid_redirect"),
+            (F::UnsupportedPeerVerification, "unsupported_proxy"),
+            (F::InvalidSource, "fetch"),
+            (F::InvalidHwid, "fetch"),
+            (F::InvalidValidator, "fetch"),
+            (F::InvalidTimeout, "fetch"),
+            (F::ProxyDnsRequired, "fetch"),
+            (F::Cancelled, "fetch"),
+            (F::Timeout, "fetch"),
+            (F::Dns, "fetch"),
+            (F::BlockedAddress, "fetch"),
+            (F::PeerMismatch, "fetch"),
+            (F::Transport, "fetch"),
+            (F::Redirect, "fetch"),
+            (F::HttpStatus, "fetch"),
+            (F::UnexpectedNotModified, "fetch"),
+            (F::UnsupportedEncoding, "fetch"),
+            (F::BodyTooLarge, "fetch"),
+        ];
+        for (error, key) in cases {
+            let failure = ScheduleFailure::service(SubscriptionError::Fetch(error));
+            assert_eq!(failure.key(), key);
+            assert!(failure.cause.is_some(), "{error:?}");
+            let mut state = super::super::Snapshot::new(true);
+            state.schedule_error(failure, Some(77));
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            let output = captured.clone();
+            let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+                *output.lock().unwrap() = raw;
+            });
+            state.emit(&callback);
+            let raw = captured.lock().unwrap().clone();
+            let export = crate::diagnostics::export_snapshot_v2(&raw).unwrap();
+            let document: serde_json::Value = serde_json::from_str(&export).unwrap();
+            assert_eq!(document["errors"].as_array().unwrap().len(), 2);
+            for item in document["errors"].as_array().unwrap() {
+                assert_eq!(item["message_key"], key);
+                assert_eq!(item["code"], key.to_ascii_uppercase());
+                assert_eq!(
+                    item["reason"],
+                    if key == "fetch" {
+                        "scheduler_service_fetch_failed".to_owned()
+                    } else {
+                        format!("scheduler_service_{key}")
+                    }
+                );
+                assert_eq!(item["stage"], "scheduler_service");
+                assert_eq!(item["params"], serde_json::json!({}));
+            }
+            if let Ok(directory) = std::env::var("YONIK_SCHEDULER_EVIDENCE") {
+                let directory = std::path::Path::new(&directory);
+                std::fs::write(
+                    directory.join(format!("fetch-{error:?}-snapshot.json")),
+                    &raw,
+                )
+                .unwrap();
+                std::fs::write(
+                    directory.join(format!("fetch-{error:?}-export.json")),
+                    &export,
+                )
+                .unwrap();
+            }
+            let mut bad: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            bad["scheduler_generation"] = serde_json::json!(78);
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["scheduler_generation"] = serde_json::Value::Null;
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+            bad["scheduler_generation"] = serde_json::json!(77);
+            bad["error_contexts"][0]["slot"] = serde_json::json!("connection");
+            assert!(crate::diagnostics::export_snapshot_v2(&bad.to_string()).is_none());
+        }
+    }
 
     #[tokio::test]
     async fn local_v2_is_excluded_on_load_and_reload() {
