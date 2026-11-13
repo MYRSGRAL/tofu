@@ -1,5 +1,6 @@
 //! Владелец двух фиксированных systemd worker, с подтверждением пустой cgroup.
 //! Accepted подтверждает передачу FD, но не готовность сети и не Applied.
+use super::run_authorization::RunAuthorization;
 use crate::{
     Cancellation,
     worker::{WorkerAck, WorkerMode, WorkerPayload, WorkerStatus},
@@ -32,6 +33,7 @@ const SOCKET_IFACE: &str = "org.freedesktop.systemd1.Socket";
 const DEADLINE: Duration = Duration::from_secs(8);
 static OWNED: AtomicBool = AtomicBool::new(false);
 type Properties = HashMap<String, OwnedValue>;
+type TransferResult = Result<(WorkerAck, Option<InvocationBinding>)>;
 type ExecCommands = Vec<(String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,6 +149,13 @@ impl BootstrapUnitObservation {
         drop(observation);
         result
     }
+    fn validate_state(&self, state: &WorkerState) -> Result<()> {
+        if state.active != "active" || state.pid != self.pid || state.invocation != self.invocation
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        Ok(())
+    }
     fn validate_identity(&self) -> Result<()> {
         if Instant::now() >= self.expires {
             return Err(WorkerSupervisorError::UnitProofGap);
@@ -198,6 +207,58 @@ fn bootstrap_start(pid: u32) -> Result<u64> {
         .and_then(|(_, tail)| tail.split_whitespace().nth(19))
         .and_then(|v| v.parse().ok())
         .ok_or(WorkerSupervisorError::Untrusted)
+}
+
+/// Связывает удерживаемый immutable payload с одной canonical invocation.
+/// Не доказывает непрерывность runtime exec и не открывает namespace gate.
+struct InvocationBinding {
+    authorization: RunAuthorization,
+    observation: BootstrapUnitObservation,
+    payload: Arc<WorkerPayload>,
+    digest: yonik_application::ConfigDigest,
+}
+impl InvocationBinding {
+    fn validate(&self) -> Result<()> {
+        self.authorization
+            .validate()
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        if self.payload.digest() != self.digest {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.observation.validate_identity()
+    }
+    fn validate_state(&self, state: &WorkerState) -> Result<()> {
+        self.observation.validate_state(state)
+    }
+    fn transfer(self, stream: &std::os::unix::net::UnixStream) -> Result<(WorkerAck, Self)> {
+        self.validate()?;
+        let ack = Self::transfer_payload(&self.payload, &self.authorization, stream)?;
+        self.validate()?;
+        Ok((ack, self))
+    }
+    fn transfer_payload(
+        payload: &WorkerPayload,
+        authorization: &RunAuthorization,
+        stream: &std::os::unix::net::UnixStream,
+    ) -> Result<WorkerAck> {
+        authorization
+            .validate()
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        let ack = payload
+            .send(stream, WorkerMode::Run)
+            .map_err(|_| WorkerSupervisorError::Protocol)?;
+        authorization
+            .validate()
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        Ok(ack)
+    }
+    fn accept(self, ack: WorkerAck) -> Result<()> {
+        self.validate()?;
+        if ack.status != WorkerStatus::Accepted || ack.pid != self.observation.pid {
+            return Err(WorkerSupervisorError::Protocol);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,7 +319,7 @@ pub struct SystemWorkerSupervisor {
     owner: String,
     permit: Arc<Permit>,
     pending: Option<WorkerMode>,
-    transfer: Option<JoinHandle<Result<WorkerAck>>>,
+    transfer: Option<JoinHandle<TransferResult>>,
     current: Option<WorkerTicket>,
     clean: bool,
     retained_copy: Option<Arc<WorkerPayload>>,
@@ -461,15 +522,39 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         cancel: &mut Cancellation,
     ) -> Result<WorkerTicket> {
+        self.start_inner(payload, None, cancel).await
+    }
+    /// Только helper owner; разрешение не заменяет kernel namespace admission.
+    #[allow(dead_code)] // W4 подключает issuer отдельно.
+    pub(crate) async fn start_authorized(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        authorization: RunAuthorization,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        self.start_inner(payload, Some(authorization), cancel).await
+    }
+    async fn start_inner(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        authorization: Option<RunAuthorization>,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        // Guard живёт в future, а не в blocking task: drop отзывает поздний ACK.
+        let _revocation = authorization.as_ref().map(RunAuthorization::guard);
         let deadline = Instant::now() + DEADLINE;
         self.begin(WorkerMode::Run, cancel, deadline).await?;
-        let ack = self
-            .send(payload, WorkerMode::Run, cancel, deadline)
+        let (ack, binding) = self
+            .send_inner(payload, WorkerMode::Run, authorization, cancel, deadline)
             .await?;
         if ack.status != WorkerStatus::Accepted {
             return Err(WorkerSupervisorError::Protocol);
         }
         let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        if let Some(binding) = binding {
+            binding.validate_state(&state)?;
+            binding.accept(ack)?;
+        }
         let invocation: [u8; 16] = state
             .invocation
             .try_into()
@@ -559,6 +644,21 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<WorkerAck> {
+        self.send_inner(payload, mode, None, cancel, deadline)
+            .await
+            .map(|(ack, _)| ack)
+    }
+    async fn send_inner(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        mode: WorkerMode,
+        authorization: Option<RunAuthorization>,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> TransferResult {
+        if authorization.is_some() && mode != WorkerMode::Run {
+            return Err(WorkerSupervisorError::Protocol);
+        }
         if payload.needs_tmpfs_assets() {
             let properties = bounded(
                 cancel,
@@ -580,12 +680,55 @@ impl SystemWorkerSupervisor {
         verify_socket(mode)?;
         let stream = stream.into_std().map_err(unavailable)?;
         stream.set_nonblocking(false).map_err(unavailable)?;
+        let binding = if let Some(authorization) = authorization {
+            authorization
+                .validate()
+                .map_err(|_| WorkerSupervisorError::Stale)?;
+            // connect активирует unit, но Type=exec ещё может быть activating.
+            loop {
+                let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+                authorization
+                    .validate()
+                    .map_err(|_| WorkerSupervisorError::Stale)?;
+                if state.active == "active" {
+                    break;
+                }
+                if !matches!(state.active.as_str(), "activating" | "inactive") {
+                    return Err(WorkerSupervisorError::Stale);
+                }
+                bounded(cancel, deadline, async {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Ok(())
+                })
+                .await?;
+            }
+            let mut observation =
+                bounded(cancel, deadline, self.inspect_anchor_bootstrap()).await?;
+            observation.expires = deadline;
+            let binding = InvocationBinding {
+                authorization,
+                observation,
+                digest: payload.digest(),
+                payload: Arc::clone(&payload),
+            };
+            self.revalidate_binding(&binding, cancel, deadline).await?;
+            Some(binding)
+        } else {
+            None
+        };
         let permit = Arc::clone(&self.permit);
         self.transfer = Some(tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            payload
-                .send(&stream, mode)
-                .map_err(|_| WorkerSupervisorError::Protocol)
+            if let Some(binding) = binding {
+                binding
+                    .transfer(&stream)
+                    .map(|(ack, binding)| (ack, Some(binding)))
+            } else {
+                payload
+                    .send(&stream, mode)
+                    .map(|ack| (ack, None))
+                    .map_err(|_| WorkerSupervisorError::Protocol)
+            }
         }));
         let handle = self
             .transfer
@@ -599,7 +742,22 @@ impl SystemWorkerSupervisor {
         if self.transfer.as_ref().is_some_and(JoinHandle::is_finished) {
             self.transfer = None;
         }
-        result
+        let (ack, binding) = result?;
+        if let Some(binding) = &binding {
+            self.revalidate_binding(binding, cancel, deadline).await?;
+        }
+        Ok((ack, binding))
+    }
+    async fn revalidate_binding(
+        &self,
+        binding: &InvocationBinding,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        binding.validate()?;
+        let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        binding.validate_state(&state)?;
+        binding.validate()
     }
     async fn cleanup(&mut self, cancel: &mut Cancellation, deadline: Instant) -> Result<()> {
         self.clean = false;

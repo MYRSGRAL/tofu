@@ -415,10 +415,13 @@ async fn cancelled_cleanup_retains_transfer_until_recovery_waits_for_it() {
     let (release, wait) = std::sync::mpsc::channel();
     fixture.supervisor.transfer = Some(tokio::task::spawn_blocking(move || {
         wait.recv().unwrap();
-        Ok(WorkerAck {
-            pid: 42,
-            status: WorkerStatus::Accepted,
-        })
+        Ok((
+            WorkerAck {
+                pid: 42,
+                status: WorkerStatus::Accepted,
+            },
+            None,
+        ))
     }));
     let (_sender, mut cancel) = Cancellation::new();
     let result = fixture
@@ -611,27 +614,8 @@ fn missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown() {
 
 #[tokio::test]
 async fn copy_reservation_survives_cancel_and_populated_cgroup_until_empty() {
-    use sha2::Digest;
     let mut fixture = Fixture::new().await;
-    let path = std::path::Path::new("/usr/bin/true");
-    let bytes = std::fs::read(path).unwrap();
-    let binary = crate::BinarySnapshot::load(
-        path,
-        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
-        yonik_engine::Engine::SingBox,
-    )
-    .unwrap();
-    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
-        .unwrap()
-        .servers
-        .remove(0);
-    let config = yonik_engine::compile(
-        &server,
-        yonik_engine::Engine::SingBox,
-        std::num::NonZeroU16::new(10808).unwrap(),
-    )
-    .unwrap();
-    let payload = Arc::new(WorkerPayload::new(binary, config).unwrap());
+    let payload = binding_test_payload();
     let weak = Arc::downgrade(&payload);
     fixture.supervisor.retained_copy = Some(payload);
     fixture.state.lock().unwrap().populated = true;
@@ -784,7 +768,34 @@ async fn actual_controlled_bootstrap_transport_without_ptrace() -> Result<()> {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let bootstrap = supervisor.inspect_anchor_bootstrap().await?;
+        let mut bootstrap = supervisor.inspect_anchor_bootstrap().await?;
+        let mut canonical = supervisor.state(WorkerMode::Run).await?;
+        bootstrap.validate_identity()?;
+        bootstrap.validate_state(&canonical)?;
+        canonical.invocation[0] ^= 1;
+        assert_eq!(
+            bootstrap.validate_state(&canonical),
+            Err(WorkerSupervisorError::Stale)
+        );
+        canonical.invocation[0] ^= 1;
+        canonical.pid = canonical.pid.saturating_add(1);
+        assert_eq!(
+            bootstrap.validate_state(&canonical),
+            Err(WorkerSupervisorError::Stale)
+        );
+        bootstrap.start += 1;
+        assert_eq!(
+            bootstrap.validate_identity(),
+            Err(WorkerSupervisorError::Stale)
+        );
+        bootstrap.start -= 1;
+        let expires = bootstrap.expires;
+        bootstrap.expires = Instant::now();
+        assert_eq!(
+            bootstrap.validate_identity(),
+            Err(WorkerSupervisorError::UnitProofGap)
+        );
+        bootstrap.expires = expires;
         let stream = stream.into_std().map_err(unavailable)?;
         stream.set_nonblocking(false).map_err(unavailable)?;
         let witness = bootstrap.exchange(&stream, [1; 32], [2; 16], 7)?;
@@ -801,4 +812,122 @@ async fn actual_controlled_bootstrap_transport_without_ptrace() -> Result<()> {
         .await;
     result?;
     cleanup
+}
+
+#[test]
+fn run_authority_is_single_use_and_revokes_outstanding_token() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    assert!(token.validate().is_ok());
+    assert!(owner.authorize([2; 32]).is_err());
+    owner.revoke();
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+#[test]
+fn dropping_run_owner_revokes_token() {
+    let token = {
+        let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+        owner.authorize([2; 32]).unwrap()
+    };
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+use super::super::run_authorization::{RunAuthority, RunAuthorizationError};
+
+#[test]
+fn dropping_attempt_guard_revokes_outstanding_token() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    let guard = token.guard();
+    drop(guard);
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+    assert!(owner.authorize([3; 32]).is_err());
+}
+
+#[test]
+fn authority_rejects_zero_context_and_nonce() {
+    assert!(RunAuthority::new([0; 16], 7, 9).is_err());
+    assert!(RunAuthority::new([1; 16], 0, 9).is_err());
+    assert!(RunAuthority::new([1; 16], 7, 0).is_err());
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    assert!(owner.authorize([0; 32]).is_err());
+    assert!(owner.authorize([2; 32]).is_ok());
+}
+
+#[test]
+fn run_authority_cannot_issue_after_revoke() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    owner.revoke();
+    owner.revoke();
+    assert!(matches!(
+        owner.authorize([2; 32]),
+        Err(RunAuthorizationError::Revoked)
+    ));
+}
+
+#[test]
+fn concurrent_authorization_has_exactly_one_winner() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    std::thread::scope(|scope| {
+        let left = scope.spawn(|| owner.authorize([2; 32]));
+        let right = scope.spawn(|| owner.authorize([3; 32]));
+        let left = left.join().unwrap();
+        let right = right.join().unwrap();
+        assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    });
+}
+
+fn binding_test_payload() -> Arc<WorkerPayload> {
+    use sha2::Digest;
+    let path = std::path::Path::new("/usr/bin/true");
+    let bytes = std::fs::read(path).unwrap();
+    let binary = crate::BinarySnapshot::load(
+        path,
+        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
+        yonik_engine::Engine::SingBox,
+    )
+    .unwrap();
+    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    let config = yonik_engine::compile(
+        &server,
+        yonik_engine::Engine::SingBox,
+        std::num::NonZeroU16::new(10808).unwrap(),
+    )
+    .unwrap();
+    Arc::new(WorkerPayload::new(binary, config).unwrap())
+}
+
+#[test]
+fn actual_payload_transfer_rejects_late_ack_after_revocation() {
+    use std::io::{Read, Write};
+    let payload = binding_test_payload();
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    let guard = token.guard();
+    let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+    let (received, wait_received) = std::sync::mpsc::channel();
+    let (release, wait_release) = std::sync::mpsc::channel();
+    let receiver = std::thread::spawn(move || {
+        let mut header = Vec::new();
+        server.read_to_end(&mut header).unwrap();
+        assert!(!header.is_empty());
+        received.send(()).unwrap();
+        wait_release.recv().unwrap();
+        let mut ack = b"YNKA".to_vec();
+        ack.extend_from_slice(&42u32.to_be_bytes());
+        ack.push(2);
+        server.write_all(&ack).unwrap();
+    });
+    let transfer =
+        std::thread::spawn(move || InvocationBinding::transfer_payload(&payload, &token, &client));
+    wait_received.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(guard);
+    release.send(()).unwrap();
+    assert_eq!(transfer.join().unwrap(), Err(WorkerSupervisorError::Stale));
+    receiver.join().unwrap();
+    assert!(owner.authorize([3; 32]).is_err());
 }
