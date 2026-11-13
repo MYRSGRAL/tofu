@@ -48,7 +48,7 @@ crates/yonik-desktop/src/application.cpp
 112:         }, Qt::QueuedConnection);
 113:     quick->update();
 114: }
-115: 
+115:
 116: class CloseHandler final : public QObject {
 117: public:
 
