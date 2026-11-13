@@ -1,0 +1,105 @@
+
+crates/yonik-desktop/src/main.rs
+65:             }
+66:             _ => return Err("Неизвестный параметр командной строки".into()),
+67:         }
+68:     }
+69:     if (smoke_test && !explicit_data_dir)
+70:         || ((screenshot.is_some() || script.is_some() || trace.is_some()) && !smoke_test)
+71:     {
+72:         return Err(
+73:             "--smoke-test требует явный --data-dir; screenshot доступен только в smoke-test".into(),
+74:         );
+75:     }
+76:     std::fs::DirBuilder::new()
+77:         .recursive(true)
+78:         .mode(0o700)
+79:         .create(&data_dir)?;
+80:     let data_dir = std::fs::canonicalize(data_dir)?;
+81:     let engine_dir = engine_dir.unwrap_or_else(|| data_dir.join("engines"));
+82:     let mut config = HostConfig::new(data_dir.clone(), engine_dir);
+83:     if let Some(port) = listen_port {
+84:         config = config.with_listen_port(port);
+85:     }
+86:     if smoke_test {
+87:         let mut key = zeroize::Zeroizing::new([0_u8; 32]);
+88:         getrandom::getrandom(key.as_mut()).map_err(|_| "Не удалось создать тестовый ключ")?;
+89:         config = config.with_ephemeral_key(*key);
+
+crates/yonik-desktop/src/application.cpp
+94:     qWarning("yonik smoke: capturing own window after a frame");
+95:     auto* quick = qobject_cast<QQuickWindow*>(window);
+96:     if (!quick) {
+97:         qWarning("yonik smoke: root is not QQuickWindow");
+98:         completed(false);
+99:         return;
+100:     }
+101:     const auto connection = std::make_shared<QMetaObject::Connection>();
+102:     const auto captured = std::make_shared<bool>(false);
+103:     *connection = QObject::connect(quick, &QQuickWindow::frameSwapped, quick,
+104:         [quick, path, connection, captured, completed = std::move(completed)] {
+105:             if (*captured) return;
+106:             *captured = true;
+107:             QObject::disconnect(*connection);
+108:             const auto image = quick->grabWindow();
+109:             const bool saved = !image.isNull() && image.save(path, "PNG");
+110:             if (!saved) qWarning("yonik smoke: own-window capture failed");
+111:             completed(saved);
+112:         }, Qt::QueuedConnection);
+113:     quick->update();
+114: }
+115: 
+116: class CloseHandler final : public QObject {
+117: public:
+
+crates/yonik-desktop/src/application.cpp
+381:     QTimer smokeSteps;
+382:     if (smokeTest && !steps.isEmpty()) {
+383:         smokeSteps.setInterval(25);
+384:         QObject::connect(&smokeSteps, &QTimer::timeout, &smokeSteps, advanceSmokeStep);
+385:         smokeSteps.start();
+386:     }
+
+crates/yonik-desktop/src/application.cpp
+419:             if (smokeTest && traceFile.isOpen()) {
+420:                 const auto line = QJsonDocument(metadata).toJson(QJsonDocument::Compact) + '\n';
+421:                 if (traceFile.pos() + line.size() > 500000 || traceFile.write(line) != line.size()) {
+422:                     smokeFailed = true;
+423:                     bridge->shutdown();
+424:                 }
+425:                 traceFile.flush();
+426:             }
+
+crates/yonik-desktop/src/application.cpp
+446:     if (smokeTest) {
+447:         // Видимость меняется без backend snapshot: trace фиксирует реальный close/relaunch.
+448:         QObject::connect(window, &QWindow::visibleChanged, bridge, [bridge](bool) {
+449:             Q_EMIT bridge->snapshot_jsonChanged();
+450:         });
+451:     }
+452:     CloseHandler closeHandler(*window, *bridge, cleanupConfirmed);
+453:     window->installEventFilter(&closeHandler);
+454:     application.installEventFilter(&closeHandler);
+455:     // Qt автоматически регистрирует иконку при последующем появлении tray-сервиса.
+456:     tray.show();
+457:     if (smokeTest) {
+458:         // Окно включает 30-секундный deadline системного RPC и подтверждение Stop.
+459:         QTimer::singleShot(45000, bridge, [&, bridge] {
+460:             smokeFailed = smokeFailed || stepIndex < steps.size() || stepDispatchPending;
+461:             if (smokeFailed) qWarning("yonik smoke: incomplete script at step %lld", static_cast<long long>(stepIndex));
+462:             bridge->shutdown();
+463:         });
+464:     }
+465:     const auto result = application.exec();
+
+crates/yonik-desktop/qml/Main.qml
+9: ApplicationWindow {
+10:     readonly property var backendForDiagnostics: backend
+11:     id: window
+12:     width: 420
+13:     height: 760
+14:     minimumWidth: 380
+15:     minimumHeight: 600
+16:     visible: true
+17:     title: "yonik · " + (state.build_id || "local")
+18:     objectName: "yonikWindow"
