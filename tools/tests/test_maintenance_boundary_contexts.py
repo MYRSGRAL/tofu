@@ -29,7 +29,9 @@ class MaintenanceBoundaryContexts(unittest.TestCase):
                     {
                         "code": "STORAGE" if reopen else "CLEANUP_FAILED",
                         "message_key": "storage" if reopen else "cleanup_failed",
-                        "stage": "maintenance_reopen" if reopen else "maintenance_drain",
+                        "stage": "maintenance_reopen"
+                        if reopen
+                        else "maintenance_drain",
                         "slots": ["maintenance_ack"],
                         "generation_required": True,
                     },
