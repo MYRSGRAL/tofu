@@ -92,3 +92,56 @@ Event ring: 500 retained events, 3 страницы с последней пус
 
 Focused build, Clippy -D warnings, Rustfmt и Ruff прошли. Полные логи,
 source-binding.json и metadata-binding.json сохранены в evidence.
+
+## Унаследованный P2: negative peer oracle
+
+Обычным merge включён parent #169
+`c2e9e27c9398d65470838c82e76d563512de4ebb`. Alternate driver напрямую
+импортирует его `denied_probe`, без копии и без изменения production API.
+Перед positive host он запускает отдельный новый denied host для каждого ядра
+при SIGSTOP собственного pinned sing-box peer, с подтверждением WIFSTOPPED.
+Direct TLS control обязан получить 204, после сброса fixture production Connect
+не должен достичь HTTPS: только ready, Timeout и ненулевой exit.
+SIGCONT находится в finally родительского oracle.
+
+Адаптация ограничена Python driver: новая опция `--peer-gate-only` выполняет
+оба denied Connect и затем два restored-positive цикла (sing-box → Xray) в одном
+новом DesktopHost с existing JSON ACK, generation/profile/probe/ELF,
+busy/refusal, Stop/pidfd/reap/rebind и closed проверками.
+JSON ACK alternate example отличается от строкового positive ACK #169;
+поэтому positive часть использует alternate `command`, а не родительский
+driver. Negative oracle совместим без адаптации: до timeout оба example
+публикуют только ready. Rust example не менялся.
+
+Focused invocation:
+
+```sh
+python crates/yonik-desktop/tests/local_socks_alternating.py \
+  /home/myrs/projects/yonik/local/evidence/local-socks-alternating-host/local_socks_alternating \
+  /home/myrs/projects/yonik/local/engines \
+  /home/myrs/projects/yonik/local/evidence/local-socks-alternating-peer-negative \
+  --peer-gate-only
+```
+
+Прежние 100 циклов не повторялись. Их бинарник retained от
+`527ae21a77b42f8b7c4708fb1248b4186471de25`; его SHA256 совпал с исходным
+binary.sha256, Rust example побайтно идентичен. AST функций sample/oracle/
+identity/children родителя также идентичен прежнему. Final Python harness
+добавляет negative gate и короткий режим; сам полный final driver на 100 циклах
+не запускался. Это две явно разделённые части evidence, а не новый full-stack
+или финальный 100-cycle seal.
+
+Focused evidence вне TTL:
+`/home/myrs/projects/yonik/local/evidence/local-socks-alternating-peer-negative/`.
+`source-binding.json` фиксирует parent, retained binary, неизменность Rust
+example/resource functions и новые Python hashes. Исходный resource evidence
+каталог не перезаписан. Новая Rust-сборка не нужна и не выполнялась.
+
+Focused gate: PASS для обоих ядер. Каждый denied host: direct TLS 204,
+peer_stopped=true, exit_code=1, Timeout примерно через 20 секунд,
+https_reached=false. После восстановления peer positive sing-box и Xray
+прошли в одном host, все Stop/reap/rebind проверки и closed ACK получены.
+Короткий режим возвращает PEER_NEGATIVE_AND_RESTORED_ALTERNATING_POSITIVE,
+не resource verdict по двум samples. Ruff check/format обоих Python файлов
+и diff-check прошли. TemporaryDirectory/private D-Bus/peer/host закрыты;
+transient build-каталог не создавался.

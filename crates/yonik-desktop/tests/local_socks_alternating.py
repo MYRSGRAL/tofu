@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from local_socks_resource import children, identity, oracle, sample
+from local_socks_resource import children, denied_probe, identity, oracle, sample
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
 from engine_compile import UUID
@@ -36,6 +36,9 @@ def command(process: subprocess.Popen, text: str, expected: str) -> dict:
 def main() -> None:
     binary, engines, output = (Path(arg).resolve() for arg in sys.argv[1:4])
     output.mkdir(parents=True, exist_ok=True)
+    peer_gate_only = sys.argv[4:] == ["--peer-gate-only"]
+    if sys.argv[4:] and not peer_gate_only:
+        raise ValueError("Неизвестный режим стенда")
     # Канарейка использует реальные собственные FD; production не получает fault.
     held = []
     canary = []
@@ -103,7 +106,20 @@ def main() -> None:
                         root,
                         port=peer_port,
                         target_ports=str(https.server_port),
-                    ):
+                    ) as peer_process:
+                        for denied_engine in pins:
+                            denied_probe(
+                                binary,
+                                engines,
+                                denied_engine,
+                                root,
+                                env,
+                                peer_process,
+                                peer_port,
+                                port,
+                                https,
+                                output,
+                            )
                         data = root / engine
                         data.mkdir(mode=0o700)
                         rows = []
@@ -131,7 +147,7 @@ def main() -> None:
                                 rows.append(sample(process.pid, 0))
                                 states = []
                                 selected = None
-                                for cycle in range(1, 101):
+                                for cycle in range(1, 3 if peer_gate_only else 101):
                                     https.requested.clear()
                                     state = command(process, "connect", "connect")
                                     current = "sing-box" if cycle % 2 else "xray"
@@ -201,7 +217,7 @@ def main() -> None:
                                             socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
                                         )
                                         rebound.bind(("127.0.0.1", port))
-                                    if cycle < 100:
+                                    if cycle < (2 if peer_gate_only else 100):
                                         states[-1]["switched"] = command(
                                             process, "switch", "switch"
                                         )
@@ -257,7 +273,13 @@ def main() -> None:
                                 process.stdout.close()
                                 if not process.stdin.closed:
                                     process.stdin.close()
-                        summary = oracle(rows)
+                        summary = (
+                            {
+                                "result": "PEER_NEGATIVE_AND_RESTORED_ALTERNATING_POSITIVE"
+                            }
+                            if peer_gate_only
+                            else oracle(rows)
+                        )
                         (output / "alternating.json").write_text(
                             json.dumps(
                                 dict(
