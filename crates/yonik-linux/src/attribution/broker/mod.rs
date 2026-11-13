@@ -642,3 +642,6 @@ mod lookup_view_tests {
         assert_eq!(view.validate(), Err(Unavailable::Coverage));
     }
 }
+
+#[cfg(test)]
+pub(in crate::attribution) use kernel::report_cold_witnesses;

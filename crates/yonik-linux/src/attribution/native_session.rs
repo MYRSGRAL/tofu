@@ -197,7 +197,7 @@ impl Session {
 // Транспорт не создаёт authority: Session по-прежнему выпускает только helper.
 mod transport;
 #[cfg(test)]
-pub(super) use transport::tests::known_roundtrip;
+pub(super) use transport::tests::{cold_roundtrip, known_roundtrip};
 
 impl Drop for Session {
     fn drop(&mut self) {
