@@ -145,3 +145,27 @@ https_reached=false. После восстановления peer positive sing-
 не resource verdict по двум samples. Ruff check/format обоих Python файлов
 и diff-check прошли. TemporaryDirectory/private D-Bus/peer/host закрыты;
 transient build-каталог не создавался.
+
+## P2b: cleanup внешнего timeout
+
+Обычным merge включён parent #169
+`7571d9270433ecd9fc17e1650f2f41a703c2d4dd`: imported denied_probe теперь
+использует run_probe с собственной session, остановкой producer и
+pidfd-validated SID cleanup, включая core с отдельной process group.
+Alternate driver с e5e3c6a и frozen Rust example с 527ae21 не изменены;
+W4 и production-код не менялись.
+
+Локально выполнены два targeted cleanup unit: старый parent-only путь
+оставляет listener (контроль обнаруживает дефект), новый helper освобождает
+listener и проверяет terminal state. 2/2 PASS; Ruff check/format трёх
+Python файлов PASS. Runtime и 100-cycle кампании здесь не повторялись.
+
+Final binding:
+`/home/myrs/projects/yonik/local/evidence/local-socks-alternating-peer-negative/cleanup-fixed/binding.json`.
+Он сохраняет привязку retained alternate binary/527ae21 и явно отмечает,
+что прежний alternate runtime evidence предшествует новому imported helper.
+Отдельный runtime rerun обоих ядер выполнен root для parent helper:
+`/home/myrs/projects/yonik/local/evidence/local-socks-resource-peer-negative/cleanup-fixed/binding.json`.
+Хеши перечисленных там evidence и соответствующих локальных исходников сверены.
+Это не новый alternate runtime seal. Новые сборки/transient не создавались;
+временные каталоги unit-тестов удалены штатно.
