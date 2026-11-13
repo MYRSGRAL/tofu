@@ -143,8 +143,8 @@ fn rebuild_both_formats_and_preserve_duplicates() {
         d.records = 3;
         let batch = receiver::rebuild(
             vec![fixture(bytes, true, true)],
-            &[d.clone()],
-            &[expected.clone()],
+            std::slice::from_ref(&d),
+            std::slice::from_ref(&expected),
             &|| false,
         )
         .unwrap();
