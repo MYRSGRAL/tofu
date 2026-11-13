@@ -50,6 +50,30 @@ impl Challenge {
             deadline: Instant::now() + DEADLINE,
         })
     }
+    /// Только opaque owner token; это transport binding, не namespace admission.
+    pub(crate) fn for_authorization(
+        authorization: &crate::helper::run_authorization::RunAuthorization,
+        digest: [u8; 32],
+        invocation: [u8; 16],
+    ) -> Result<Self, WorkerError> {
+        let (nonce, session, generation) = authorization
+            .challenge_context()
+            .map_err(|_| WorkerError::Protocol)?;
+        if digest == [0; 32] || invocation == [0; 16] {
+            return Err(WorkerError::Protocol);
+        }
+        let mut bytes = [0; FRAME];
+        bytes[..8].copy_from_slice(b"YNKNS001");
+        bytes[8..40].copy_from_slice(&nonce);
+        bytes[40..72].copy_from_slice(&digest);
+        bytes[72..88].copy_from_slice(&session);
+        bytes[88..96].copy_from_slice(&generation.to_be_bytes());
+        bytes[96..112].copy_from_slice(&invocation);
+        Ok(Self {
+            bytes,
+            deadline: Instant::now() + DEADLINE,
+        })
+    }
     /// Вызывается только helper для уже проверенного fixed unit PID/UID.
     /// Возвращаемое наблюдение само по себе НЕ разрешает admission.
     pub fn exchange(
@@ -367,6 +391,7 @@ impl NamespaceObservation {
             .unwrap()
             .bytes;
         challenge[..8].copy_from_slice(b"YNKNS003");
+        challenge[8..40].copy_from_slice(&[4; 32]);
         let report = KernelObservation::decode(
             KernelObservation::encode(
                 &challenge,
@@ -391,6 +416,7 @@ impl NamespaceObservation {
     }
     pub(crate) fn bind_run(
         &self,
+        nonce: [u8; 32],
         session: [u8; 16],
         generation: u64,
         epoch: u64,
@@ -405,7 +431,8 @@ impl NamespaceObservation {
             .lock()
             .map_err(|_| WorkerError::Protocol)?;
         let report = kernel.as_mut().ok_or(WorkerError::Protocol)?;
-        if report.1.is_some()
+        if report.0[8..40] != nonce
+            || report.1.is_some()
             || report.0[72..88] != session
             || report.0[88..96] != generation.to_be_bytes()
         {
@@ -733,6 +760,18 @@ mod tests {
         }
     }
     #[test]
+    fn authorized_challenge_uses_owner_nonce_and_rejects_revoke() {
+        let owner = crate::helper::run_authorization::RunAuthority::new([2; 16], 7, 9).unwrap();
+        let auth = owner.authorize([4; 32]).unwrap();
+        let challenge = Challenge::for_authorization(&auth, [1; 32], [3; 16]).unwrap();
+        assert_eq!(&challenge.bytes[8..40], &[4; 32]);
+        assert_eq!(&challenge.bytes[72..88], &[2; 16]);
+        assert_eq!(&challenge.bytes[88..96], &7u64.to_be_bytes());
+        owner.revoke();
+        assert!(Challenge::for_authorization(&auth, [1; 32], [3; 16]).is_err());
+    }
+
+    #[test]
     fn actual_v3_bound_report_channel() {
         const CHILD: &str = "YONIK_V3_REPORT_TEST_CHILD";
         if std::env::var_os(CHILD).is_none() {
@@ -801,11 +840,11 @@ mod tests {
     #[test]
     fn kernel_report_expiry_discards_evidence_and_descriptors() {
         let observation = NamespaceObservation::test_kernel_observation([2; 16], 7);
-        observation.bind_run([2; 16], 7, 9).unwrap();
+        observation.bind_run([4; 32], [2; 16], 7, 9).unwrap();
         std::thread::sleep(DEADLINE + Duration::from_millis(30));
         assert_eq!(observation.retained_namespace_count(), 0);
         assert!(observation.custody.kernel.lock().unwrap().is_none());
-        assert!(observation.bind_run([2; 16], 7, 10).is_err());
+        assert!(observation.bind_run([4; 32], [2; 16], 7, 10).is_err());
     }
     #[test]
     fn v3_report_exact_binding_and_closed_errno_set() {
