@@ -146,26 +146,22 @@ https_reached=false. После восстановления peer positive sing-
 и diff-check прошли. TemporaryDirectory/private D-Bus/peer/host закрыты;
 transient build-каталог не создавался.
 
-## P2b: cleanup внешнего timeout
+## P2b: окончательная cleanup граница
 
-Обычным merge включён parent #169
-`7571d9270433ecd9fc17e1650f2f41a703c2d4dd`: imported denied_probe теперь
-использует run_probe с собственной session, остановкой producer и
-pidfd-validated SID cleanup, включая core с отдельной process group.
-Alternate driver с e5e3c6a и frozen Rust example с 527ae21 не изменены;
-W4 и production-код не менялись.
+Промежуточный вариант `7571d92` заменён обычным merge #169
+`88c398a1a3973f24c65eb7e1b369711daf3547a5`: imported denied_probe использует
+собственную PID namespace и util-linux kill-child. Host с унаследованными pipes
+и core с отдельной process group завершает kernel; cleanup не зависит от
+нового pidfd/сканирования для kill. UID mapping сохраняет текущий UID.
+Механизм и ограничения описаны в отчёте #169.
 
-Локально выполнены два targeted cleanup unit: старый parent-only путь
-оставляет listener (контроль обнаруживает дефект), новый helper освобождает
-listener и проверяет terminal state. 2/2 PASS; Ruff check/format трёх
-Python файлов PASS. Runtime и 100-cycle кампании здесь не повторялись.
+Три коротких cleanup unit — PASS, без SKIP: старый parent-only путь обнаружен
+занятым listener; новый timeout и ранний выход host освобождают listener.
+Ruff и diff-check PASS. Rust examples/100-cycle workload не менялись;
+100 циклов и real restored-positive кампании снова не запускались.
+Оба actual peer-negative/restored-positive controls именно нового helper
+прошли в root #169, evidence в `local-socks-resource-peer-negative/pidns-cleanup`.
+Им не приписывается новый alternating runtime: retained 100 и focused
+alternating proofs остаются привязаны к прежним бинарникам и drivers.
 
-Final binding:
-`/home/myrs/projects/yonik/local/evidence/local-socks-alternating-peer-negative/cleanup-fixed/binding.json`.
-Он сохраняет привязку retained alternate binary/527ae21 и явно отмечает,
-что прежний alternate runtime evidence предшествует новому imported helper.
-Отдельный runtime rerun обоих ядер выполнен root для parent helper:
-`/home/myrs/projects/yonik/local/evidence/local-socks-resource-peer-negative/cleanup-fixed/binding.json`.
-Хеши перечисленных там evidence и соответствующих локальных исходников сверены.
-Это не новый alternate runtime seal. Новые сборки/transient не создавались;
-временные каталоги unit-тестов удалены штатно.
+Merge binding: `/home/myrs/projects/yonik/local/evidence/local-socks-alternating-peer-negative/pidns-merge/binding.json`.
