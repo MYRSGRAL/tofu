@@ -127,3 +127,9 @@ p07-gui-bindings.json. Raw samples, own cert fixtures и бинарник сох
 | sing-box | 37 / 37 / 28 | 55 / 36 / 50 | 49 / 57 / 48 |
 
 Никакой p95/p99 из трёх наблюдений не вычислялся; абсолютный latency budget не вводился.
+
+После сохранения source/executable/raw logs проверены /proc exe/cwd/fd references:
+активных ссылок на собственную сборку нет. `cargo clean` удалил 8 485 файлов,
+3.6 GiB; `/var/tmp/codex-myrs/transient/p07-gui` удалён. Cleanup log сохранён
+в `local/validation/p07-gui/cleanup.log`. Cargo.lock восстановлен к accepted байтам;
+чужие cross-UID untracked файлы сохранены.
