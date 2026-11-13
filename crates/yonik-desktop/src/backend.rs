@@ -20,7 +20,10 @@ use crate::preferences::{Preferences, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
+#[path = "source_failure.rs"]
+mod source_failure;
 use serde::{Deserialize, Serialize};
+use source_failure::{FailureContext, SourceFailure, SourceResult};
 use std::{
     fmt,
     fs::{self, DirBuilder, File, OpenOptions},
@@ -1159,6 +1162,29 @@ impl Snapshot {
             None,
         );
     }
+    fn source_failure(&mut self, source: bool, failure: SourceFailure, generation: u64) {
+        self.command_error(source, failure.key());
+        if let Some(context) = failure.context {
+            let (cause, generation) = match context {
+                FailureContext::Source(cause) => (cause, generation),
+                FailureContext::Scheduler(cause, generation) => {
+                    self.scheduler_generation = Some(generation);
+                    (cause, generation)
+                }
+            };
+            for slot in [
+                Slot::Error,
+                if source {
+                    Slot::Source
+                } else {
+                    Slot::Connection
+                },
+            ] {
+                self.error_contexts
+                    .set_generation(slot, cause, Some(generation));
+            }
+        }
+    }
     fn schedule_error(
         &mut self,
         failure: desktop_schedule::ScheduleFailure,
@@ -1671,7 +1697,12 @@ impl Actor {
             Err(error) => Err(error),
         }
     }
-    async fn refresh(&mut self, generation: u64, host: Arc<DesktopFetch>) -> Result<RefreshTask> {
+    async fn refresh(
+        &mut self,
+        generation: u64,
+        scheduler_generation: u64,
+        host: Arc<DesktopFetch>,
+    ) -> SourceResult<RefreshTask> {
         let id = self
             .state
             .source_id
@@ -1691,7 +1722,7 @@ impl Actor {
                 .service()
                 .schedule_generation(id)
                 .await
-                .map_err(map_subscription)?
+                .map_err(SourceFailure::subscription)?
                 .ok_or(DesktopError("source_required"))?,
         };
         let service = self.service().clone();
@@ -1703,14 +1734,14 @@ impl Actor {
         service
             .reserve_manual_schedule(identity, wall)
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         extend_schedule_interval(
             &service,
             identity,
             Duration::from_secs(self.preferences.subscription_interval_seconds as u64),
         )
         .await
-        .map_err(|failure| failure.error)?;
+        .map_err(|failure| SourceFailure::schedule(failure, scheduler_generation))?;
         let task = tokio::spawn(async move {
             service
                 .refresh_with_host(
@@ -1773,7 +1804,7 @@ impl Actor {
         self.state.selected_name = None;
         self.state.tcp_result = None;
     }
-    async fn reload(&mut self) -> Result<()> {
+    async fn reload(&mut self) -> SourceResult<()> {
         self.sources().await?;
         if self.state.source_id.is_none() {
             self.state.source_id = self.state.sources.first().map(|source| source.id);
@@ -1781,12 +1812,12 @@ impl Actor {
         }
         self.page().await
     }
-    async fn sources(&mut self) -> Result<()> {
+    async fn sources(&mut self) -> SourceResult<()> {
         let page = self
             .service()
             .sources_page(self.state.sources_offset)
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         self.state.sources_total = page.total;
         self.state.sources_offset = page.offset;
         self.state.sources = page
@@ -1800,7 +1831,7 @@ impl Actor {
             .collect();
         Ok(())
     }
-    async fn page(&mut self) -> Result<()> {
+    async fn page(&mut self) -> SourceResult<()> {
         self.state.source_generation = None;
         self.state.profiles.clear();
         self.state.total = 0;
@@ -1815,17 +1846,17 @@ impl Actor {
             .service()
             .schedule_generation(id)
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         let summary = self
             .service()
             .source_summary(id)
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         self.state.source_local = self
             .service()
             .source_is_local(id)
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         self.state.source_hwid_enabled = summary.hwid_enabled;
         self.state.source_name = Some(summary.name);
         let page = self
@@ -1842,7 +1873,7 @@ impl Actor {
                 },
             )
             .await
-            .map_err(map_subscription)?;
+            .map_err(SourceFailure::subscription)?;
         self.state.total = page.total;
         self.state.revision = page.snapshot_revision;
         self.state.profiles = page
@@ -1867,6 +1898,206 @@ impl Actor {
             self.clear_selection();
         }
         Ok(())
+    }
+    async fn source_command(&mut self, command: Command) -> SourceResult<()> {
+        match command {
+            Command::Reload => self.reload().await,
+            Command::SourcePage { offset } => {
+                self.state.sources_offset = offset;
+                self.sources().await
+            }
+            Command::AddSource {
+                name,
+                url,
+                local_exception,
+                route,
+                hwid_enabled,
+            } => {
+                let source = SubscriptionSource::new(
+                    name,
+                    url,
+                    local_exception,
+                    match route {
+                        Route::Direct => FetchRoute::Direct,
+                        Route::Proxy => FetchRoute::Proxy,
+                    },
+                )
+                .and_then(|source| source.with_hwid(hwid_enabled))
+                .map_err(SourceFailure::subscription)?;
+                let id = self
+                    .service()
+                    .add(source)
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.state.source_id = Some(id);
+                self.state.offset = 0;
+                self.pending = None;
+                self.state.pending = None;
+                self.clear_selection();
+                self.reload().await
+            }
+            Command::SourceChange {
+                request_id,
+                id,
+                expected_generation,
+                name,
+                url,
+                local_exception,
+                route,
+                hwid_enabled,
+            } => {
+                let source = SubscriptionSource::new(
+                    name,
+                    url,
+                    local_exception,
+                    match route {
+                        Route::Direct => FetchRoute::Direct,
+                        Route::Proxy => FetchRoute::Proxy,
+                    },
+                )
+                .and_then(|source| source.with_hwid(hwid_enabled))
+                .map_err(SourceFailure::subscription)?;
+                let generation = self
+                    .service()
+                    .change_source(id, expected_generation, source)
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.state.source_change_ack = Some(SourceChangeAck {
+                    request_id,
+                    id,
+                    generation: Some(generation),
+                    error: None,
+                });
+                if self.state.source_id == Some(id) {
+                    self.clear_selection();
+                    self.reload().await
+                } else {
+                    self.sources().await
+                }
+            }
+            Command::RenameSource { id, name } => {
+                self.service()
+                    .rename_source(id, name.clone())
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                if self.state.source_id == Some(id) {
+                    self.state.source_name = Some(name);
+                }
+                self.sources().await
+            }
+            Command::DeleteSource { id } => {
+                if self.state.can_stop {
+                    return Err(DesktopError("source_in_use").into());
+                }
+                if self.pending.is_some() {
+                    return Err(DesktopError("busy").into());
+                }
+                self.service()
+                    .delete_source(id)
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.state.sources_offset = 0;
+                self.sources().await?;
+                if self.state.source_id == Some(id) {
+                    self.state.source_id = self.state.sources.first().map(|source| source.id);
+                    self.state.offset = 0;
+                    self.clear_selection();
+                    self.page().await?;
+                }
+                Ok(())
+            }
+            Command::SetSourceHwid { enabled } => {
+                let id = self
+                    .state
+                    .source_id
+                    .ok_or(DesktopError("source_required"))?;
+                self.service()
+                    .set_source_hwid(id, enabled)
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.pending = None;
+                self.state.pending = None;
+                self.clear_selection();
+                self.reload().await
+            }
+            Command::SelectSource { id } => {
+                if !self.state.sources.iter().any(|s| s.id == id) {
+                    return Err(DesktopError("source_required").into());
+                }
+                self.state.source_id = Some(id);
+                self.state.offset = 0;
+                self.pending = None;
+                self.state.pending = None;
+                self.clear_selection();
+                self.page().await
+            }
+            Command::ApproveRefresh => {
+                let pending = self.pending.take().ok_or(DesktopError("review_required"))?;
+                let identity = pending.identity();
+                self.state.pending = None;
+                self.service()
+                    .commit(pending.approve_after_review())
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.persist_refresh_completion(identity, true).await?;
+                self.clear_selection();
+                self.page().await
+            }
+            Command::DiscardRefresh => {
+                if let Some(pending) = self.pending.as_ref() {
+                    self.persist_refresh_completion(pending.identity(), true)
+                        .await?;
+                }
+                self.pending = None;
+                self.state.pending = None;
+                Ok(())
+            }
+            Command::ReviewPage { offset } => {
+                let pending = self
+                    .pending
+                    .as_ref()
+                    .ok_or(DesktopError("review_required"))?;
+                self.state.pending = Some(pending_dto(pending, offset)?);
+                Ok(())
+            }
+            Command::Query {
+                search,
+                favorites_only,
+                offset,
+            } => {
+                self.state.search = search;
+                self.state.favorites_only = favorites_only;
+                self.state.offset = offset;
+                self.page().await
+            }
+            Command::Favorite { id, value } => {
+                self.service()
+                    .set_favorite(id, value)
+                    .await
+                    .map_err(SourceFailure::subscription)?;
+                self.page().await
+            }
+            Command::SelectProfile { id, revision } => {
+                let profile = self
+                    .service()
+                    .select_profile(id, revision)
+                    .await
+                    .map_err(SourceFailure::selection)?;
+                if Some(profile.profile.source_id) != self.state.source_id
+                    || profile.snapshot_revision != self.state.revision
+                {
+                    return Err(DesktopError("profile_unavailable").into());
+                }
+                if self.state.selected_profile != Some(id) {
+                    self.state.tcp_result = None;
+                }
+                self.state.selected_profile = Some(id);
+                self.state.selected_name = Some(profile.profile.name.clone());
+                self.selected = Some(profile);
+                Ok(())
+            }
+            command => self.command(command).await.map_err(Into::into),
+        }
     }
     async fn command(&mut self, command: Command) -> Result<()> {
         match command {
@@ -2205,197 +2436,6 @@ impl Actor {
                 )
                 .await
             }
-            Command::Reload => self.reload().await,
-            Command::SourcePage { offset } => {
-                self.state.sources_offset = offset;
-                self.sources().await
-            }
-            Command::AddSource {
-                name,
-                url,
-                local_exception,
-                route,
-                hwid_enabled,
-            } => {
-                let source = SubscriptionSource::new(
-                    name,
-                    url,
-                    local_exception,
-                    match route {
-                        Route::Direct => FetchRoute::Direct,
-                        Route::Proxy => FetchRoute::Proxy,
-                    },
-                )
-                .and_then(|source| source.with_hwid(hwid_enabled))
-                .map_err(map_subscription)?;
-                let id = self.service().add(source).await.map_err(map_subscription)?;
-                self.state.source_id = Some(id);
-                self.state.offset = 0;
-                self.pending = None;
-                self.state.pending = None;
-                self.clear_selection();
-                self.reload().await
-            }
-            Command::SourceChange {
-                request_id,
-                id,
-                expected_generation,
-                name,
-                url,
-                local_exception,
-                route,
-                hwid_enabled,
-            } => {
-                let source = SubscriptionSource::new(
-                    name,
-                    url,
-                    local_exception,
-                    match route {
-                        Route::Direct => FetchRoute::Direct,
-                        Route::Proxy => FetchRoute::Proxy,
-                    },
-                )
-                .and_then(|source| source.with_hwid(hwid_enabled))
-                .map_err(map_subscription)?;
-                let generation = self
-                    .service()
-                    .change_source(id, expected_generation, source)
-                    .await
-                    .map_err(map_subscription)?;
-                self.state.source_change_ack = Some(SourceChangeAck {
-                    request_id,
-                    id,
-                    generation: Some(generation),
-                    error: None,
-                });
-                if self.state.source_id == Some(id) {
-                    self.clear_selection();
-                    self.reload().await
-                } else {
-                    self.sources().await
-                }
-            }
-            Command::RenameSource { id, name } => {
-                self.service()
-                    .rename_source(id, name.clone())
-                    .await
-                    .map_err(map_subscription)?;
-                if self.state.source_id == Some(id) {
-                    self.state.source_name = Some(name);
-                }
-                self.sources().await
-            }
-            Command::DeleteSource { id } => {
-                if self.state.can_stop {
-                    return Err(DesktopError("source_in_use"));
-                }
-                if self.pending.is_some() {
-                    return Err(DesktopError("busy"));
-                }
-                self.service()
-                    .delete_source(id)
-                    .await
-                    .map_err(map_subscription)?;
-                self.state.sources_offset = 0;
-                self.sources().await?;
-                if self.state.source_id == Some(id) {
-                    self.state.source_id = self.state.sources.first().map(|source| source.id);
-                    self.state.offset = 0;
-                    self.clear_selection();
-                    self.page().await?;
-                }
-                Ok(())
-            }
-            Command::SetSourceHwid { enabled } => {
-                let id = self
-                    .state
-                    .source_id
-                    .ok_or(DesktopError("source_required"))?;
-                self.service()
-                    .set_source_hwid(id, enabled)
-                    .await
-                    .map_err(map_subscription)?;
-                self.pending = None;
-                self.state.pending = None;
-                self.clear_selection();
-                self.reload().await
-            }
-            Command::SelectSource { id } => {
-                if !self.state.sources.iter().any(|s| s.id == id) {
-                    return Err(DesktopError("source_required"));
-                }
-                self.state.source_id = Some(id);
-                self.state.offset = 0;
-                self.pending = None;
-                self.state.pending = None;
-                self.clear_selection();
-                self.page().await
-            }
-            Command::ApproveRefresh => {
-                let pending = self.pending.take().ok_or(DesktopError("review_required"))?;
-                let identity = pending.identity();
-                self.state.pending = None;
-                self.service()
-                    .commit(pending.approve_after_review())
-                    .await
-                    .map_err(map_subscription)?;
-                self.persist_refresh_completion(identity, true).await?;
-                self.clear_selection();
-                self.page().await
-            }
-            Command::DiscardRefresh => {
-                if let Some(pending) = self.pending.as_ref() {
-                    self.persist_refresh_completion(pending.identity(), true)
-                        .await?;
-                }
-                self.pending = None;
-                self.state.pending = None;
-                Ok(())
-            }
-            Command::ReviewPage { offset } => {
-                let pending = self
-                    .pending
-                    .as_ref()
-                    .ok_or(DesktopError("review_required"))?;
-                self.state.pending = Some(pending_dto(pending, offset)?);
-                Ok(())
-            }
-            Command::Query {
-                search,
-                favorites_only,
-                offset,
-            } => {
-                self.state.search = search;
-                self.state.favorites_only = favorites_only;
-                self.state.offset = offset;
-                self.page().await
-            }
-            Command::Favorite { id, value } => {
-                self.service()
-                    .set_favorite(id, value)
-                    .await
-                    .map_err(map_subscription)?;
-                self.page().await
-            }
-            Command::SelectProfile { id, revision } => {
-                let profile = self
-                    .service()
-                    .select_profile(id, revision)
-                    .await
-                    .map_err(|_| DesktopError("profile_unavailable"))?;
-                if Some(profile.profile.source_id) != self.state.source_id
-                    || profile.snapshot_revision != self.state.revision
-                {
-                    return Err(DesktopError("profile_unavailable"));
-                }
-                if self.state.selected_profile != Some(id) {
-                    self.state.tcp_result = None;
-                }
-                self.state.selected_profile = Some(id);
-                self.state.selected_name = Some(profile.profile.name.clone());
-                self.selected = Some(profile);
-                Ok(())
-            }
             Command::SetSubscriptionSchedule {
                 interval_seconds,
                 background,
@@ -2529,7 +2569,7 @@ impl Actor {
         &self,
         identity: SubscriptionIdentity,
         success: bool,
-    ) -> Result<()> {
+    ) -> SourceResult<()> {
         let wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -2537,14 +2577,14 @@ impl Actor {
         self.service()
             .record_schedule_completion(identity, success, wall)
             .await
-            .map_err(map_subscription)
+            .map_err(SourceFailure::subscription)
     }
     async fn refreshed(
         &mut self,
         identity: SubscriptionIdentity,
         result: std::result::Result<RefreshResult, SubscriptionError>,
-    ) -> Result<()> {
-        let outcome = match result.map_err(map_subscription) {
+    ) -> SourceResult<()> {
+        let outcome = match result.map_err(SourceFailure::subscription) {
             Err(error) => Err(error),
             Ok(result) => match result {
                 RefreshResult::NotModified => self.page().await,
@@ -2556,9 +2596,13 @@ impl Actor {
                         Ok(())
                     } else {
                         self.service()
-                            .commit(pending.accept_clean().map_err(map_subscription)?)
+                            .commit(
+                                pending
+                                    .accept_clean()
+                                    .map_err(SourceFailure::subscription)?,
+                            )
                             .await
-                            .map_err(map_subscription)?;
+                            .map_err(SourceFailure::subscription)?;
                         self.clear_selection();
                         self.page().await
                     }
@@ -2905,7 +2949,7 @@ mod settings_tests {
                 serde_json::from_str(r#"{"command":"delete_source","id":1}"#).expect("удаление");
             assert_eq!(
                 actor
-                    .command(command)
+                    .source_command(command)
                     .await
                     .expect_err("активное ядро")
                     .key(),
@@ -4287,10 +4331,12 @@ async fn run(
                 actor.state.refresh_token = None;
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting { actor.state.error_contexts.clear(crate::diagnostics::context::Slot::Source); actor.state.source_error = None; }
                 if generation == control.generation.load(Ordering::SeqCst) && !quitting && !*cancel.borrow() {
-                    let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch")) };
+                    let outcome = match result { Ok(result) => actor.refreshed(identity, result).await, Err(_) => Err(DesktopError("fetch").into()) };
+                    if generation != control.generation.load(Ordering::SeqCst) { continue; }
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = outcome { actor.state.command_error(true, error.key()); }
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
+                    if let Err(error) = outcome { actor.state.command_generation = generation; actor.state.source_failure(true, error, generation); }
+                    let Some(reconciled) = await_current_schedule(reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed), &control.generation, generation).await else { continue; };
+                    if let Err(error) = reconciled { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 actor.emit();
             }
@@ -4483,12 +4529,13 @@ async fn run(
                 if let Some(id) = local_forbidden {
                     let error = match actor.service().source_is_local(id).await {
                         Ok(false) => None,
-                        Ok(true) => Some("invalid_input"),
-                        Err(error) => Some(map_subscription(error).key()),
+                        Ok(true) => Some(DesktopError("invalid_input").into()),
+                        Err(error) => Some(SourceFailure::subscription(error)),
                     };
+                    if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
                     if let Some(error) = error {
-                        if let Command::SourceChange { request_id, .. } = &envelope.command { actor.state.source_change_ack = Some(SourceChangeAck { request_id: *request_id, id, generation: None, error: Some(error) }); }
-                        actor.state.command_error(true, error); actor.emit(); continue;
+                        if let Command::SourceChange { request_id, .. } = &envelope.command { actor.state.source_change_ack = Some(SourceChangeAck { request_id: *request_id, id, generation: None, error: Some(error.key()) }); }
+                        actor.state.command_generation = envelope.generation; actor.state.source_failure(true, error, envelope.generation); actor.emit(); continue;
                     }
                 }
                 let apply_request = match &envelope.command { Command::RoutingApply { request_id, .. } => Some(*request_id), _ => None };
@@ -4582,9 +4629,9 @@ async fn run(
                     }
                 }
                 let local_is_file = matches!(&envelope.command, Command::ImportFile { .. });
-                let outcome = match envelope.command {
+                let outcome: SourceResult<()> = match envelope.command {
                     Command::ImportText { name, text } | Command::ImportFile { name, path: text } => {
-                        if refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || scheduled.review.is_some() || actor.pending.is_some() || actor.state.can_stop { Err(DesktopError("busy")) }
+                        if refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || scheduled.review.is_some() || actor.pending.is_some() || actor.state.can_stop { Err(DesktopError("busy").into()) }
                         else {
                             let is_file = local_is_file;
                             let (cancel, receiver) = watch::channel(false);
@@ -4600,7 +4647,7 @@ async fn run(
                         if local_pending.take().is_some() { actor.state.pending = None; } Ok(())
                     }
                     Command::DiscardRefresh if local_pending.is_some() => { local_pending = None; actor.state.pending = None; Ok(()) }
-                    Command::ReviewPage { offset } if local_pending.is_some() => { match report_dto(&local_pending.as_ref().expect("guard").1, offset) { Ok(dto) => { actor.state.pending = Some(dto); Ok(()) }, Err(error) => Err(error) } }
+                    Command::ReviewPage { offset } if local_pending.is_some() => { match report_dto(&local_pending.as_ref().expect("guard").1, offset) { Ok(dto) => { actor.state.pending = Some(dto); Ok(()) }, Err(error) => Err(error.into()) } }
                     Command::ApproveRefresh if local_pending.is_some() => {
                         let (name, report) = local_pending.as_ref().expect("guard");
                         let result = {
@@ -4610,13 +4657,13 @@ async fn run(
                             tokio::pin!(operation);
                             tokio::select! {
                                 biased;
-                                _ = interruption.changed() => { sender.send_replace(true); let _ = operation.await; Err(DesktopError("cancelled")) }
-                                result = &mut operation => result.map_err(map_subscription),
+                                _ = interruption.changed() => { sender.send_replace(true); let _ = operation.await; Err(DesktopError("cancelled").into()) }
+                                result = &mut operation => result.map_err(SourceFailure::subscription),
                             }
                         };
                         match result {
                             Ok(id) if envelope.generation == control.generation.load(Ordering::SeqCst) => { local_pending = None; actor.state.pending = None; actor.state.source_id = Some(id); actor.state.offset = 0; actor.state.search.clear(); actor.state.favorites_only = false; actor.clear_selection(); actor.reload().await }
-                            Ok(_) => { local_pending = None; actor.state.pending = None; Err(DesktopError("cancelled")) }
+                            Ok(_) => { local_pending = None; actor.state.pending = None; Err(DesktopError("cancelled").into()) }
                             Err(error) => Err(error)
                         }
                     }
@@ -4627,16 +4674,16 @@ async fn run(
                         actor.state.pending = None;
                         match scheduled.runtime.finish_review(actor.service(), id, approve, || origin.elapsed()).await {
                             Ok(_) => { actor.clear_selection(); actor.page().await }
-                            Err(error) => Err(map_subscription(error)),
+                            Err(error) => Err(SourceFailure::subscription(error)),
                         }
                     }
                     Command::ReviewPage { offset } if scheduled.review.is_some() => {
                         match scheduled.review.and_then(|id| scheduled.runtime.review(id)) {
-                            Some(pending) => pending_dto(pending, offset).map(|dto| actor.state.pending = Some(dto)),
-                            None => Err(DesktopError("review_required")),
+                            Some(pending) => pending_dto(pending, offset).map(|dto| actor.state.pending = Some(dto)).map_err(Into::into),
+                            None => Err(DesktopError("review_required").into()),
                         }
                     }
-                    Command::SelectSource { .. } | Command::ImportSource { .. } | Command::AddSource { .. } if scheduled.review.is_some() => Err(DesktopError("review_required")),
+                    Command::SelectSource { .. } | Command::ImportSource { .. } | Command::AddSource { .. } if scheduled.review.is_some() => Err(DesktopError("review_required").into()),
 
                     Command::CancelRefresh { id, token } => {
                         match refreshing.as_ref() {
@@ -4644,22 +4691,22 @@ async fn run(
                                 cancel.send_replace(true);
                                 Ok(())
                             }
-                            _ => Err(DesktopError("refresh_required")),
+                            _ => Err(DesktopError("refresh_required").into()),
                         }
                     }
                     Command::BatchPage { offset } => { actor.state.batch.page(offset); Ok(()) }
                     Command::CheckBatch => {
-                        if batch_running.is_some() || actor.state.busy { Err(DesktopError("busy")) }
-                        else if envelope.generation != control.generation.load(Ordering::SeqCst) || envelope.tcp_generation != *control.tcp_priority.borrow() { Err(DesktopError("cancelled")) }
+                        if batch_running.is_some() || actor.state.busy { Err(DesktopError("busy").into()) }
+                        else if envelope.generation != control.generation.load(Ordering::SeqCst) || envelope.tcp_generation != *control.tcp_priority.borrow() { Err(DesktopError("cancelled").into()) }
                         else { match actor.start_batch(envelope.generation, envelope.tcp_generation) {
-                            Ok(batch) => { batch_running = Some(batch); Ok(()) }, Err(error) => Err(error)
+                            Ok(batch) => { batch_running = Some(batch); Ok(()) }, Err(error) => Err(error.into())
                         } }
                     }
                     Command::CheckTcp => {
                         if envelope.tcp_generation != *control.tcp_priority.borrow() {
-                            Err(DesktopError("cancelled"))
+                            Err(DesktopError("cancelled").into())
                         } else if tcp_running.is_some() || actor.state.busy {
-                            Err(DesktopError("busy"))
+                            Err(DesktopError("busy").into())
                         } else if let Some(profile) = actor.selected.as_ref() {
                             let target = TcpProbeTarget::for_server(&profile.server);
                             let current = network.as_ref().map(NetworkWatch::current);
@@ -4682,15 +4729,15 @@ async fn run(
                             tcp_running = Some(TcpRunning { generation: envelope.generation,
                                 tcp_generation: envelope.tcp_generation, network_stamp, result, cancel, task });
                             Ok(())
-                        } else { Err(DesktopError("profile_required")) }
+                        } else { Err(DesktopError("profile_required").into()) }
                     }
                     Command::ImportSource { name, url, local_exception, route, hwid_enabled } => {
-                        if refreshing.is_some() { Err(DesktopError("busy")) }
+                        if refreshing.is_some() { Err(DesktopError("busy").into()) }
                         else {
-                            match actor.command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
+                            match actor.source_command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -4700,10 +4747,10 @@ async fn run(
                         }
                     }
                     Command::SetSourceHwid { enabled } => {
-                        if refreshing.is_some() { Err(DesktopError("busy")) }
+                        if refreshing.is_some() { Err(DesktopError("busy").into()) }
                         else {
-                            match actor.command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                            match actor.source_command(Command::SetSourceHwid { enabled }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -4756,32 +4803,32 @@ async fn run(
                         Ok(())
                     }
                     Command::Refresh => {
-                        if refreshing.is_some() { Err(DesktopError("busy")) }
-                        else { match actor.refresh(envelope.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                        if refreshing.is_some() { Err(DesktopError("busy").into()) }
+                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
                     }
                     Command::SetConnectionMode { mode } => {
-                        if actor.state.can_stop || actor.state.system_recovery_pending || system_flight.is_some() || system_stop { Err(DesktopError("busy")) }
+                        if actor.state.can_stop || actor.state.system_recovery_pending || system_flight.is_some() || system_stop { Err(DesktopError("busy").into()) }
                         else { actor.state.connection_mode = mode; actor.state.status = "Disconnected"; Ok(()) }
                     }
                     Command::SystemState | Command::SystemUnlock => {
-                        if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy")) }
+                        if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy").into()) }
                         else {
                             let operation = if matches!(envelope.command, Command::SystemUnlock) { Operation::Unlock } else { Operation::State };
                             system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation));
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
-                    Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage")),
-                    Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage")),
-                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option")),
+                    Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage").into()),
+                    Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage").into()),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option").into()),
                     command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
                         let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
-                        if let Err(error) = actor.check_routing_apply(&command).await { Err(error) }
-                        else if actor.state.can_stop || (request_id.is_some() && actor.state.system_recovery_pending) || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy")) }
-                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
+                        if let Err(error) = actor.check_routing_apply(&command).await { Err(error.into()) }
+                        else if actor.state.can_stop || (request_id.is_some() && actor.state.system_recovery_pending) || system_flight.is_some() || refreshing.is_some() || system_stop { Err(DesktopError("busy").into()) }
+                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required").into()) }
                         else if let Some(profile) = actor.selected.as_ref() {
                             match yonik_import::ServerIntent::from_server(&profile.server).map_err(|_| DesktopError("engine_config")).and_then(|server| actor.current_inline_policy().map(|(policy, revision)| (server, policy, revision))) {
                                 Ok((server, policy, routing_revision)) => {
@@ -4794,18 +4841,18 @@ async fn run(
                                     actor.state.active_engine = Some(actor.state.engine);
                                     actor.state.system_state = "Unknown"; actor.state.status = "Preparing"; Ok(())
                                 }
-                                Err(error) => Err(error),
+                                Err(error) => Err(error.into()),
                             }
-                        } else { Err(DesktopError("profile_required")) }
+                        } else { Err(DesktopError("profile_required").into()) }
                     }
                     Command::Connect => {
-                        if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy")) }
-                        else if session_generation == u64::MAX { Err(DesktopError("engine_failed")) }
-                        else if actor.selected.is_none() { Err(DesktopError("profile_required")) }
-                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required")) }
-                        else if let Err(error) = actor.prepare_port() { Err(error) }
+                        if actor.state.can_stop || running.is_some() || refreshing.is_some() { Err(DesktopError("busy").into()) }
+                        else if session_generation == u64::MAX { Err(DesktopError("engine_failed").into()) }
+                        else if actor.selected.is_none() { Err(DesktopError("profile_required").into()) }
+                        else if actor.pending.is_some() || scheduled.review.is_some() { Err(DesktopError("review_required").into()) }
+                        else if let Err(error) = actor.prepare_port() { Err(error.into()) }
                         else if let Some(profile) = actor.selected.as_ref() {
-                            if actor.pending.is_some() { Err(DesktopError("review_required")) }
+                            if actor.pending.is_some() { Err(DesktopError("review_required").into()) }
                             else {
                                 match (NonZeroU16::new(actor.state.port).and_then(|port| yonik_engine::compile(&profile.server, actor.state.engine.engine(), port).ok()), actor.probe_target()) {
                                     (Some(compiled), Ok(target)) => {
@@ -4817,25 +4864,32 @@ async fn run(
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
                                         actor.state.probe_result = None; actor.state.status = "Preparing"; Ok(())
                                     }
-                                    (_, Err(error)) => Err(error),
-                                    _ => Err(DesktopError("engine_config")),
+                                    (_, Err(error)) => Err(error.into()),
+                                    _ => Err(DesktopError("engine_config").into()),
                                 }
                             }
-                        } else { Err(DesktopError("profile_required")) }
+                        } else { Err(DesktopError("profile_required").into()) }
                     }
                     Command::PresetActivate { request_id, .. } | Command::PresetPrepare { request_id, .. } | Command::PresetRollback { request_id } if preset_job.is_some() => {
                         actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("busy") }); Ok(())
                     }
-                    Command::PresetStatus if preset_job.is_some() => Err(DesktopError("busy")),
+                    Command::PresetStatus if preset_job.is_some() => Err(DesktopError("busy").into()),
                     command => {
                         if refreshing.is_some() && matches!(command, Command::SelectSource { .. } | Command::AddSource { .. } | Command::ApproveRefresh | Command::RenameSource { .. } | Command::DeleteSource { .. }) {
-                            Err(DesktopError("busy"))
-                        } else { actor.command(command).await }
+                            Err(DesktopError("busy").into())
+                        } else { actor.source_command(command).await }
                     }
                 };
+                if envelope.generation != control.generation.load(Ordering::SeqCst) { continue; }
+                let command_context = outcome.as_ref().err().and_then(|failure| {
+                    context_request_id.and_then(|id| actor.state.error_contexts.matching(Slot::RoutingAck, Some(failure.key()), Some(id)))
+                        .or_else(|| actor.state.error_contexts.matching(Slot::Error, Some(failure.key()), None))
+                        .filter(|context| matches!(context.stage, crate::diagnostics::context::Stage::RoutingSave | crate::diagnostics::context::Stage::CatalogRead | crate::diagnostics::context::Stage::StorageWrite))
+                });
                 if let Some(identity) = manual_review_completion {
                     let storage_failed = matches!(&outcome, Err(error) if error.key() == "storage");
-                    if let Err(error) = reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
+                    let Some(reconciled) = await_current_schedule(reconcile_manual_schedule(&mut scheduled, actor.service(), identity, || origin.elapsed(), storage_failed), &control.generation, envelope.generation).await else { continue; };
+                    if let Err(error) = reconciled { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 }
                 let mut schedule_reload_error = None;
                 if reload_schedule || cancel_id.is_some() {
@@ -4858,9 +4912,8 @@ async fn run(
                 }
 
                 if let Err(error) = outcome {
-                    let context = context_request_id.and_then(|id| actor.state.error_contexts.matching(Slot::RoutingAck, Some(error.key()), Some(id))).or_else(|| actor.state.error_contexts.matching(Slot::Error, Some(error.key()), None));
-                    actor.state.command_error(source_operation, error.key());
-                    if let Some(context) = context {
+                    actor.state.source_failure(source_operation, error, envelope.generation);
+                    if let Some(context) = command_context {
                         actor.state.error_contexts.set_generation(Slot::Error, context.reason, context.generation);
                         actor.state.error_contexts.set_generation(if source_operation { Slot::Source } else { Slot::Connection }, context.reason, context.generation);
                     }
@@ -5058,6 +5111,87 @@ mod routing_regressions {
             lock,
             path,
         )
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn source_actual_missing_table_проходит_через_ручные_команды() {
+        let (mut actor, lock, path) = fixture().await;
+        actor.state.source_id = Some(1);
+        actor.state.sources = vec![SourceDto {
+            id: 1,
+            name: "Fixture".into(),
+            hwid_enabled: false,
+        }];
+        actor.state.command_generation = 91;
+        // Нарушаем только схему собственной fixture: настоящий SQL lookup вернёт Storage.
+        let status = std::process::Command::new("python3")
+            .arg("-c")
+            .arg("import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute('ALTER TABLE sources RENAME TO unavailable_sources'); db.commit(); db.close()")
+            .arg(path.join("subscriptions.sqlite"))
+            .status()
+            .expect("Python sqlite3 fixture");
+        assert!(status.success());
+        for value in [
+            serde_json::json!({"command":"reload"}),
+            serde_json::json!({"command":"source_page", "offset":0}),
+            serde_json::json!({"command":"query", "search":"", "favorites_only":false, "offset":0}),
+            serde_json::json!({"command":"select_source", "id":1}),
+            serde_json::json!({"command":"rename_source", "id":1, "name":"Renamed"}),
+            serde_json::json!({"command":"set_source_hwid", "enabled":true}),
+            serde_json::json!({"command":"delete_source", "id":1}),
+        ] {
+            let command: Command = serde_json::from_value(value).expect("команда");
+            actor.state.begin_command(&command);
+            let failure = actor
+                .source_command(command)
+                .await
+                .expect_err("реальный отказ SQL lookup");
+            assert_eq!(failure.key(), "storage");
+            actor.state.source_failure(true, failure, 91);
+            let context = actor
+                .state
+                .error_contexts
+                .matching(Slot::Source, Some("storage"), None)
+                .expect("companion");
+            assert_eq!(context.reason, Cause::SourceRepositoryStorage);
+            assert_eq!(context.generation, Some(91));
+        }
+        let (lease, _) = watch::channel(None);
+        let failure = actor
+            .refresh(91, 17, DesktopFetch::new(&lease, None))
+            .await
+            .err()
+            .expect("refresh admission");
+        actor.state.source_failure(true, failure, 91);
+        assert_eq!(
+            actor
+                .state
+                .error_contexts
+                .matching(Slot::Source, Some("storage"), None)
+                .expect("refresh")
+                .reason,
+            Cause::SourceRepositoryStorage
+        );
+        // Тот же service preflight используется runtime перед SetSubscriptionSchedule.
+        let failure = actor
+            .service()
+            .source_is_local(1)
+            .await
+            .expect_err("schedule preflight");
+        actor
+            .state
+            .source_failure(true, SourceFailure::subscription(failure), 91);
+        assert_eq!(
+            actor
+                .state
+                .error_contexts
+                .matching(Slot::Source, Some("storage"), None)
+                .expect("schedule")
+                .reason,
+            Cause::SourceRepositoryStorage
+        );
+        drop(actor);
+        drop(lock);
+        std::fs::remove_dir_all(path).expect("очистка своей fixture");
     }
     async fn send(actor: &mut Actor, value: serde_json::Value) -> Result<()> {
         actor
