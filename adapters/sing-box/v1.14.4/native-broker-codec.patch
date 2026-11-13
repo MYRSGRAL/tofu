@@ -1621,7 +1621,7 @@ diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/export_test.go
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,164 @@
 +package nativehooks
 +
 +import (
@@ -1781,6 +1781,10 @@ new file mode 100644
 +	flow := old.flow
 +	flow.Local = netip.AddrPortFrom(flow.Local.Addr(), port)
 +	return context.WithValue(context.WithoutCancel(ctx), routingKey{}, &routingConsumer{session: old.session, required: true, flow: flow, lookup: old.lookup})
++}
++
++func PersistentPlainTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	return closedTUNFixtureMode(t, "persistent/cancel")
 +}
 diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
 new file mode 100644
@@ -2121,7 +2125,7 @@ diff --git a/common/yonikbroker/closed_tun_linux.go b/common/yonikbroker/closed_
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux.go
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,241 @@
 +//go:build linux && !android
 +
 +package nativehooks
@@ -2221,7 +2225,7 @@ new file mode 100644
 +	if err != nil || unix.IoctlIfreq(fd, unix.TUNGETIFF, req) != nil {
 +		return ErrDenied
 +	}
-+	if req.Name() != a.Name || req.Uint16() != unix.IFF_TUN|unix.IFF_NO_PI {
++	if req.Name() != a.Name || !plainTUNFlags(req.Uint16()) {
 +		return ErrDenied
 +	}
 +	iface, err := net.InterfaceByName(a.Name)
@@ -2356,11 +2360,18 @@ new file mode 100644
 +	}
 +	return context.WithValue(target, routingKey{}, c)
 +}
++
++// Оба закрытых конструктора читают Plain IP без virtio header.
++// PERSIST описывает хранение интерфейса, не packet framing; остальные биты запрещены.
++func plainTUNFlags(flags uint16) bool {
++	const plain = unix.IFF_TUN | unix.IFF_NO_PI
++	return flags == plain || flags == plain|unix.IFF_PERSIST
++}
 diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/closed_tun_linux_test.go
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/closed_tun_linux_test.go
-@@ -0,0 +1,284 @@
+@@ -0,0 +1,301 @@
 +//go:build linux && !android
 +
 +package nativehooks
@@ -2371,6 +2382,7 @@ new file mode 100644
 +	"io"
 +	"net"
 +	"os"
++	"strings"
 +	"syscall"
 +	"testing"
 +	"time"
@@ -2386,6 +2398,8 @@ new file mode 100644
 +	if known {
 +		mode = mode[6:]
 +	}
++	persistent := strings.HasPrefix(mode, "persistent/")
++	mode = strings.TrimPrefix(mode, "persistent/")
 +	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
 +		t.Skip("нужен isolated namespace launcher")
 +	}
@@ -2403,6 +2417,20 @@ new file mode 100644
 +	req.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
 +	if err = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); err != nil {
 +		t.Fatal(err)
++	}
++	if persistent {
++		if err = unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1); err != nil {
++			t.Fatal(err)
++		}
++		t.Cleanup(func() {
++			if err := unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 0); err != nil {
++				t.Error(err)
++			}
++		})
++		if err = unix.IoctlIfreq(fd, unix.TUNGETIFF, req); err != nil || req.Uint16() != 0x1801 {
++			t.Fatalf("persistent Plain flags=%#x err=%v", req.Uint16(), err)
++		}
++		t.Log("kernel persistent Plain TUNGETIFF=0x1801; wire semantic flags=0x1001")
 +	}
 +	iface, err := net.InterfaceByName(req.Name())
 +	if err != nil {
@@ -2649,7 +2677,7 @@ diff --git a/common/yonikbroker/tun_callsite_test.go b/common/yonikbroker/tun_ca
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/tun_callsite_test.go
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,53 @@
 +package nativehooks_test
 +
 +import (
@@ -2662,11 +2690,17 @@ new file mode 100644
 +	"time"
 +)
 +
-+func TestActualTUNConstructor(t *testing.T) {
++func TestActualTUNConstructor(t *testing.T)                { actualTUNConstructor(t, false) }
++func TestPersistentPlainActualTUNConstructor(t *testing.T) { actualTUNConstructor(t, true) }
++func actualTUNConstructor(t *testing.T, persistent bool) {
 +	if _, err := tun.NewOwnedInterface(context.Background(), T.Options{EXP_ExternalConfiguration: true, Name: "ignored", MTU: 1500}); err == nil {
 +		t.Fatal("нет handoff")
 +	}
-+	ctx, original, cancel := nativehooks.ClosedTUNFixture(t)
++	fixture := nativehooks.ClosedTUNFixture
++	if persistent {
++		fixture = nativehooks.PersistentPlainTUNFixture
++	}
++	ctx, original, cancel := fixture(t)
 +	ctx = nativehooks.CarryClosedSession(ctx, context.Background())
 +	iface, err := net.InterfaceByName("ynkfixture0")
 +	if err != nil {
@@ -3929,7 +3963,7 @@ diff --git a/common/yonikbroker/pipeline_test.go b/common/yonikbroker/pipeline_t
 new file mode 100644
 --- /dev/null
 +++ b/common/yonikbroker/pipeline_test.go
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,201 @@
 +package nativehooks_test
 +
 +import (
@@ -3949,12 +3983,18 @@ new file mode 100644
 +	"time"
 +)
 +
-+func TestActualTUNPipeline(t *testing.T) {
++func TestActualTUNPipeline(t *testing.T)          { actualTUNPipeline(t, false) }
++func TestPersistentPlainTUNPipeline(t *testing.T) { actualTUNPipeline(t, true) }
++func actualTUNPipeline(t *testing.T, persistent bool) {
 +	baselineFD, baselineTasks := 0, 0
 +	var baselineHeap uint64
 +	for index, mode := range []string{"cancel", "eof", "revoke", "stop", "cancel", "eof", "revoke", "stop"} {
 +		t.Run(mode, func(t *testing.T) {
-+			ctx, revoke := H.ClosedRevokeFixture(t, map[string]string{"stop": "cancel", "cancel": "cancel", "eof": "eof", "revoke": "revoke"}[mode], 6)
++			fixtureMode := map[string]string{"stop": "cancel", "cancel": "cancel", "eof": "eof", "revoke": "revoke"}[mode]
++			if persistent {
++				fixtureMode = "persistent/" + fixtureMode
++			}
++			ctx, revoke := H.ClosedRevokeFixture(t, fixtureMode, 6)
 +			l, err := net.Listen("tcp", "127.0.0.1:0")
 +			if err != nil {
 +				t.Fatal(err)
@@ -5572,3 +5612,123 @@ diff --git a/dns/client.go b/dns/client.go
  	if options.Timeout == 0 {
  		options.Timeout = c.timeout
  	}
+diff --git a/common/yonikbroker/plain_tun_linux_test.go b/common/yonikbroker/plain_tun_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/plain_tun_linux_test.go
+@@ -0,0 +1,115 @@
++package nativehooks
++
++import (
++	"golang.org/x/sys/unix"
++	"net"
++	"os"
++	"testing"
++)
++
++func TestPlainTUNFlags(t *testing.T) {
++	for flags := 0; flags <= 0xffff; flags++ {
++		want := flags == 0x1001 || flags == 0x1801
++		if plainTUNFlags(uint16(flags)) != want {
++			t.Fatalf("flags=%#x", flags)
++		}
++	}
++}
++
++func TestKernelPlainTUNValidation(t *testing.T) {
++	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
++		t.Skip("нужен isolated namespace launcher")
++	}
++	ns, err := os.Readlink("/proc/self/ns/net")
++	if err != nil || ns == os.Getenv("YONIK_HOST_NETNS") {
++		t.Fatal("нужна отдельная netns")
++	}
++	for _, item := range []struct {
++		name    string
++		flags   uint16
++		persist bool
++		header  int
++		want    bool
++	}{
++		{"plain", 0x1001, false, 0, true}, {"persistent_plain", 0x1001, true, 0, true},
++		{"vnet10", 0x5001, false, 10, false}, {"persistent_vnet10", 0x5001, true, 10, false},
++		{"vnet12", 0x5001, false, 12, false}, {"tap", 0x1002, false, 0, false},
++		{"pi", 0x0001, false, 0, false}, {"multiqueue", 0x1101, false, 0, false},
++		{"unknown", 0x1005, false, 0, false},
++	} {
++		t.Run(item.name, func(t *testing.T) {
++			fd, e := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
++			if e != nil {
++				t.Fatal(e)
++			}
++			defer unix.Close(fd)
++			req, _ := unix.NewIfreq("ynkcheck%d")
++			req.SetUint16(item.flags)
++			if e = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); e != nil {
++				if item.want {
++					t.Fatal(e)
++				}
++				t.Logf("kernel отверг flags=%#x: %v", item.flags, e)
++				return
++			}
++			if item.persist {
++				if e = unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1); e != nil {
++					t.Fatal(e)
++				}
++				defer unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 0)
++			}
++			if item.header != 0 {
++				if e = unix.IoctlSetPointerInt(fd, unix.TUNSETVNETHDRSZ, item.header); e != nil {
++					t.Fatal(e)
++				}
++			}
++			if item.header != 0 {
++				actualHeader, err := unix.IoctlGetInt(fd, unix.TUNGETVNETHDRSZ)
++				if err != nil || actualHeader != item.header {
++					t.Fatalf("header=%d expected=%d err=%v", actualHeader, item.header, err)
++				}
++				t.Logf("kernel vnet header=%d", actualHeader)
++			}
++			if e = unix.IoctlIfreq(fd, unix.TUNGETIFF, req); e != nil {
++				t.Fatal(e)
++			}
++			actual := req.Uint16()
++			iface, e := net.InterfaceByName(req.Name())
++			if e != nil {
++				t.Fatal(e)
++			}
++			a := AttachBody{Name: iface.Name, Ifindex: uint32(iface.Index), MTU: uint32(iface.MTU)}
++			accepted := validateTUNFD(fd, a) == nil
++			if item.name == "pi" && actual&unix.IFF_NO_PI != 0 {
++				t.Logf("kernel нормализовал PI request в Plain: actual=%#x; PI flags deny проверяется exhaustive unit test", actual)
++				return
++			}
++			if item.name == "unknown" && actual&0x0004 == 0 {
++				t.Log("kernel удалил неизвестный бит; сохранённые unknown bits проверяются exhaustive unit test")
++				return
++			}
++			if accepted != item.want {
++				t.Fatalf("requested=%#x actual=%#x accepted=%v", item.flags, actual, accepted)
++			}
++			t.Logf("requested=%#x actual=%#x accepted=%v", item.flags, actual, accepted)
++			if !item.want {
++				return
++			}
++			if _, e = unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); e != nil {
++				t.Fatal(e)
++			}
++			if validateTUNFD(fd, a) == nil {
++				t.Fatal("нет CLOEXEC: FD принят")
++			}
++			if _, e = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC); e != nil {
++				t.Fatal(e)
++			}
++			if e = unix.SetNonblock(fd, false); e != nil {
++				t.Fatal(e)
++			}
++			if validateTUNFD(fd, a) == nil {
++				t.Fatal("blocking FD принят")
++			}
++		})
++	}
++}
