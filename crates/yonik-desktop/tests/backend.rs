@@ -2455,3 +2455,128 @@ fn local_cancel_unknown_field_preserves_report_and_normal_cancel_works() {
     app.wait(|v| v["pending"].is_null() && v["busy"] == false);
     app.close();
 }
+
+#[test]
+fn manual_source_failure_сохраняет_enum_до_публикации() {
+    let directory = Directory::new();
+    let mut app = Harness::with_hook(directory.config(), |_| {});
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"add_source", "name":"invalid", "url":"not-a-url", "local_exception":false, "route":"direct", "hwid_enabled":false}));
+    let failed = app.wait(|v| v["error"] == "invalid_input");
+    assert_eq!(failed["source_error"], "invalid_input");
+    assert_eq!(
+        failed["error_contexts"]
+            .as_array()
+            .expect("контексты")
+            .len(),
+        2
+    );
+    for context in failed["error_contexts"].as_array().expect("контексты") {
+        assert_eq!(context["reason"], "source_service_invalid_source");
+        assert_eq!(
+            context["generation"],
+            failed["command_generation"]
+                .as_u64()
+                .map(|id| id.to_string())
+                .expect("поколение")
+        );
+    }
+    eprintln!(
+        "SOURCE_ACTUAL_V2 {}",
+        yonik_desktop::diagnostics::export_snapshot_v2(&failed.to_string()).expect("строгий V2")
+    );
+    app.close();
+}
+
+#[test]
+fn manual_source_rename_и_selection_имеют_свои_причины() {
+    let directory = Directory::new();
+    let mut app = Harness::with_hook(directory.config(), |_| {});
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"rename_source", "id":999, "name":"missing"}));
+    let failed = app.wait(|v| v["error"] == "storage");
+    for context in failed["error_contexts"].as_array().expect("контексты") {
+        assert_eq!(context["reason"], "source_service_not_found");
+    }
+    eprintln!(
+        "SOURCE_ACTUAL_V2 {}",
+        yonik_desktop::diagnostics::export_snapshot_v2(&failed.to_string()).expect("строгий V2")
+    );
+    app.send(json!({"command":"select_profile", "id":999, "revision":1}));
+    let failed = app.wait(|v| v["error"] == "profile_unavailable");
+    assert_eq!(
+        failed["error_contexts"]
+            .as_array()
+            .expect("контексты")
+            .len(),
+        2
+    );
+    for context in failed["error_contexts"].as_array().expect("контексты") {
+        assert_eq!(context["reason"], "source_selection_repository_failed");
+    }
+    eprintln!(
+        "SOURCE_ACTUAL_V2 {}",
+        yonik_desktop::diagnostics::export_snapshot_v2(&failed.to_string()).expect("строгий V2")
+    );
+    app.close();
+}
+
+#[test]
+fn manual_source_import_failure_идёт_из_реального_parser() {
+    let directory = Directory::new();
+    let (url, server) = fixture(vec!["unknown://unusable"]);
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"import_source", "name":"Invalid import", "url":url, "local_exception":true, "route":"direct"}));
+    let failed = app.wait(|v| v["error"] == "import");
+    assert_eq!(failed["source_error"], "import");
+    assert_eq!(
+        failed["error_contexts"]
+            .as_array()
+            .expect("контексты")
+            .len(),
+        2
+    );
+    for context in failed["error_contexts"].as_array().expect("контексты") {
+        assert_eq!(context["reason"], "source_service_import_failed");
+    }
+    eprintln!(
+        "SOURCE_ACTUAL_V2 {}",
+        yonik_desktop::diagnostics::export_snapshot_v2(&failed.to_string()).expect("строгий V2")
+    );
+    server.join().expect("HTTP fixture");
+    app.close();
+}
+
+#[test]
+fn manual_source_change_failure_сохраняет_request_ack_и_generation() {
+    let directory = Directory::new();
+    let mut app = Harness::new(directory.config());
+    app.wait(|v| v["ready"] == true);
+    app.send(json!({"command":"source_change", "request_id":88, "id":999, "expected_generation":1, "name":"Missing", "url":"https://example.org/sub", "local_exception":false, "route":"direct", "hwid_enabled":false}));
+    let failed = app.wait(|v| v["source_change_ack"]["request_id"] == 88);
+    assert_eq!(failed["source_change_ack"]["error"], "storage");
+    assert_eq!(
+        failed["error_contexts"]
+            .as_array()
+            .expect("контексты")
+            .len(),
+        2
+    );
+    for context in failed["error_contexts"].as_array().expect("контексты") {
+        assert_eq!(context["reason"], "source_service_not_found");
+        assert!(context["request_id"].is_null());
+        assert_eq!(
+            context["generation"],
+            failed["command_generation"]
+                .as_u64()
+                .expect("поколение")
+                .to_string()
+        );
+    }
+    eprintln!(
+        "SOURCE_ACTUAL_V2 {}",
+        yonik_desktop::diagnostics::export_snapshot_v2(&failed.to_string()).expect("строгий V2")
+    );
+    app.close();
+}
