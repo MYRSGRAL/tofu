@@ -74,6 +74,7 @@ def main() -> None:
                 time.sleep(5)
             info = json.loads(connection.read_text())
             ssh = info["ssh"]
+            complete = False
             try:
                 for source, destination in [
                     (BINARY, "/usr/local/bin/yonik-desktop"),
@@ -134,7 +135,19 @@ def main() -> None:
                 if state["state"] != "COMPLETE":
                     raise RuntimeError("Incomplete repeat")
                 terminal["repeats"].append({"repeat": index, "state": state["state"]})
+                complete = True
             finally:
+                if not complete:
+                    terminal["preserved_root"] = str(root)
+                    for name in ["terminal.json", "samples.jsonl", "gui.log"]:
+                        try:
+                            (output / name).write_bytes(
+                                call(ssh, "cat /home/fixture/p01-result/" + name)
+                            )
+                        except (subprocess.SubprocessError, OSError) as error:
+                            terminal.setdefault("harvest_errors", []).append(
+                                type(error).__name__
+                            )
                 (root / "finish").touch()
                 if vm is not None:
                     vm.wait(timeout=60)
@@ -148,7 +161,8 @@ def main() -> None:
                 if Path(f"/proc/{info['vm_pid']}").exists():
                     raise RuntimeError("VM remains active; refusing cleanup")
                 # Только собственный восстановимый overlay; ELF/evidence вне root.
-                shutil.rmtree(root)
+                if complete:
+                    shutil.rmtree(root)
         terminal["state"] = "COMPLETE"
     finally:
         (EVIDENCE / "campaign-terminal.json").write_text(

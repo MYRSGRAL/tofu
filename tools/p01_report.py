@@ -79,14 +79,32 @@ def main() -> None:
         result["repeats"].append({"repeat": index, "phases": phases})
     result["variance"] = {}
     for phase in ["hidden", "static-open"]:
-        values = [
-            next(x for x in r["phases"] if x["phase"] == phase)["gui_tray_cpu_percent"]
+        phases = [
+            next(x for x in r["phases"] if x["phase"] == phase)
             for r in result["repeats"]
         ]
+        series = {
+            "cpu_percent": [x["gui_tray_cpu_percent"] for x in phases],
+            "pss_median_kib": [x["gui_tray_pss_kib"]["median"] for x in phases],
+            "frames": [x["frames_delta"] for x in phases],
+        }
+        for group in ["gui", "tray"]:
+            series[group + "_wakeups"] = [
+                x["groups"][group]["scheduler_wakeups"] for x in phases
+            ]
+            series[group + "_private_dirty_median_kib"] = [
+                x["groups"][group]["memory_kib"]["Private_Dirty"]["median"]
+                for x in phases
+            ]
         result["variance"][phase] = {
-            "cpu_percent_min": min(values),
-            "cpu_percent_max": max(values),
-            "cpu_percent_median": statistics.median(values),
+            name: None
+            if any(v is None for v in values)
+            else {
+                "min": min(values),
+                "max": max(values),
+                "median": statistics.median(values),
+            }
+            for name, values in series.items()
         }
     (ROOT / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
 
