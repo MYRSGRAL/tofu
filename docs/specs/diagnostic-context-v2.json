@@ -1202,6 +1202,76 @@
     ],
     "generation_required": true
   },
+  "scheduler_service_hwid_required": {
+    "code": "HWID_REQUIRED",
+    "message_key": "hwid_required",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_hwid_limit": {
+    "code": "HWID_LIMIT",
+    "message_key": "hwid_limit",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_hwid_rejected": {
+    "code": "HWID_REJECTED",
+    "message_key": "hwid_rejected",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_hwid_redirect": {
+    "code": "HWID_REDIRECT",
+    "message_key": "hwid_redirect",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_unsupported_proxy": {
+    "code": "UNSUPPORTED_PROXY",
+    "message_key": "unsupported_proxy",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_fetch_failed": {
+    "code": "FETCH",
+    "message_key": "fetch",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_import_failed": {
+    "code": "IMPORT",
+    "message_key": "import",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
   "source_service_invalid_source": {
     "code": "INVALID_INPUT",
     "message_key": "invalid_input",
@@ -1445,16 +1515,6 @@
       "error",
       "source",
       "connection"
-    ],
-    "generation_required": true
-  },
-  "scheduler_service_import_failed": {
-    "code": "IMPORT",
-    "message_key": "import",
-    "stage": "scheduler_service",
-    "slots": [
-      "error",
-      "source"
     ],
     "generation_required": true
   }
