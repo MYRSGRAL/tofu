@@ -931,3 +931,36 @@ fn actual_payload_transfer_rejects_late_ack_after_revocation() {
     receiver.join().unwrap();
     assert!(owner.authorize([3; 32]).is_err());
 }
+
+#[test]
+fn kernel_report_shares_run_epoch_revocation() {
+    use crate::worker::anchor_exchange::NamespaceObservation;
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let mismatch = NamespaceObservation::test_kernel_observation([5; 16], 7);
+    assert!(token.bind_custody(&mismatch).is_err());
+    assert_eq!(mismatch.retained_namespace_count(), 0);
+    assert!(token.validate().is_err());
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let observation = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    token.bind_custody(&observation).unwrap();
+    assert_eq!(observation.retained_namespace_count(), 2);
+    owner.revoke();
+    assert_eq!(observation.retained_namespace_count(), 0);
+    assert!(token.bind_custody(&observation).is_err());
+}
+
+#[test]
+fn duplicate_kernel_report_revokes_all_custody() {
+    use crate::worker::anchor_exchange::NamespaceObservation;
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let first = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    let second = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    token.bind_custody(&first).unwrap();
+    assert!(token.bind_custody(&second).is_err());
+    assert_eq!(first.retained_namespace_count(), 0);
+    assert_eq!(second.retained_namespace_count(), 0);
+    assert!(token.validate().is_err());
+}

@@ -1,6 +1,6 @@
 //! Одноразовое разрешение владельца helper; не является namespace admission.
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
@@ -11,6 +11,32 @@ pub(crate) enum RunAuthorizationError {
     Consumed,
 }
 
+struct RunRevocation {
+    revoked: AtomicBool,
+    custody: Mutex<Option<crate::worker::anchor_exchange::NamespaceRevocation>>,
+}
+impl RunRevocation {
+    fn new() -> Self {
+        Self {
+            revoked: AtomicBool::new(false),
+            custody: Mutex::new(None),
+        }
+    }
+    fn load(&self, ordering: Ordering) -> bool {
+        self.revoked.load(ordering)
+    }
+    fn revoke(&self) {
+        let mut custody = self
+            .custody
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.revoked.store(true, Ordering::Release);
+        if let Some(item) = custody.take() {
+            item.revoke();
+        }
+    }
+}
+
 // Producer подключается W4 после проверки реального owner/network context.
 #[allow(dead_code)]
 pub(crate) struct RunAuthority {
@@ -18,7 +44,7 @@ pub(crate) struct RunAuthority {
     generation: u64,
     network_epoch: u64,
     issued: AtomicBool,
-    revoked: Arc<AtomicBool>,
+    revoked: Arc<RunRevocation>,
 }
 #[allow(dead_code)]
 impl RunAuthority {
@@ -35,7 +61,7 @@ impl RunAuthority {
             generation,
             network_epoch,
             issued: AtomicBool::new(false),
-            revoked: Arc::new(AtomicBool::new(false)),
+            revoked: Arc::new(RunRevocation::new()),
         })
     }
     pub(crate) fn authorize(
@@ -62,7 +88,7 @@ impl RunAuthority {
         Ok(token)
     }
     pub(crate) fn revoke(&self) {
-        self.revoked.store(true, Ordering::Release);
+        self.revoked.revoke();
     }
 }
 impl Drop for RunAuthority {
@@ -76,7 +102,7 @@ pub(crate) struct RunAuthorization {
     nonce: [u8; 32],
     generation: u64,
     network_epoch: u64,
-    revoked: Arc<AtomicBool>,
+    revoked: Arc<RunRevocation>,
 }
 impl RunAuthorization {
     pub(super) fn validate(&self) -> Result<(), RunAuthorizationError> {
@@ -92,15 +118,46 @@ impl RunAuthorization {
         }
         Ok(())
     }
+    pub(super) fn context(&self) -> ([u8; 16], u64, u64) {
+        (self.session, self.generation, self.network_epoch)
+    }
+    pub(super) fn bind_custody(
+        &self,
+        observation: &crate::worker::anchor_exchange::NamespaceObservation,
+    ) -> Result<(), RunAuthorizationError> {
+        let result = (|| {
+            let mut custody = self
+                .revoked
+                .custody
+                .lock()
+                .map_err(|_| RunAuthorizationError::Revoked)?;
+            self.validate()?;
+            // Один Run token удерживает только один bootstrap report.
+            if custody.is_some() {
+                return Err(RunAuthorizationError::Consumed);
+            }
+            observation
+                .bind_run(self.session, self.generation, self.network_epoch)
+                .map_err(|_| RunAuthorizationError::InvalidContext)?;
+            *custody = Some(observation.revocation());
+            Ok(())
+        })();
+        if result.is_err() {
+            observation.revoke();
+            self.revoked.revoke();
+        }
+        result
+    }
+
     pub(super) fn guard(&self) -> RunRevocationGuard {
         RunRevocationGuard(Arc::clone(&self.revoked))
     }
 }
 
 /// Drop future отзывает даже token, уже переданный blocking task.
-pub(super) struct RunRevocationGuard(Arc<AtomicBool>);
+pub(super) struct RunRevocationGuard(Arc<RunRevocation>);
 impl Drop for RunRevocationGuard {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
+        self.0.revoke();
     }
 }

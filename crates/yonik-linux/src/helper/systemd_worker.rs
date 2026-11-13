@@ -128,7 +128,7 @@ impl BootstrapUnitObservation {
             generation,
             self.invocation,
         )
-        .and_then(|challenge| challenge.exchange(stream, self.pid, self.uid))
+        .and_then(|challenge| challenge.exchange_kernel(stream, self.pid, self.uid))
         .map_err(|_| WorkerSupervisorError::Protocol)?;
         self.validate_identity()?;
         Ok(witness)
@@ -216,6 +216,7 @@ struct InvocationBinding {
     observation: BootstrapUnitObservation,
     payload: Arc<WorkerPayload>,
     digest: yonik_application::ConfigDigest,
+    kernel: Option<crate::worker::anchor_exchange::NamespaceObservation>,
 }
 impl InvocationBinding {
     fn validate(&self) -> Result<()> {
@@ -230,8 +231,27 @@ impl InvocationBinding {
     fn validate_state(&self, state: &WorkerState) -> Result<()> {
         self.observation.validate_state(state)
     }
-    fn transfer(self, stream: &std::os::unix::net::UnixStream) -> Result<(WorkerAck, Self)> {
+    fn transfer(mut self, stream: &std::os::unix::net::UnixStream) -> Result<(WorkerAck, Self)> {
         self.validate()?;
+        let (session, generation, _network_epoch) = self.authorization.context();
+        let witness = crate::worker::anchor_exchange::Challenge::new(
+            *self.digest.as_bytes(),
+            session,
+            generation,
+            self.observation.invocation,
+        )
+        .and_then(|challenge| {
+            challenge.exchange_kernel(stream, self.observation.pid, self.observation.uid)
+        })
+        .map_err(|_| WorkerSupervisorError::Protocol)?;
+        self.validate()?;
+        self.authorization
+            .bind_custody(&witness)
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        self.kernel = Some(witness);
+        // Эти три наблюдения не закрывают legacy clone/per-flag gap.
+        crate::worker::role_handoff::ProductionPermit::mint()
+            .map_err(|_| WorkerSupervisorError::UnitProofGap)?;
         let ack = Self::transfer_payload(&self.payload, &self.authorization, stream)?;
         self.validate()?;
         Ok((ack, self))
@@ -709,6 +729,7 @@ impl SystemWorkerSupervisor {
                 authorization,
                 observation,
                 digest: payload.digest(),
+                kernel: None,
                 payload: Arc::clone(&payload),
             };
             self.revalidate_binding(&binding, cancel, deadline).await?;
