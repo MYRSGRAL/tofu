@@ -37,8 +37,20 @@ class ReportGateTests(unittest.TestCase):
                     "duration": duration,
                     "first": {"gui": first, "tray": first},
                     "last": {"gui": last, "tray": last},
-                    "start": {"frames": 0},
-                    "end": {"frames": frames, "visible": name == "static-open"},
+                    "start": {
+                        "frames": 0,
+                        "visible": name == "static-open",
+                        "visibility_events": 0,
+                        "status": "Disconnected",
+                        "can_stop": False,
+                    },
+                    "end": {
+                        "frames": frames,
+                        "visible": name == "static-open",
+                        "visibility_events": 0,
+                        "status": "Disconnected",
+                        "can_stop": False,
+                    },
                 }
                 for name in ["hidden", "static-open"]
             ]
@@ -91,6 +103,20 @@ class ReportGateTests(unittest.TestCase):
             group = result["repeats"][0]["phases"][0]["groups"]["gui"]
             self.assertIsNone(group["scheduler_wakeups"])
             self.assertFalse(group["wakeup_threads_stable"])
+
+    def test_visibility_transition_inside_phase_cannot_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            path = root / "repeat-1" / "terminal.json"
+            data = json.loads(path.read_text())
+            data["phases"][1]["end"]["visibility_events"] = 2
+            path.write_text(json.dumps(data))
+            with (
+                patch.object(p01_report, "ROOT", root),
+                self.assertRaises(RuntimeError),
+            ):
+                p01_report.main()
 
     def test_short_phase_and_hidden_frames_cannot_produce_summary(self) -> None:
         for duration, frames in [(899, 0), (900, 1)]:

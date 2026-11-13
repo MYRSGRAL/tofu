@@ -65,6 +65,19 @@ def main() -> None:
                     "wakeup_threads_stable": stable_threads,
                     "wakeup_source": first["wakeup_source"],
                 }
+            if any(
+                state.get("can_stop") or state.get("status") != "Disconnected"
+                for state in [phase["start"], phase["end"]]
+            ):
+                raise RuntimeError("No-connect boundary gate")
+            expected_visible = phase["phase"] == "static-open"
+            if (
+                phase["start"]["visible"] != expected_visible
+                or phase["end"]["visible"] != expected_visible
+                or phase["start"]["visibility_events"]
+                != phase["end"]["visibility_events"]
+            ):
+                raise RuntimeError("Phase visibility changed")
             frame_delta = phase["end"]["frames"] - phase["start"]["frames"]
             if phase["phase"] == "hidden" and (frame_delta or phase["end"]["visible"]):
                 raise RuntimeError("Hidden frame/visibility gate")
