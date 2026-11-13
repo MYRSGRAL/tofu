@@ -1,12 +1,17 @@
 //! P07: компонентный DesktopHost, удерживаемая health-проверка и синтетический журнал.
+#[cfg(feature = "test-support")]
 use std::{error::Error, io::Write, path::Path, time::Duration};
+#[cfg(feature = "test-support")]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     time::timeout,
 };
+#[cfg(feature = "test-support")]
 use yonik_engine::Engine;
+#[cfg(feature = "test-support")]
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+#[cfg(feature = "test-support")]
 const PINS: [(&str, &str, Engine); 2] = [
     (
         "xray-26.10.31/xray",
@@ -20,6 +25,7 @@ const PINS: [(&str, &str, Engine); 2] = [
     ),
 ];
 
+#[cfg(feature = "test-support")]
 async fn snapshot(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
     predicate: impl Fn(&serde_json::Value) -> bool,
@@ -36,6 +42,7 @@ async fn snapshot(
     .await?
 }
 
+#[cfg(feature = "test-support")]
 async fn desktop(dir: &Path, engine: Engine) -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let upstream = listener.local_addr()?.port();
@@ -167,6 +174,7 @@ async fn desktop(dir: &Path, engine: Engine) -> Result<()> {
     )?;
     Ok(())
 }
+#[cfg(feature = "test-support")]
 fn main() -> Result<()> {
     let dir = std::env::args_os().nth(1).ok_or("Каталог cores")?;
     let engine_index: usize = std::env::args().nth(3).ok_or("Индекс")?.parse()?;
@@ -175,4 +183,9 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?
         .block_on(desktop(Path::new(&dir), engine))
+}
+
+#[cfg(not(feature = "test-support"))]
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    Err("Для компонентного fixture нужен feature test-support".into())
 }

@@ -1,0 +1,732 @@
+{
+  "base": "f77013f8c095ba4a49a3034d1da9976b22e976b9",
+  "production_qrc_gui": true,
+  "private_bridge": "\u0435\u0434\u0438\u043d\u0441\u0442\u0432\u0435\u043d\u043d\u043e\u0435 \u043e\u0442\u043b\u0438\u0447\u0438\u0435 \u2014 private p07_logs producer hook \u0438 \u043e\u0442\u043d\u043e\u0441\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0439 include",
+  "passive_observer": false,
+  "pending_shared_api": "W3 P01 observer commit/API \u0435\u0449\u0451 \u043d\u0435 \u043f\u0435\u0440\u0435\u0434\u0430\u043d",
+  "conditions": {
+    "kernel": "7.2.9-1-cachyos",
+    "qt": "6.11.2",
+    "platform": "offscreen/software; private user/net/mount/PID/proc/D-Bus",
+    "power_temperature": "\u043d\u0435 \u043a\u043e\u043d\u0442\u0440\u043e\u043b\u0438\u0440\u043e\u0432\u0430\u043b\u0438\u0441\u044c; \u044d\u043d\u0435\u0440\u0433\u0435\u0442\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0432\u044b\u0432\u043e\u0434\u044b \u043d\u0435 \u0434\u0435\u043b\u0430\u044e\u0442\u0441\u044f"
+  },
+  "runs": [
+    {
+      "engine": "xray",
+      "repeat": 0,
+      "duration_s": 10.55417442599719,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 5,
+              "network_epoch": "defd66071e222e58b475679e71bb86d6:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "defd66071e222e58b475679e71bb86d6:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "defd66071e222e58b475679e71bb86d6:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 621,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": "52408"
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5248.224307,
+            "evicted": 1000520,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 0
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 25,
+            "stop_snapshot_ms": 42,
+            "max_driver_tick_gap_ms": 48,
+            "state_changes": 37
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37641.674927305
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37642.68318041
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37643.704881795
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37644.730754822
+        },
+        {
+          "held_eof": true,
+          "time": 37646.43041885
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194292,
+        "events.log": 84531
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 440,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 47,
+      "sampled_max_pss": 117511168,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    },
+    {
+      "engine": "xray",
+      "repeat": 1,
+      "duration_s": 11.785291400999995,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 6,
+              "network_epoch": "5fb9ca58075a5e6e28fb1cc48f7acf41:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "5fb9ca58075a5e6e28fb1cc48f7acf41:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "5fb9ca58075a5e6e28fb1cc48f7acf41:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 623,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": "52408"
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5319.5161530000005,
+            "evicted": 1000520,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 0
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 30,
+            "stop_snapshot_ms": 37,
+            "max_driver_tick_gap_ms": 47,
+            "state_changes": 37
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37653.028612392
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37654.062937527
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37655.584608752
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37656.924829758
+        },
+        {
+          "held_eof": true,
+          "time": 37658.621911667
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194294,
+        "events.log": 1020485
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 472,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 47,
+      "sampled_max_pss": 118235136,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    },
+    {
+      "engine": "xray",
+      "repeat": 2,
+      "duration_s": 10.882330884000112,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 6,
+              "network_epoch": "7297227a0cfc6f3862c3a919c265d30d:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "7297227a0cfc6f3862c3a919c265d30d:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "7297227a0cfc6f3862c3a919c265d30d:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 617,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": "46393"
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5352.541612,
+            "evicted": 1000519,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 1
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 25,
+            "stop_snapshot_ms": 39,
+            "max_driver_tick_gap_ms": 49,
+            "state_changes": 37
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37665.42235791
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37666.629299214
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37667.61617465
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37668.633399348
+        },
+        {
+          "held_eof": true,
+          "time": 37670.337425492
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194288,
+        "events.log": 1786504
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 450,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 47,
+      "sampled_max_pss": 117397504,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    },
+    {
+      "engine": "sing-box",
+      "repeat": 0,
+      "duration_s": 17.70349346900184,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 6,
+              "network_epoch": "ae162fdd3b8a6c8769ad41f792898bb0:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "ae162fdd3b8a6c8769ad41f792898bb0:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "ae162fdd3b8a6c8769ad41f792898bb0:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 622,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": ""
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5311.049247,
+            "evicted": 1000520,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 0
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 37,
+            "stop_snapshot_ms": 55,
+            "max_driver_tick_gap_ms": 49,
+            "state_changes": 37
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37677.984105093
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37680.949833425
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37683.647872553
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37687.013812659
+        },
+        {
+          "held_eof": true,
+          "time": 37688.73020199
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194284,
+        "events.log": 969178
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 723,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 49,
+      "sampled_max_pss": 138921984,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    },
+    {
+      "engine": "sing-box",
+      "repeat": 1,
+      "duration_s": 17.901007339998614,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 6,
+              "network_epoch": "a9bf55cd01b934ce0bee518bcabe2e50:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "a9bf55cd01b934ce0bee518bcabe2e50:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "a9bf55cd01b934ce0bee518bcabe2e50:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 623,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": "50403"
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5327.085107,
+            "evicted": 1000520,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 0
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 37,
+            "stop_snapshot_ms": 36,
+            "max_driver_tick_gap_ms": 57,
+            "state_changes": 37
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37697.409752485
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37700.820794482
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37703.357190944
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37705.735069036
+        },
+        {
+          "held_eof": true,
+          "time": 37707.432318819
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194295,
+        "events.log": 462731
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 730,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 49,
+      "sampled_max_pss": 142605312,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    },
+    {
+      "engine": "sing-box",
+      "repeat": 2,
+      "duration_s": 16.15004026400129,
+      "markers": [
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 0,
+            "result": {
+              "kind": "http",
+              "http_status": 204,
+              "elapsed_ms": 10,
+              "network_epoch": "4683b0a91f0401e57ffc1d2b7923b2b2:1",
+              "network_observed": false
+            },
+            "status": "Connected"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 1,
+            "result": {
+              "kind": "tls",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "4683b0a91f0401e57ffc1d2b7923b2b2:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 STRICT",
+          "value": {
+            "axis": 2,
+            "result": {
+              "kind": "transport",
+              "http_status": null,
+              "elapsed_ms": null,
+              "network_epoch": "4683b0a91f0401e57ffc1d2b7923b2b2:1",
+              "network_observed": false
+            },
+            "status": "Limited"
+          }
+        },
+        {
+          "marker": "P07 HIDDEN",
+          "value": {
+            "duration_ms": 620,
+            "state_changes": 1,
+            "log_page_changes": 0,
+            "cursor": "52408"
+          }
+        },
+        {
+          "marker": "P07 LOGS",
+          "value": {
+            "attempted": 1002500,
+            "batches": 500,
+            "duration_ms": 5311.885039,
+            "evicted": 1000520,
+            "page_len": 256,
+            "period_ms": 10,
+            "rejected": 0
+          }
+        },
+        {
+          "marker": "P07 GUI_PASS",
+          "value": {
+            "cancel_snapshot_ms": 28,
+            "stop_snapshot_ms": 50,
+            "max_driver_tick_gap_ms": 48,
+            "state_changes": 38
+          }
+        }
+      ],
+      "peer_events": [
+        {
+          "port": 18080,
+          "request": "05010001c612000146a0",
+          "time": 37715.390519417
+        },
+        {
+          "port": 18081,
+          "request": "05010001c612000146a1",
+          "time": 37717.854358386
+        },
+        {
+          "port": 18082,
+          "request": "05010001c612000146a2",
+          "time": 37720.441049968
+        },
+        {
+          "port": 18083,
+          "request": "05010001c612000146a3",
+          "time": 37722.590357508
+        },
+        {
+          "held_eof": true,
+          "time": 37724.29910827
+        }
+      ],
+      "terminal": {},
+      "disk_files": {
+        "events.1.log": 4194283,
+        "events.log": 829602
+      },
+      "strict_ca": true,
+      "peer_negative": true,
+      "sample_count": 638,
+      "max_pending_batch_sockets": 8,
+      "sampled_max_fd": 49,
+      "sampled_max_pss": 150196224,
+      "cancel_socket_proof": true,
+      "stop_runtime_proof": true
+    }
+  ],
+  "negative_oracle": {
+    "831:3790899": {
+      "state": "S",
+      "fd": 4,
+      "threads": 1,
+      "pss": 12615680,
+      "private_dirty": 11722752
+    }
+  }
+}
