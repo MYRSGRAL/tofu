@@ -4,6 +4,8 @@ import json
 import statistics
 from pathlib import Path
 
+from p01_observer_measure import verify_frame_canary, verify_phase
+
 ROOT = Path("/home/myrs/projects/yonik/local/validation/p01-178")
 
 
@@ -18,11 +20,14 @@ def main() -> None:
         terminal = json.loads((root / "terminal.json").read_text())
         if terminal["state"] != "COMPLETE" or not terminal.get("reaped"):
             raise RuntimeError("Incomplete/reap gate")
+        canary = terminal["frame_canary"]
+        verify_frame_canary(canary["before"], canary["after"])
         samples = [
             json.loads(x) for x in (root / "samples.jsonl").read_text().splitlines()
         ]
         phases = []
         for phase in terminal["phases"]:
+            verify_phase(phase["phase"], phase["start"], phase["end"])
             if phase["duration"] < 900:
                 raise RuntimeError("Short P01 phase")
             rows = [x for x in samples if x["phase"] == phase["phase"]]
