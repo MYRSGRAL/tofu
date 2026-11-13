@@ -1517,5 +1517,68 @@
       "connection"
     ],
     "generation_required": true
+  },
+  "maintenance_scheduler_drain_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_scheduler_admission_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_service_drain_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_repository_drain_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_schedule_reload_failed": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_schedule_replacement_failed": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "maintenance_reopen",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
+  },
+  "maintenance_task_failed": {
+    "code": "CLEANUP_FAILED",
+    "message_key": "cleanup_failed",
+    "stage": "maintenance_drain",
+    "slots": [
+      "maintenance_ack"
+    ],
+    "generation_required": true
   }
 }

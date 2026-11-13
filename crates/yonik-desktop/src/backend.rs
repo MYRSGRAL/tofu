@@ -4426,16 +4426,12 @@ async fn run(
                             }
                         }
                     };
-                    let mut result = Err("cleanup_failed");
-                    let mut job_context = None;
-                    let mut job_drained = false;
-                    if let Ok(outcome) = outcome {
-                        job_context = outcome.cause.map(maintenance_job::Failure::context);
-                        job_drained = outcome.drained;
-                        result = outcome.result;
-                        if let Some((service, repository, owner)) = outcome.handles {
-                            actor.service = Some(service); actor.routing_repository = Some(repository); accept_maintenance_owner(&mut actor.state, &mut scheduled, owner);
-                        }
+                    let outcome = maintenance_job::joined(outcome);
+                    let job_context = outcome.cause.map(maintenance_job::Failure::context);
+                    let job_drained = outcome.drained;
+                    let result = outcome.result;
+                    if let Some((service, repository, owner)) = outcome.handles {
+                        actor.service = Some(service); actor.routing_repository = Some(repository); accept_maintenance_owner(&mut actor.state, &mut scheduled, owner);
                     }
                     if result.is_ok() { actor.format4_backup = backup_destination; }
                     let online = actor.service.is_some() && actor.routing_repository.is_some();

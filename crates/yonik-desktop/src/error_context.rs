@@ -166,6 +166,13 @@ pub enum Cause {
     MaintenanceAccessStorage,
     MaintenanceAccessConflict,
     MaintenanceAccessNotFound,
+    MaintenanceSchedulerDrainFailed,
+    MaintenanceSchedulerAdmissionFailed,
+    MaintenanceServiceDrainFailed,
+    MaintenanceRepositoryDrainFailed,
+    MaintenanceScheduleReloadFailed,
+    MaintenanceScheduleReplacementFailed,
+    MaintenanceTaskFailed,
     MaintenanceCancelled,
     LogsReadBusy,
     LogsSaveBusy,
@@ -414,6 +421,27 @@ impl Cause {
             Self::MaintenanceReopenStorage => ("STORAGE", "storage", Stage::MaintenanceReopen),
             Self::MaintenanceReopenConflict => ("STORAGE", "storage", Stage::MaintenanceReopen),
             Self::MaintenanceReopenNotFound => ("STORAGE", "storage", Stage::MaintenanceReopen),
+            Self::MaintenanceSchedulerDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceSchedulerAdmissionFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceServiceDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceRepositoryDrainFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
+            Self::MaintenanceScheduleReloadFailed => {
+                ("STORAGE", "storage", Stage::MaintenanceReopen)
+            }
+            Self::MaintenanceScheduleReplacementFailed => {
+                ("STORAGE", "storage", Stage::MaintenanceReopen)
+            }
+            Self::MaintenanceTaskFailed => {
+                ("CLEANUP_FAILED", "cleanup_failed", Stage::MaintenanceDrain)
+            }
             Self::MaintenanceAccessInvalidInput => ("STORAGE", "storage", Stage::MaintenanceDrain),
             Self::MaintenanceAccessUnsafePath => ("STORAGE", "storage", Stage::MaintenanceDrain),
             Self::MaintenanceAccessUnsupportedVersion => {
@@ -560,6 +588,34 @@ fn decimal_id<S: Serializer>(id: &Option<u64>, serializer: S) -> Result<S::Ok, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn maintenance_boundaries_require_matching_ack_identity() {
+        for cause in [
+            Cause::MaintenanceSchedulerDrainFailed,
+            Cause::MaintenanceSchedulerAdmissionFailed,
+            Cause::MaintenanceServiceDrainFailed,
+            Cause::MaintenanceRepositoryDrainFailed,
+            Cause::MaintenanceScheduleReloadFailed,
+            Cause::MaintenanceScheduleReplacementFailed,
+            Cause::MaintenanceTaskFailed,
+        ] {
+            let mut context = ErrorContext::new(Slot::MaintenanceAck, cause, Some(9));
+            context.generation = Some(7);
+            let value = serde_json::to_value(context).expect("контекст");
+            let mut snapshot = serde_json::json!({"maintenance_ack":{"request_id":9,"error":context.message_key},"maintenance_generation":7,"error_contexts":[value]});
+            assert!(
+                crate::diagnostics::export_snapshot_v2(&snapshot.to_string()).is_some(),
+                "{cause:?}"
+            );
+            for field in ["request_id", "generation", "slot", "code", "stage"] {
+                let previous = snapshot["error_contexts"][0][field].clone();
+                snapshot["error_contexts"][0][field] = serde_json::json!("999999");
+                assert!(crate::diagnostics::export_snapshot_v2(&snapshot.to_string()).is_none());
+                snapshot["error_contexts"][0][field] = previous;
+            }
+            assert_eq!(value["params"], serde_json::json!({}));
+        }
+    }
     #[test]
     fn replacement_clear_and_ack_identity() {
         let mut contexts = Contexts::default();
