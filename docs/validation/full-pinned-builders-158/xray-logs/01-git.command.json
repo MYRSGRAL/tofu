@@ -1,0 +1,1 @@
+{"argv": ["git", "clone", "--depth=1", "--branch", "v26.10.31", "--", "https://github.com/XTLS/Xray-core.git", "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray"], "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray"}
