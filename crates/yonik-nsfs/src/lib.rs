@@ -1,6 +1,7 @@
 //! Узкие safe nsfs/TUN API. Нет raw FD, generic ioctl или setns API.
 #![cfg(target_os = "linux")]
 pub mod kernel_probe;
+pub mod kernel_probe_v2;
 use std::{io, os::fd::AsFd};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

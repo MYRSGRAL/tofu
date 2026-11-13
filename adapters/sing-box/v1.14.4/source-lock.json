@@ -1,0 +1,14 @@
+{
+  "engine": "sing-box",
+  "version": "1.14.4",
+  "source_url": "https://github.com/SagerNet/sing-box.git",
+  "tag": "v1.14.4",
+  "commit": "c005f35300ce76427dc285481ec5695f5b179cd2",
+  "archive_format": "git archive --format=tar c005f35300ce76427dc285481ec5695f5b179cd2",
+  "archive_sha256": "b17af9949529e2ad17f9fc0cd3d3b3cc352f3aaacb856ebaa7f245ba9a21472b",
+  "module_sha256": {
+    "go.mod": "e5f23c00072adeee7285fabe8ea8dab9049ed8ae5e86fbf06b7a033b6126d24c",
+    "go.sum": "a93ea3b691cdfbba29d49ac63ed8352601306d89625e0abc87e41241434e8592"
+  },
+  "native_protocol": null
+}
