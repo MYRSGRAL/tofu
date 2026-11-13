@@ -1,0 +1,74 @@
+{
+  "source_head": "35476f7c1969676bd9017681b72a866997b1dc74",
+  "accepted_base": "128a070884e82bf21b5c22a74ba908dadd7daf5a",
+  "accepted_main": {
+    "148": "a8c5a291b96c11cb1706a3d9c7be7bd281949368",
+    "149": "09d53e5620086a509d737dd63498cda2720e8fad",
+    "150": "724638ac69b8d7afb1d09020e94c0f09d4d64c35",
+    "154": "5fd6153839a8c55f67ba31ddbe9ae2d403328a1f",
+    "162": "128a070884e82bf21b5c22a74ba908dadd7daf5a",
+    "161": "a62dc33d73dce9f1d5d3a2bc5ba570d1cbd414fb"
+  },
+  "incoming_reviewed": {
+    "145": "6e3d0490706c223b90fe6ab773446ec66ffb001f",
+    "152": "edc301b85afa34fbfb5049276070c10b27bbf125",
+    "160": "8fff27dbe58892a6831e9171530f6dad8c9da900",
+    "163": "999662c53cbdb92c009340831aaf69e868c7294e"
+  },
+  "ordinary_merges": [
+    {
+      "head": "538ff996507ccc2566d9330e5148e7d4d1767587",
+      "parents": [
+        "fa368da826b8c11ee70cba44dbf005871f6e77a5",
+        "999662c53cbdb92c009340831aaf69e868c7294e"
+      ]
+    },
+    {
+      "head": "fa368da826b8c11ee70cba44dbf005871f6e77a5",
+      "parents": [
+        "41faf5d6e6e5e81505a0a87428d6543e8d9854a2",
+        "8fff27dbe58892a6831e9171530f6dad8c9da900"
+      ]
+    },
+    {
+      "head": "41faf5d6e6e5e81505a0a87428d6543e8d9854a2",
+      "parents": [
+        "b467e98b6a2d301d7d73156f361364f36ad7ce3d",
+        "edc301b85afa34fbfb5049276070c10b27bbf125"
+      ]
+    },
+    {
+      "head": "b467e98b6a2d301d7d73156f361364f36ad7ce3d",
+      "parents": [
+        "128a070884e82bf21b5c22a74ba908dadd7daf5a",
+        "6e3d0490706c223b90fe6ab773446ec66ffb001f"
+      ]
+    }
+  ],
+  "v2_union_entries": 166,
+  "historical_163": {
+    "closed": 3,
+    "incoming": 11,
+    "unchanged": true
+  },
+  "P11_full_closed": false,
+  "integrated_review": "pending",
+  "CI": "pending",
+  "disk_IO_unknown_closed": false,
+  "excluded": [
+    168
+  ],
+  "LocalSocks169_rerun": false,
+  "desktop_tested_head": "538ff996507ccc2566d9330e5148e7d4d1767587",
+  "main_update_parentage": "35476f7c1969676bd9017681b72a866997b1dc74 538ff996507ccc2566d9330e5148e7d4d1767587 a62dc33d73dce9f1d5d3a2bc5ba570d1cbd414fb",
+  "checks": {
+    "desktop_prior_head_pass": 176,
+    "disk_prior_head_pass": 14,
+    "attribution_updated_head_pass": 43,
+    "private_maintenance_updated_head_pass": 1,
+    "python_pass": 22,
+    "clippy_msrv": "PASS обе версии",
+    "fmt": "PASS обе версии",
+    "ruff": "недоступен локально"
+  }
+}
