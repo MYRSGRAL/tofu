@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "status": "BLOCKED",
+  "scope": "A4 package provenance preflight",
+  "observed_source": "5fd6153839a8c55f67ba31ddbe9ae2d403328a1f",
+  "final_linux_acceptance": false,
+  "missing_final_artifacts": [
+    "reviewed frozen full-source commit and tree after leaf merges",
+    "exact frozen Git archive with SHA256 and blob/tree verification",
+    "trusted clean build record: source/archive/command/toolchain/target/output hashes",
+    "GUI/helper/worker ELF from that frozen build",
+    "both pinned core ELF and patched package hashes from completed 158+156 W1 builder seal",
+    "ABI260 closure for both cores",
+    "final notices, licenses and source-offers payload bound to exact artifacts",
+    "final Arch package and reviewed recipe seal matching frozen source",
+    "independently reviewed FROZEN expected descriptor"
+  ],
+  "excluded_evidence": {
+    "retained_app_a8": "clean archive build fixture only; not 5fd/final source; not installer host",
+    "core_candidate_158_156_W1": "builder seal pending; future output not assumed ready",
+    "119": "accepted historical source/package lifecycle; no repeat",
+    "147": "accepted Secret Service campaign; no repeat"
+  },
+  "effects": {"rust_build": false, "host_install": false, "deploy": false}
+}

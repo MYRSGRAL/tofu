@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "target": "x86_64-unknown-linux-gnu",
+  "native_spec_commit": "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef",
+  "rust_commands": [
+    [
+      "cargo",
+      "rustc",
+      "--locked",
+      "--release",
+      "-p",
+      "yonik-desktop",
+      "--features",
+      "gui",
+      "--bin",
+      "yonik-desktop",
+      "--",
+      "-C",
+      "link-arg=-Wl,--undefined=cxx_qt_init_qml_module_cloud_highpriority_yonik",
+      "-C",
+      "link-arg=-Wl,--undefined=cxx_qt_init_crate_yonik_desktop",
+      "-C",
+      "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt_lib",
+      "-C",
+      "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt"
+    ],
+    [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "-p",
+      "yonik-linux",
+      "--bin",
+      "yonik-helper",
+      "--bin",
+      "yonik-worker"
+    ]
+  ],
+  "core_members": {
+    "xray": "usr/lib/yonik/cores/xray",
+    "sing-box": "usr/lib/yonik/cores/sing-box"
+  }
+}

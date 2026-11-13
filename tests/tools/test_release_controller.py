@@ -1,0 +1,438 @@
+"""Контролируемый producer: synthetic runner не является production evidence."""
+
+import importlib
+import io
+import json
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tarfile
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+TOOLS = Path(__file__).resolve().parents[2] / "tools"
+sys.path.insert(0, str(TOOLS))
+c = importlib.import_module("release_controller")
+
+
+def elf() -> bytes:
+    ident = b"\x7fELF\x02\x01\x01" + bytes(9)
+    header = struct.pack(
+        "<16sHHIQQQIHHHHHH", ident, 2, 62, 1, 64, 64, 0, 0, 64, 56, 1, 64, 0, 0
+    )
+    return header + struct.pack("<IIQQQQQQ", 1, 5, 0, 0, 0, 120, 120, 4096)
+
+
+class FakeTrustedRunner:
+    """Только test injection во внутренний collect, без production регистрации."""
+
+    def __init__(self) -> None:
+        self.commands: list[dict] = []
+        self.fail = False
+        self.bad_offer = False
+
+    def run(self, argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+        self.commands.append({"argv": argv, "cwd": str(cwd), "exit": 0})
+        if self.fail:
+            raise RuntimeError("fixture build failed")
+        if argv[0] in ("rustc", "cargo") and "--version" in argv:
+            return b"fixture toolchain\n"
+        if argv[:3] == [c.SLOT, "cargo", "clean"]:
+            shutil.rmtree(Path(env["CARGO_TARGET_DIR"]))
+            return b""
+        if argv[0] == c.SLOT:
+            target = Path(env["CARGO_TARGET_DIR"]) / "release"
+            target.mkdir(parents=True, exist_ok=True)
+            for name in ("yonik-desktop", "yonik-helper", "yonik-worker"):
+                (target / name).write_bytes(elf())
+            return b""
+        if "--engine" in argv:
+            engine = argv[argv.index("--engine") + 1]
+            output = Path(argv[argv.index("--output-dir") + 1])
+            output.mkdir()
+            (output / engine).write_bytes(elf())
+            metadata = c.core_metadata(cwd)[engine]
+            manifest = {
+                "engine": engine,
+                "engine_version": metadata["lock"]["version"],
+                "source_commit": metadata["lock"]["commit"],
+                "source_tag": metadata["lock"]["tag"],
+                "source_url": metadata["lock"]["source_url"],
+                "binary_sha256": c.sha(output / engine),
+                "module_sha256": metadata["lock"]["module_sha256"],
+                "native_codec_component": {
+                    "frozen_spec_commit": c.SPEC,
+                    "patch_sha256": metadata["codec"]["patch_sha256"],
+                    "runtime_hooks_connected": False,
+                    "callsite_files_sha256": metadata["codec"]["callsite_files_sha256"],
+                },
+                "patches": [],
+                "go_env": {"GOOS": "linux", "GOARCH": "amd64"},
+                "go_version": "go version fixture",
+            }
+            prebuild = {
+                key: manifest[key] for key in ("source_commit", "module_sha256")
+            }
+            (output / "prebuild.json").write_text(json.dumps(prebuild))
+            manifest["prebuild_sha256"] = c.sha(output / "prebuild.json")
+            (output / "manifest.json").write_text(json.dumps(manifest))
+            source = (
+                Path(argv[argv.index("--build-root") + 1]) / f"build-source-{engine}"
+            )
+            source.mkdir(parents=True)
+            (source / "proof.go").write_bytes(b"proof")
+            (source / "go.mod").write_bytes(b"module fixture")
+            (source / "go.sum").write_bytes(b"sum")
+            archive = source.parent / "upstream.tar"
+            with tarfile.open(archive, "w") as stream:
+                data = b"upstream"
+                info = tarfile.TarInfo("src/source")
+                info.size = len(data)
+                stream.addfile(info, io.BytesIO(data))
+            return b""
+        if argv[:2] == ["git", "clone"]:
+            source = Path(argv[-1])
+            source.mkdir()
+            (source / "proof.go").write_bytes(b"proof")
+            (source / "go.mod").write_bytes(b"module fixture")
+            (source / "go.sum").write_bytes(b"sum")
+            with tarfile.open(source.parent / "upstream.tar", "w") as stream:
+                data = b"upstream"
+                info = tarfile.TarInfo("src/source")
+                info.size = len(data)
+                stream.addfile(info, io.BytesIO(data))
+            return b""
+        if argv[:2] == ["git", "rev-parse"]:
+            return ("a" * 40 + "\n").encode()
+        if argv[:2] == ["git", "apply"]:
+            return b""
+        if argv[:3] == ["go", "version", "-m"]:
+            return (
+                b"fixture: go1.27\n\tpath\tfixture\n"
+                b"\tdep\tfixture/module\tv1.0.0\th1:fixture\n"
+                b"\tbuild\tGOOS=linux\n\tbuild\tGOARCH=amd64\n"
+            )
+        if argv[0] == "curl":
+            target = Path(argv[argv.index("--output") + 1])
+            target.write_bytes(b"wrong" if self.bad_offer else b"fixture zip")
+            return b""
+        if argv[:2] == ["git", "archive"]:
+            return (cwd.parent / "upstream.tar").read_bytes()
+        raise AssertionError(argv)
+
+
+class ControllerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.registry = self.root / "registry"
+        self.task = self.root / "task"
+        self.runner = FakeTrustedRunner()
+        self.make_source()
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+
+    def git(self, *args: str) -> bytes:
+        return subprocess.check_output(
+            ["git", "-C", str(self.repo), *args], stderr=subprocess.DEVNULL
+        )
+
+    def make_source(self) -> None:
+        self.git("init")
+        for directory in ("systemd", "sysusers", "polkit", "dbus"):
+            (self.repo / "packaging" / directory).mkdir(parents=True)
+            # Git хранит файл, чтобы snapshot сохранял каталог.
+            (self.repo / "packaging" / directory / "fixture").write_text("fixture")
+        recipe = self.repo / "packaging/arch"
+        recipe.mkdir(parents=True)
+        (recipe / "PKGBUILD").write_bytes(
+            (TOOLS.parent / "packaging/arch/PKGBUILD").read_bytes()
+        )
+        (recipe / "release-recipe.json").write_text(json.dumps(c.RECIPE))
+        icon = self.repo / "crates/yonik-desktop/assets/yonik.svg"
+        icon.parent.mkdir(parents=True)
+        icon.write_text("<svg/>")
+        licenses = self.repo / "packaging/licenses"
+        (licenses / "composition").mkdir(parents=True)
+        (licenses / "linux-inventory.json").write_text('{"packages":[]}')
+        (licenses / "composition/go-sources.json").write_text(
+            json.dumps(
+                {
+                    "records": [
+                        {
+                            "module": "fixture/module",
+                            "version": "v1.0.0",
+                            "h1": "h1:fixture",
+                            "zip_sha256": c.digest(b"fixture zip"),
+                            "zip_url": "https://fixture.invalid/module.zip",
+                            "texts": [],
+                        }
+                    ]
+                }
+            )
+        )
+        for name in ("composition/P25-SCOPE.md", "SOURCE-OBLIGATIONS.md"):
+            (licenses / name).write_text("fixture scope")
+        (self.repo / "LICENSE").write_text("fixture license")
+        (self.repo / "tools").mkdir()
+        (self.repo / "tools/build_native_adapter.py").write_text("fixture builder")
+        self.upstream = self.root / "upstream.tar"
+        with tarfile.open(self.upstream, "w") as stream:
+            data = b"upstream"
+            info = tarfile.TarInfo("src/source")
+            info.size = len(data)
+            stream.addfile(info, io.BytesIO(data))
+        for engine, version in c.VERSIONS.items():
+            folder = self.repo / f"adapters/{engine}/v{version}"
+            folder.mkdir(parents=True)
+            (folder / "native-broker-codec.patch").write_bytes(b"patch")
+            lock = {
+                "engine": engine,
+                "version": version,
+                "tag": "v" + version,
+                "commit": "a" * 40,
+                "source_url": "https://fixture.invalid/source",
+                "module_sha256": {
+                    "go.mod": c.digest(b"module fixture"),
+                    "go.sum": c.digest(b"sum"),
+                },
+                "archive_sha256": c.sha(self.upstream),
+            }
+            codec = {
+                "frozen_spec_commit": c.SPEC,
+                "patch_sha256": c.digest(b"patch"),
+                "package_files_sha256": {},
+                "callsite_files_sha256": {"proof.go": c.digest(b"proof")},
+                "runtime_hooks_connected": False,
+                "frozen_sources_sha256": {},
+            }
+            (folder / "source-lock.json").write_text(json.dumps(lock))
+            (folder / "native-broker-codec.json").write_text(json.dumps(codec))
+        self.git("add", ".")
+        self.git(
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.org",
+            "commit",
+            "-m",
+            "fixture",
+        )
+
+    def freeze(self) -> None:
+        c._freeze(self.repo, self.registry, "unit", self.commit)
+
+    def collect(self) -> dict:
+        return c._collect(self.repo, self.registry, "unit", self.task, self.runner)
+
+    def test_real_pipeline_with_fake_runner(self) -> None:
+        self.freeze()
+        # Mutable checkout не должен влиять на frozen recipe/compliance.
+        (self.repo / "LICENSE").write_text("changed checkout")
+        context = self.collect()
+        self.assertEqual(context["state"], "COLLECTED")
+        self.assertFalse((self.task / "target").exists())
+        package = self.registry / "unit/package.tar"
+        result = c._verify(
+            self.repo, self.registry, "unit", package, self.registry / "unit"
+        )
+        self.assertEqual(result["status"], "PASS")
+        self.assertFalse(result["final_linux_acceptance"])
+        self.assertTrue(any(row["argv"][0] == c.SLOT for row in self.runner.commands))
+        self.assertEqual(
+            os.stat(self.registry / "unit/frozen.json").st_mode & 0o777, 0o600
+        )
+
+    def test_uncollected_and_fabricated_context(self) -> None:
+        self.freeze()
+        with self.assertRaises(ValueError):
+            c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
+        # Candidate input directory не может быть источником registry record.
+        (self.root / "frozen.json").write_text('{"state":"COLLECTED"}')
+        with self.assertRaises(ValueError):
+            c._verify(self.repo, self.registry, "missing", self.upstream, self.root)
+
+    def test_failed_job_never_registers_collected(self) -> None:
+        self.freeze()
+        self.runner.fail = True
+        with self.assertRaises(RuntimeError):
+            self.collect()
+        self.assertEqual(c.read_context(self.registry, "unit")["state"], "FROZEN")
+
+    def test_wrong_core_and_compliance_payload(self) -> None:
+        self.freeze()
+        self.collect()
+        original = self.registry / "unit/package.tar"
+        for member in ("usr/lib/yonik/cores/xray", "usr/share/licenses/yonik/LICENSE"):
+            target = self.root / "bad.tar"
+            with (
+                tarfile.open(original) as incoming,
+                tarfile.open(target, "w") as outgoing,
+            ):
+                for entry in incoming:
+                    data = incoming.extractfile(entry).read()
+                    if entry.name == member:
+                        data = b"wrong payload"
+                        entry.size = len(data)
+                    outgoing.addfile(entry, io.BytesIO(data))
+            with self.subTest(member=member), self.assertRaises(ValueError):
+                c._verify(self.repo, self.registry, "unit", target, original.parent)
+
+    def test_incompatible_elf_and_metadata(self) -> None:
+        for data in (b"not an ELF", elf()[:20], elf()[:18] + b"\xb7\x00" + elf()[20:]):
+            with self.assertRaises(ValueError):
+                c.elf_header(data)
+        self.freeze()
+        metadata = c.core_metadata(self.repo)
+        folder = self.repo / "adapters/xray/v26.10.31"
+        record = json.loads((folder / "native-broker-codec.json").read_text())
+        record["patch_sha256"] = "0" * 64
+        (folder / "native-broker-codec.json").write_text(json.dumps(record))
+        with self.assertRaises(ValueError):
+            c.core_metadata(self.repo)
+        self.assertEqual(metadata["xray"]["codec"]["frozen_spec_commit"], c.SPEC)
+
+    def test_no_overwrite_and_path_refusal(self) -> None:
+        self.freeze()
+        with self.assertRaises((ValueError, FileExistsError)):
+            self.freeze()
+        for release in ("../evil", "/evil", "."):
+            with self.subTest(release=release), self.assertRaises(ValueError):
+                c._freeze(self.repo, self.registry, release, self.commit)
+
+    def test_ingest_only_controller_selected_job(self) -> None:
+        self.freeze()
+        job = self.root / "trusted-job"
+        job.mkdir()
+        for engine in c.VERSIONS:
+            self.runner.run(
+                [
+                    sys.executable,
+                    "builder",
+                    "--engine",
+                    engine,
+                    "--output-dir",
+                    str(job / engine),
+                    "--build-root",
+                    str(self.root / ("native-" + engine)),
+                ],
+                self.repo,
+                {},
+            )
+        patches = {
+            path.relative_to(self.repo).as_posix(): c.sha(path)
+            for path in (self.repo / "adapters").rglob("*")
+            if path.is_file()
+        }
+        (job / "acceptance-context.json").write_text(
+            json.dumps(
+                {
+                    "builder_sha256": c.digest(b"fixture builder"),
+                    "patches": patches,
+                }
+            )
+        )
+        hashes = {engine: c.sha(job / engine / engine) for engine in c.VERSIONS}
+        (job / "capability-abi-manifest.json").write_text(
+            json.dumps(
+                {
+                    engine: {
+                        "binary_sha256": hashes[engine],
+                        "frozen_spec_commit": c.SPEC,
+                    }
+                    for engine in c.VERSIONS
+                }
+            )
+        )
+        self.runner.commands.clear()
+        with (
+            patch.object(c, "JOB_SOURCE", self.commit),
+            patch.object(c, "JOB_BINARIES", hashes),
+        ):
+            c._ingest_core_job(self.repo, self.registry, "unit", job)
+            self.collect()
+        self.assertFalse(any("--engine" in row["argv"] for row in self.runner.commands))
+        self.assertTrue(
+            any(row["argv"][:2] == ["git", "apply"] for row in self.runner.commands)
+        )
+
+    def test_redirect_inputs_and_extraneous_compliance(self) -> None:
+        self.freeze()
+        self.collect()
+        package = self.registry / "unit/package.tar"
+        (self.root / "source.tar").write_bytes(b"attacker source")
+        with self.assertRaises(ValueError):
+            c._verify(self.repo, self.registry, "unit", package, self.root)
+        target = self.root / "extra.tar"
+        with tarfile.open(package) as incoming, tarfile.open(target, "w") as outgoing:
+            for entry in incoming:
+                outgoing.addfile(entry, incoming.extractfile(entry))
+            entry = tarfile.TarInfo("usr/share/licenses/yonik/extraneous")
+            entry.mode = 0o644
+            entry.size = 5
+            outgoing.addfile(entry, io.BytesIO(b"wrong"))
+        # Даже если заменить только package hash, frozen payload closure откажет.
+        context = c.read_context(self.registry, "unit")
+        context["package_sha256"] = c.sha(target)
+        with self.assertRaises(ValueError):
+            c.validate_payload(target, self.task / "source", context)
+
+    def test_builder_wrong_arch_and_pins_never_register(self) -> None:
+        self.freeze()
+        run = self.runner.run
+
+        def bad(argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+            result = run(argv, cwd, env)
+            if "--engine" in argv:
+                output = Path(argv[argv.index("--output-dir") + 1])
+                manifest = json.loads((output / "manifest.json").read_text())
+                manifest["engine_version"] = "incompatible"
+                (output / "manifest.json").write_text(json.dumps(manifest))
+            return result
+
+        with (
+            patch.object(self.runner, "run", side_effect=bad),
+            self.assertRaises(ValueError),
+        ):
+            self.collect()
+        self.assertFalse((self.registry / "unit/collected.json").exists())
+
+    def test_actual_dependency_source_offer_mismatch(self) -> None:
+        self.freeze()
+        self.runner.bad_offer = True
+        with self.assertRaisesRegex(ValueError, "source offer"):
+            self.collect()
+        self.assertFalse((self.registry / "unit/collected.json").exists())
+
+    def test_local_runner_records_real_exit_codes(self) -> None:
+        runner = c.LocalRunner(self.root / "logs")
+        output = runner.run(
+            [sys.executable, "-c", "import sys; sys.stdout.write('observed')"],
+            self.root,
+            dict(os.environ),
+        )
+        self.assertEqual(output, b"observed")
+        with self.assertRaises(subprocess.CalledProcessError):
+            runner.run(
+                [sys.executable, "-c", "raise SystemExit(7)"],
+                self.root,
+                dict(os.environ),
+            )
+        self.assertEqual([row["exit"] for row in runner.commands], [0, 7])
+        self.assertEqual(
+            json.loads((self.root / "logs/1.command.json").read_text())["exit"], 7
+        )
+
+    def test_malformed_registry_is_blocked(self) -> None:
+        self.freeze()
+        record = self.registry / "unit/collected.json"
+        record.write_text("{broken")
+        record.chmod(0o600)
+        with self.assertRaises(c.NotReady):
+            c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
