@@ -1,7 +1,7 @@
 """Negative controls для post-native packaging boundary без Rust/VM."""
 
 import copy
-import importlib.util
+import importlib
 import io
 import json
 import os
@@ -15,11 +15,7 @@ from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
 sys.path.insert(0, str(TOOLS))
-spec = importlib.util.spec_from_file_location(
-    "provenance", TOOLS / "check_package_provenance.py"
-)
-p = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(p)
+p = importlib.import_module("check_package_provenance")
 
 
 class ProvenanceTest(unittest.TestCase):
@@ -220,7 +216,7 @@ class ProvenanceTest(unittest.TestCase):
             ) as command,
         ):
 
-            def output(args: list[str]) -> bytes:
+            def output(args: list[str], **kwargs: object) -> bytes:
                 if args[0] == "bsdtar":
                     key = {
                         "usr/bin/yonik-desktop": "gui",
@@ -228,7 +224,7 @@ class ProvenanceTest(unittest.TestCase):
                         "usr/lib/yonik/yonik-worker": "worker",
                     }[args[-1]]
                     return (self.root / key).read_bytes()
-                return original(args)
+                return original(args, **kwargs)
 
             command.side_effect = output
             self.assertEqual(
@@ -240,12 +236,16 @@ class ProvenanceTest(unittest.TestCase):
 
     def test_fabricated_record_cannot_authorize(self) -> None:
         # Даже корректный самосогласованный FROZEN не является production proof.
-        with patch.object(p, "_read_request", return_value=self.expected):
-            with self.assertRaisesRegex(p.NotReady, "producer"):
+        with (
+            patch("release_controller.release_lock") as lock,
+            patch("release_controller._read_request", return_value=self.expected),
+        ):
+            lock.return_value.__enter__.return_value = self.root
+            with self.assertRaisesRegex(p.NotReady, "controller-collected"):
                 p.verify_release("fabricated", self.root / "package", self.root)
 
     def test_registry_absence_and_redirect_inputs(self) -> None:
-        with patch.object(p, "_read_request", side_effect=FileNotFoundError):
+        with patch("release_controller._read_request", side_effect=FileNotFoundError):
             for inputs in (self.root, self.root / "attacker-registry"):
                 with self.subTest(inputs=inputs), self.assertRaises(p.NotReady):
                     p.verify_release("missing", self.root / "package", inputs)
@@ -262,11 +262,20 @@ class ProvenanceTest(unittest.TestCase):
                 p.verify_release("forged", self.root / "package", self.root)
 
     def test_controller_has_no_import_attestation_path(self) -> None:
-        request = p.FrozenBuildRequest(
-            "test", "0" * 40, "0" * 40, self.root / "archive"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "release_controller.py"),
+                "collect",
+                "--release-id",
+                "test",
+                "--build-record",
+                str(self.root / "record"),
+            ],
+            capture_output=True,
+            text=True,
         )
-        with self.assertRaises(p.NotReady):
-            p.collect_release(request)
+        self.assertEqual(result.returncode, 2)
 
     def test_private_registry_record(self) -> None:
         registry = self.root / "registry"

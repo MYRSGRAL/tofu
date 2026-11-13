@@ -1,76 +1,83 @@
 # A4: preflight package provenance
 
-Production CLI принимает только release-id и пути проверяемых материалов:
+[Design contract root](../design/package-trust-contract.md) определяет TCB,
+canonical Git anchor, fixed registry, source selection и trusted native job.
+Initial 128 — не final Linux freeze.
 
-```sh
+## Controller operations
+
+После review tooling и выбора final source root/доверенный CI запускает отдельно:
+
+~~~sh
+python tools/release_controller.py freeze --release-id root-selected-id \
+  --commit FULL_REVIEWED_SOURCE_SHA
+python tools/release_controller.py ingest-cores --release-id root-selected-id
+python tools/release_controller.py collect --release-id root-selected-id
+~~~
+
+Идентификатор использует строчные латинские буквы/цифры, "_" и "-".
+Ingest опционален: без него collect запускает frozen native builder для обоих
+cores. Он читает только закреплённый trusted PR167 job path; caller не передаёт
+manifest/record paths. Ingest сверяет accepted binary hashes, builder из reviewed
+source158, frozen patches и source locks. Collect восстанавливает pinned sources,
+применяет patches, сверяет actual source package и GoBuildInfo.
+
+Freeze сам получает source commit/tree/archive из canonical common Git project.
+Он создаёт новый release directory и FROZEN request без перезаписи предыдущего.
+Collect проверяет content hashes tooling, материализует точный Git snapshot,
+проверяет tracked release-recipe.json против fixed controller recipe и frozen
+PKGBUILD seal. Затем выполняет фиксированные cargo commands под общим Rust slot,
+jobs=1 с target вне checkout; запускает native builders либо использует явно
+controller-ingested accepted cores. Никаких makepkg/install/hooks не исполняется.
+
+Producer собирает package.tar из actual outputs и frozen package generator:
+три Rust ELF, оба core ELF, compiled notices/licenses, metadata, upstream/patched
+core archives, manifests и source offers. Go dependencies сопоставляются с frozen
+composition, их source zips проверяются по pinned SHA. Core ELF headers проверяют
+ELF64 little-endian x86_64; версии, patches и ABI spec commit берутся из frozen
+adapters metadata и trusted native builder observations. Candidate ELF не
+исполняется. Статические проверки не заявляют bit reproducibility.
+
+COLLECTED record публикуется O_EXCL только после успешной проверки полного
+package payload и cargo clean. Он связывает source/archive, fixed recipe,
+toolchains, команды с exit codes, фактические ELF/core observations и каждый
+payload file. FROZEN request остаётся неизменным. Private registry records читаются
+через NOFOLLOW, с own UID/mode/nlink проверками под shared root/release locks;
+writer удерживает exclusive release lock. Same-UID attacker вне модели угроз.
+
+Тяжёлый task root в /var/tmp/codex-myrs/transient удерживается flock от создания
+до завершения команд; outputs и command/native-builder logs сохраняются в registry
+вне TTL. При успехе own target очищается cargo clean, собственный task root удаляется.
+При failure COLLECTED не появляется; оставшийся task требует диагностики.
+
+## Candidate verification
+
+~~~sh
 python tools/check_package_provenance.py --release-id root-selected-id \
-  --package /path/to/package.pkg.tar.zst --inputs /path/to/retained/artifacts
-```
+  --package /path/to/package.tar --inputs /path/to/release-inputs
+~~~
 
-Старые аргументы candidate/expected/repo/output удалены. Произвольные JSON,
-включая совпадающие самосогласованные FROZEN и build record, не являются authority.
-Сейчас CLI всегда возвращает JSON BLOCKED, final_linux_acceptance=false и exit 2.
-Финальный PASS manifest не создаётся. Registry record сам по себе также не
-открывает положительный путь.
+Inputs должны содержать exact source.tar, соответствующий release. Их содержимое
+не выбирает registry/source/recipe. Старые candidate/expected/repo/build-record
+аргументы отвергаются. Verifier берёт только controller-collected context из
+фиксированного registry, материализует frozen snapshot, сверяет actual package hash,
+metadata/compliance с frozen generators и каждый payload digest, включая оба core
+ELF/source packages. PASS относится только к local TCB provenance preflight,
+final_linux_acceptance всегда false. Без actual collected job — JSON BLOCKED, exit 2.
 
-## Bounded contract root
+Внутренний _validate_materials остаётся диагностикой старого untrusted schema 1,
+результат MATERIALS_CHECKED не создаёт authority и не используется production CLI.
 
-Canonical Git project: /home/myrs/projects/yonik, origin MYRSGRAL/yonik.
-Root registry выводится из common Git directory reviewed tooling, а не из
-candidate args, cwd или GIT_* env. Первоначальный reviewed anchor:
-128a070884e82bf21b5c22a74ba908dadd7daf5a. Это принятый main, НЕ final Linux freeze.
-Final source после интеграции выбирает root; candidate caller не выбирает revision.
+## Проверки R2
 
-Authorized producer — локальный release-controller из reviewed tooling,
-вызванный root или доверенным CI job. Он должен сам исполнить fixed build recipe
-на exact frozen archive, собрать команды/toolchains/outputs и native builder
-metadata. Импорт candidate build record не допускается.
+tests/tools/test_package_provenance.py и test_release_controller.py запускаются
+через unittest discovery с явным -s tests/tools. FakeTrustedRunner проходит всю
+цепочку freeze/collect/package/verify в отдельном TemporaryDirectory; это synthetic
+evidence, не production build. Negative controls: fabricated/self-consistent
+records, отсутствующий registry/collection, redirect inputs, wrong core/version/ELF,
+extraneous compliance, изменённый checkout, symlink/traversal/mixed prefix.
+Проверки архивов/путей выполняются до source extraction/hash; ссылки и специальные
+файлы не входят в поддерживаемый source closure.
 
-Registry: /home/myrs/projects/yonik/local/release-controller/<release-id>/frozen.json.
-Verifier не создаёт registry и не регистрирует release. Чтение descriptor-relative,
-O_NOFOLLOW, shared BSD lock корня registry; каталоги own UID 0700, records —
-own UID regular 0600 nlink=1, ограничение размера 1 MiB.
-Это hygiene и защита от случайной подмены пути, а не защита от malicious same UID.
-TCB включает authorized build controller, same-UID процессы, root/operator;
-злоумышленник с такими правами находится вне модели угроз. Новых daemon,
-capabilities, crypto или сетевой authority нет.
-
-## Состояние реализации
-
-**BLOCKED:** producer не реализован. Controller-facing API
-FrozenBuildRequest/collect_release отделён от candidate CLI. Сейчас collect_release
-выдаёт NotReady и не записывает регистрацию. Он не принимает caller attestation.
-До реализации реального исполнения/сбора нет production trusted context и PASS.
-
-Условия для последующего включения producer:
-- exact frozen Git tree/archive и fixed recipe revision, выбранные root;
-- commands/toolchains и SHA actual build outputs, включая оба core ELF;
-- static ELF headers и trusted SHA без исполнения package ELF на host;
-- core ABI 260, версии, pins/patch metadata из frozen tracked adapters locks,
-  GoBuildInfo/architecture/version/source-package hashes из trusted native job;
-- actual package compliance против frozen packaging/licenses/composition,
-  compiled notices, pinned core source offers/archives/source hashes.
-
-Никакой готовый Go native builder evidence не считается полной Rust/GUI сборкой.
-Исторические #119/#147 здесь не пересобираются. Ни initial 5fd/128, ни retained a8,
-ни ожидаемый результат интеграции не выдаются за final Linux freeze.
-candidate-readiness.json не изменён.
-
-## Проверки материалов
-
-Внутренний _validate_materials — только структурная диагностика недоверенных
-материалов, результат MATERIALS_CHECKED; не provenance и не production entrypoint.
-Оpaque hashes cores/compliance здесь по-прежнему не доказывают actual build binding.
-
-Пути артефактов проверяются до hash: traversal, ссылки во всех компонентах и
-необычные файлы запрещены. Source archive предварительно проверяется целиком:
-один prefix, канонические пути, отсутствие ссылок/специальных файлов, повторов
-и лишних каталогов. Git symlinks не входят в поддерживаемый closure.
-Пакетный checker получает snapshot проверенных frozen Git blobs, а не mutable
-checkout. Код snapshot не исполняется.
-
-Тесты tests/tools/test_package_provenance.py используют синтетические материалы.
-Они не создают и не подделывают actual production build record. Проверяются
-отказ fabricated FROZEN, отсутствие registry, redirect inputs, wrong core и
-compliance, режимы/ссылки registry, unsafe paths/archives и mutable checkout.
-Новые сборки GUI, VM lifecycle и host install не выполнялись.
+Текущая production readiness остаётся BLOCKED до actual final freeze/build.
+candidate-readiness.json не изменён; новых GUI/VM/host install artifacts нет.

@@ -15,7 +15,6 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import NamedTuple, Never
 
 
 def sha(path: Path) -> str:
@@ -24,7 +23,14 @@ def sha(path: Path) -> str:
 
 
 def git(repo: Path, *args: str) -> bytes:
-    return subprocess.check_output(["git", "-C", str(repo), *args])
+    return subprocess.check_output(
+        ["git", "-C", str(repo), *args],
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        },
+    )
 
 
 def validate_source_members(path: Path) -> None:
@@ -228,27 +234,6 @@ class NotReady(ValueError):
     """Нет авторизованного полного build closure; финальный PASS запрещён."""
 
 
-class FrozenBuildRequest(NamedTuple):
-    """Вход отдельной controller operation, выбранный root, не candidate CLI."""
-
-    release_id: str
-    source_commit: str
-    source_tree: str
-    source_archive: Path
-
-
-def collect_release(request: FrozenBuildRequest) -> Never:
-    """Будущий producer сам запускает fixed recipe, не импортирует attestation.
-
-    До реализации исполнения и сбора actual core/compliance metadata никакая
-    регистрация frozen request не может создать trusted release context.
-    """
-    raise NotReady(
-        "Producer не реализован: нужны fixed recipe execution, toolchains, "
-        "ELF/GoBuildInfo, frozen core pins/patch packages и packaged compliance"
-    )
-
-
 def canonical_repo() -> Path:
     """Registry выводится из common Git root reviewed tooling, не caller/env."""
     env = {
@@ -307,18 +292,24 @@ def _private_directory(path: Path | str, parent: int | None = None) -> int:
     return fd
 
 
-def _read_request(registry: Path, release_id: str) -> dict:
+def _read_request(
+    registry: Path, release_id: str, record_name: str = "frozen.json"
+) -> dict:
     """Descriptor-relative NOFOLLOW; shared lock корня удерживается до чтения."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", release_id):
+        raise NotReady("Некорректный release-id")
     for parent in reversed(registry.parents):
         if parent.is_symlink():
             raise NotReady("Ссылка в пути registry")
+    if record_name not in ("frozen.json", "collected.json", "trusted-core-job.json"):
+        raise NotReady("Недопустимое имя registry record")
     root_fd = _private_directory(registry)
     try:
         fcntl.flock(root_fd, fcntl.LOCK_SH)
         release_fd = _private_directory(release_id, root_fd)
         try:
             fd = os.open(
-                "frozen.json",
+                record_name,
                 os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                 dir_fd=release_fd,
             )
@@ -344,21 +335,12 @@ def _read_request(registry: Path, release_id: str) -> dict:
         os.close(root_fd)
 
 
-def verify_release(release_id: str, package: Path, inputs: Path) -> Never:
-    """Единственный production entrypoint; arbitrary JSON не является authority."""
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", release_id):
-        raise NotReady("Некорректный release-id")
-    registry = canonical_repo() / "local/release-controller"
-    try:
-        _read_request(registry, release_id)
-    except (OSError, ValueError) as error:
-        raise NotReady(f"Нет доверенного release context: {error}") from error
-    # Даже FROZEN в приватном registry не заменяет ещё отсутствующий producer.
-    # package/inputs намеренно не читаются до получения trusted build context.
-    raise NotReady(
-        "Registry request не является build authority: controlled producer "
-        "и actual core/compliance binding ещё не реализованы"
-    )
+def verify_release(release_id: str, package: Path, inputs: Path) -> dict:
+    """Candidate управляет только пакетом/inputs, не trusted release context."""
+    from release_controller import _verify
+
+    repo = canonical_repo()
+    return _verify(repo, repo / "local/release-controller", release_id, package, inputs)
 
 
 def main() -> None:
@@ -368,7 +350,8 @@ def main() -> None:
     parser.add_argument("--inputs", type=Path, required=True)
     args = parser.parse_args()
     try:
-        verify_release(args.release_id, args.package, args.inputs)
+        result = verify_release(args.release_id, args.package, args.inputs)
+        sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     except (NotReady, OSError, subprocess.CalledProcessError) as error:
         sys.stdout.write(
             json.dumps(
@@ -385,4 +368,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    sys.modules["check_package_provenance"] = sys.modules[__name__]
     main()

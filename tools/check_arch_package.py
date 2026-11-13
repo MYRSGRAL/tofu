@@ -102,8 +102,14 @@ def expected_files(root: Path) -> dict[str, tuple[int, bytes | None]]:
     return files
 
 
-def validate_archive(path: Path, root: Path) -> None:
+def validate_archive(
+    path: Path, root: Path, *, bound_files: dict[str, tuple[int, str]] | None = None
+) -> None:
     expected = expected_files(root)
+    bound_files = bound_files or {}
+    if expected.keys() & bound_files.keys():
+        raise ValueError("Binding не может заменить frozen metadata")
+    expected.update({name: (mode, None) for name, (mode, _) in bound_files.items()})
     seen = set()
     # zstd декодирует архив makepkg без дополнительного Python-модуля.
     process = None
@@ -152,7 +158,13 @@ def validate_archive(path: Path, root: Path) -> None:
                     raise ValueError(f"Неверный mode: {name}")
                 stream = archive.extractfile(entry)
                 assert stream is not None
-                if mode == 0o755:
+                if name in bound_files:
+                    if (
+                        hashlib.file_digest(stream, "sha256").hexdigest()
+                        != bound_files[name][1]
+                    ):
+                        raise ValueError(f"Подменён bound payload: {name}")
+                elif mode == 0o755:
                     if stream.read(4) != b"\x7fELF":
                         raise ValueError(f"Ожидался ELF: {name}")
                 elif content is not None and (
