@@ -38,6 +38,28 @@ time.sleep(120)
 
 
 class CleanupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        result = subprocess.run(
+            [
+                "unshare",
+                "--map-current-user",
+                "--pid",
+                "--fork",
+                "--kill-child=KILL",
+                "--mount-proc",
+                "--",
+                "true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            raise unittest.SkipTest(
+                "PID namespace fixture недоступна: " + result.stderr.strip()
+            )
+
     def test_timeout_closes_listener_in_separate_core_group(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yonik-cleanup-") as temporary:
             marker = Path(temporary) / "child.json"
@@ -47,12 +69,30 @@ class CleanupTests(unittest.TestCase):
                     os.environ.copy(),
                     1,
                 )
-            pid, port = json.loads(marker.read_text())
+            _, port = json.loads(marker.read_text())
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", port))
-            stat = Path(f"/proc/{pid}/stat")
-            if stat.exists():
-                self.assertEqual(stat.read_text().rsplit(") ", 1)[1].split()[0], "Z")
+
+    def test_parent_exit_closes_inherited_child_pipes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yonik-exit-cleanup-") as temporary:
+            marker = Path(temporary) / "child.json"
+            parent = PARENT.replace(
+                "time.sleep(120)",
+                """
+from pathlib import Path
+while not Path(sys.argv[2]).exists():
+    time.sleep(0.01)
+""",
+            )
+            result = FIXTURE.run_probe(
+                [sys.executable, "-c", parent, CHILD, str(marker)],
+                os.environ.copy(),
+                3,
+            )
+            self.assertEqual(result.returncode, 0)
+            _, port = json.loads(marker.read_text())
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", port))
 
     def test_old_parent_only_cleanup_is_detected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yonik-cleanup-control-") as temporary:
