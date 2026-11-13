@@ -1,6 +1,10 @@
 #include "application.h"
+#include "p01_build_guard.h"
 #include "ui_smoke.h"
 #include "yonik-desktop/src/bridge.cxxqt.h"
+#if YONIK_P01_TEST_SUPPORT
+#include "p01_observer.h"
+#endif
 
 #include <QApplication>
 #include <QClipboard>
@@ -462,6 +466,18 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             bridge->shutdown();
         });
     }
+#if YONIK_P01_TEST_SUPPORT
+    // Observer не включает smoke fixture и не меняет normal credentials.
+    std::unique_ptr<P01Observer> p01;
+    if (qEnvironmentVariableIsSet("YONIK_P01_CONTROL_FD")) {
+        if (smokeTest) return 1;
+        bool valid = false;
+        const int fd = qEnvironmentVariableIntValue("YONIK_P01_CONTROL_FD", &valid);
+        if (!valid || fd < 3) return 1;
+        p01 = std::make_unique<P01Observer>(fd, window, bridge, showAction, quitAction);
+        if (!p01->valid()) return 1;
+    }
+#endif
     const auto result = application.exec();
     return smokeTest && smokeFailed ? 2 : result;
 }
