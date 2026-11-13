@@ -162,6 +162,32 @@ impl Session {
         self.sequence.complete(header.request_id)?;
         Ok(result)
     }
+    fn lookup_and_project(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<super::broker::ProjectedLookup, Malformed> {
+        let result = (|| {
+            if self.phase != Phase::Active {
+                return Err(Malformed);
+            }
+            let header = self.header(bytes)?;
+            if header.kind != Kind::Lookup {
+                return Err(Malformed);
+            }
+            let flow = wire::lookup_flow(bytes)?;
+            self.sequence.begin(header.request_id)?;
+            let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
+                Some(broker) => broker.lookup_and_project(flow, self.epoch),
+                None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
+            };
+            self.sequence.complete(header.request_id)?;
+            Ok(result)
+        })();
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
     pub fn revoke(&mut self, bytes: &[u8]) -> Result<(), Malformed> {
         let valid = self.header(bytes).map(|h| h.kind) == Ok(Kind::Revoke);
         self.close();
