@@ -412,6 +412,27 @@ pub(super) mod tests {
         flow: super::super::super::broker::Flow,
         deadline: Instant,
     ) -> Result<(), Unavailable> {
+        known_roundtrip_inner(broker, prepare, flow, deadline, false)
+    }
+    pub(in crate::attribution) fn cold_roundtrip(
+        broker: super::super::super::broker::Broker,
+        prepare: impl FnOnce(&mut super::super::super::broker::Broker) -> Result<(), Unavailable>
+        + Send
+        + 'static,
+        flow: super::super::super::broker::Flow,
+        deadline: Instant,
+    ) -> Result<(), Unavailable> {
+        known_roundtrip_inner(broker, prepare, flow, deadline, true)
+    }
+    fn known_roundtrip_inner(
+        broker: super::super::super::broker::Broker,
+        prepare: impl FnOnce(&mut super::super::super::broker::Broker) -> Result<(), Unavailable>
+        + Send
+        + 'static,
+        flow: super::super::super::broker::Flow,
+        deadline: Instant,
+        cold: bool,
+    ) -> Result<(), Unavailable> {
         let (mut session, peer, _metadata) = fixture();
         session.roles.as_mut().unwrap().broker = Some(broker);
         let thread = std::thread::spawn(move || {
@@ -420,7 +441,11 @@ pub(super) mod tests {
                     prepare(session.roles.as_mut().unwrap().broker.as_mut().unwrap())
                 }));
             });
-            session.serve(&AtomicBool::new(false))
+            let result = session.serve(&AtomicBool::new(false));
+            if cold {
+                crate::attribution::broker::report_cold_witnesses();
+            }
+            result
         });
         // Задержка bootstrap заведомо превышает owner TTL; наблюдение ещё не начато.
         let exchange = (|| {
@@ -442,8 +467,14 @@ pub(super) mod tests {
             lookup[104..120].copy_from_slice(&flow.local);
             lookup[120..136].copy_from_slice(&flow.remote);
             let cancel = AtomicBool::new(false);
+            let begun = Instant::now();
             send(&peer, &lookup, None, deadline, &cancel)?;
-            receive(&peer, deadline, &cancel)
+            let reply = receive(&peer, deadline, &cancel)?;
+            if cold {
+                assert!(begun.elapsed() < super::super::super::broker::DEADLINE);
+                eprintln!("cold RPC elapsed={:?}", begun.elapsed());
+            }
+            Ok(reply)
         })();
         drop(peer);
         let worker = thread.join().unwrap();

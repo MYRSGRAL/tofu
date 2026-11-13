@@ -221,7 +221,7 @@ mod transport;
 #[cfg(test)]
 pub(crate) use transport::tests::bound_terminal_controls;
 #[cfg(test)]
-pub(super) use transport::tests::known_roundtrip;
+pub(super) use transport::tests::{cold_roundtrip, known_roundtrip};
 
 impl Drop for Session {
     fn drop(&mut self) {
