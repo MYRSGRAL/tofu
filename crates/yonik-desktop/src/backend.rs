@@ -3811,11 +3811,13 @@ async fn run(
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
+    let (event_log, disk_log) =
+        yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
         presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
             .ok()
             .map(Arc::new),
-        event_log: yonik_linux::event_log::EventLog::new(),
+        event_log,
         logs_save: crate::backend::logs::SaveJob::default(),
         routing_repository: Some(routing_repository),
         format4_backup: None,
@@ -5036,6 +5038,11 @@ async fn run(
     } else {
         true
     };
+    disk_log.request_shutdown();
+    // Guard остаётся здесь до Done; actor не выполняет файловые операции и join.
+    while !disk_log.wait_closed(Duration::ZERO) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let closed = service_closed && routing_closed && provider_closed && network_closed;
     drop(_lock);
     actor.state.ready = false;

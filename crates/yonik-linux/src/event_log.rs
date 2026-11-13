@@ -7,6 +7,9 @@ use std::{
     },
 };
 
+mod disk;
+pub use disk::{DiskLogGuard, DiskLogStats, DiskLogStatus};
+
 pub const MAX_EVENTS: usize = 2_000;
 pub const MAX_PAGE: usize = 256;
 
@@ -66,6 +69,7 @@ struct Shared {
     ring: Mutex<Ring>,
     rejected: AtomicU64,
     next_session: AtomicU64,
+    disk: Option<disk::Producer>,
 }
 #[derive(Clone)]
 pub struct EventLog(Arc<Shared>, Option<EventContext>);
@@ -76,6 +80,9 @@ impl Default for EventLog {
 }
 impl EventLog {
     pub fn new() -> Self {
+        Self::build(None)
+    }
+    fn build(disk: Option<disk::Producer>) -> Self {
         Self(
             Arc::new(Shared {
                 ring: Mutex::new(Ring {
@@ -86,9 +93,15 @@ impl EventLog {
                 }),
                 rejected: AtomicU64::new(0),
                 next_session: AtomicU64::new(1),
+                disk,
             }),
             None,
         )
+    }
+    /// Открытие и все файловые операции выполняются только consumer-потоком.
+    pub fn with_disk(data_dir: std::path::PathBuf) -> (Self, DiskLogGuard) {
+        let (producer, guard) = disk::start(data_dir);
+        (Self::build(Some(producer)), guard)
     }
     /// Отдельный immutable handle: поздний callback сохраняет исходный контекст.
     pub fn with_context(&self, context: EventContext) -> Self {
@@ -139,6 +152,9 @@ impl EventLog {
         }
         ring.events.push_back(event);
         ring.contexts.push_back(self.1);
+        if let Some(disk) = &self.0.disk {
+            disk.record(event, self.1);
+        }
     }
     pub(crate) fn reject(&self) {
         let _ = self
