@@ -1,0 +1,73 @@
+{
+  "prebuild_sha256": "2919fe67b57ff3ac89c2d3745fc474bc1ff9b4570f4de514694fe1c4ea39db9a",
+  "native_protocol": null,
+  "native_codec_component": {
+    "patch_sha256": "5fc31e65d528e511d8253fa318d757f5b5ef505ee009e0ddb941fefb42840785",
+    "runtime_hooks_connected": false,
+    "owned_tun_constructor_connected": true,
+    "frozen_spec_commit": "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef",
+    "routing_entry_guard_connected": true,
+    "callsite_files_sha256": {
+      "app/dispatcher/default.go": "6fe0f79242c6d3525ea8d3ecca291be8488575fbe3608f49cf1e8a24aba0626a",
+      "app/dispatcher/yonik_guard_test.go": "76d63b353c767572a9aec328cc0890581a88cc956614c990f4c576b6d71abeeb",
+      "proxy/tun/tun_linux.go": "fc01cef8a5cd078adfcdebe00dcafbeb80027b2e2c7d49a5ecb0ffe678410b24",
+      "proxy/tun/handler.go": "4e167508d4a98b4eb493d004fecdb3acc0279212e34423904882b478338fd6da",
+      "proxy/tun/worker_other.go": "bcc42ef31b50decc61d4993c38abbff906366f095f3ac8dfcad09f3f76dcbc98",
+      "transport/internet/dialer.go": "c8c4d13ee86307995dcc52e62affa18a8798f72205a2b27b18af89fb03b3135a",
+      "transport/internet/system_dialer.go": "c5acf22276b35f106da52f5664aef26ba4d38aa9a3744abf2d77b8adacf0253d",
+      "transport/internet/happy_eyeballs.go": "bb978d7f79838033f39af8f4e560784f4688cce163e9a9886b512af3d34f36f4",
+      "app/dns/dns.go": "bb0cbaac7504d2797a17dd77b7068b1702ee7c631b7025a8abeeddcc35b55a4b",
+      "features/dns/client.go": "7023f9b955820769c3773da1ce8e189a8599437c9087fe612b2eb07bf19349d9",
+      "features/routing/dns/context.go": "66e90fc4871895ceb26efcbacf0fce83f0a9535c05b3dc86c439f9bab91261f4",
+      "features/routing/session/context.go": "d4e46e3029880331f47493574697b3903c0e0760daa2a8fb2fc59266cc2cacaa",
+      "proxy/freedom/freedom.go": "374abc23368cb170a51d5afbf05772cfb322a09d1cdcd8b77ed059a282363649",
+      "app/dns/nameserver_cached.go": "2945990930fc06fb08dfc2d1165fd8208a6d61776275c0b689d0816a4ac79ff3",
+      "app/dns/nameserver_udp.go": "3119832a165a32f5ddb7424946805c0eacfb6260f5bb93cb389780dd3ecd3554",
+      "app/dns/dnscommon.go": "26d5331d7732d297137bee4a66dbeb7d880f7e891391502018b1885cef87ab98",
+      "app/dns/cache_controller.go": "c0a573b057d0caaadd3519d4dd9cae0441047a7f04671283e3dec13c3d543464",
+      "app/dns/yonik_exchange.go": "9d5a107f02a93c5dafeb1be697244b4b9b433640d86648a3064e754bb2f7ddde",
+      "app/dns/yonik_exchange_test.go": "1e58092aa03c261fc71af3e7af33ec53226e921a688098857872324ad35ea2b3"
+    }
+  },
+  "engine": "xray",
+  "engine_version": "26.10.31",
+  "source_url": "https://github.com/XTLS/Xray-core.git",
+  "source_tag": "v26.10.31",
+  "source_commit": "a4a3dff5b20c2faae567b742c172c7b95e75c083",
+  "patch_sha256": null,
+  "patches": [],
+  "binary_sha256": "68d802801b6be344f6fda5546803f2f38d49ace1cc50c4e37155fd0818d6083d",
+  "go_version": "go version go1.27.1-X:nodwarf5 linux/amd64",
+  "go_env": {
+    "GOARCH": "amd64",
+    "GOEXPERIMENT": "nodwarf5",
+    "GOOS": "linux"
+  },
+  "build_environment": {
+    "GOTOOLCHAIN": "local",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "CGO_ENABLED": "0",
+    "GOMAXPROCS": "1"
+  },
+  "build_tags": [],
+  "build_args": [
+    "go",
+    "build",
+    "-p=1",
+    "-mod=readonly",
+    "-trimpath",
+    "-buildvcs=false",
+    "-o",
+    "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-native-adapter-xray",
+    "./main"
+  ],
+  "module_sha256": {
+    "go.mod": "ad8701ad59ba44b28c4c8adf924271e0df9c8b0a854662cfda9a61996a42d882",
+    "go.sum": "4ead70b9e65f181080638e3e40d850336b85b40bb51cdb2115b814489219c4e3"
+  },
+  "adapter_features": {},
+  "strictDNSGate": false,
+  "strict_dns_gate": false,
+  "bit_reproducibility_verified": false
+}
