@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
+import os
+import re
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple, Never
 
 
 def sha(path: Path) -> str:
@@ -75,11 +80,13 @@ def input_path(inputs: Path, name: str) -> Path:
     return path
 
 
-def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
-    """Expected — независимо review-закреплённый контракт, не часть кандидата.
+def _validate_materials(
+    candidate: dict, expected: dict, repo: Path, inputs: Path
+) -> dict:
+    """Только структурная проверка недоверенных материалов, НЕ provenance.
 
-    Build record является свидетельством доверенного локального builder (TCB),
-    а не доказательством исполнения произвольного compiler вне этой модели.
+    Функция не создаёт trusted context и не вызывается production CLI.
+    Положительный результат не доказывает core/compliance build binding.
     """
     if expected.get("status") != "FROZEN" or candidate != expected:
         raise ValueError("Нет frozen контракта или кандидат отличается от него")
@@ -210,27 +217,171 @@ def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
         if hashlib.sha256(data).hexdigest() != artifacts[key]["sha256"]:
             raise ValueError("ELF пакета отличается от build closure")
     return {
-        "status": "PASS",
-        "scope": "local-TCB-provenance-preflight",
+        "status": "MATERIALS_CHECKED",
+        "scope": "untrusted-materials-only",
         "final_linux_acceptance": False,
         "candidate": candidate,
     }
 
 
+class NotReady(ValueError):
+    """Нет авторизованного полного build closure; финальный PASS запрещён."""
+
+
+class FrozenBuildRequest(NamedTuple):
+    """Вход отдельной controller operation, выбранный root, не candidate CLI."""
+
+    release_id: str
+    source_commit: str
+    source_tree: str
+    source_archive: Path
+
+
+def collect_release(request: FrozenBuildRequest) -> Never:
+    """Будущий producer сам запускает fixed recipe, не импортирует attestation.
+
+    До реализации исполнения и сбора actual core/compliance metadata никакая
+    регистрация frozen request не может создать trusted release context.
+    """
+    raise NotReady(
+        "Producer не реализован: нужны fixed recipe execution, toolchains, "
+        "ELF/GoBuildInfo, frozen core pins/patch packages и packaged compliance"
+    )
+
+
+def canonical_repo() -> Path:
+    """Registry выводится из common Git root reviewed tooling, не caller/env."""
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    common = (
+        subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(Path(__file__).resolve().parent),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            env=env,
+        )
+        .decode()
+        .strip()
+    )
+    repo = Path(common).parent
+    if repo != Path("/home/myrs/projects/yonik") or Path(common).name != ".git":
+        raise NotReady("Неизвестный canonical Git anchor")
+    origin = (
+        subprocess.check_output(
+            ["git", "-C", str(repo), "remote", "get-url", "origin"], env=env
+        )
+        .decode()
+        .strip()
+    )
+    if origin not in (
+        "https://github.com/MYRSGRAL/yonik.git",
+        "git@github.com:MYRSGRAL/yonik.git",
+    ):
+        raise NotReady("Неверный origin canonical anchor")
+    subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "cat-file",
+            "-e",
+            "128a070884e82bf21b5c22a74ba908dadd7daf5a^{commit}",
+        ],
+        env=env,
+    )
+    return repo
+
+
+def _private_directory(path: Path | str, parent: int | None = None) -> int:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    metadata = os.fstat(fd)
+    if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+        os.close(fd)
+        raise NotReady("Registry требует own-UID каталог 0700")
+    return fd
+
+
+def _read_request(registry: Path, release_id: str) -> dict:
+    """Descriptor-relative NOFOLLOW; shared lock корня удерживается до чтения."""
+    for parent in reversed(registry.parents):
+        if parent.is_symlink():
+            raise NotReady("Ссылка в пути registry")
+    root_fd = _private_directory(registry)
+    try:
+        fcntl.flock(root_fd, fcntl.LOCK_SH)
+        release_fd = _private_directory(release_id, root_fd)
+        try:
+            fd = os.open(
+                "frozen.json",
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=release_fd,
+            )
+            with os.fdopen(fd, "rb") as stream:
+                metadata = os.fstat(stream.fileno())
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != os.getuid()
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_nlink != 1
+                    or metadata.st_size > 1024 * 1024
+                ):
+                    raise NotReady(
+                        "Registry record требует own-UID regular 0600 nlink=1"
+                    )
+                record = json.loads(stream.read(1024 * 1024 + 1))
+                if not isinstance(record, dict):
+                    raise NotReady("Некорректный registry request")
+                return record
+        finally:
+            os.close(release_fd)
+    finally:
+        os.close(root_fd)
+
+
+def verify_release(release_id: str, package: Path, inputs: Path) -> Never:
+    """Единственный production entrypoint; arbitrary JSON не является authority."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", release_id):
+        raise NotReady("Некорректный release-id")
+    registry = canonical_repo() / "local/release-controller"
+    try:
+        _read_request(registry, release_id)
+    except (OSError, ValueError) as error:
+        raise NotReady(f"Нет доверенного release context: {error}") from error
+    # Даже FROZEN в приватном registry не заменяет ещё отсутствующий producer.
+    # package/inputs намеренно не читаются до получения trusted build context.
+    raise NotReady(
+        "Registry request не является build authority: controlled producer "
+        "и actual core/compliance binding ещё не реализованы"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("candidate", "expected", "repo", "inputs", "output"):
-        parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--release-id", required=True)
+    parser.add_argument("--package", type=Path, required=True)
+    parser.add_argument("--inputs", type=Path, required=True)
     args = parser.parse_args()
-    result = verify(
-        json.loads(args.candidate.read_text()),
-        json.loads(args.expected.read_text()),
-        args.repo,
-        args.inputs,
-    )
-    # O_EXCL: предыдущий final manifest нельзя заменить даже новым PASS.
-    with args.output.open("x") as stream:
-        stream.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    try:
+        verify_release(args.release_id, args.package, args.inputs)
+    except (NotReady, OSError, subprocess.CalledProcessError) as error:
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "status": "BLOCKED",
+                    "final_linux_acceptance": False,
+                    "reason": str(error),
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        raise SystemExit(2) from error
 
 
 if __name__ == "__main__":

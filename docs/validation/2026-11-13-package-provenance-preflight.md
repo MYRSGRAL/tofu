@@ -1,58 +1,76 @@
 # A4: preflight package provenance
 
-`tools/check_package_provenance.py` дополняет, не заменяет
-`check_arch_package.py` и исторический source→ELF closure #119.
-Новые подписи не вводятся: доверенный локальный builder входит в TCB.
-Build record фиксирует связь исходников и outputs; один binary hash её не заменяет.
-Verifier не доказывает честность произвольного внешнего builder.
-
-Запуск после freeze:
+Production CLI принимает только release-id и пути проверяемых материалов:
 
 ```sh
-python tools/check_package_provenance.py --candidate candidate.json \
-  --expected reviewed-frozen.json --repo /path/to/frozen/repo \
-  --inputs /path/to/retained/artifacts --output /path/to/new/final-manifest.json
+python tools/check_package_provenance.py --release-id root-selected-id \
+  --package /path/to/package.pkg.tar.zst --inputs /path/to/retained/artifacts
 ```
 
-`expected` должен быть закреплён независимым review до проверки кандидата.
-Передача одного самосогласованного неподтверждённого документа обоим аргументам
-не даёт provenance. Финальный manifest создаётся исключительно через O_EXCL.
-Его PASS означает только preflight, не финальную Linux acceptance.
+Старые аргументы candidate/expected/repo/output удалены. Произвольные JSON,
+включая совпадающие самосогласованные FROZEN и build record, не являются authority.
+Сейчас CLI всегда возвращает JSON BLOCKED, final_linux_acceptance=false и exit 2.
+Финальный PASS manifest не создаётся. Registry record сам по себе также не
+открывает положительный путь.
 
-Schema 1 задаётся fixture в `tests/tools/test_package_provenance.py`:
-source commit/tree, arch x86_64, ABI 260, build command/toolchain/target;
-artifacts — path/SHA256 для source_archive, gui/helper/worker, xray/sing_box,
-обоих patched_package, notices/licenses/source_offers, build_record и package.
-Source archive содержит один prefix, полный Git tree без submodules.
-Build record обязан точно повторять source, archive checksum, command/toolchain,
-target, ABI и семь output hashes. Это evidence сборщика, не сгенерированный
-после сборки substitute. Core pins и patched package hashes, состав notices,
-лицензий и source offers должны быть независимо сверены reviewer в expected;
-данный checker проверяет их байтовую неизменность, не юридическую достаточность.
-В package повторно проверяются рецепт, metadata и hashes трёх Rust ELF.
-File capabilities пусты, setuid/autostart/runtime downloads/host install запрещены.
+## Bounded contract root
 
-Точный текущий остаток находится в `packaging/arch/candidate-readiness.json`.
-Ни retained a8, ни ожидаемый результат 158+156 W1 не выдаются за frozen final.
-Новые сборки, VM lifecycle, Secret Service campaign и установка не выполнялись.
-Тесты используют синтетические данные и mock только package boundary;
-реальную проверку пакета выполняет существующий checker.
+Canonical Git project: /home/myrs/projects/yonik, origin MYRSGRAL/yonik.
+Root registry выводится из common Git directory reviewed tooling, а не из
+candidate args, cwd или GIT_* env. Первоначальный reviewed anchor:
+128a070884e82bf21b5c22a74ba908dadd7daf5a. Это принятый main, НЕ final Linux freeze.
+Final source после интеграции выбирает root; candidate caller не выбирает revision.
 
-## R2: ограниченные исправления
+Authorized producer — локальный release-controller из reviewed tooling,
+вызванный root или доверенным CI job. Он должен сам исполнить fixed build recipe
+на exact frozen archive, собрать команды/toolchains/outputs и native builder
+metadata. Импорт candidate build record не допускается.
 
-Проверка артефактов отказывает symlink во всех компонентах пути, traversal и
-необычным файлам до hashing. Source archive проходит предварительную проверку
-всех заголовков: один prefix, канонические пути, отсутствие ссылок/специальных
-файлов, повторов и лишних каталогов. Git symlinks в этом closure запрещены.
+Registry: /home/myrs/projects/yonik/local/release-controller/<release-id>/frozen.json.
+Verifier не создаёт registry и не регистрирует release. Чтение descriptor-relative,
+O_NOFOLLOW, shared BSD lock корня registry; каталоги own UID 0700, records —
+own UID regular 0600 nlink=1, ограничение размера 1 MiB.
+Это hygiene и защита от случайной подмены пути, а не защита от malicious same UID.
+TCB включает authorized build controller, same-UID процессы, root/operator;
+злоумышленник с такими правами находится вне модели угроз. Новых daemon,
+capabilities, crypto или сетевой authority нет.
 
-Пакет проверяется по временному snapshot проверенных frozen Git blobs, а не по
-mutable checkout. Snapshot не исполняется. Изменение checkout после freeze
-не меняет recipe, metadata и compliance, используемые пакетным checker.
+## Состояние реализации
 
-**BLOCKED:** trusted producer/anchor и actual core/compliance binding ещё не
-реализованы. Нужен bounded contract authorized build controller от root:
-reviewed repo/revision, управляемое controller хранилище frozen record и actual
-core pins/metadata. Два caller JSON не становятся trusted от равенства.
-TCB должен явно включать authorized build controller и процессы того же UID:
-защита от злоумышленника с тем же UID этим preflight не обеспечивается.
-Текущий PASS не является закрытием этих двух P1 и не разрешает final acceptance.
+**BLOCKED:** producer не реализован. Controller-facing API
+FrozenBuildRequest/collect_release отделён от candidate CLI. Сейчас collect_release
+выдаёт NotReady и не записывает регистрацию. Он не принимает caller attestation.
+До реализации реального исполнения/сбора нет production trusted context и PASS.
+
+Условия для последующего включения producer:
+- exact frozen Git tree/archive и fixed recipe revision, выбранные root;
+- commands/toolchains и SHA actual build outputs, включая оба core ELF;
+- static ELF headers и trusted SHA без исполнения package ELF на host;
+- core ABI 260, версии, pins/patch metadata из frozen tracked adapters locks,
+  GoBuildInfo/architecture/version/source-package hashes из trusted native job;
+- actual package compliance против frozen packaging/licenses/composition,
+  compiled notices, pinned core source offers/archives/source hashes.
+
+Никакой готовый Go native builder evidence не считается полной Rust/GUI сборкой.
+Исторические #119/#147 здесь не пересобираются. Ни initial 5fd/128, ни retained a8,
+ни ожидаемый результат интеграции не выдаются за final Linux freeze.
+candidate-readiness.json не изменён.
+
+## Проверки материалов
+
+Внутренний _validate_materials — только структурная диагностика недоверенных
+материалов, результат MATERIALS_CHECKED; не provenance и не production entrypoint.
+Оpaque hashes cores/compliance здесь по-прежнему не доказывают actual build binding.
+
+Пути артефактов проверяются до hash: traversal, ссылки во всех компонентах и
+необычные файлы запрещены. Source archive предварительно проверяется целиком:
+один prefix, канонические пути, отсутствие ссылок/специальных файлов, повторов
+и лишних каталогов. Git symlinks не входят в поддерживаемый closure.
+Пакетный checker получает snapshot проверенных frozen Git blobs, а не mutable
+checkout. Код snapshot не исполняется.
+
+Тесты tests/tools/test_package_provenance.py используют синтетические материалы.
+Они не создают и не подделывают actual production build record. Проверяются
+отказ fabricated FROZEN, отсутствие registry, redirect inputs, wrong core и
+compliance, режимы/ссылки registry, unsafe paths/archives и mutable checkout.
+Новые сборки GUI, VM lifecycle и host install не выполнялись.

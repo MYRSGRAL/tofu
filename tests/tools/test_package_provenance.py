@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -118,7 +119,9 @@ class ProvenanceTest(unittest.TestCase):
                 candidate = copy.deepcopy(self.expected)
                 candidate[field] = value
                 with self.assertRaises(ValueError):
-                    p.verify(candidate, self.expected, self.root, self.root)
+                    p._validate_materials(
+                        candidate, self.expected, self.root, self.root
+                    )
         for name in (
             "gui",
             "xray",
@@ -133,19 +136,21 @@ class ProvenanceTest(unittest.TestCase):
                 original = path.read_bytes()
                 path.write_bytes(b"wrong")
                 with self.assertRaises(ValueError):
-                    p.verify(self.expected, self.expected, self.root, self.root)
+                    p._validate_materials(
+                        self.expected, self.expected, self.root, self.root
+                    )
                 path.write_bytes(original)
 
     def test_tree_and_missing_binding(self) -> None:
         candidate = copy.deepcopy(self.expected)
         candidate["source"]["tree"] = "0" * 40
         with self.assertRaises(ValueError):
-            p.verify(candidate, candidate, self.root, self.root)
+            p._validate_materials(candidate, candidate, self.root, self.root)
         (self.root / "record").write_text(json.dumps({"binary_sha256": "0" * 64}))
         candidate = copy.deepcopy(self.expected)
         candidate["artifacts"]["build_record"]["sha256"] = p.sha(self.root / "record")
         with self.assertRaises(ValueError):
-            p.verify(candidate, candidate, self.root, self.root)
+            p._validate_materials(candidate, candidate, self.root, self.root)
 
     def test_unsafe_source_members(self) -> None:
         for names in (
@@ -176,7 +181,7 @@ class ProvenanceTest(unittest.TestCase):
         candidate = copy.deepcopy(self.expected)
         candidate["artifacts"]["gui"]["path"] = "link"
         with self.assertRaisesRegex(ValueError, "путь"):
-            p.verify(candidate, candidate, self.root, self.root)
+            p._validate_materials(candidate, candidate, self.root, self.root)
 
     def test_source_link_refusal(self) -> None:
         archive = self.root / "linked.tar"
@@ -199,7 +204,7 @@ class ProvenanceTest(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 p.input_path(self.root, name)
 
-    def test_valid_binding_and_immutable_output(self) -> None:
+    def test_materials_use_frozen_snapshot_without_provenance_pass(self) -> None:
         # Mutable checkout отличается от frozen tree; checker должен видеть Git blob.
         (self.root / "source").write_text("подмена checkout")
 
@@ -227,30 +232,118 @@ class ProvenanceTest(unittest.TestCase):
 
             command.side_effect = output
             self.assertEqual(
-                p.verify(self.expected, self.expected, self.root, self.root)["status"],
-                "PASS",
+                p._validate_materials(
+                    self.expected, self.expected, self.root, self.root
+                )["status"],
+                "MATERIALS_CHECKED",
             )
-        for name in ("candidate", "expected"):
-            (self.root / name).write_text(json.dumps(self.expected))
-        final = self.root / "final"
-        final.write_text("retained")
-        args = [
-            "check",
-            "--candidate",
-            str(self.root / "candidate"),
-            "--expected",
-            str(self.root / "expected"),
-            "--repo",
-            str(self.root),
-            "--inputs",
-            str(self.root),
-            "--output",
-            str(final),
-        ]
-        with (
-            patch.object(sys, "argv", args),
-            patch.object(p, "verify", return_value={"status": "PASS"}),
+
+    def test_fabricated_record_cannot_authorize(self) -> None:
+        # Даже корректный самосогласованный FROZEN не является production proof.
+        with patch.object(p, "_read_request", return_value=self.expected):
+            with self.assertRaisesRegex(p.NotReady, "producer"):
+                p.verify_release("fabricated", self.root / "package", self.root)
+
+    def test_registry_absence_and_redirect_inputs(self) -> None:
+        with patch.object(p, "_read_request", side_effect=FileNotFoundError):
+            for inputs in (self.root, self.root / "attacker-registry"):
+                with self.subTest(inputs=inputs), self.assertRaises(p.NotReady):
+                    p.verify_release("missing", self.root / "package", inputs)
+
+    def test_wrong_core_and_compliance_cannot_authorize(self) -> None:
+        for key in ("xray", "sing_box", "notices", "licenses", "source_offers"):
+            forged = copy.deepcopy(self.expected)
+            forged["artifacts"][key]["sha256"] = "0" * 64
+            with (
+                self.subTest(key=key),
+                patch.object(p, "_read_request", return_value=forged),
+                self.assertRaises(p.NotReady),
+            ):
+                p.verify_release("forged", self.root / "package", self.root)
+
+    def test_controller_has_no_import_attestation_path(self) -> None:
+        request = p.FrozenBuildRequest(
+            "test", "0" * 40, "0" * 40, self.root / "archive"
+        )
+        with self.assertRaises(p.NotReady):
+            p.collect_release(request)
+
+    def test_private_registry_record(self) -> None:
+        registry = self.root / "registry"
+        registry.mkdir(mode=0o700)
+        release = registry / "test"
+        release.mkdir(mode=0o700)
+        record = release / "frozen.json"
+        record.write_text(json.dumps(self.expected))
+        record.chmod(0o600)
+        self.assertEqual(p._read_request(registry, "test"), self.expected)
+        record.chmod(0o644)
+        with self.assertRaises(p.NotReady):
+            p._read_request(registry, "test")
+        record.chmod(0o600)
+        (release / "alias").hardlink_to(record)
+        with self.assertRaises(p.NotReady):
+            p._read_request(registry, "test")
+        (release / "alias").unlink()
+        record.unlink()
+        record.symlink_to(self.root / "record")
+        with self.assertRaises(OSError):
+            p._read_request(registry, "test")
+
+    def test_cli_refuses_attestation_arguments(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "check_package_provenance.py"),
+                "--candidate",
+                "fabricated",
+                "--expected",
+                "fabricated",
+                "--repo",
+                str(self.root),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn('"status": "PASS"', result.stdout)
+
+    def test_cli_missing_release_is_blocked(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(TOOLS / "check_package_provenance.py"),
+                "--release-id",
+                "nonexistent-test-release",
+                "--package",
+                str(self.root / "package"),
+                "--inputs",
+                str(self.root),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["status"], "BLOCKED")
+
+    def test_git_environment_does_not_redirect_anchor(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"GIT_DIR": str(self.root / ".git"), "GIT_WORK_TREE": str(self.root)},
         ):
-            with self.assertRaises(FileExistsError):
-                p.main()
-        self.assertEqual(final.read_text(), "retained")
+            self.assertEqual(p.canonical_repo(), Path("/home/myrs/projects/yonik"))
+
+    def test_registry_directory_modes_and_links(self) -> None:
+        registry = self.root / "registry"
+        registry.mkdir(mode=0o755)
+        with self.assertRaises(p.NotReady):
+            p._read_request(registry, "test")
+        registry.chmod(0o700)
+        alias = self.root / "alias"
+        alias.symlink_to(registry, target_is_directory=True)
+        with self.assertRaises(OSError):
+            p._read_request(alias, "test")
+        release = registry / "test"
+        release.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(OSError):
+            p._read_request(registry, "test")
