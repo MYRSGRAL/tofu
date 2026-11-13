@@ -165,15 +165,13 @@ fn validate_credentials(server: &ParsedServer, engine: Engine) -> Result<(), Com
             }
         }
         Credentials::UserPassword { username, password }
-            if server.protocol() == Protocol::Socks5 =>
+            if server.protocol() == Protocol::Socks5
+                && (username.expose().is_empty()
+                    || password.expose().is_empty()
+                    || username.expose().len() > 255
+                    || password.expose().len() > 255) =>
         {
-            if username.expose().is_empty()
-                || password.expose().is_empty()
-                || username.expose().len() > 255
-                || password.expose().len() > 255
-            {
-                return Err(CompileError::InvalidCredentials);
-            }
+            return Err(CompileError::InvalidCredentials);
         }
         _ => {}
     }
