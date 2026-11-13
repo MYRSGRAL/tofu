@@ -1,0 +1,5 @@
+{
+	"GOARCH": "amd64",
+	"GOEXPERIMENT": "nodwarf5",
+	"GOOS": "linux"
+}

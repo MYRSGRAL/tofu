@@ -1,0 +1,516 @@
+[
+  {
+    "argv": [
+      "git",
+      "clone",
+      "--depth=1",
+      "--branch",
+      "v1.14.4",
+      "--",
+      "https://github.com/SagerNet/sing-box.git",
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 1.9723200110020116
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.0021818370005348697
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "v1.14.4^{commit}"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.002048610997007927
+  },
+  {
+    "argv": [
+      "git",
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--ignored"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.06490563499755808
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/strict-complete-dns.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.00439892899885308
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/strict-complete-dns.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.004243735998898046
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/resolution-provenance.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.004164763002336258
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/resolution-provenance.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.004241237998940051
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/resolution-pin.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.004184320001513697
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/resolution-pin.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.008471558001474477
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/external-tun-configuration.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.004218406000290997
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/external-tun-configuration.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.00427402599962079
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/native-broker-codec.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.008519187998899724
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/sing-box/v1.14.4/native-broker-codec.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.008344266996573424
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./common/yonikbroker",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 195.45319352599836
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./common/yonikbroker"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 28.25352519200169
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./route",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 6.6346102289971896
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./route"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 0.7670298449993425
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./protocol/tun",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 1.26887769500172
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./protocol/tun"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 0.6172476829997322
+  },
+  {
+    "argv": [
+      "go",
+      "version"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.009031875000800937
+  },
+  {
+    "argv": [
+      "go",
+      "env",
+      "-json",
+      "GOOS",
+      "GOARCH",
+      "GOEXPERIMENT"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.009003511997434543
+  },
+  {
+    "argv": [
+      "go",
+      "build",
+      "-p=1",
+      "-mod=readonly",
+      "-trimpath",
+      "-buildvcs=false",
+      "-ldflags",
+      "-X github.com/sagernet/sing-box/constant.Version=1.14.4",
+      "-tags",
+      "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_cloudflared,with_usbip,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0",
+      "-o",
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-native-adapter-sing-box",
+      "./cmd/sing-box"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 425.0681457690007
+  },
+  {
+    "argv": [
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-native-adapter-sing-box",
+      "version"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/sing-box/build-source-sing-box",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.06434293699931004
+  },
+  {
+    "argv": [
+      "git",
+      "clone",
+      "--depth=1",
+      "--branch",
+      "v26.10.31",
+      "--",
+      "https://github.com/XTLS/Xray-core.git",
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 1.3680162540003948
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.0018644510018930305
+  },
+  {
+    "argv": [
+      "git",
+      "rev-parse",
+      "v26.10.31^{commit}"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.003932250998332165
+  },
+  {
+    "argv": [
+      "git",
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--ignored"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.03234628599966527
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "--check",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/xray/v26.10.31/native-broker-codec.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.008464796999760438
+  },
+  {
+    "argv": [
+      "git",
+      "apply",
+      "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/adapters/xray/v26.10.31/native-broker-codec.patch"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.009054079000634374
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./common/yonikbroker",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 167.51444889300183
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./common/yonikbroker"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 19.782482407001226
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./app/dispatcher",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 1.8705275080028514
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./app/dispatcher"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 0.4664126549978391
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./proxy/tun",
+      "-run",
+      "^$"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "compile-only",
+    "status": "PASS",
+    "elapsed_seconds": 7.685541748000105
+  },
+  {
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-mod=readonly",
+      "./proxy/tun"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "package-runtime",
+    "status": "PASS",
+    "elapsed_seconds": 14.521334761000617
+  },
+  {
+    "argv": [
+      "go",
+      "version"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.00460582700179657
+  },
+  {
+    "argv": [
+      "go",
+      "env",
+      "-json",
+      "GOOS",
+      "GOARCH",
+      "GOEXPERIMENT"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.008310047996928915
+  },
+  {
+    "argv": [
+      "go",
+      "build",
+      "-p=1",
+      "-mod=readonly",
+      "-trimpath",
+      "-buildvcs=false",
+      "-o",
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-native-adapter-xray",
+      "./main"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 106.39368349099823
+  },
+  {
+    "argv": [
+      "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-native-adapter-xray",
+      "version"
+    ],
+    "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray",
+    "phase": "builder",
+    "status": "PASS",
+    "elapsed_seconds": 0.03365874399969471
+  }
+]
