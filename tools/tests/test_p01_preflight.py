@@ -38,8 +38,31 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             verify_phase("hidden", before, dict(before, frames=1))
 
+    def test_connection_schema_rejects_malformed_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "connection.json"
+            for value in (
+                {"ssh": "invalid", "vm_pid": 123},
+                {"ssh": ["ssh"], "vm_pid": True},
+                {"ssh": ["ssh", 1], "vm_pid": 123},
+                {"ssh": [], "vm_pid": 123},
+                {"ssh": ["ssh"], "vm_pid": -1},
+            ):
+                path.write_text(json.dumps(value))
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    host.read_connection(path)
+            value = {"ssh": ["ssh", "fixture"], "vm_pid": 123}
+            path.write_text(json.dumps(value))
+            self.assertEqual(host.read_connection(path), value)
+
     def test_setup_failure_still_finishes_and_waits_vm(self) -> None:
-        for malformed, slow_stop in ((False, False), (True, False), (False, True)):
+        for malformed, slow_stop in (
+            (False, False),
+            (True, False),
+            (False, True),
+            ("schema", False),
+            ("harvest", False),
+        ):
             with (
                 self.subTest(malformed=malformed),
                 tempfile.TemporaryDirectory() as tmp,
@@ -49,7 +72,13 @@ class PreflightTests(unittest.TestCase):
                 output = Path(tmp) / "evidence"
                 output.mkdir()
                 if malformed:
-                    (root / "connection.json").write_text("broken")
+                    (root / "connection.json").write_text(
+                        json.dumps({"ssh": ["ssh"], "vm_pid": 99999999})
+                        if malformed == "harvest"
+                        else json.dumps({"ssh": "invalid", "vm_pid": 123})
+                        if malformed == "schema"
+                        else "broken"
+                    )
                 vm = Mock()
                 vm.poll.return_value = None
                 if slow_stop:
@@ -61,12 +90,14 @@ class PreflightTests(unittest.TestCase):
                     patch.object(host, "EVIDENCE", output),
                     patch.object(host.subprocess, "Popen", return_value=vm),
                     patch.object(host.time, "monotonic", side_effect=[0, 601]),
-                    self.assertRaises((TimeoutError, json.JSONDecodeError)),
+                    patch.object(host, "call", side_effect=TypeError("harvest error")),
+                    self.assertRaises((TimeoutError, ValueError, TypeError)),
                 ):
                     host.main()
                 self.assertTrue((root / "finish").exists())
                 if slow_stop:
                     self.assertEqual(vm.wait.call_count, 2)
+                    vm.wait.assert_called_with(timeout=360)
                     vm.send_signal.assert_called_once_with(host.signal.SIGINT)
                 else:
                     vm.wait.assert_called_once_with(timeout=60)

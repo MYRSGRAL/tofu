@@ -41,6 +41,22 @@ def context() -> dict:
     return result
 
 
+def read_connection(path: Path) -> dict:
+    info = json.loads(path.read_text())
+    if (
+        not isinstance(info, dict)
+        or not isinstance(info.get("ssh"), list)
+        or not info["ssh"]
+        or any(
+            not isinstance(arg, str) or not arg or "\0" in arg for arg in info["ssh"]
+        )
+        or type(info.get("vm_pid")) is not int
+        or not 0 < info["vm_pid"] < 2**31
+    ):
+        raise ValueError("Invalid VM connection metadata")
+    return info
+
+
 def main() -> None:
     terminal = {"state": "FAILED", "repeats": []}
     try:
@@ -77,7 +93,7 @@ def main() -> None:
                     ):
                         raise TimeoutError("VM setup deadline")
                     time.sleep(5)
-                info = json.loads(connection.read_text())
+                info = read_connection(connection)
                 ssh = info["ssh"]
                 for source, destination in [
                     (BINARY, "/usr/local/bin/yonik-desktop"),
@@ -142,40 +158,43 @@ def main() -> None:
             finally:
                 if not complete:
                     terminal["preserved_root"] = str(root)
-                if not complete and ssh is not None:
-                    for name in ["terminal.json", "samples.jsonl", "gui.log"]:
+                try:
+                    if not complete and ssh is not None:
+                        for name in ["terminal.json", "samples.jsonl", "gui.log"]:
+                            try:
+                                (output / name).write_bytes(
+                                    call(ssh, "cat /home/fixture/p01-result/" + name)
+                                )
+                            except (subprocess.SubprocessError, OSError) as error:
+                                terminal.setdefault("harvest_errors", []).append(
+                                    type(error).__name__
+                                )
+                finally:
+                    if root.is_dir():
+                        (root / "finish").touch()
+                    if vm is not None:
                         try:
-                            (output / name).write_bytes(
-                                call(ssh, "cat /home/fixture/p01-result/" + name)
-                            )
-                        except (subprocess.SubprocessError, OSError) as error:
-                            terminal.setdefault("harvest_errors", []).append(
-                                type(error).__name__
-                            )
-                if root.is_dir():
-                    (root / "finish").touch()
-                if vm is not None:
-                    try:
-                        try:
-                            vm.wait(timeout=60)
-                        except subprocess.TimeoutExpired:
-                            # SIGINT даёт Python wrapper выполнить finally и reap QEMU.
-                            vm.send_signal(signal.SIGINT)
-                            vm.wait(timeout=45)
-                    finally:
-                        vm_log.close()
-                else:
-                    deadline = time.monotonic() + 60
-                    while Path(f"/proc/{info['vm_pid']}").exists():
-                        if time.monotonic() > deadline:
-                            raise TimeoutError("First VM reap deadline")
-                        time.sleep(1)
-                vm_log.close()
-                if info is not None and Path(f"/proc/{info['vm_pid']}").exists():
-                    raise RuntimeError("VM remains active; refusing cleanup")
-                # Только собственный восстановимый overlay; ELF/evidence вне root.
-                if complete:
-                    shutil.rmtree(root)
+                            try:
+                                vm.wait(timeout=60)
+                            except subprocess.TimeoutExpired:
+                                # Wrapper: poweroff ≤300 с, затем wait20 + TERM/wait15.
+                                # 360 с включает весь его finally и reap QEMU.
+                                vm.send_signal(signal.SIGINT)
+                                vm.wait(timeout=360)
+                        finally:
+                            vm_log.close()
+                    else:
+                        deadline = time.monotonic() + 60
+                        while Path(f"/proc/{info['vm_pid']}").exists():
+                            if time.monotonic() > deadline:
+                                raise TimeoutError("First VM reap deadline")
+                            time.sleep(1)
+                    vm_log.close()
+                    if info is not None and Path(f"/proc/{info['vm_pid']}").exists():
+                        raise RuntimeError("VM remains active; refusing cleanup")
+                    # Только собственный восстановимый overlay; ELF/evidence вне root.
+                    if complete:
+                        shutil.rmtree(root)
         terminal["state"] = "COMPLETE"
     finally:
         (EVIDENCE / "campaign-terminal.json").write_text(
