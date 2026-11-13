@@ -37,6 +37,24 @@ from check_package_provenance import (
 SPEC = "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef"
 VERSIONS = {"xray": "26.10.31", "sing-box": "1.14.4"}
 SLOT = "/home/myrs/projects/yonik/local/orchestration/with-rust-slot"
+RUST_PROFILE = "1.85.1-x86_64-unknown-linux-gnu"
+RUST_BIN = Path("/home/myrs/.rustup/toolchains") / RUST_PROFILE / "bin"
+CONTROLLED_ENV = (
+    "PATH",
+    "RUSTUP_TOOLCHAIN",
+    "RUSTC",
+    "CARGO_TARGET_DIR",
+    "CARGO_BUILD_JOBS",
+    "YONIK_BUILD_ID",
+    "GOMAXPROCS",
+    "GOENV",
+    "GOWORK",
+    "GOTOOLCHAIN",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_TERMINAL_PROMPT",
+    "TMPDIR",
+)
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
 JOB_SOURCE = "ce356b452675036fab3388ef64ea03f8f00910ce"
 JOB_BINARIES = {
@@ -329,7 +347,12 @@ class LocalRunner:
 
     def run(self, argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
         index = len(self.commands)
-        row = {"argv": argv, "cwd": str(cwd), "exit": None}
+        row = {
+            "argv": argv,
+            "cwd": str(cwd),
+            "exit": None,
+            "controlled_env": {key: env[key] for key in CONTROLLED_ENV if key in env},
+        }
         self.commands.append(row)
         with (
             (self.logs / f"{index}.stdout").open("xb") as out,
@@ -381,6 +404,9 @@ def build_env(task: Path, commit: str) -> dict[str, str]:
         and key not in ("RUSTFLAGS", "RUSTDOCFLAGS", "LD_PRELOAD", "LD_LIBRARY_PATH")
     }
     env.update(
+        PATH=str(RUST_BIN) + os.pathsep + env.get("PATH", os.defpath),
+        RUSTUP_TOOLCHAIN=RUST_PROFILE,
+        RUSTC=str(RUST_BIN / "rustc"),
         CARGO_TARGET_DIR=str(task / "target"),
         CARGO_BUILD_JOBS="1",
         YONIK_BUILD_ID="0.1.0+" + commit,
@@ -830,6 +856,7 @@ def _collect(
                     "state": "COLLECTED",
                     "producer": "local-release-controller-v1",
                     "toolchains": toolchains,
+                    "controlled_env": {key: env[key] for key in CONTROLLED_ENV},
                     "commands": runner.commands,
                     "elf": elf_records,
                     "cores": cores,

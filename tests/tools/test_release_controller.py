@@ -436,3 +436,39 @@ class ControllerTest(unittest.TestCase):
         record.chmod(0o600)
         with self.assertRaises(c.NotReady):
             c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
+
+
+class ControlledProfileTests(unittest.TestCase):
+    def test_fixed_msrv_profile_ignores_caller_rust_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {
+                    "RUSTUP_TOOLCHAIN": "untrusted",
+                    "RUSTC": "/bad/rustc",
+                    "RUSTFLAGS": "untrusted",
+                },
+            ):
+                env = c.build_env(Path(directory), "a" * 40)
+            expected = (
+                "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin"
+            )
+            self.assertEqual(env["PATH"].split(os.pathsep)[0], expected)
+            self.assertEqual(env["RUSTUP_TOOLCHAIN"], "1.85.1-x86_64-unknown-linux-gnu")
+            self.assertEqual(env["RUSTC"], expected + "/rustc")
+            self.assertEqual(env["CARGO_BUILD_JOBS"], "1")
+            self.assertNotIn("RUSTFLAGS", env)
+
+    def test_real_command_records_controlled_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = c.build_env(root, "a" * 40)
+            env["PRIVATE_UNRELATED_SECRET"] = "must-not-log"
+            runner = c.LocalRunner(root / "logs")
+            runner.run([sys.executable, "-c", "pass"], root, env)
+            record = json.loads((root / "logs/0.command.json").read_text())
+            self.assertEqual(record["controlled_env"]["RUSTC"], env["RUSTC"])
+            self.assertEqual(
+                record["controlled_env"]["CARGO_TARGET_DIR"], env["CARGO_TARGET_DIR"]
+            )
+            self.assertNotIn("PRIVATE_UNRELATED_SECRET", record["controlled_env"])

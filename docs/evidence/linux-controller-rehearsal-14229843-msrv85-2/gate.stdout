@@ -1,0 +1,1 @@
+{"status": "BLOCKED", "final_linux_acceptance": false, "reason": "Неполный trusted release context: Нет controller-collected build"}

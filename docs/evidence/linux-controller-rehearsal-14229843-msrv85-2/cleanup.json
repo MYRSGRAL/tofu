@@ -1,0 +1,8 @@
+{
+  "removed": true,
+  "task": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2",
+  "cargo_clean_exit": 0,
+  "cargo_clean_command_record": "controller-logs/9.command.json",
+  "rust_builds": 2,
+  "active_process_references": []
+}
