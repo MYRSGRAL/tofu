@@ -2,9 +2,11 @@
 
 import copy
 import importlib.util
+import io
 import json
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -145,10 +147,69 @@ class ProvenanceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             p.verify(candidate, candidate, self.root, self.root)
 
+    def test_unsafe_source_members(self) -> None:
+        for names in (
+            ["../source"],
+            ["src/../source"],
+            ["src/source", "other/"],
+            ["src/source", "src/../"],
+            ["src/source", "/absolute/"],
+            ["src/source", "src/empty/"],
+        ):
+            with self.subTest(names=names):
+                archive = self.root / "archive.tar"
+                with tarfile.open(archive, "w") as stream:
+                    for name in names:
+                        entry = tarfile.TarInfo(name)
+                        entry.mode = 0o644
+                        data = "исходник\n".encode()
+                        if name.endswith("/"):
+                            entry.type = tarfile.DIRTYPE
+                        else:
+                            entry.size = len(data)
+                        stream.addfile(entry, io.BytesIO(data))
+                with self.assertRaisesRegex(ValueError, "source|путь|prefix"):
+                    p.validate_source_members(archive)
+
+    def test_symlink_input(self) -> None:
+        (self.root / "link").symlink_to(self.root / "gui")
+        candidate = copy.deepcopy(self.expected)
+        candidate["artifacts"]["gui"]["path"] = "link"
+        with self.assertRaisesRegex(ValueError, "путь"):
+            p.verify(candidate, candidate, self.root, self.root)
+
+    def test_source_link_refusal(self) -> None:
+        archive = self.root / "linked.tar"
+        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE):
+            with self.subTest(kind=kind):
+                with tarfile.open(archive, "w") as stream:
+                    entry = tarfile.TarInfo("src/source")
+                    entry.type = kind
+                    entry.linkname = "source" if kind != tarfile.FIFOTYPE else ""
+                    stream.addfile(entry)
+                with self.assertRaises(ValueError):
+                    p.validate_source_members(archive)
+
+    def test_input_parent_link_and_traversal(self) -> None:
+        (self.root / "directory").mkdir()
+        (self.root / "alias").symlink_to(
+            self.root / "directory", target_is_directory=True
+        )
+        for name in ("../source", "/source", "alias/source", "./source"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                p.input_path(self.root, name)
+
     def test_valid_binding_and_immutable_output(self) -> None:
+        # Mutable checkout отличается от frozen tree; checker должен видеть Git blob.
+        (self.root / "source").write_text("подмена checkout")
+
+        def check_frozen(package: Path, frozen: Path) -> None:
+            self.assertNotEqual(frozen, self.root)
+            self.assertEqual((frozen / "source").read_text(), "исходник\n")
+
         original = subprocess.check_output
         with (
-            patch("check_arch_package.validate_archive"),
+            patch("check_arch_package.validate_archive", side_effect=check_frozen),
             patch.object(
                 p.subprocess, "check_output", wraps=subprocess.check_output
             ) as command,

@@ -37,3 +37,22 @@ File capabilities пусты, setuid/autostart/runtime downloads/host install з
 Новые сборки, VM lifecycle, Secret Service campaign и установка не выполнялись.
 Тесты используют синтетические данные и mock только package boundary;
 реальную проверку пакета выполняет существующий checker.
+
+## R2: ограниченные исправления
+
+Проверка артефактов отказывает symlink во всех компонентах пути, traversal и
+необычным файлам до hashing. Source archive проходит предварительную проверку
+всех заголовков: один prefix, канонические пути, отсутствие ссылок/специальных
+файлов, повторов и лишних каталогов. Git symlinks в этом closure запрещены.
+
+Пакет проверяется по временному snapshot проверенных frozen Git blobs, а не по
+mutable checkout. Snapshot не исполняется. Изменение checkout после freeze
+не меняет recipe, metadata и compliance, используемые пакетным checker.
+
+**BLOCKED:** trusted producer/anchor и actual core/compliance binding ещё не
+реализованы. Нужен bounded contract authorized build controller от root:
+reviewed repo/revision, управляемое controller хранилище frozen record и actual
+core pins/metadata. Два caller JSON не становятся trusted от равенства.
+TCB должен явно включать authorized build controller и процессы того же UID:
+защита от злоумышленника с тем же UID этим preflight не обеспечивается.
+Текущий PASS не является закрытием этих двух P1 и не разрешает final acceptance.

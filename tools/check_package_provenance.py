@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 import subprocess
 import tarfile
-from pathlib import Path
+import tempfile
+from pathlib import Path, PurePosixPath
 
 
 def sha(path: Path) -> str:
@@ -18,6 +20,59 @@ def sha(path: Path) -> str:
 
 def git(repo: Path, *args: str) -> bytes:
     return subprocess.check_output(["git", "-C", str(repo), *args])
+
+
+def validate_source_members(path: Path) -> None:
+    """Проверяет все заголовки до чтения payload; ссылки не входят в closure."""
+    prefix = None
+    seen: set[str] = set()
+    files: set[str] = set()
+    directories: set[str] = set()
+    with tarfile.open(path) as archive:
+        for entry in archive:
+            name = entry.name.removesuffix("/") if entry.isdir() else entry.name
+            parts = name.split("/")
+            if (
+                not name
+                or any(part in ("", ".", "..") for part in parts)
+                or name in seen
+                or entry.type
+                not in (tarfile.DIRTYPE, tarfile.REGTYPE, tarfile.AREGTYPE)
+                or entry.linkname
+            ):
+                raise ValueError("Недопустимый source путь/тип")
+            seen.add(name)
+            if prefix is None:
+                prefix = parts[0]
+            if parts[0] != prefix or (entry.isfile() and len(parts) < 2):
+                raise ValueError("Неверный source prefix")
+            (directories if entry.isdir() else files).add(name)
+    parents = {str(parent) for name in files for parent in PurePosixPath(name).parents}
+    if not files or not directories <= parents:
+        raise ValueError("Лишний source каталог")
+
+
+def input_path(inputs: Path, name: str) -> Path:
+    """Отказывает ссылкам во всех компонентах до resolve/hash (same-UID TCB)."""
+    relative = PurePosixPath(name)
+    if (
+        relative.is_absolute()
+        or name != relative.as_posix()
+        or any(part in (".", "..") for part in relative.parts)
+        or not relative.parts
+    ):
+        raise ValueError("Недопустимый путь артефакта")
+    path = inputs.absolute()
+    for component in (*reversed(path.parents), path):
+        if component.is_symlink():
+            raise ValueError("Недопустимый путь: ссылка")
+    for part in relative.parts:
+        path /= part
+        if path.is_symlink():
+            raise ValueError("Недопустимый путь: ссылка")
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise ValueError("Недопустимый путь: не обычный файл")
+    return path
 
 
 def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
@@ -66,12 +121,12 @@ def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
         raise ValueError("Неполный closure артефактов")
     paths = {}
     for name, record in artifacts.items():
-        path = (inputs / record["path"]).resolve()
-        if not path.is_relative_to(inputs.resolve()) or not path.is_file():
-            raise ValueError(f"Недопустимый путь: {name}")
-        if sha(path) != record["sha256"]:
-            raise ValueError(f"Подменён артефакт: {name}")
+        path = input_path(inputs, record["path"])
         paths[name] = path
+    validate_source_members(paths["source_archive"])
+    for name, path in paths.items():
+        if sha(path) != artifacts[name]["sha256"]:
+            raise ValueError(f"Подменён артефакт: {name}")
     # Сравниваем каждый blob архива с точным Git tree, а не доверяем checksum.
     blobs = {}
     for row in git(repo, "ls-tree", "-rz", commit).split(b"\0"):
@@ -92,8 +147,8 @@ def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
                 raise ValueError("Лишний/повторный source member")
             seen.add(name)
             mode, data = blobs[name]
-            if mode == b"120000":
-                valid = entry.issym() and entry.linkname.encode() == data
+            if mode not in (b"100644", b"100755"):
+                raise ValueError("Недопустимый source mode/link")
             else:
                 stream = archive.extractfile(entry) if entry.isfile() else None
                 valid = (
@@ -136,7 +191,14 @@ def verify(candidate: dict, expected: dict, repo: Path, inputs: Path) -> dict:
         raise ValueError("Отсутствует exact source/build/output binding")
     from check_arch_package import validate_archive
 
-    validate_archive(paths["package"], repo)
+    # Snapshot содержит только проверенные Git blobs. Код из snapshot не запускается.
+    with tempfile.TemporaryDirectory(prefix="yonik-frozen-") as temporary:
+        frozen = Path(temporary)
+        for name, (mode, data) in blobs.items():
+            target = frozen / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        validate_archive(paths["package"], frozen)
     for key, member in (
         ("gui", "usr/bin/yonik-desktop"),
         ("helper", "usr/lib/yonik/yonik-helper"),
