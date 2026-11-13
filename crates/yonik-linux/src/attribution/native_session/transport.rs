@@ -1,5 +1,6 @@
 //! Ограниченный последовательный transport; ошибки всегда отзывают custody.
-use super::{Header, Kind, Lookup, OwnedFd, Session, Unavailable, wire};
+use super::super::broker::ProjectedLookup;
+use super::{Header, Kind, OwnedFd, Session, Unavailable, wire};
 use rustix::net::{
     self, RecvAncillaryBuffer, RecvFlags, ReturnFlags, SendAncillaryBuffer, SendAncillaryMessage,
     SendFlags,
@@ -182,31 +183,19 @@ impl Session {
                 }
                 Ok(())
             })?;
-            let lookup = self.lookup(&bytes).map_err(|_| Unavailable::Malformed)?;
+            let lookup = self
+                .lookup_and_project(&bytes)
+                .map_err(|_| Unavailable::Malformed)?;
             let snapshot_expiry = match &lookup {
-                Lookup::KnownOwner(owner) => Some(
-                    owner
-                        .observed_from
-                        .checked_add(Duration::from_nanos(wire::OWNER_TTL_NS))
-                        .ok_or(Unavailable::Timeout)?,
-                ),
+                ProjectedLookup::Known(projection) => Some(projection.expiry()?),
                 _ => None,
             };
             fence(deadline, cancel)?;
-            let mut reply = self.reply(
-                header.request_id,
-                lookup,
-                wire::lookup_flow(&bytes).map_err(|_| Unavailable::Malformed)?,
-            )?;
+            let mut reply = self.reply(header.request_id, lookup)?;
             send_reply(&socket, &mut reply, snapshot_expiry, deadline, cancel)?;
         }
     }
-    fn reply(
-        &self,
-        id: u64,
-        lookup: Lookup,
-        flow: super::super::broker::Flow,
-    ) -> Result<Vec<u8>, Unavailable> {
+    fn reply(&self, id: u64, lookup: ProjectedLookup) -> Result<Vec<u8>, Unavailable> {
         let mut bytes = vec![0; 160];
         Header {
             kind: Kind::Reply,
@@ -218,41 +207,29 @@ impl Session {
         .map_err(|_| Unavailable::Malformed)?;
         bytes[64..96].copy_from_slice(&self.nonce);
         let (status, reason) = match lookup {
-            Lookup::UnknownFlow => (2, 0),
-            Lookup::KnownOwner(snapshot) => {
-                let projection = self
-                    .roles
-                    .as_ref()
-                    .and_then(|roles| roles.broker.as_ref())
-                    .ok_or(Unavailable::Authority)?
-                    .project(flow, &snapshot, self.epoch);
-                match projection {
-                    Ok((owner, path, ttl)) => {
-                        bytes.resize(160 + path.len(), 0);
-                        Header {
-                            kind: Kind::Reply,
-                            request_id: id,
-                            epoch: self.epoch,
-                            digest: self.digest,
-                        }
-                        .write(&mut bytes)
-                        .map_err(|_| Unavailable::Malformed)?;
-                        bytes[100..102].copy_from_slice(&(path.len() as u16).to_be_bytes());
-                        bytes[104..112].copy_from_slice(&(ttl.as_nanos() as u64).to_be_bytes());
-                        bytes[112..120].copy_from_slice(&owner.cookie.to_be_bytes());
-                        bytes[120..124].copy_from_slice(&owner.pid.to_be_bytes());
-                        bytes[128..136].copy_from_slice(&owner.start_time.to_be_bytes());
-                        bytes[136..144].copy_from_slice(&owner.executable.0.to_be_bytes());
-                        bytes[144..152].copy_from_slice(&owner.executable.1.to_be_bytes());
-                        bytes[160..].copy_from_slice(path.as_bytes());
-                        (1, 0)
-                    }
-                    Err(reason) => {
-                        return self.reply(id, Lookup::MechanismUnavailable(reason), flow);
-                    }
+            ProjectedLookup::Unknown => (2, 0),
+            ProjectedLookup::Known(projection) => {
+                let (owner, path, ttl) = projection.into_parts();
+                bytes.resize(160 + path.len(), 0);
+                Header {
+                    kind: Kind::Reply,
+                    request_id: id,
+                    epoch: self.epoch,
+                    digest: self.digest,
                 }
+                .write(&mut bytes)
+                .map_err(|_| Unavailable::Malformed)?;
+                bytes[100..102].copy_from_slice(&(path.len() as u16).to_be_bytes());
+                bytes[104..112].copy_from_slice(&(ttl.as_nanos() as u64).to_be_bytes());
+                bytes[112..120].copy_from_slice(&owner.cookie.to_be_bytes());
+                bytes[120..124].copy_from_slice(&owner.pid.to_be_bytes());
+                bytes[128..136].copy_from_slice(&owner.start_time.to_be_bytes());
+                bytes[136..144].copy_from_slice(&owner.executable.0.to_be_bytes());
+                bytes[144..152].copy_from_slice(&owner.executable.1.to_be_bytes());
+                bytes[160..].copy_from_slice(path.as_bytes());
+                (1, 0)
             }
-            Lookup::MechanismUnavailable(reason) => (
+            ProjectedLookup::Unavailable(reason) => (
                 3,
                 match reason {
                     Unavailable::Authority => 1,
