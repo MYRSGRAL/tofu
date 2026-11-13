@@ -28,6 +28,16 @@ fn witness(
     deadline: Instant,
     cancelled: &AtomicBool,
 ) -> Result<Option<(u64, u64)>, Unavailable> {
+    witness_dump::<true>(flow, deadline, cancelled)
+}
+
+fn witness_dump<const FILTER_PORTS: bool>(
+    flow: Flow,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> Result<Option<(u64, u64)>, Unavailable> {
+    #[cfg(test)]
+    let phase_start = Instant::now();
     let socket = socket_with(
         AddressFamily::NETLINK,
         SocketType::RAW,
@@ -48,6 +58,13 @@ fn witness(
     request[17] = flow.protocol;
     request[20..24].fill(255);
     request[64..72].fill(255);
+    // Linux tcp_diag_dump/udp_diag_dump сравнивают ненулевые порты на равенство.
+    // Это необходимое условие userspace match, без выбора одного socket/interface.
+    // Адреса и cookie по-прежнему проверяются после полного dump до DONE.
+    if FILTER_PORTS {
+        request[24..26].copy_from_slice(&flow.local_port.to_be_bytes());
+        request[26..28].copy_from_slice(&flow.remote_port.to_be_bytes());
+    }
     rustix::net::sendto(
         &socket,
         &request,
@@ -55,6 +72,12 @@ fn witness(
         &SocketAddrNetlink::new(0, 0),
     )
     .map_err(|_| Unavailable::Coverage)?;
+    #[cfg(test)]
+    let sent_at = Instant::now();
+    #[cfg(test)]
+    let mut receives = 0usize;
+    #[cfg(test)]
+    let mut again = 0usize;
     let mut dump = DiagDump {
         flow,
         found: None,
@@ -78,11 +101,19 @@ fn witness(
         ) {
             Ok(m) => m,
             Err(rustix::io::Errno::AGAIN) => {
+                #[cfg(test)]
+                {
+                    again += 1;
+                }
                 std::thread::yield_now();
                 continue;
             }
             Err(error) => return Err(diag_error(error)),
         };
+        #[cfg(test)]
+        {
+            receives += 1;
+        }
         let sender = msg
             .address
             .as_ref()
@@ -92,6 +123,13 @@ fn witness(
             return Err(Unavailable::Authority);
         }
         if let DumpProgress::Complete(result) = dump.consume(&b[..msg.bytes], msg.flags)? {
+            #[cfg(test)]
+            eprintln!(
+                "diag phases send={:?} receive_done={:?} records={} receives={receives} again={again}",
+                sent_at.duration_since(phase_start),
+                sent_at.elapsed(),
+                dump.count
+            );
             return Ok(result);
         }
     }
@@ -768,6 +806,55 @@ mod tests {
         ));
     }
     #[test]
+    fn actual_udp_reuseport_dump_preserves_ambiguity() {
+        use rustix::net::{AddressFamily, SocketType, bind, socket, sockopt::set_socket_reuseport};
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            let peer = UdpSocket::bind(address).unwrap();
+            let family = if peer.local_addr().unwrap().is_ipv4() {
+                AddressFamily::INET
+            } else {
+                AddressFamily::INET6
+            };
+            let a = socket(family, SocketType::DGRAM, None).unwrap();
+            set_socket_reuseport(&a, true).unwrap();
+            let local: SocketAddr = address.parse().unwrap();
+            bind(&a, &local).unwrap();
+            let a = UdpSocket::from(a);
+            let b = socket(family, SocketType::DGRAM, None).unwrap();
+            set_socket_reuseport(&b, true).unwrap();
+            bind(&b, &a.local_addr().unwrap()).unwrap();
+            let b = UdpSocket::from(b);
+            a.connect(peer.local_addr().unwrap()).unwrap();
+            b.connect(peer.local_addr().unwrap()).unwrap();
+            let f = flow(a.local_addr().unwrap(), a.peer_addr().unwrap(), 17);
+            for result in [
+                super::witness_dump::<false>(f, Instant::now() + Duration::from_secs(1), &cancel),
+                super::witness_dump::<true>(f, Instant::now() + Duration::from_secs(1), &cancel),
+            ] {
+                assert_eq!(result, Err(Unavailable::AmbiguousSocket));
+            }
+            let mut selected = f;
+            selected.cookie = Some(rustix::net::sockopt::socket_cookie(&a).unwrap());
+            let expected = super::witness_dump::<false>(
+                selected,
+                Instant::now() + Duration::from_secs(1),
+                &cancel,
+            )
+            .unwrap();
+            assert!(expected.is_some());
+            assert_eq!(
+                witness(selected, Instant::now() + Duration::from_secs(1)),
+                Ok(expected)
+            );
+            selected.remote[0] ^= 1;
+            assert_eq!(
+                witness(selected, Instant::now() + Duration::from_secs(1)),
+                Ok(None)
+            );
+        }
+    }
+    #[test]
     fn diag_tcp_udp_v4_v6_cookie_and_deadline() {
         for address in ["127.0.0.1:0", "[::1]:0"] {
             let listener = TcpListener::bind(address).unwrap();
@@ -778,6 +865,18 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_ne!(proof.0, 0);
+            let unfiltered = super::witness_dump::<false>(
+                tcp,
+                Instant::now() + Duration::from_secs(1),
+                &std::sync::atomic::AtomicBool::new(false),
+            );
+            assert_eq!(unfiltered, Ok(Some(proof)));
+            let mut wrong_tuple = tcp;
+            wrong_tuple.remote_port ^= 1;
+            assert_eq!(
+                witness(wrong_tuple, Instant::now() + Duration::from_secs(1)),
+                Ok(None)
+            );
             let mut wrong = tcp;
             wrong.cookie = Some(proof.1.wrapping_add(1));
             assert_eq!(
@@ -788,10 +887,28 @@ mod tests {
             let b = UdpSocket::bind(address).unwrap();
             a.connect(b.local_addr().unwrap()).unwrap();
             let udp = flow(a.local_addr().unwrap(), b.local_addr().unwrap(), 17);
-            assert!(
-                witness(udp, Instant::now() + Duration::from_secs(1))
-                    .unwrap()
-                    .is_some()
+            let proof = witness(udp, Instant::now() + Duration::from_secs(1))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                super::witness_dump::<false>(
+                    udp,
+                    Instant::now() + Duration::from_secs(1),
+                    &std::sync::atomic::AtomicBool::new(false)
+                ),
+                Ok(Some(proof))
+            );
+            let mut wrong = udp;
+            wrong.cookie = Some(proof.1.wrapping_add(1));
+            assert_eq!(
+                witness(wrong, Instant::now() + Duration::from_secs(1)),
+                Ok(None)
+            );
+            wrong = udp;
+            wrong.remote_port ^= 1;
+            assert_eq!(
+                witness(wrong, Instant::now() + Duration::from_secs(1)),
+                Ok(None)
             );
             assert_eq!(witness(udp, Instant::now()), Err(Unavailable::Timeout));
         }

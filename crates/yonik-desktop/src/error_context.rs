@@ -56,6 +56,7 @@ pub enum Cause {
     SchedulerServiceForeignApproval,
     SchedulerServiceStaleUpdate,
     SchedulerServiceWorker,
+    SchedulerServiceImportFailed,
     SchedulerRepositoryInvalidInput,
     SchedulerRepositoryUnsafePath,
     SchedulerRepositoryUnsupportedVersion,
@@ -219,6 +220,7 @@ impl Cause {
                 ("STORAGE", "storage", Stage::SchedulerService)
             }
             Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceImportFailed => ("IMPORT", "import", Stage::SchedulerService),
             Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
             Self::SchedulerRepositoryInvalidInput => {
                 ("STORAGE", "storage", Stage::SchedulerService)
