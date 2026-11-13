@@ -374,3 +374,8 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod consumer_fixture;
+#[cfg(test)]
+pub(crate) use consumer_fixture::run as bound_consumer_fixture;
