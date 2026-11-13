@@ -1,0 +1,60 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling syn v3.0.9
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling yoke v0.8.4
+   Compiling zerovec-derive v0.11.7
+   Compiling zerovec v0.11.9
+   Compiling displaydoc v0.2.7
+   Compiling syn v2.0.119
+   Compiling tinystr v0.8.5
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling serde_derive v1.0.229
+   Compiling serde v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling cc v1.11.1
+   Compiling tokio v1.54.1
+   Compiling icu_properties v2.1.2
+   Compiling icu_normalizer v2.1.1
+   Compiling idna_adapter v1.2.1
+   Compiling ring v0.17.14
+   Compiling futures-macro v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling idna v1.1.0
+   Compiling tracing-attributes v0.1.31
+   Compiling zvariant_utils v2.1.0
+   Compiling tracing v0.1.44
+   Compiling url v2.5.8
+   Compiling enumflags2_derive v0.7.12
+   Compiling rustls v0.23.46
+   Compiling enumflags2 v0.7.12
+   Compiling rustls-webpki v0.103.16
+   Compiling zvariant_derive v4.2.0
+   Compiling hyper v1.12.0
+   Compiling zvariant v4.2.0
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.21
+   Compiling tokio-rustls v0.26.6
+   Compiling yonik-import v0.1.0 (/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source/crates/yonik-import)
+   Compiling zbus_names v3.0.0
+   Compiling zbus_macros v4.4.0
+   Compiling serde_repr v0.1.21
+   Compiling async-trait v0.1.92
+   Compiling zbus v4.4.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling hyper-rustls v0.27.10
+   Compiling tower-http v0.6.11
+   Compiling yonik-domain v0.1.0 (/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source/crates/yonik-domain)
+   Compiling reqwest v0.12.28
+   Compiling yonik-engine v0.1.0 (/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source/crates/yonik-engine)
+   Compiling secret-service v4.0.0
+   Compiling yonik-subscription v0.1.0 (/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source/crates/yonik-subscription)
+   Compiling yonik-linux v0.1.0 (/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source/crates/yonik-linux)
+    Finished `release` profile [optimized] target(s) in 2m 58s

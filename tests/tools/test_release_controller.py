@@ -34,6 +34,8 @@ class FakeTrustedRunner:
         self.commands: list[dict] = []
         self.fail = False
         self.bad_offer = False
+        self.dep_versions = {engine: "v1.0.0" for engine in c.VERSIONS}
+        self.zip_bytes = {"https://fixture.invalid/module.zip": b"fixture zip"}
 
     def run(self, argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
         self.commands.append({"argv": argv, "cwd": str(cwd), "exit": 0})
@@ -113,12 +115,12 @@ class FakeTrustedRunner:
         if argv[:3] == ["go", "version", "-m"]:
             return (
                 b"fixture: go1.27\n\tpath\tfixture\n"
-                b"\tdep\tfixture/module\tv1.0.0\th1:fixture\n"
-                b"\tbuild\tGOOS=linux\n\tbuild\tGOARCH=amd64\n"
+                + f"\tdep\tfixture/module\t{self.dep_versions[Path(argv[-1]).name]}\th1:fixture\n".encode()
+                + b"\tbuild\tGOOS=linux\n\tbuild\tGOARCH=amd64\n"
             )
         if argv[0] == "curl":
             target = Path(argv[argv.index("--output") + 1])
-            target.write_bytes(b"wrong" if self.bad_offer else b"fixture zip")
+            target.write_bytes(b"wrong" if self.bad_offer else self.zip_bytes[argv[-1]])
             return b""
         if argv[:2] == ["git", "archive"]:
             return (cwd.parent / "upstream.tar").read_bytes()
@@ -410,6 +412,239 @@ class ControllerTest(unittest.TestCase):
             self.collect()
         self.assertFalse((self.registry / "unit/collected.json").exists())
 
+    def two_version_fixture(self) -> None:
+        path = self.repo / "packaging/licenses/composition/go-sources.json"
+        data = json.loads(path.read_text())
+        second = {
+            **data["records"][0],
+            "version": "v2.0.0",
+            "zip_url": "https://fixture.invalid/module-v2.zip",
+            "zip_sha256": c.digest(b"fixture zip v2"),
+        }
+        data["records"].append(second)
+        path.write_text(json.dumps(data))
+        self.runner.dep_versions["sing-box"] = "v2.0.0"
+        self.runner.zip_bytes[second["zip_url"]] = b"fixture zip v2"
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture two versions")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+
+    def test_two_cores_resolve_distinct_versions_and_payloads(self) -> None:
+        self.two_version_fixture()
+        self.freeze()
+        context = self.collect()
+        first = context["cores"]["xray"]["dependencies"][0]
+        second = context["cores"]["sing-box"]["dependencies"][0]
+        self.assertEqual((first["version"], second["version"]), ("v1.0.0", "v2.0.0"))
+        self.assertNotEqual(first["zip_sha256"], second["zip_sha256"])
+        for row in (first, second):
+            self.assertIn(
+                f"usr/share/yonik/sources/go/{row['zip_sha256']}.zip",
+                context["payload"],
+            )
+        self.assertEqual(
+            c._verify(
+                self.repo,
+                self.registry,
+                "unit",
+                self.registry / "unit/package.tar",
+                self.registry / "unit",
+            )["status"],
+            "PASS",
+        )
+
+    def test_two_version_package_cannot_omit_one_source_offer(self) -> None:
+        self.two_version_fixture()
+        self.freeze()
+        context = self.collect()
+        missing = context["cores"]["sing-box"]["dependencies"][0]["zip_sha256"]
+        del context["payload"][f"usr/share/yonik/sources/go/{missing}.zip"]
+        with self.assertRaisesRegex(c.NotReady, "source offer"):
+            c.validate_payload(
+                self.registry / "unit/package.tar", self.task / "source", context
+            )
+
+    def test_conflicting_same_module_version_hash_is_rejected(self) -> None:
+        path = self.repo / "packaging/licenses/composition/go-sources.json"
+        data = json.loads(path.read_text())
+        data["records"].append({**data["records"][0], "zip_sha256": "f" * 64})
+        path.write_text(json.dumps(data))
+        with self.assertRaises(c.NotReady):
+            c.source_offers(self.repo)
+
+    def test_missing_second_version_offer_is_rejected(self) -> None:
+        self.runner.dep_versions["sing-box"] = "v2.0.0"
+        self.freeze()
+        with self.assertRaises(c.NotReady):
+            self.collect()
+
+    def test_exact_duplicate_offer_is_deduplicated(self) -> None:
+        path = self.repo / "packaging/licenses/composition/go-sources.json"
+        data = json.loads(path.read_text())
+        data["records"].append(data["records"][0])
+        path.write_text(json.dumps(data))
+        self.assertEqual(len(c.source_offers(self.repo)), 1)
+
+    def prior_rust_fixture(self) -> dict:
+        prior = "linux-controller-rehearsal-14229843-msrv85-2"
+        for name in c.tooling_hashes():
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture reviewed controller")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+        c._freeze(self.repo, self.registry, prior, self.commit)
+        folder = self.registry / prior
+        logs = folder / "controller-logs"
+        logs.mkdir(mode=0o700)
+        old_task = c.TRANSIENT / ("release-controller-" + prior)
+        env = {
+            "RUSTUP_TOOLCHAIN": c.RUST_PROFILE,
+            "RUSTC": str(c.RUST_BIN / "rustc"),
+            "PATH": str(c.RUST_BIN) + ":/usr/bin",
+            "CARGO_BUILD_JOBS": "1",
+            "CARGO_TARGET_DIR": str(old_task / "target"),
+            "TMPDIR": str(old_task / "tmp"),
+            "YONIK_BUILD_ID": "0.1.0+" + self.commit,
+        }
+        commands = [
+            ["rustc", "--version"],
+            ["cargo", "--version"],
+            *[[c.SLOT, *command] for command in c.RECIPE["rust_commands"]],
+        ]
+        for i, command in enumerate(commands):
+            c.write_record(
+                logs / f"{i}.command.json",
+                {
+                    "argv": command,
+                    "cwd": str(old_task / "source"),
+                    "exit": 0,
+                    "controlled_env": env,
+                },
+            )
+        for i in (0, 1):
+            (logs / f"{i}.stdout").write_bytes(b"fixture toolchain\n")
+        for name in c.RUST:
+            (folder / name).write_bytes(elf())
+        c.write_record(
+            folder / "failure.json",
+            {
+                "status": "BLOCKED",
+                "final_linux_acceptance": False,
+                "reason": "Некорректный frozen Go source offer",
+            },
+        )
+        return {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+
+    def test_reuse_rust_has_lineage_and_no_cargo_build(self) -> None:
+        pins = self.prior_rust_fixture()
+        self.freeze()
+        with (
+            patch.object(c, "rust_reuse_pins", return_value=pins),
+            patch.object(
+                c,
+                "rust_toolchain_hashes",
+                return_value={"rustc": "a" * 64, "cargo": "b" * 64},
+            ),
+            patch.object(c, "RUST_REUSE_REVIEW", self.commit),
+            patch.object(c, "RUST_REUSE_TARGET", "unit"),
+        ):
+            context = self.collect()
+        self.assertEqual(context["rust_lineage"]["build_performed"], False)
+        self.assertFalse(any(row["argv"][0] == c.SLOT for row in self.runner.commands))
+        self.assertFalse((self.task / "target").exists())
+        self.assertTrue((self.registry / "unit/rust-lineage.json").is_file())
+
+    def test_reuse_tampered_elf_fails_without_build_fallback(self) -> None:
+        pins = self.prior_rust_fixture()
+        (
+            self.registry / "linux-controller-rehearsal-14229843-msrv85-2/yonik-helper"
+        ).write_bytes(b"wrong")
+        self.freeze()
+        with (
+            patch.object(c, "rust_reuse_pins", return_value=pins),
+            patch.object(c, "RUST_REUSE_REVIEW", self.commit),
+            patch.object(c, "RUST_REUSE_TARGET", "unit"),
+            self.assertRaises(c.NotReady),
+        ):
+            self.collect()
+        self.assertFalse(any(row["argv"][0] == c.SLOT for row in self.runner.commands))
+
+    def test_reuse_symlink_rejected_even_with_matching_bytes(self) -> None:
+        pins = self.prior_rust_fixture()
+        path = (
+            self.registry / "linux-controller-rehearsal-14229843-msrv85-2/yonik-helper"
+        )
+        copy = self.root / "helper-copy"
+        copy.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(copy)
+        self.freeze()
+        with (
+            patch.object(c, "rust_reuse_pins", return_value=pins),
+            patch.object(c, "RUST_REUSE_REVIEW", self.commit),
+            patch.object(c, "RUST_REUSE_TARGET", "unit"),
+            self.assertRaises((c.NotReady, OSError)),
+        ):
+            self.collect()
+
+    def test_reuse_source_and_command_mismatch_fail_closed(self) -> None:
+        pins = self.prior_rust_fixture()
+        self.freeze()
+        record = c.read_context(self.registry, "unit")
+        folder = self.registry / "unit"
+        toolchains = {name: "fixture toolchain\n" for name in ("rustc", "cargo")}
+        with (
+            patch.object(c, "rust_reuse_pins", return_value=pins),
+            patch.object(c, "RUST_REUSE_REVIEW", self.commit),
+            patch.object(c, "RUST_REUSE_TARGET", "unit"),
+        ):
+            wrong = {**record, "source": {**record["source"], "commit": "b" * 40}}
+            with self.assertRaisesRegex(c.NotReady, "source/tree"):
+                c.reuse_rust(
+                    self.repo, self.registry, "unit", wrong, folder, toolchains
+                )
+            command = (
+                self.registry / c.RUST_REUSE_PRIOR / "controller-logs/2.command.json"
+            )
+            row = json.loads(command.read_text())
+            row["exit"] = 1
+            command.write_text(json.dumps(row))
+            # Даже иной доверенный pin не делает exit=1 пригодным для reuse.
+            pins["controller-logs/2.command.json"] = {
+                "size": command.stat().st_size,
+                "sha256": c.sha(command),
+            }
+            with self.assertRaisesRegex(c.NotReady, "exact Rust"):
+                c.reuse_rust(
+                    self.repo, self.registry, "unit", record, folder, toolchains
+                )
+
+    def test_reuse_hardlink_and_wrong_record_mode_fail_closed(self) -> None:
+        pins = self.prior_rust_fixture()
+        folder = self.registry / c.RUST_REUSE_PRIOR
+        os.link(folder / "yonik-worker", self.root / "extra-link")
+        with self.assertRaises(c.NotReady):
+            c.read_pinned_partial(folder, "yonik-worker", pins["yonik-worker"])
+        (folder / "failure.json").chmod(0o644)
+        with self.assertRaises(c.NotReady):
+            c.read_pinned_partial(folder, "failure.json", pins["failure.json"])
+
+    def test_two_versions_wrong_second_archive_rejected(self) -> None:
+        self.two_version_fixture()
+        self.runner.zip_bytes["https://fixture.invalid/module-v2.zip"] = (
+            b"wrong second archive"
+        )
+        self.freeze()
+        with self.assertRaisesRegex(c.NotReady, "source offer hash"):
+            self.collect()
+
     def test_local_runner_records_real_exit_codes(self) -> None:
         runner = c.LocalRunner(self.root / "logs")
         output = runner.run(
@@ -436,3 +671,39 @@ class ControllerTest(unittest.TestCase):
         record.chmod(0o600)
         with self.assertRaises(c.NotReady):
             c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
+
+
+class ControlledProfileTests(unittest.TestCase):
+    def test_fixed_msrv_profile_ignores_caller_rust_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {
+                    "RUSTUP_TOOLCHAIN": "untrusted",
+                    "RUSTC": "/bad/rustc",
+                    "RUSTFLAGS": "untrusted",
+                },
+            ):
+                env = c.build_env(Path(directory), "a" * 40)
+            expected = (
+                "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin"
+            )
+            self.assertEqual(env["PATH"].split(os.pathsep)[0], expected)
+            self.assertEqual(env["RUSTUP_TOOLCHAIN"], "1.85.1-x86_64-unknown-linux-gnu")
+            self.assertEqual(env["RUSTC"], expected + "/rustc")
+            self.assertEqual(env["CARGO_BUILD_JOBS"], "1")
+            self.assertNotIn("RUSTFLAGS", env)
+
+    def test_real_command_records_controlled_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = c.build_env(root, "a" * 40)
+            env["PRIVATE_UNRELATED_SECRET"] = "must-not-log"
+            runner = c.LocalRunner(root / "logs")
+            runner.run([sys.executable, "-c", "pass"], root, env)
+            record = json.loads((root / "logs/0.command.json").read_text())
+            self.assertEqual(record["controlled_env"]["RUSTC"], env["RUSTC"])
+            self.assertEqual(
+                record["controlled_env"]["CARGO_TARGET_DIR"], env["CARGO_TARGET_DIR"]
+            )
+            self.assertNotIn("PRIVATE_UNRELATED_SECRET", record["controlled_env"])

@@ -1,0 +1,7 @@
+{
+  "status": "BLOCKED",
+  "final_linux_acceptance": false,
+  "left_task": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2",
+  "bytes": 23480307,
+  "reason": "Некорректный frozen Go source offer"
+}

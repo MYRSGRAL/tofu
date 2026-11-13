@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "cargo",
+    "--version"
+  ],
+  "cwd": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/source",
+  "exit": 0,
+  "controlled_env": {
+    "PATH": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin:/usr/share/pyenv/libexec:/usr/share/pyenv/plugins/python-build/bin:/home/myrs/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/myrs/.codex/tmp/arg0-linux/codex-arg0DGEawh:/home/myrs/.local/bin:/home/myrs/.opencode/bin:/home/myrs/.cargo/bin:/home/myrs/.npm-global/bin:/home/myrs/.pyenv/shims:/home/myrs/.pyenv/bin:/tmp/.mount_T3-CodeDHNDk:/tmp/.mount_T3-CodeDHNDk/usr/sbin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/var/lib/flatpak/exports/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl",
+    "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+    "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+    "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+    "CARGO_BUILD_JOBS": "1",
+    "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2",
+    "GOMAXPROCS": "1",
+    "GOENV": "off",
+    "GOWORK": "off",
+    "GOTOOLCHAIN": "local",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "TMPDIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/tmp"
+  }
+}
