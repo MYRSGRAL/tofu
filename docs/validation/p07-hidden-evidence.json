@@ -1,0 +1,427 @@
+{
+  "static_trace": {
+    "sha256": {
+      "crates/yonik-desktop/qml/LogsView.qml": "f2c9a36721777f104c46f3da641df0932435665846ebe3e8d83e50435ad6850f",
+      "crates/yonik-desktop/qml/Main.qml": "d6646815e76876b801ef2260ea628bd42de8421be998d4cc09618ab898f324bf"
+    },
+    "read_calls": 2,
+    "no_timer": true,
+    "matching_visible_pending_guard": true,
+    "visible_stale_page_model_guard": true,
+    "bridge_difference": "\u0442\u043e\u043b\u044c\u043a\u043e private dispatch: producer hook \u0438 actual successful logs_read admission trace"
+  },
+  "runs": [
+    {
+      "name": "positive-0",
+      "exit": 0,
+      "records": {
+        "VISIBLE_CANARY": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 2,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 252
+        },
+        "FRAME_CANARY": {
+          "delta": 1
+        },
+        "QUIET_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 21,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 775
+        },
+        "QUIET_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 151
+        },
+        "HIDDEN_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 21,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 1126
+        },
+        "HIDDEN_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 1201
+        },
+        "POST_VISIBLE_CANARY": {
+          "count_notify": 3,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 2,
+          "list_count": 0,
+          "model_notify": 2,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 253
+        },
+        "LOGS": {
+          "attempted": 1002500,
+          "batches": 500,
+          "duration_ms": 5463.355965,
+          "evicted": 1000500,
+          "page_len": 256,
+          "period_ms": 10,
+          "rejected": 0
+        },
+        "hidden_producer_progress": [
+          200500,
+          300750,
+          401000
+        ],
+        "hidden_actual_read_admissions": 0,
+        "total_actual_read_admissions": 2
+      },
+      "terminal": {}
+    },
+    {
+      "name": "positive-1",
+      "exit": 0,
+      "records": {
+        "VISIBLE_CANARY": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 2,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 252
+        },
+        "FRAME_CANARY": {
+          "delta": 1
+        },
+        "QUIET_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 22,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 814
+        },
+        "QUIET_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 151
+        },
+        "HIDDEN_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 22,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 1165
+        },
+        "HIDDEN_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 1201
+        },
+        "POST_VISIBLE_CANARY": {
+          "count_notify": 1,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 2,
+          "list_count": -256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 253
+        },
+        "LOGS": {
+          "attempted": 1002500,
+          "batches": 500,
+          "duration_ms": 5522.870137,
+          "evicted": 1000500,
+          "page_len": 256,
+          "period_ms": 10,
+          "rejected": 0
+        },
+        "hidden_producer_progress": [
+          200500,
+          300750
+        ],
+        "hidden_actual_read_admissions": 0,
+        "total_actual_read_admissions": 2
+      },
+      "terminal": {}
+    },
+    {
+      "name": "positive-2",
+      "exit": 0,
+      "records": {
+        "VISIBLE_CANARY": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 2,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 252
+        },
+        "FRAME_CANARY": {
+          "delta": 1
+        },
+        "QUIET_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 21,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 814
+        },
+        "QUIET_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 150
+        },
+        "HIDDEN_BEGIN": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 21,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 4,
+          "t_ms": 1165
+        },
+        "HIDDEN_END": {
+          "count_notify": 0,
+          "delegate_created": 0,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 0,
+          "list_count": 0,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 0,
+          "snapshot_callback": 0,
+          "t_ms": 1201
+        },
+        "POST_VISIBLE_CANARY": {
+          "count_notify": 3,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 2,
+          "list_count": 0,
+          "model_notify": 2,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 254
+        },
+        "LOGS": {
+          "attempted": 1002500,
+          "batches": 500,
+          "duration_ms": 5486.229647,
+          "evicted": 1000500,
+          "page_len": 256,
+          "period_ms": 10,
+          "rejected": 0
+        },
+        "hidden_producer_progress": [
+          200500,
+          300750,
+          401000
+        ],
+        "hidden_actual_read_admissions": 0,
+        "total_actual_read_admissions": 2
+      },
+      "terminal": {}
+    },
+    {
+      "name": "negative-notify-disconnected",
+      "exit": 1,
+      "records": {
+        "VISIBLE_CANARY": {
+          "count_notify": 0,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 0,
+          "frame_swapped": 2,
+          "list_count": 256,
+          "model_notify": 0,
+          "page_apply": 0,
+          "response_callback": 0,
+          "serial_notify": 0,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 252
+        },
+        "LOGS": {
+          "attempted": 1002500,
+          "batches": 500,
+          "duration_ms": 5490.441965999999,
+          "evicted": 1000500,
+          "page_len": 256,
+          "period_ms": 10,
+          "rejected": 0
+        }
+      },
+      "terminal": {}
+    },
+    {
+      "name": "negative-frame-disconnected",
+      "exit": 1,
+      "records": {
+        "VISIBLE_CANARY": {
+          "count_notify": 2,
+          "delegate_created": 29,
+          "delegate_data_notify": 0,
+          "delegate_text_notify": 29,
+          "frame_swapped": 0,
+          "list_count": 256,
+          "model_notify": 1,
+          "page_apply": 1,
+          "response_callback": 1,
+          "serial_notify": 1,
+          "serial_value": 1,
+          "snapshot_callback": 1,
+          "t_ms": 252
+        },
+        "FRAME_CANARY": {
+          "delta": 0
+        },
+        "LOGS": {
+          "attempted": 1002500,
+          "batches": 500,
+          "duration_ms": 5470.923151,
+          "evicted": 1000500,
+          "page_len": 256,
+          "period_ms": 10,
+          "rejected": 0
+        }
+      },
+      "terminal": {}
+    }
+  ]
+}

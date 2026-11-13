@@ -82,6 +82,13 @@ Oracle не исключает zombie из terminal group. Краткоживу�
 
 ## Границы GUI доказательства и координация W3
 
+Блок ниже фиксирует исторические границы этой GUI campaign; её counters и raw
+bindings не повышаются задним числом. Remaining bounded hidden-consumer gate теперь
+проверен отдельным [focused passive campaign](2026-11-14-p07-hidden-consumer.md)
+по разрешённому root test-private пути, без общей API W3. Исторический
+WAITING_W3_API ниже не является текущей dependency P07. P01/энергетические
+и всеобщие internal/stat-poll claims по-прежнему не заявляются.
+
 За интервал hidden в каждом прогоне: 0 log page changes, 1 stateChanged (visibility),
 cursor неизменен. Это доказывает только указанные внешние notifications/cursor,
 а не отсутствие внутренней обработки строк или polling. Для этого пункта статус
