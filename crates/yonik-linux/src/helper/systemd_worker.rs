@@ -1,6 +1,6 @@
 //! Владелец двух фиксированных systemd worker, с подтверждением пустой cgroup.
 //! Accepted подтверждает передачу FD, но не готовность сети и не Applied.
-use super::run_authorization::RunAuthorization;
+use super::run_authorization::{RunAuthorization, RunRevocationGuard};
 use crate::{
     Cancellation,
     worker::{WorkerAck, WorkerMode, WorkerPayload, WorkerStatus},
@@ -99,6 +99,35 @@ impl WorkerTicket {
             && self.invocation.as_slice() == state.invocation
             && self.invocation != [0; 16]
     }
+}
+/// Удерживает lifetime authorized transfer; не открывает production factory.
+#[allow(dead_code)] // Consumer подключается отдельно после supported report.
+pub(crate) struct AuthorizedRun {
+    ticket: WorkerTicket,
+    lease: AuthorizedLease,
+}
+#[allow(dead_code)]
+impl AuthorizedRun {
+    /// Ticket не является admission; доступ требует живого retained binding.
+    pub(crate) fn ticket(&self) -> Result<&WorkerTicket> {
+        self.lease.binding.validate()?;
+        if self
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .map(|kernel| kernel.retained_namespace_count())
+            != Some(2)
+        {
+            return Err(WorkerSupervisorError::UnitProofGap);
+        }
+        Ok(&self.ticket)
+    }
+}
+#[allow(dead_code)]
+struct AuthorizedLease {
+    binding: InvocationBinding,
+    _guard: RunRevocationGuard,
 }
 /// Наблюдение canonical PID1 bootstrap, ещё не proof неизменности namespace.
 /// Конструктор закрыт; caller PID/UID и namespace numbers не принимаются.
@@ -233,11 +262,9 @@ impl InvocationBinding {
     }
     fn transfer(mut self, stream: &std::os::unix::net::UnixStream) -> Result<(WorkerAck, Self)> {
         self.validate()?;
-        let (session, generation, _network_epoch) = self.authorization.context();
-        let witness = crate::worker::anchor_exchange::Challenge::new(
+        let witness = crate::worker::anchor_exchange::Challenge::for_authorization(
+            &self.authorization,
             *self.digest.as_bytes(),
-            session,
-            generation,
             self.observation.invocation,
         )
         .and_then(|challenge| {
@@ -272,12 +299,12 @@ impl InvocationBinding {
             .map_err(|_| WorkerSupervisorError::Stale)?;
         Ok(ack)
     }
-    fn accept(self, ack: WorkerAck) -> Result<()> {
+    fn accept(self, ack: WorkerAck) -> Result<Self> {
         self.validate()?;
         if ack.status != WorkerStatus::Accepted || ack.pid != self.observation.pid {
             return Err(WorkerSupervisorError::Protocol);
         }
-        Ok(())
+        Ok(self)
     }
 }
 
@@ -542,7 +569,9 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         cancel: &mut Cancellation,
     ) -> Result<WorkerTicket> {
-        self.start_inner(payload, None, cancel).await
+        self.start_inner(payload, None, cancel)
+            .await
+            .map(|(ticket, _)| ticket)
     }
     /// Только helper owner; разрешение не заменяет kernel namespace admission.
     #[allow(dead_code)] // W4 подключает issuer отдельно.
@@ -551,17 +580,23 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         authorization: RunAuthorization,
         cancel: &mut Cancellation,
-    ) -> Result<WorkerTicket> {
-        self.start_inner(payload, Some(authorization), cancel).await
+    ) -> Result<AuthorizedRun> {
+        let (ticket, lease) = self
+            .start_inner(payload, Some(authorization), cancel)
+            .await?;
+        Ok(AuthorizedRun {
+            ticket,
+            lease: lease.ok_or(WorkerSupervisorError::Protocol)?,
+        })
     }
     async fn start_inner(
         &mut self,
         payload: Arc<WorkerPayload>,
         authorization: Option<RunAuthorization>,
         cancel: &mut Cancellation,
-    ) -> Result<WorkerTicket> {
+    ) -> Result<(WorkerTicket, Option<AuthorizedLease>)> {
         // Guard живёт в future, а не в blocking task: drop отзывает поздний ACK.
-        let _revocation = authorization.as_ref().map(RunAuthorization::guard);
+        let revocation = authorization.as_ref().map(RunAuthorization::guard);
         let deadline = Instant::now() + DEADLINE;
         self.begin(WorkerMode::Run, cancel, deadline).await?;
         let (ack, binding) = self
@@ -571,10 +606,12 @@ impl SystemWorkerSupervisor {
             return Err(WorkerSupervisorError::Protocol);
         }
         let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
-        if let Some(binding) = binding {
-            binding.validate_state(&state)?;
-            binding.accept(ack)?;
-        }
+        let binding = binding
+            .map(|binding| {
+                binding.validate_state(&state)?;
+                binding.accept(ack)
+            })
+            .transpose()?;
         let invocation: [u8; 16] = state
             .invocation
             .try_into()
@@ -591,7 +628,15 @@ impl SystemWorkerSupervisor {
             invocation: ticket.invocation,
         });
         self.pending = None;
-        Ok(ticket)
+        let lease = match (binding, revocation) {
+            (Some(binding), Some(guard)) => Some(AuthorizedLease {
+                binding,
+                _guard: guard,
+            }),
+            (None, None) => None,
+            _ => return Err(WorkerSupervisorError::Protocol),
+        };
+        Ok((ticket, lease))
     }
     pub async fn observe(&self, ticket: &WorkerTicket) -> Result<WorkerLiveness> {
         tokio::time::timeout(DEADLINE, async {

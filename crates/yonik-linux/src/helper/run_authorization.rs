@@ -87,6 +87,10 @@ impl RunAuthority {
         token.validate()?;
         Ok(token)
     }
+    #[cfg(test)]
+    pub(super) fn is_revoked(&self) -> bool {
+        self.revoked.load(Ordering::Acquire)
+    }
     pub(crate) fn revoke(&self) {
         self.revoked.revoke();
     }
@@ -118,8 +122,11 @@ impl RunAuthorization {
         }
         Ok(())
     }
-    pub(super) fn context(&self) -> ([u8; 16], u64, u64) {
-        (self.session, self.generation, self.network_epoch)
+    pub(crate) fn challenge_context(
+        &self,
+    ) -> Result<([u8; 32], [u8; 16], u64), RunAuthorizationError> {
+        self.validate()?;
+        Ok((self.nonce, self.session, self.generation))
     }
     pub(super) fn bind_custody(
         &self,
@@ -137,7 +144,12 @@ impl RunAuthorization {
                 return Err(RunAuthorizationError::Consumed);
             }
             observation
-                .bind_run(self.session, self.generation, self.network_epoch)
+                .bind_run(
+                    self.nonce,
+                    self.session,
+                    self.generation,
+                    self.network_epoch,
+                )
                 .map_err(|_| RunAuthorizationError::InvalidContext)?;
             *custody = Some(observation.revocation());
             Ok(())

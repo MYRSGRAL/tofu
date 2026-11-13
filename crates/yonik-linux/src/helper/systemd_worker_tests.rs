@@ -964,3 +964,135 @@ fn duplicate_kernel_report_revokes_all_custody() {
     assert_eq!(second.retained_namespace_count(), 0);
     assert!(token.validate().is_err());
 }
+
+fn authorized_result_fixture() -> (RunAuthority, AuthorizedRun) {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let authorization = owner.authorize([4; 32]).unwrap();
+    let guard = authorization.guard();
+    let kernel =
+        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
+    authorization.bind_custody(&kernel).unwrap();
+    let payload = binding_test_payload();
+    let binding = InvocationBinding {
+        authorization,
+        observation: BootstrapUnitObservation {
+            pid: 42,
+            uid: 0,
+            gid: 0,
+            start: 1,
+            invocation: [3; 16],
+            expires: Instant::now() + DEADLINE,
+            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
+        },
+        digest: payload.digest(),
+        payload,
+        kernel: Some(kernel),
+    };
+    // Только ownership fixture: не имитирует successful canonical verification/mint.
+    let result = AuthorizedRun {
+        ticket: WorkerTicket {
+            pid: 42,
+            invocation: [3; 16],
+        },
+        lease: AuthorizedLease {
+            binding,
+            _guard: guard,
+        },
+    };
+    (owner, result)
+}
+
+#[test]
+fn authorized_result_retains_guard_binding_and_custody_until_drop() {
+    let (owner, result) = authorized_result_fixture();
+    assert!(result.lease.binding.authorization.validate().is_ok());
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        2
+    );
+    assert_eq!(result.ticket.pid(), 42);
+    assert!(!owner.is_revoked());
+    drop(result);
+    // Повторный revoke безопасен, а повторная выдача owner закрыта.
+    assert!(owner.is_revoked());
+
+    assert!(owner.authorize([5; 32]).is_err());
+}
+
+#[tokio::test]
+async fn dropping_pending_authorized_future_revokes_token() {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let mut future = Box::pin(async {
+        let _guard = token.guard();
+        std::future::pending::<()>().await;
+    });
+    assert!(futures_util::poll!(future.as_mut()).is_pending());
+    drop(future);
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+#[test]
+fn custody_rejects_owner_nonce_mismatch() {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([5; 32]).unwrap();
+    let observation =
+        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
+    assert!(token.bind_custody(&observation).is_err());
+    assert_eq!(observation.retained_namespace_count(), 0);
+    assert!(owner.is_revoked());
+}
+
+#[test]
+fn held_authorized_result_observes_owner_revoke() {
+    let (owner, result) = authorized_result_fixture();
+    owner.revoke();
+    assert!(matches!(result.ticket(), Err(WorkerSupervisorError::Stale)));
+    assert_eq!(
+        result.lease.binding.authorization.validate(),
+        Err(RunAuthorizationError::Revoked)
+    );
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        0
+    );
+}
+
+#[test]
+fn accepted_binding_rejects_expiry_and_identity_drift() {
+    let (_owner, mut result) = authorized_result_fixture();
+    let state = WorkerState {
+        active: "active".into(),
+        pid: 42,
+        invocation: vec![8; 16],
+    };
+    assert_eq!(
+        result.lease.binding.validate_state(&state),
+        Err(WorkerSupervisorError::Stale)
+    );
+    result.lease.binding.observation.expires = Instant::now();
+    assert!(matches!(
+        result.ticket(),
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
+    let AuthorizedRun { lease, .. } = result;
+    assert!(matches!(
+        lease.binding.accept(WorkerAck {
+            pid: 42,
+            status: WorkerStatus::Accepted
+        }),
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
+}
