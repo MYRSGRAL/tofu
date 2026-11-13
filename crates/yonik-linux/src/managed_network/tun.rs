@@ -19,10 +19,13 @@ use tokio::{
 
 #[path = "tun_config.rs"]
 mod config;
+#[path = "tun_custody.rs"]
+mod custody;
 #[path = "tun_rule.rs"]
 mod rule;
 #[path = "tun_topology.rs"]
 mod topology;
+pub(crate) use custody::BoundTun;
 pub(crate) use topology::session_external_topology_with_framing;
 #[cfg(test)]
 #[path = "tun_session_tests.rs"]

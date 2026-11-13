@@ -1,4 +1,4 @@
-//! Узкий safe NS_GET_NSTYPE API. Нет raw FD, generic ioctl или setns API.
+//! Узкие safe nsfs/TUN API. Нет raw FD, generic ioctl или setns API.
 #![cfg(target_os = "linux")]
 pub mod kernel_probe;
 use std::{io, os::fd::AsFd};
@@ -85,3 +85,6 @@ mod tests {
         );
     }
 }
+
+/// Механическая очередь Linux TUN; не admission authority.
+pub mod tun;

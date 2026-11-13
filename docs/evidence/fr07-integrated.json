@@ -1,0 +1,84 @@
+{
+  "results": [
+    {
+      "case": "xray-ws-valid",
+      "closed": true,
+      "reaped": [
+        861507
+      ],
+      "oracle": true,
+      "direct_endpoint_available": true,
+      "peer_credentials_valid": true,
+      "actual_writes_sha256": "fc55b75ab345cf6cdd42a7f1701e84e05f3548e96c654156fd27293f06d0a198",
+      "core_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "database_sha256": "c25778dd39c6623143cdf74a6df3dca5a00703643d1f4a3eb857097df4387cf4"
+    },
+    {
+      "case": "xray-ws-wrong-peer",
+      "closed": true,
+      "reaped": [
+        861853
+      ],
+      "oracle": true,
+      "direct_endpoint_available": true,
+      "peer_credentials_valid": false,
+      "actual_writes_sha256": "fc55b75ab345cf6cdd42a7f1701e84e05f3548e96c654156fd27293f06d0a198",
+      "core_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "database_sha256": "c25778dd39c6623143cdf74a6df3dca5a00703643d1f4a3eb857097df4387cf4"
+    }
+  ],
+  "binary_sha256": "a1cb460407dddbfc1d5afe87c3cbb4a559afb4234517df3c662107820386532a",
+  "source_base": "bf97e32e639ab3b01ca2feb119c7d103441af3f4",
+  "key_custody": "synthetic fixture [43;32]; Secret Service not exercised",
+  "lifecycle": {
+    "first": {
+      "terminal": {
+        "busy": false,
+        "can_stop": false,
+        "closed": true,
+        "error": null,
+        "pending": false,
+        "probe_present": false,
+        "profile_count": 1,
+        "ready": false,
+        "revision": 1,
+        "selected_profile": 1,
+        "source_count": 1,
+        "status": "Disconnected",
+        "step": 18,
+        "tcp_busy": false,
+        "tcp_samples_count": 0,
+        "tray_available": false,
+        "window_visible": true
+      },
+      "trace_sha256": "ab3e1837fb91a42b400ffbf0b706d6e4ae2769b278e0f417104e7aa08f7431cc"
+    },
+    "reopened": {
+      "terminal": {
+        "busy": false,
+        "can_stop": false,
+        "closed": true,
+        "error": null,
+        "pending": false,
+        "probe_present": false,
+        "profile_count": 0,
+        "ready": false,
+        "revision": 0,
+        "selected_profile": null,
+        "source_count": 0,
+        "status": "Disconnected",
+        "step": 6,
+        "tcp_busy": false,
+        "tcp_samples_count": 0,
+        "tray_available": false,
+        "window_visible": true
+      },
+      "trace_sha256": "12715a5e10381ce02ab0af4e00be4310e94746d3520fa8afce2f6e7c527c45b5"
+    }
+  },
+  "remote_operation_denial": {
+    "test": "local_text_partial_approval_reopen_and_network_controls_fail_closed",
+    "passed": true,
+    "log_sha256": "43da7e6e91dabedf7cd667a50b0be52beb251717a8c88299dee3941cce8eda07"
+  }
+}
