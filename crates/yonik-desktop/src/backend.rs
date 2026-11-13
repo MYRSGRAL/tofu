@@ -573,7 +573,9 @@ impl DesktopHost {
         });
         let worker_control = control.clone();
         let callback: Callback = Arc::new(callback);
-        std::thread::Builder::new()
+        let startup_observer = config.startup_observer.clone();
+        let startup_callback = Arc::clone(&callback);
+        let thread = std::thread::Builder::new()
             .name("yonik-backend".into())
             .spawn(move || {
                 config.startup_observer.emit(StartupPhase::RuntimeBuild);
@@ -598,8 +600,8 @@ impl DesktopHost {
                         worker_control.closed();
                     }
                 }
-            })
-            .map_err(|_| DesktopError("startup"))?;
+            });
+        startup_observer.finish_thread_start(thread, &startup_callback)?;
         Ok(Self { commands, control })
     }
     /// Доверенный platform provider. Unknown/default запрещает автоматические загрузки.
