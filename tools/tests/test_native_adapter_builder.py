@@ -77,6 +77,10 @@ class BuilderTests(unittest.TestCase):
         if argv[:2] == ["go", "env"]:
             return json.dumps({"GOOS": "linux", "GOARCH": "amd64", "GOEXPERIMENT": ""})
         if argv[:2] == ["go", "build"]:
+            prebuild = json.loads((runner.logs / "prebuild.json").read_text())
+            self.assertEqual(prebuild["build_args"], argv)
+            self.assertEqual(prebuild["build_environment"]["GOMAXPROCS"], "1")
+            self.assertIsNone(prebuild["native_protocol"])
             if self.fail_go:
                 raise builder.BuildError("Go завершился с ошибкой")
             if self.modify_module:
@@ -96,6 +100,104 @@ class BuilderTests(unittest.TestCase):
             ),
         ):
             return builder.build(self.root, self.output, self.patch_file)
+
+    def test_xray_build_is_pinned_and_claims_no_unimplemented_features(self) -> None:
+        self.source = self.root / "build-source-xray"
+        self.source.mkdir()
+        (self.source / "go.mod").write_text("module github.com/xtls/xray-core\n")
+        (self.source / "go.sum").write_text("fixture\n")
+        self.head = builder.XRAY_COMMIT
+        original = self.fake_run
+
+        def run(runner: builder.Runner, argv: list[str], cwd: Path) -> str:
+            if argv[:2] == ["git", "rev-parse"]:
+                original(runner, ["git", "status"], cwd)
+                return builder.XRAY_COMMIT + "\n"
+            if len(argv) == 2 and argv[1] == "version":
+                return "Xray 26.10.31 (Xray, Penetrates Everything.) fixture\n"
+            return original(runner, argv, cwd)
+
+        with patch.object(builder.Runner, "run", autospec=True, side_effect=run):
+            result = builder.build(self.root, self.output, self.patch_file, "xray")
+        manifest = json.loads(result.read_text())
+        self.assertEqual(manifest["source_commit"], builder.XRAY_COMMIT)
+        self.assertEqual(
+            manifest["prebuild_sha256"], builder.sha256(self.output / "prebuild.json")
+        )
+        self.assertEqual(manifest["adapter_features"], {})
+        self.assertEqual(manifest["patches"], [])
+        self.assertIsNone(manifest["patch_sha256"])
+        self.assertTrue((self.output / "xray").is_file())
+        command = next(argv for argv in self.commands if argv[:2] == ["go", "build"])
+        self.assertIn("-p=1", command)
+        self.assertEqual(command[-1], "./main")
+        self.assertFalse(any(argv[:2] == ["git", "apply"] for argv in self.commands))
+
+    def test_codec_component_is_verified_without_feature_ack(self) -> None:
+        original = self.fake_run
+
+        def run(runner: builder.Runner, argv: list[str], cwd: Path) -> str:
+            if argv[:2] == ["git", "apply"] and "native-broker-codec.patch" in argv[-1]:
+                subprocess.run(
+                    [
+                        *argv[:-1],
+                        *(
+                            f"--exclude={name}"
+                            for name in metadata["callsite_files_sha256"]
+                        ),
+                        argv[-1],
+                    ],
+                    cwd=cwd,
+                    check=True,
+                    capture_output=True,
+                )
+            return original(runner, argv, cwd)
+
+        metadata = json.loads(
+            builder.DEFAULT_PATCH.with_name("native-broker-codec.json").read_text()
+        )
+        real_sha256 = builder.sha256
+
+        def sha256(path: Path) -> str:
+            if path in {
+                self.source / name for name in metadata["callsite_files_sha256"]
+            }:
+                return metadata["callsite_files_sha256"][
+                    str(path.relative_to(self.source))
+                ]
+            return real_sha256(path)
+
+        with (
+            patch.object(builder, "sha256", side_effect=sha256),
+            patch.object(builder.Runner, "run", autospec=True, side_effect=run),
+            patch.object(builder, "EXTRA_PATCHES", tuple(self.extra_patches)),
+        ):
+            result = builder.build(
+                self.root, self.output, self.patch_file, native_codec=True
+            )
+        manifest = json.loads(result.read_text())
+        self.assertFalse(manifest["native_codec_component"]["runtime_hooks_connected"])
+        self.assertTrue(
+            manifest["native_codec_component"]["routing_entry_guard_connected"]
+        )
+        self.assertIn(["go", "test", "-p=1", "-mod=readonly", "./route"], self.commands)
+        self.assertIn(
+            ["go", "test", "-p=1", "-mod=readonly", "./protocol/tun"], self.commands
+        )
+        self.assertTrue(
+            manifest["native_codec_component"]["owned_tun_constructor_connected"]
+        )
+        self.assertIsNone(manifest["native_protocol"])
+        self.assertNotIn("native_broker", manifest["adapter_features"])
+        self.assertIn(
+            ["go", "test", "-p=1", "-mod=readonly", "./common/yonikbroker"],
+            self.commands,
+        )
+
+    def test_unknown_engine_is_rejected_before_commands(self) -> None:
+        with self.assertRaises(builder.BuildError):
+            builder.build(self.root, self.output, self.patch_file, "other")
+        self.assertFalse(self.commands)
 
     def test_unknown_patch_cannot_claim_strict_complete_feature(self) -> None:
         self.patch_file.write_text("unrelated README-only patch")
