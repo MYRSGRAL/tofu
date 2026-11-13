@@ -43,14 +43,26 @@ def main() -> None:
                         "median": statistics.median(values),
                         "max": max(values),
                     }
+                observations = [first, *[x["processes"][name] for x in rows], last]
+                stable_threads = all(
+                    set(x["threads"]) == set(first["threads"]) for x in observations
+                )
+                wakeups = None
+                if stable_threads and all(
+                    v is not None for x in observations for v in x["threads"].values()
+                ):
+                    deltas = [
+                        last["threads"][tid] - first["threads"][tid]
+                        for tid in first["threads"]
+                    ]
+                    if all(delta >= 0 for delta in deltas):
+                        wakeups = sum(deltas)
                 groups[name] = {
                     "cpu_seconds": seconds,
                     "cpu_percent_one_cpu": seconds / phase["duration"] * 100,
                     "memory_kib": memory,
-                    "scheduler_wakeups": None
-                    if first["scheduler_wakeups"] is None
-                    or last["scheduler_wakeups"] is None
-                    else last["scheduler_wakeups"] - first["scheduler_wakeups"],
+                    "scheduler_wakeups": wakeups,
+                    "wakeup_threads_stable": stable_threads,
                     "wakeup_source": first["wakeup_source"],
                 }
             frame_delta = phase["end"]["frames"] - phase["start"]["frames"]

@@ -53,7 +53,7 @@ def main() -> None:
             output.mkdir()
             vm = None
             vm_log = (output / "vm.log").open("wb")
-            if index > 1:
+            if index >= 1:
                 env = dict(
                     os.environ, YONIK_VM_ROOT=str(root), YONIK_VM_EVIDENCE=str(output)
                 )
@@ -92,7 +92,7 @@ def main() -> None:
                         "cat > " + destination + "; chmod 755 " + destination,
                         source.read_bytes(),
                     )
-                if index > 1:
+                if index >= 1:
                     call(
                         ssh,
                         "runuser -u fixture -- python /home/fixture/format4_gui_guest.py",
@@ -112,7 +112,7 @@ def main() -> None:
                         stdout=subprocess.DEVNULL,
                         stderr=stderr,
                     )
-                    deadline = time.monotonic() + 1900
+                    deadline = time.monotonic() + 2050
                     with (output / "host-context.jsonl").open("w") as samples:
                         while task.poll() is None:
                             samples.write(json.dumps(context()) + "\n")

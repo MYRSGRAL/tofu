@@ -21,6 +21,7 @@ def measure(pid: int) -> dict:
     wakeups = 0
     wakeups_supported = True
     children: set[str] = set()
+    threads: dict[str, int | None] = {}
     for task in (root / "task").iterdir():
         try:
             children.update((task / "children").read_text().split())
@@ -31,6 +32,11 @@ def measure(pid: int) -> dict:
                 if ":" in line
                 for a, b in [line.split(":", 1)]
             }
+            thread_stat = (task / "stat").read_text().rsplit(")", 1)[1].split()
+            identity = f"{task.name}:{thread_stat[19]}"
+            threads[identity] = (
+                int(keys["nr_wakeups"]) if "nr_wakeups" in keys else None
+            )
             switches += int(keys["nr_switches"])
             if "nr_wakeups" in keys:
                 wakeups += int(keys["nr_wakeups"])
@@ -40,6 +46,7 @@ def measure(pid: int) -> dict:
             continue
     return {
         "pid": pid,
+        "threads": threads,
         "cpu_ticks": int(stat[11]) + int(stat[12]),
         "start_ticks": int(stat[19]),
         "memory_kib": memory,
@@ -113,7 +120,7 @@ def main() -> None:
                     ("static-open", "Open", True),
                 ]:
                     command(action)
-                    time.sleep(3)  # setup вне измерения
+                    time.sleep(60)  # startup Qt thread pool expiry вне измерения
                     start_state = command("Snapshot")
                     if start_state["visible"] != visible or start_state.get("can_stop"):
                         raise RuntimeError("Visibility/no-connect precondition")

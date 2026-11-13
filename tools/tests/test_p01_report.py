@@ -14,8 +14,18 @@ class ReportGateTests(unittest.TestCase):
         for index in range(1, 4):
             output = root / f"repeat-{index}"
             output.mkdir()
-            first = {"start_ticks": 1, "cpu_ticks": 100, "scheduler_wakeups": 100}
-            last = {"start_ticks": 1, "cpu_ticks": 110, "scheduler_wakeups": 110}
+            first = {
+                "start_ticks": 1,
+                "cpu_ticks": 100,
+                "scheduler_wakeups": 100,
+                "threads": {"1:1": 100},
+            }
+            last = {
+                "start_ticks": 1,
+                "cpu_ticks": 110,
+                "scheduler_wakeups": 110,
+                "threads": {"1:1": 110},
+            }
             for value in [first, last]:
                 value.update(
                     memory_kib={"Pss": 2048, "Private_Dirty": 1024},
@@ -64,6 +74,23 @@ class ReportGateTests(unittest.TestCase):
             self.assertAlmostEqual(
                 result["variance"]["hidden"]["cpu_percent"]["median"], 0.2 / 900 * 100
             )
+
+    def test_thread_exit_does_not_become_negative_or_zero_wakeups(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            for output in root.glob("repeat-*"):
+                path = output / "terminal.json"
+                data = json.loads(path.read_text())
+                for phase in data["phases"]:
+                    phase["first"]["gui"]["threads"] = {"1:1": 300, "2:1": 200}
+                path.write_text(json.dumps(data))
+            with patch.object(p01_report, "ROOT", root):
+                p01_report.main()
+            result = json.loads((root / "summary.json").read_text())
+            group = result["repeats"][0]["phases"][0]["groups"]["gui"]
+            self.assertIsNone(group["scheduler_wakeups"])
+            self.assertFalse(group["wakeup_threads_stable"])
 
     def test_short_phase_and_hidden_frames_cannot_produce_summary(self) -> None:
         for duration, frames in [(899, 0), (900, 1)]:

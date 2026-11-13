@@ -1,6 +1,12 @@
 # P-01: bounded proposal перед длительной кампанией
 
-Статус: **OPEN / API blocker**, не PASS и не результат измерения idle.
+Статус исходного preflight: **OPEN / API blocker**, не PASS и не результат измерения idle.
+
+Продолжение: root разрешил узкий test-support observer, реализованный в
+[private API v1](p01-observer-api.md). Full-duration кампания запущена; этот
+документ сохраняет первоначальный proposal, не описывает её итог.
+Root подтвердил N/A stats-positive-canary только для frozen 3e64220;
+появление production statistics требует новой проверки.
 База: accepted `origin/main` `3e64220fc16b7cfdd2170bd0fffc7049d056c8a7`.
 Рабочая ветка: `test/p01-idle-acceptance-3e64220`.
 Проверка API выполнена по исходникам этой базы; старые GUI ELF не запускались.
