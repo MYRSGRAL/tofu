@@ -19,7 +19,7 @@ ATTACH; handshake проверяет единственный SCM_RIGHTS FD и C
 `ynkfixture0`, issuer socketpair, bootstrap record и вызывает private
 `closedAttach`, получая private routingConsumer. Actual constructors используют
 этот context. `PersistentPlainTUNFixture` не принимает внешний endpoint.
-В Xray это `common/yonikbroker/export_test.go` и `owned_tun_linux_test.go`
+В Xray это `common/yonikbroker/export_test.go` и `closed_tun_linux_test.go`
 внутри native-broker-codec.patch; те же symbols есть в sing-box patch.
 Простая подстановка Rust-received FD не проверит actual authenticated ATTACH и
 потребует самостоятельно изготовить приватный context. Готовый production ELF
