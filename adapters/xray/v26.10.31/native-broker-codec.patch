@@ -1,0 +1,5663 @@
+diff --git a/common/yonikbroker/proof.go b/common/yonikbroker/proof.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/proof.go
+@@ -0,0 +1,177 @@
++// Package nativehooks задаёт внутреннюю семантику guard, без wire ABI.
++package nativehooks
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/netip"
++	"sync"
++	"time"
++)
++
++// MaxTrackedFlows ограничивает только этот fixture; production budget согласует Root.
++const MaxTrackedFlows = 4096
++
++var ErrDenied = errors.New("нет действующего broker proof")
++
++type Status uint8
++
++const (
++	Unknown Status = iota
++	Unavailable
++	Known
++)
++
++type Stage uint8
++
++const (
++	BeforeRouting Stage = iota
++	AfterDNS
++	BeforeDial
++)
++
++// Binding поступает только из trusted bootstrap, не из native config/env.
++type Binding struct {
++	Nonce        [32]byte
++	ConfigDigest [32]byte
++	Epoch        uint64
++}
++
++// Flow хранит исходный canonical tuple до DNS/sniff переписывания назначения.
++type Flow struct {
++	Protocol uint8
++	Local    netip.AddrPort
++	Remote   netip.AddrPort
++}
++
++func (f Flow) valid() bool {
++	a, b := f.Local.Addr(), f.Remote.Addr()
++	return (f.Protocol == 6 || f.Protocol == 17) && f.Local.IsValid() && f.Remote.IsValid() &&
++		f.Local.Port() != 0 && f.Remote.Port() != 0 && a.Zone() == "" && b.Zone() == "" &&
++		!a.Is4In6() && !b.Is4In6() && a.Is4() == b.Is4() && !a.IsUnspecified() && !b.IsUnspecified()
++}
++
++// Evidence — semantic input trusted broker decoder; это не публичный assertion API.
++// Строка caller path никогда не становится identity доказательством.
++type Evidence struct {
++	Flow             Flow
++	Binding          Binding
++	Status           Status
++	Observed         time.Time
++	Expires          time.Time
++	ExecutableDevice uint64
++	ExecutableInode  uint64
++	RawCallerPath    string
++}
++
++// Handle передаёт сессии владение закрытием одного flow.
++type Handle struct {
++	flow io.Closer
++	once sync.Once
++	err  error
++}
++
++func (h *Handle) close() error {
++	h.once.Do(func() { h.err = h.flow.Close() })
++	return h.err
++}
++
++// Session отзывает flows и pending I/O; положительного cache здесь нет.
++type Session struct {
++	ctx        context.Context
++	cancel     context.CancelFunc
++	mu         sync.Mutex
++	binding    Binding
++	maxTTL     time.Duration
++	revoked    bool
++	revokeDone chan struct{}
++	revokeErr  error
++	flows      map[*Handle]struct{}
++}
++
++func NewSession(binding Binding, maxTTL time.Duration) (*Session, error) {
++	if binding.Epoch == 0 || binding.Nonce == [32]byte{} || binding.ConfigDigest == [32]byte{} || maxTTL <= 0 {
++		return nil, ErrDenied
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	return &Session{ctx: ctx, cancel: cancel, binding: binding, maxTTL: maxTTL, revokeDone: make(chan struct{}), flows: make(map[*Handle]struct{})}, nil
++}
++
++func (s *Session) guard(now time.Time, stage Stage, required bool, tuple Flow, proof Evidence) error {
++	if s.revoked || stage > BeforeDial || proof.RawCallerPath != "" {
++		return ErrDenied
++	}
++	if !required {
++		return nil
++	}
++	if !tuple.valid() || proof.Flow != tuple || proof.Status != Known || proof.Binding != s.binding || proof.ExecutableInode == 0 ||
++		proof.Observed.IsZero() || now.Before(proof.Observed) || !now.Before(proof.Expires) ||
++		proof.Expires.Sub(proof.Observed) <= 0 || proof.Expires.Sub(proof.Observed) > s.maxTTL {
++		return ErrDenied
++	}
++	return nil
++}
++
++func (s *Session) Guard(now time.Time, stage Stage, required bool, tuple Flow, proof Evidence) error {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	return s.guard(now, stage, required, tuple, proof)
++}
++
++// Track атомарно относительно revoke регистрирует flow до его публикации.
++// Ошибка передаёт закрытие flow вызывающему коду; после успеха сессия владеет close.
++func (s *Session) Track(now time.Time, required bool, tuple Flow, proof Evidence, flow io.Closer) (*Handle, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if flow == nil || len(s.flows) >= MaxTrackedFlows {
++		return nil, ErrDenied
++	}
++	if err := s.guard(now, BeforeDial, required, tuple, proof); err != nil {
++		return nil, err
++	}
++	handle := &Handle{flow: flow}
++	s.flows[handle] = struct{}{}
++	return handle, nil
++}
++
++// Release закрывает flow и снимает регистрацию, не удерживая mutex во время I/O.
++func (s *Session) Release(flow *Handle) error {
++	s.mu.Lock()
++	_, exists := s.flows[flow]
++	s.mu.Unlock()
++	if !exists {
++		return nil
++	}
++	err := flow.close()
++	s.mu.Lock()
++	delete(s.flows, flow)
++	s.mu.Unlock()
++	return err
++}
++
++// Revoke вызывается также на EOF/broker death/cancel; повтор безопасен.
++func (s *Session) Revoke() error {
++	s.mu.Lock()
++	if s.revoked {
++		done := s.revokeDone
++		s.mu.Unlock()
++		<-done
++		return s.revokeErr
++	}
++	s.revoked = true
++	s.cancel()
++	flows := s.flows
++	s.flows = make(map[*Handle]struct{})
++	s.mu.Unlock()
++	var result error
++	for flow := range flows {
++		result = errors.Join(result, flow.close())
++	}
++	s.revokeErr = result
++	close(s.revokeDone)
++	return result
++}
++
++// Context передаётся каждому DNS/dial ожиданию, чтобы revoke отменял и pending I/O.
++func (s *Session) Context() context.Context { return s.ctx }
+diff --git a/common/yonikbroker/proof_test.go b/common/yonikbroker/proof_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/proof_test.go
+@@ -0,0 +1,152 @@
++package nativehooks
++
++import (
++	"io"
++	"net"
++	"net/netip"
++	"testing"
++	"time"
++)
++
++func fixture(t *testing.T) (*Session, Evidence, time.Time) {
++	t.Helper()
++	now := time.Now()
++	binding := Binding{Nonce: [32]byte{1}, ConfigDigest: [32]byte{2}, Epoch: 3}
++	session, err := NewSession(binding, 20*time.Millisecond)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return session, Evidence{Flow: Flow{Protocol: 6, Local: netip.MustParseAddrPort("127.0.0.1:1234"), Remote: netip.MustParseAddrPort("127.0.0.2:443")}, Binding: binding, Status: Known, Observed: now, Expires: now.Add(20 * time.Millisecond), ExecutableInode: 4}, now
++}
++
++func TestProofMatrix(t *testing.T) {
++	cases := []struct {
++		name    string
++		change  func(*Evidence)
++		elapsed time.Duration
++		deny    bool
++	}{
++		{name: "known"},
++		{name: "other-flow", change: func(p *Evidence) { p.Flow.Remote = netip.MustParseAddrPort("127.0.0.3:443") }, deny: true},
++		{name: "expiry", elapsed: 20 * time.Millisecond, deny: true},
++		{name: "unknown", change: func(p *Evidence) { p.Status = Unknown }, deny: true},
++		{name: "unavailable", change: func(p *Evidence) { p.Status = Unavailable }, deny: true},
++		{name: "nonce", change: func(p *Evidence) { p.Binding.Nonce[0]++ }, deny: true},
++		{name: "digest", change: func(p *Evidence) { p.Binding.ConfigDigest[0]++ }, deny: true},
++		{name: "epoch", change: func(p *Evidence) { p.Binding.Epoch++ }, deny: true},
++		{name: "caller-path", change: func(p *Evidence) { p.RawCallerPath = "/usr/bin/trusted" }, deny: true},
++		{name: "long-ttl", change: func(p *Evidence) { p.Expires = p.Expires.Add(time.Millisecond) }, deny: true},
++		{name: "future", change: func(p *Evidence) { p.Observed = p.Observed.Add(time.Millisecond) }, deny: true},
++		{name: "missing-identity", change: func(p *Evidence) { p.ExecutableInode = 0 }, deny: true},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			s, p, now := fixture(t)
++			tuple := p.Flow
++			if c.change != nil {
++				c.change(&p)
++			}
++			for _, stage := range []Stage{BeforeRouting, AfterDNS, BeforeDial} {
++				if err := s.Guard(now.Add(c.elapsed), stage, true, tuple, p); (err != nil) != c.deny {
++					t.Fatalf("stage=%d err=%v", stage, err)
++				}
++			}
++		})
++	}
++}
++
++func TestDNSWaitRequiresFreshProof(t *testing.T) {
++	s, p, now := fixture(t)
++	if err := s.Guard(now, BeforeRouting, true, p.Flow, p); err != nil {
++		t.Fatal(err)
++	}
++	for _, stage := range []Stage{AfterDNS, BeforeDial} {
++		if s.Guard(now.Add(21*time.Millisecond), stage, true, p.Flow, p) == nil {
++			t.Fatal("просроченный proof допущен")
++		}
++	}
++	if err := s.Guard(now, BeforeRouting, false, Flow{}, Evidence{}); err != nil {
++		t.Fatal("non-app control", err)
++	}
++}
++
++func TestRevokeClosesTCPUDPFlows(t *testing.T) {
++	for _, reason := range []string{"revoke", "EOF", "cancel", "broker-death"} {
++		t.Run(reason, func(t *testing.T) {
++			s, p, now := fixture(t)
++			tcp, peer := net.Pipe()
++			defer peer.Close()
++			udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			for _, flow := range []io.Closer{tcp, udp} {
++				if _, err := s.Track(now, true, p.Flow, p, flow); err != nil {
++					t.Fatal(err)
++				}
++			}
++			if err := s.Revoke(); err != nil {
++				t.Fatal(err)
++			}
++			if _, err := tcp.Write([]byte{1}); err == nil {
++				t.Fatal("TCP остался открыт")
++			}
++			if _, err := udp.WriteTo([]byte{1}, udp.LocalAddr()); err == nil {
++				t.Fatal("UDP остался открыт")
++			}
++			if s.Context().Err() == nil {
++				t.Fatal("pending I/O не отменён")
++			}
++			if s.Guard(now, BeforeDial, true, p.Flow, p) == nil {
++				t.Fatal("revoke не блокирует dial")
++			}
++			if err := s.Revoke(); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
++}
++
++func TestCanonicalTCPUDPv4v6(t *testing.T) {
++	for _, protocol := range []uint8{6, 17} {
++		for _, pair := range [][2]string{{"192.0.2.1:1234", "192.0.2.2:443"}, {"[2001:db8::1]:1234", "[2001:db8::2]:443"}} {
++			s, p, now := fixture(t)
++			p.Flow = Flow{Protocol: protocol, Local: netip.MustParseAddrPort(pair[0]), Remote: netip.MustParseAddrPort(pair[1])}
++			if err := s.Guard(now, BeforeDial, true, p.Flow, p); err != nil {
++				t.Fatal(protocol, pair, err)
++			}
++		}
++	}
++	for _, pair := range [][2]string{{"[::ffff:192.0.2.1]:1234", "[::ffff:192.0.2.2]:443"}, {"192.0.2.1:0", "192.0.2.2:443"}, {"192.0.2.1:1234", "[2001:db8::2]:443"}} {
++		s, p, now := fixture(t)
++		p.Flow = Flow{Protocol: 6, Local: netip.MustParseAddrPort(pair[0]), Remote: netip.MustParseAddrPort(pair[1])}
++		if s.Guard(now, BeforeDial, true, p.Flow, p) == nil {
++			t.Fatal("неканонический tuple допущен", pair)
++		}
++	}
++}
++
++func TestTrackAfterRevokeDeniedAndReleaseIdempotent(t *testing.T) {
++	s, p, now := fixture(t)
++	tcp, peer := net.Pipe()
++	defer peer.Close()
++	handle, err := s.Track(now, true, p.Flow, p, tcp)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Release(handle); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Release(handle); err != nil {
++		t.Fatal(err)
++	}
++	if err := s.Revoke(); err != nil {
++		t.Fatal(err)
++	}
++	next, other := net.Pipe()
++	defer next.Close()
++	defer other.Close()
++	if _, err := s.Track(now, true, p.Flow, p, next); err == nil {
++		t.Fatal("flow опубликован после revoke")
++	}
++}
+diff --git a/common/yonikbroker/wire.go b/common/yonikbroker/wire.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/wire.go
+@@ -0,0 +1,348 @@
++package nativehooks
++
++import (
++	"encoding/binary"
++	"errors"
++	"net/netip"
++	"strings"
++	"time"
++	"unicode/utf8"
++)
++
++// FrozenSpec — единственный источник wire bytes; fixture136 не участвует.
++const FrozenSpec = "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef"
++const (
++	HeaderBytes              = 64
++	MaxFrameBytes            = 768
++	MaxPathBytes             = 512
++	OwnerTTL                 = 20 * time.Millisecond
++	BootstrapTTL             = time.Second
++	OwnedTUN          uint64 = 1
++	OwnerLookup       uint64 = 2
++	StrictAppRequired uint64 = 4
++	AllFeatures              = OwnedTUN | OwnerLookup | StrictAppRequired
++)
++
++var ErrMalformed = errors.New("некорректный YNKBROK1 frame")
++
++type Kind uint16
++
++const (
++	HelloKind     Kind = 1
++	FeaturesKind  Kind = 2
++	AttachKind    Kind = 3
++	AttachACKKind Kind = 4
++	LookupKind    Kind = 16
++	ReplyKind     Kind = 17
++	RevokeKind    Kind = 32
++)
++
++type Header struct {
++	Kind      Kind
++	RequestID uint64
++	Epoch     uint64
++	Digest    [32]byte
++}
++type HelloBody struct {
++	Session     [16]byte
++	Generation  uint64
++	Invocation  [16]byte
++	OwnerTTL    time.Duration
++	Deadline    time.Duration
++	Supported   uint64
++	AppRequired bool
++}
++type AttachBody struct {
++	Ifindex uint32
++	Flags   uint32
++	MTU     uint32
++	Name    string
++}
++
++// ReplyBody.Cookie информационный: никогда не входит в EncodeLookup.
++type ReplyBody struct {
++	Status           Status
++	Reason           uint8
++	TTL              time.Duration
++	Cookie           uint64
++	PID              uint32
++	Starttime        uint64
++	ExecutableDevice uint64
++	ExecutableInode  uint64
++	Path             string
++}
++type Frame struct {
++	Header       Header
++	Nonce        [32]byte
++	Hello        HelloBody
++	Supported    uint64
++	Selected     uint64
++	Attach       AttachBody
++	Lookup       Flow
++	Reply        ReplyBody
++	RevokeReason uint32
++}
++
++var be = binary.BigEndian
++
++func zero(b []byte) bool {
++	for _, v := range b {
++		if v != 0 {
++			return false
++		}
++	}
++	return true
++}
++func u16(b []byte, n int) uint16                       { return be.Uint16(b[n : n+2]) }
++func u32(b []byte, n int) uint32                       { return be.Uint32(b[n : n+4]) }
++func u64(b []byte, n int) uint64                       { return be.Uint64(b[n : n+8]) }
++func boundedDuration(n uint64, max time.Duration) bool { return n > 0 && n <= uint64(max) }
++func validPath(b []byte) bool {
++	return len(b) > 0 && len(b) <= MaxPathBytes && b[0] == '/' && !strings.ContainsRune(string(b), 0) &&
++		!strings.HasSuffix(string(b), " (deleted)") && utf8.Valid(b)
++}
++func interfaceName(b []byte) (string, error) {
++	n := 0
++	for n < len(b) && b[n] != 0 {
++		v := b[n]
++		if !(v >= 'a' && v <= 'z' || v >= 'A' && v <= 'Z' || v >= '0' && v <= '9' || v == '_' || v == '.' || v == '-') {
++			return "", ErrMalformed
++		}
++		n++
++	}
++	if n == 0 || n == len(b) || !zero(b[n:]) {
++		return "", ErrMalformed
++	}
++	return string(b[:n]), nil
++}
++
++// DecodeFrame проверяет bytes/count, но НЕ credentials, pidfd или unit authority.
++// Полученные FD принадлежат transport и закрываются им при любой ошибке.
++func DecodeFrame(b []byte, fdCount int) (Frame, error) {
++	fail := func() (Frame, error) { return Frame{}, ErrMalformed }
++	if len(b) < HeaderBytes || len(b) > MaxFrameBytes || string(b[:8]) != "YNKBROK1" || u16(b, 8) != 1 || uint64(u32(b, 12)) != uint64(len(b)) {
++		return fail()
++	}
++	kind := Kind(u16(b, 10))
++	size := 0
++	fds := 0
++	switch kind {
++	case HelloKind:
++		size = 176
++	case FeaturesKind:
++		size = 112
++	case AttachKind:
++		size = 128
++		fds = 1
++	case AttachACKKind, RevokeKind:
++		size = 104
++	case LookupKind:
++		size = 144
++	case ReplyKind:
++		if len(b) < 160 || len(b) > 160+MaxPathBytes {
++			return fail()
++		}
++	default:
++		return fail()
++	}
++	if fdCount != fds || size != 0 && len(b) != size {
++		return fail()
++	}
++	id, epoch := u64(b, 16), u64(b, 24)
++	if ((kind == LookupKind || kind == ReplyKind) != (id != 0)) || epoch == 0 || zero(b[32:64]) || zero(b[64:96]) {
++		return fail()
++	}
++	f := Frame{Header: Header{Kind: kind, RequestID: id, Epoch: epoch}}
++	copy(f.Header.Digest[:], b[32:64])
++	copy(f.Nonce[:], b[64:96])
++	switch kind {
++	case HelloKind:
++		ttl, deadline, supported, flags := u64(b, 144), u64(b, 152), u64(b, 160), u64(b, 168)
++		if zero(b[96:112]) || u64(b, 112) == 0 || zero(b[120:136]) || u32(b, 136) != MaxFrameBytes || u16(b, 140) != 1 || !zero(b[142:144]) ||
++			!boundedDuration(ttl, OwnerTTL) || !boundedDuration(deadline, BootstrapTTL) || supported & ^AllFeatures != 0 || supported&OwnedTUN == 0 || flags & ^uint64(1) != 0 || flags != 0 && supported&AllFeatures != AllFeatures {
++			return fail()
++		}
++		copy(f.Hello.Session[:], b[96:112])
++		copy(f.Hello.Invocation[:], b[120:136])
++		f.Hello.Generation = u64(b, 112)
++		f.Hello.OwnerTTL = time.Duration(ttl)
++		f.Hello.Deadline = time.Duration(deadline)
++		f.Hello.Supported = supported
++		f.Hello.AppRequired = flags != 0
++	case FeaturesKind:
++		f.Supported = u64(b, 96)
++		f.Selected = u64(b, 104)
++		if f.Supported & ^AllFeatures != 0 || f.Selected & ^f.Supported != 0 || f.Selected&OwnedTUN == 0 {
++			return fail()
++		}
++	case AttachKind:
++		name, err := interfaceName(b[112:128])
++		mtu := u32(b, 108)
++		if err != nil || u32(b, 96) != 1 || u32(b, 100) == 0 || u32(b, 104) != 0x1001 || mtu < 68 || mtu > 65535 {
++			return fail()
++		}
++		f.Attach = AttachBody{Ifindex: u32(b, 100), Flags: u32(b, 104), MTU: mtu, Name: name}
++	case AttachACKKind:
++		if u32(b, 96) != 1 || !zero(b[100:104]) {
++			return fail()
++		}
++	case LookupKind:
++		if (b[96] != 4 && b[96] != 6) || (b[97] != 6 && b[97] != 17) || !zero(b[98:100]) || !zero(b[136:144]) || u16(b, 100) == 0 || u16(b, 102) == 0 {
++			return fail()
++		}
++		var local, remote netip.Addr
++		if b[96] == 4 {
++			if !zero(b[108:120]) || !zero(b[124:136]) {
++				return fail()
++			}
++			local = netip.AddrFrom4([4]byte(b[104:108]))
++			remote = netip.AddrFrom4([4]byte(b[120:124]))
++		} else {
++			local = netip.AddrFrom16([16]byte(b[104:120]))
++			remote = netip.AddrFrom16([16]byte(b[120:136]))
++		}
++		f.Lookup = Flow{Protocol: b[97], Local: netip.AddrPortFrom(local, u16(b, 100)), Remote: netip.AddrPortFrom(remote, u16(b, 102))}
++		if !f.Lookup.valid() {
++			return fail()
++		}
++	case ReplyKind:
++		n := int(u16(b, 100))
++		status, reason := b[96], b[97]
++		if len(b) != 160+n || n > MaxPathBytes || !zero(b[98:100]) || !zero(b[102:104]) || !zero(b[124:128]) || !zero(b[152:160]) {
++			return fail()
++		}
++		switch {
++		case status == 1 && reason == 0:
++			if !boundedDuration(u64(b, 104), OwnerTTL) || u32(b, 120) == 0 || u64(b, 128) == 0 || !validPath(b[160:]) {
++				return fail()
++			}
++			f.Reply = ReplyBody{Status: Known, TTL: time.Duration(u64(b, 104)), Cookie: u64(b, 112), PID: u32(b, 120), Starttime: u64(b, 128), ExecutableDevice: u64(b, 136), ExecutableInode: u64(b, 144), Path: string(b[160:])}
++		case status == 2 && reason == 0, status == 3 && reason >= 1 && reason <= 7:
++			if n != 0 || !zero(b[104:152]) {
++				return fail()
++			}
++			f.Reply.Status = Unknown
++			if status == 3 {
++				f.Reply.Status = Unavailable
++			}
++			f.Reply.Reason = reason
++		default:
++			return fail()
++		}
++	case RevokeKind:
++		f.RevokeReason = u32(b, 96)
++		if f.RevokeReason < 1 || f.RevokeReason > 7 || !zero(b[100:104]) {
++			return fail()
++		}
++	}
++	return f, nil
++}
++
++func (f Frame) CheckBinding(expected Binding, requestID uint64) error {
++	if f.Header.Epoch != expected.Epoch || f.Header.Digest != expected.ConfigDigest || f.Nonce != expected.Nonce || f.Header.RequestID != requestID {
++		return ErrMalformed
++	}
++	return nil
++}
++func (f Frame) SelectedFeatures(appRequired bool, offered uint64) (uint64, error) {
++	required := OwnedTUN
++	if appRequired {
++		required = AllFeatures
++	}
++	if f.Header.Kind != FeaturesKind || offered & ^AllFeatures != 0 || f.Selected & ^offered != 0 || f.Selected&required != required {
++		return 0, ErrMalformed
++	}
++	return f.Selected, nil
++}
++func makeFrame(kind Kind, id uint64, binding Binding, size int) []byte {
++	b := make([]byte, size)
++	copy(b, "YNKBROK1")
++	be.PutUint16(b[8:], 1)
++	be.PutUint16(b[10:], uint16(kind))
++	be.PutUint32(b[12:], uint32(size))
++	be.PutUint64(b[16:], id)
++	be.PutUint64(b[24:], binding.Epoch)
++	copy(b[32:64], binding.ConfigDigest[:])
++	copy(b[64:96], binding.Nonce[:])
++	return b
++}
++
++// EncodeLookup намеренно не принимает cookie/flags, PID/UID/path.
++func EncodeLookup(binding Binding, id uint64, tuple Flow) ([]byte, error) {
++	if !tuple.valid() {
++		return nil, ErrMalformed
++	}
++	b := makeFrame(LookupKind, id, binding, 144)
++	b[96] = 6
++	if tuple.Local.Addr().Is4() {
++		b[96] = 4
++	}
++	b[97] = tuple.Protocol
++	be.PutUint16(b[100:], tuple.Local.Port())
++	be.PutUint16(b[102:], tuple.Remote.Port())
++	copy(b[104:120], tuple.Local.Addr().AsSlice())
++	copy(b[120:136], tuple.Remote.Addr().AsSlice())
++	if _, err := DecodeFrame(b, 0); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++func EncodeFeatures(binding Binding, selected uint64, appRequired bool, offered uint64) ([]byte, error) {
++	b := makeFrame(FeaturesKind, 0, binding, 112)
++	be.PutUint64(b[96:], AllFeatures)
++	be.PutUint64(b[104:], selected)
++	f, err := DecodeFrame(b, 0)
++	if err != nil {
++		return nil, err
++	}
++	if _, err = f.SelectedFeatures(appRequired, offered); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++func EncodeAttachACK(binding Binding) ([]byte, error) {
++	b := makeFrame(AttachACKKind, 0, binding, 104)
++	be.PutUint32(b[96:], 1)
++	if _, err := DecodeFrame(b, 0); err != nil {
++		return nil, err
++	}
++	return b, nil
++}
++
++// EffectiveReplyTTL вычитает полный monotonic RTT; ноль означает Unavailable.
++func EffectiveReplyTTL(ttl time.Duration, sent, received time.Time) time.Duration {
++	if ttl <= 0 || ttl > OwnerTTL || received.Before(sent) {
++		return 0
++	}
++	rtt := received.Sub(sent)
++	if rtt >= ttl {
++		return 0
++	}
++	return ttl - rtt
++}
++
++// Sequence вызывается только единственным transport owner, без параллельных обменов.
++type Sequence struct {
++	last    uint64
++	pending uint64
++	retired bool
++}
++
++func (s *Sequence) Begin(id uint64) error {
++	if s.retired || s.pending != 0 || id == 0 || id <= s.last {
++		s.Retire()
++		return ErrMalformed
++	}
++	s.last = id
++	s.pending = id
++	return nil
++}
++func (s *Sequence) Complete(id uint64) error {
++	if s.retired || s.pending == 0 || s.pending != id {
++		s.Retire()
++		return ErrMalformed
++	}
++	s.pending = 0
++	return nil
++}
++func (s *Sequence) Retire() { s.pending = 0; s.retired = true }
+diff --git a/common/yonikbroker/wire_test.go b/common/yonikbroker/wire_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/wire_test.go
+@@ -0,0 +1,256 @@
++package nativehooks
++
++import (
++	"bytes"
++	"encoding/hex"
++	"encoding/json"
++	"math"
++	"os"
++	"testing"
++	"time"
++)
++
++type golden struct {
++	Name        string `json:"name"`
++	Hex         string `json:"hex"`
++	FDCount     int    `json:"fd_count"`
++	HeaderOK    bool   `json:"header_ok"`
++	AppRequired *bool  `json:"app_required"`
++	FeaturesOK  bool   `json:"features_ok"`
++}
++
++func vectors(t *testing.T) []golden {
++	t.Helper()
++	b, err := os.ReadFile("frozen-vectors.json")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var data struct {
++		Contract string   `json:"contract"`
++		Vectors  []golden `json:"vectors"`
++	}
++	if err := json.Unmarshal(b, &data); err != nil {
++		t.Fatal(err)
++	}
++	if data.Contract != "YNKBROK1-v1" {
++		t.Fatal(data.Contract)
++	}
++	return data.Vectors
++}
++func wireBytes(t *testing.T, g golden) []byte {
++	t.Helper()
++	b, err := hex.DecodeString(g.Hex)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b
++}
++func TestFrozenRustGolden(t *testing.T) {
++	for _, g := range vectors(t) {
++		t.Run(g.Name, func(t *testing.T) {
++			b := wireBytes(t, g)
++			f, err := DecodeFrame(b, g.FDCount)
++			if (err == nil) != g.HeaderOK {
++				t.Fatalf("decode=%v expected=%v", err, g.HeaderOK)
++			}
++			if g.AppRequired != nil {
++				_, err := f.SelectedFeatures(*g.AppRequired, AllFeatures)
++				if (err == nil) != g.FeaturesOK {
++					t.Fatal("feature mismatch", err)
++				}
++			}
++			if g.HeaderOK {
++				binding := Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}
++				if f.CheckBinding(binding, f.Header.RequestID) != nil {
++					t.Fatal("binding")
++				}
++				binding.Nonce[0] ^= 1
++				if f.CheckBinding(binding, f.Header.RequestID) == nil {
++					t.Fatal("nonce mismatch accepted")
++				}
++				for n := 0; n < len(b); n++ {
++					if _, err := DecodeFrame(b[:n], g.FDCount); err == nil {
++						t.Fatalf("prefix %d accepted", n)
++					}
++				}
++				for _, count := range []int{-1, 0, 1, 2, 3} {
++					if count != g.FDCount {
++						if _, err := DecodeFrame(b, count); err == nil {
++							t.Fatalf("FD count %d accepted", count)
++						}
++					}
++				}
++				var encoded []byte
++				switch f.Header.Kind {
++				case LookupKind:
++					encoded, err = EncodeLookup(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}, f.Header.RequestID, f.Lookup)
++				case FeaturesKind:
++					encoded, err = EncodeFeatures(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch}, f.Selected, false, AllFeatures)
++				case AttachACKKind:
++					encoded, err = EncodeAttachACK(Binding{Nonce: f.Nonce, ConfigDigest: f.Header.Digest, Epoch: f.Header.Epoch})
++				}
++				if encoded != nil && (err != nil || !bytes.Equal(encoded, b)) {
++					t.Fatal("encoder differs from Rust golden", err)
++				}
++			}
++		})
++	}
++}
++func TestCookieNeverBecomesRequestFilter(t *testing.T) {
++	for _, g := range vectors(t) {
++		if g.Name == "known_observed_projection" {
++			b := wireBytes(t, g)
++			first, err := DecodeFrame(b, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			be.PutUint64(b[112:], first.Reply.Cookie+1)
++			second, err := DecodeFrame(b, 0)
++			if err != nil || second.Reply.Cookie == first.Reply.Cookie {
++				t.Fatal(err)
++			}
++			_, proof, _ := fixture(t)
++			binding := Binding{Nonce: first.Nonce, Epoch: first.Header.Epoch, ConfigDigest: first.Header.Digest}
++			request, err := EncodeLookup(binding, 1, proof.Flow)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !zero(request[98:100]) || !zero(request[136:144]) {
++				t.Fatal("reply cookie leaked into request")
++			}
++		}
++	}
++}
++func TestSelectedFeatureMatrix(t *testing.T) {
++	_, proof, _ := fixture(t)
++	for selected := uint64(0); selected < 16; selected++ {
++		for _, app := range []bool{false, true} {
++			_, err := EncodeFeatures(proof.Binding, selected, app, AllFeatures)
++			want := selected < 8 && selected&OwnedTUN != 0 && (!app || selected == AllFeatures)
++			if (err == nil) != want {
++				t.Fatal(selected, app, err)
++			}
++		}
++	}
++	if _, err := EncodeFeatures(proof.Binding, AllFeatures, true, OwnedTUN); err == nil {
++		t.Fatal("offer downgrade")
++	}
++}
++func TestSequenceRetires(t *testing.T) {
++	for _, failure := range []string{"outstanding", "reuse", "late", "wrap", "timeout"} {
++		t.Run(failure, func(t *testing.T) {
++			var s Sequence
++			id := uint64(1)
++			if failure == "wrap" {
++				id = math.MaxUint64
++			}
++			if s.Begin(id) != nil {
++				t.Fatal("begin")
++			}
++			switch failure {
++			case "outstanding":
++				if s.Begin(2) == nil {
++					t.Fatal("second request")
++				}
++			case "late":
++				if s.Complete(2) == nil {
++					t.Fatal("late reply")
++				}
++			case "timeout":
++				s.Retire()
++			default:
++				if s.Complete(id) != nil {
++					t.Fatal("complete")
++				}
++				if s.Begin(1) == nil {
++					t.Fatal("id reuse/wrap")
++				}
++			}
++			if s.Begin(3) == nil || s.Complete(id) == nil {
++				t.Fatal("retired endpoint reused")
++			}
++		})
++	}
++	var s Sequence
++	if s.Complete(0) == nil {
++		t.Fatal("unsolicited reply")
++	}
++}
++func TestFullRTTTTL(t *testing.T) {
++	now := time.Now()
++	for _, c := range []struct{ ttl, rtt, want time.Duration }{{OwnerTTL, time.Millisecond, 19 * time.Millisecond}, {OwnerTTL, OwnerTTL, 0}, {OwnerTTL, OwnerTTL + 1, 0}, {OwnerTTL + 1, 0, 0}, {0, 0, 0}, {OwnerTTL, -1, 0}} {
++		if got := EffectiveReplyTTL(c.ttl, now, now.Add(c.rtt)); got != c.want {
++			t.Fatal(c, got)
++		}
++	}
++}
++func TestMalformedReservedPathAndBounds(t *testing.T) {
++	for _, g := range vectors(t) {
++		if !g.HeaderOK {
++			continue
++		}
++		base := wireBytes(t, g)
++		for _, n := range []int{769, 1024} {
++			bad := make([]byte, n)
++			copy(bad, base)
++			be.PutUint32(bad[12:], uint32(n))
++			if _, err := DecodeFrame(bad, g.FDCount); err == nil {
++				t.Fatal("oversized")
++			}
++		}
++		offsets := []int{8, 12, 24, 64}
++		switch Kind(u16(base, 10)) {
++		case HelloKind:
++			offsets = append(offsets, 142)
++		case AttachACKKind, RevokeKind:
++			offsets = append(offsets, 100)
++		case LookupKind:
++			offsets = append(offsets, 98, 99, 136, 143)
++		case ReplyKind:
++			offsets = append(offsets, 98, 102, 124, 152)
++		}
++		for _, at := range offsets {
++			bad := bytes.Clone(base)
++			switch at {
++			case 24:
++				clear(bad[24:32])
++			case 64:
++				clear(bad[64:96])
++			default:
++				bad[at] ^= 1
++			}
++			if _, err := DecodeFrame(bad, g.FDCount); err == nil {
++				t.Fatalf("%s offset %d", g.Name, at)
++			}
++		}
++	}
++	for _, p := range [][]byte{nil, []byte("relative"), []byte("/bad\x00path"), []byte("/bad (deleted)"), {'/', 255}, bytes.Repeat([]byte{'/'}, 513)} {
++		if validPath(p) {
++			t.Fatal("path accepted", p)
++		}
++	}
++}
++
++func TestLookupRejectsNoncanonicalAddresses(t *testing.T) {
++	for _, g := range vectors(t) {
++		b := wireBytes(t, g)
++		if !g.HeaderOK || Kind(u16(b, 10)) != LookupKind {
++			continue
++		}
++		clear(b[104:120])
++		if _, err := DecodeFrame(b, 0); err == nil {
++			t.Fatal("unspecified source accepted")
++		}
++	}
++}
++
++func FuzzDecodeFrame(f *testing.F) {
++	f.Add([]byte("YNKBROK1"), 0)
++	f.Add(make([]byte, MaxFrameBytes), 1)
++	f.Fuzz(func(t *testing.T, b []byte, fds int) {
++		frame, err := DecodeFrame(b, fds)
++		if err == nil && frame.Header.Kind == LookupKind && !frame.Lookup.valid() {
++			t.Fatal("неканонический tuple принят декодером")
++		}
++	})
++}
+diff --git a/common/yonikbroker/frozen-vectors.json b/common/yonikbroker/frozen-vectors.json
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/frozen-vectors.json
+@@ -0,0 +1,135 @@
++{
++  "contract": "YNKBROK1-v1",
++  "vectors": [
++    {
++      "name": "lookup_v4_cookie_absent",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "lookup_forbidden_cookie_98",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406010004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_99",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000104d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_136",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000100000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_forbidden_cookie_143",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000001",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_v6",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030606000004d201bb20010db800000000000000000000000120010db80000000000000000000000020000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "v4_noncanonical_padding",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001010000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "lookup_extra_fd",
++      "hex": "594e4b42524f4b31000100100000009000000000000000010000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030406000004d201bb7f000001000000000000000000000000010203040000000000000000000000000000000000000000",
++      "fd_count": 1,
++      "header_ok": false
++    },
++    {
++      "name": "features_required_all",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000007",
++      "fd_count": 0,
++      "header_ok": true,
++      "app_required": true,
++      "features_ok": true
++    },
++    {
++      "name": "features_cannot_downgrade_app",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000001",
++      "fd_count": 0,
++      "header_ok": true,
++      "app_required": true,
++      "features_ok": false
++    },
++    {
++      "name": "features_zero_invalid",
++      "hex": "594e4b42524f4b310001000200000070000000000000000000000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030300000000000000070000000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "attach_one_owned_tun",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 1,
++      "header_ok": true
++    },
++    {
++      "name": "attach_zero_fds",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "attach_extra_fd",
++      "hex": "594e4b42524f4b3100010003000000800000000000000000000000000000000702020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303000000010000000900001001000005dc796f6e696b2d74756e00000000000000",
++      "fd_count": 2,
++      "header_ok": false
++    },
++    {
++      "name": "hello_app_required",
++      "hex": "594e4b42524f4b3100010001000000b000000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030404040404040404040404040404040400000000000000010505050505050505050505050505050500000300000100000000000001312d00000000003b9aca0000000000000000070000000000000001",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "attach_ack",
++      "hex": "594e4b42524f4b31000100040000006800000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030000000100000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "known_observed_projection",
++      "hex": "594e4b42524f4b3100010011000000ad000000000000000100000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030301000000000d00000000000001312d0000000000000000ea0000007b00000000000000000000000c0000000000000004000000000000003800000000000000002f7573722f62696e2f74657374",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "known_ttl_cannot_extend",
++      "hex": "594e4b42524f4b3100010011000000ad000000000000000100000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030301000000000d00000000000001312d0100000000000000ea0000007b00000000000000000000000c0000000000000004000000000000003800000000000000002f7573722f62696e2f74657374",
++      "fd_count": 0,
++      "header_ok": false
++    },
++    {
++      "name": "unknown_zero_projection",
++      "hex": "594e4b42524f4b3100010011000000a0000000000000000200000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030302000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "unavailable_proofgap",
++      "hex": "594e4b42524f4b3100010011000000a0000000000000000200000000000000070202020202020202020202020202020202020202020202020202020202020202030303030303030303030303030303030303030303030303030303030303030303010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
++      "fd_count": 0,
++      "header_ok": true
++    },
++    {
++      "name": "revoke",
++      "hex": "594e4b42524f4b31000100200000006800000000000000000000000000000007020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030000000200000000",
++      "fd_count": 0,
++      "header_ok": true
++    }
++  ]
++}
+diff --git a/common/yonikbroker/bootstrap_linux.go b/common/yonikbroker/bootstrap_linux.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/bootstrap_linux.go
+@@ -0,0 +1,188 @@
++package nativehooks
++
++import (
++	"fmt"
++	"os"
++	"strconv"
++	"strings"
++	"syscall"
++	"time"
++)
++
++// Bootstrap содержит только поля замороженного closed worker handoff.
++// Вызывающий protected worker обязан подтвердить происхождение record до exec.
++// Разбор произвольной строки окружения сам по себе authority не создаёт.
++type Bootstrap struct {
++	Binding         Binding
++	Session         [16]byte
++	Generation      uint64
++	Invocation      [16]byte
++	ServerPID       uint32
++	ServerStarttime uint64
++}
++
++func DecodeBootstrap(b []byte, fdCount int) (Bootstrap, error) {
++	var r Bootstrap
++	if len(b) != 192 || fdCount != 2 || string(b[:8]) != "YNKROLE1" || zero(b[8:40]) || zero(b[40:72]) || u64(b, 72) == 0 || zero(b[80:96]) || u64(b, 96) == 0 || zero(b[104:120]) || u32(b, 120) == 0 || u32(b, 124) != 0 || u64(b, 128) == 0 || !zero(b[136:144]) || u16(b, 144) != 2 || u16(b, 146) != 1 || u16(b, 148) != 2 || !zero(b[150:192]) {
++		return r, ErrMalformed
++	}
++	copy(r.Binding.Nonce[:], b[8:40])
++	copy(r.Binding.ConfigDigest[:], b[40:72])
++	r.Binding.Epoch = u64(b, 72)
++	copy(r.Session[:], b[80:96])
++	r.Generation = u64(b, 96)
++	copy(r.Invocation[:], b[104:120])
++	r.ServerPID = u32(b, 120)
++	r.ServerStarttime = u64(b, 128)
++	return r, nil
++}
++
++// CheckServer сверяет live pidfd и starttime. FD принадлежит custody вызывающего.
++// pidfd readable при exit, поэтому одного существующего /proc/PID недостаточно.
++// controlFile удерживает ссылку runtime на FD до конца syscall, исключая Close/reuse.
++func controlFile(file *os.File, operation func(int) error) error {
++	if file == nil {
++		return ErrDenied
++	}
++	raw, err := file.SyscallConn()
++	if err != nil {
++		return ErrDenied
++	}
++	var result error
++	if err = raw.Control(func(fd uintptr) { result = operation(int(fd)) }); err != nil {
++		return ErrDenied
++	}
++	return result
++}
++
++func (b Bootstrap) CheckServer(pidfd *os.File) error {
++	return controlFile(pidfd, b.checkServerFD)
++}
++
++func (b Bootstrap) checkServerFD(fd int) error {
++	var set syscall.FdSet
++	if fd < 0 || fd >= len(set.Bits)*64 {
++		return ErrDenied
++	}
++	set.Bits[fd/64] |= 1 << uint(fd%64)
++	timeout := syscall.Timeval{}
++	n, err := syscall.Select(fd+1, &set, nil, nil, &timeout)
++	if err != nil || n != 0 {
++		return ErrDenied
++	}
++	info, err := os.ReadFile(fmt.Sprintf("/proc/self/fdinfo/%d", fd))
++	if err != nil {
++		return ErrDenied
++	}
++	found := false
++	for _, line := range strings.Split(string(info), "\n") {
++		fields := strings.Fields(line)
++		if len(fields) == 2 && fields[0] == "Pid:" {
++			pid, e := strconv.ParseUint(fields[1], 10, 32)
++			if e != nil || pid != uint64(b.ServerPID) {
++				return ErrDenied
++			}
++			found = true
++		}
++	}
++	if !found {
++		return ErrDenied
++	}
++	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", b.ServerPID))
++	if err != nil {
++		return ErrDenied
++	}
++	end := strings.LastIndexByte(string(stat), ')')
++	if end < 0 {
++		return ErrDenied
++	}
++	fields := strings.Fields(string(stat[end+1:]))
++	if len(fields) <= 19 {
++		return ErrDenied
++	}
++	start, err := strconv.ParseUint(fields[19], 10, 64)
++	if err != nil || start != b.ServerStarttime {
++		return ErrDenied
++	}
++	return nil
++}
++
++// ReceiveAuthenticated принимает владение всеми полученными FD даже при отказе.
++// Возвращённые FD переходят вызывающему только после всех проверок.
++func (b Bootstrap) ReceiveAuthenticated(channel, pidfd *os.File) (frame Frame, files []*os.File, err error) {
++	err = controlFile(channel, func(fd int) error {
++		var receiveErr error
++		frame, files, receiveErr = b.receiveAuthenticatedFD(fd, pidfd)
++		return receiveErr
++	})
++	return
++}
++
++func (b Bootstrap) receiveAuthenticatedFD(fd int, pidfd *os.File) (Frame, []*os.File, error) {
++	fail := func(files []*os.File) (Frame, []*os.File, error) {
++		for _, f := range files {
++			_ = f.Close()
++		}
++		return Frame{}, nil, ErrDenied
++	}
++	if b.CheckServer(pidfd) != nil {
++		return fail(nil)
++	}
++	kind, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_TYPE)
++	if err != nil || kind != syscall.SOCK_SEQPACKET {
++		return fail(nil)
++	}
++	pass, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_PASSCRED)
++	if err != nil || pass != 1 {
++		return fail(nil)
++	}
++	data := make([]byte, MaxFrameBytes+1)
++	control := make([]byte, syscall.CmsgSpace(4*16)+syscall.CmsgSpace(syscall.SizeofUcred))
++	var ready syscall.FdSet
++	if fd < 0 || fd >= len(ready.Bits)*64 {
++		return fail(nil)
++	}
++	ready.Bits[fd/64] |= 1 << uint(fd%64)
++	timeout := syscall.NsecToTimeval(int64(20 * time.Millisecond))
++	count, waitErr := syscall.Select(fd+1, &ready, nil, nil, &timeout)
++	if waitErr != nil || count != 1 {
++		return fail(nil)
++	}
++	n, oobn, flags, _, err := syscall.Recvmsg(fd, data, control, syscall.MSG_CMSG_CLOEXEC|syscall.MSG_DONTWAIT)
++	var files []*os.File
++	messages, parseErr := syscall.ParseSocketControlMessage(control[:oobn])
++	credentials := 0
++	valid := true
++	for _, message := range messages {
++		switch {
++		case message.Header.Level == syscall.SOL_SOCKET && message.Header.Type == syscall.SCM_RIGHTS:
++			rights, e := syscall.ParseUnixRights(&message)
++			if e != nil {
++				valid = false
++				continue
++			}
++			for _, fd := range rights {
++				files = append(files, os.NewFile(uintptr(fd), "native-broker-received"))
++			}
++		case message.Header.Level == syscall.SOL_SOCKET && message.Header.Type == syscall.SCM_CREDENTIALS:
++			credentials++
++			cred, e := syscall.ParseUnixCredentials(&message)
++			if e != nil || uint32(cred.Pid) != b.ServerPID || cred.Uid != 0 {
++				valid = false
++			}
++		default:
++			valid = false
++		}
++	}
++	if err != nil || parseErr != nil || !valid || credentials != 1 || flags&(syscall.MSG_TRUNC|syscall.MSG_CTRUNC) != 0 || n == 0 || b.CheckServer(pidfd) != nil {
++		return fail(files)
++	}
++	frame, err := DecodeFrame(data[:n], len(files))
++	if err != nil || frame.CheckBinding(b.Binding, frame.Header.RequestID) != nil {
++		return fail(files)
++	}
++	if frame.Header.Kind == HelloKind && (frame.Hello.Session != b.Session || frame.Hello.Generation != b.Generation || frame.Hello.Invocation != b.Invocation) {
++		return fail(files)
++	}
++	return frame, files, nil
++}
+diff --git a/common/yonikbroker/bootstrap_linux_test.go b/common/yonikbroker/bootstrap_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/bootstrap_linux_test.go
+@@ -0,0 +1,218 @@
++package nativehooks
++
++import (
++	"os"
++	"runtime"
++	"strconv"
++	"strings"
++	"syscall"
++	"testing"
++)
++
++func roleRecord() []byte {
++	b := make([]byte, 192)
++	copy(b, "YNKROLE1")
++	b[8] = 1
++	b[40] = 2
++	be.PutUint64(b[72:], 3)
++	b[80] = 4
++	be.PutUint64(b[96:], 5)
++	b[104] = 6
++	be.PutUint32(b[120:], 7)
++	be.PutUint64(b[128:], 8)
++	be.PutUint16(b[144:], 2)
++	be.PutUint16(b[146:], 1)
++	be.PutUint16(b[148:], 2)
++	return b
++}
++func TestClosedBootstrap(t *testing.T) {
++	b := roleRecord()
++	r, e := DecodeBootstrap(b, 2)
++	if e != nil || r.ServerPID != 7 || r.Binding.Epoch != 3 {
++		t.Fatal(r, e)
++	}
++	for _, n := range []int{0, 1, 3} {
++		if _, e := DecodeBootstrap(b, n); e == nil {
++			t.Fatalf("принято %d FD", n)
++		}
++	}
++	for _, n := range []int{0, 136, 137, 143, 144, 146, 148, 150, 191} {
++		bad := append([]byte(nil), b...)
++		bad[n] ^= 255
++		if _, e := DecodeBootstrap(bad, 2); e == nil {
++			t.Fatalf("принято изменение byte %d", n)
++		}
++	}
++	for _, n := range []int{0, 136, 191, 193} {
++		bad := make([]byte, n)
++		copy(bad, b)
++		if _, e := DecodeBootstrap(bad, 2); e == nil {
++			t.Fatalf("принята длина %d", n)
++		}
++	}
++	if r.CheckServer(nil) == nil {
++		t.Fatal("nil pidfd принят")
++	}
++}
++
++func TestBootstrapRejectsMissingIdentity(t *testing.T) {
++	for _, span := range [][2]int{{8, 40}, {40, 72}, {72, 80}, {80, 96}, {96, 104}, {104, 120}, {120, 124}, {128, 136}} {
++		b := roleRecord()
++		for i := span[0]; i < span[1]; i++ {
++			b[i] = 0
++		}
++		if _, err := DecodeBootstrap(b, 2); err == nil {
++			t.Fatalf("принято пустое поле %v", span)
++		}
++	}
++	b := roleRecord()
++	be.PutUint32(b[124:], 1000)
++	if _, err := DecodeBootstrap(b, 2); err == nil {
++		t.Fatal("принят server UID != 0")
++	}
++}
++
++// Linux pidfd_open имеет номер 434 на поддерживаемых здесь amd64/arm64.
++func liveBootstrap(t *testing.T) (Bootstrap, *os.File) {
++	t.Helper()
++	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
++		t.Skip("pidfd fixture поддерживает amd64/arm64")
++	}
++	fd, _, errno := syscall.Syscall(434, uintptr(os.Getpid()), 0, 0)
++	if errno != 0 {
++		t.Skipf("pidfd_open: %v", errno)
++	}
++	f := os.NewFile(fd, "test-pidfd")
++	t.Cleanup(func() { _ = f.Close() })
++	stat, err := os.ReadFile("/proc/self/stat")
++	if err != nil {
++		t.Fatal(err)
++	}
++	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
++	start, err := strconv.ParseUint(fields[19], 10, 64)
++	if err != nil {
++		t.Fatal(err)
++	}
++	record := roleRecord()
++	be.PutUint32(record[120:], uint32(os.Getpid()))
++	be.PutUint64(record[128:], start)
++	b, err := DecodeBootstrap(record, 2)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b, f
++}
++func TestLiveAnchor(t *testing.T) {
++	b, f := liveBootstrap(t)
++	if err := b.CheckServer(f); err != nil {
++		t.Fatal(err)
++	}
++	b.ServerStarttime++
++	if b.CheckServer(f) == nil {
++		t.Fatal("принят чужой starttime")
++	}
++	b.ServerStarttime--
++	b.ServerPID++
++	if b.CheckServer(f) == nil {
++		t.Fatal("принят чужой PID")
++	}
++}
++func TestRecvClosesRejectedRights(t *testing.T) {
++	b, pidfd := liveBootstrap(t)
++	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	receiver := os.NewFile(uintptr(pair[0]), "receiver")
++	sender := os.NewFile(uintptr(pair[1]), "sender")
++	defer receiver.Close()
++	defer sender.Close()
++	if err := syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++		t.Fatal(err)
++	}
++	pipeR, pipeW, err := os.Pipe()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer pipeR.Close()
++	defer pipeW.Close()
++	before, err := os.ReadDir("/proc/self/fd")
++	if err != nil {
++		t.Fatal(err)
++	}
++	// Некорректный frame с real SCM_RIGHTS обязан закрыть полученный duplicate.
++	if err := syscall.Sendmsg(pair[1], []byte("malformed"), syscall.UnixRights(int(pipeR.Fd())), nil, 0); err != nil {
++		t.Fatal(err)
++	}
++	if _, files, err := b.ReceiveAuthenticated(receiver, pidfd); err == nil || len(files) != 0 {
++		t.Fatal("принят malformed frame")
++	}
++	after, err := os.ReadDir("/proc/self/fd")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(before) != len(after) {
++		t.Fatalf("FD leak: %d -> %d", len(before), len(after))
++	}
++}
++
++func TestHelloMatchesEntireBootstrapIdentity(t *testing.T) {
++	if os.Geteuid() != 0 {
++		t.Skip("нужен изолированный user namespace с UID 0")
++	}
++	for _, field := range []string{"control", "session", "generation", "invocation"} {
++		t.Run(field, func(t *testing.T) {
++			b, pidfd := liveBootstrap(t)
++			var data []byte
++			for _, vector := range vectors(t) {
++				candidate := wireBytes(t, vector)
++				frame, err := DecodeFrame(candidate, vector.FDCount)
++				if err == nil && frame.Header.Kind == HelloKind {
++					data = candidate
++					break
++				}
++			}
++			if data == nil {
++				t.Fatal("нет корректного HELLO control")
++			}
++			be.PutUint64(data[24:], b.Binding.Epoch)
++			copy(data[32:64], b.Binding.ConfigDigest[:])
++			copy(data[64:96], b.Binding.Nonce[:])
++			copy(data[96:112], b.Session[:])
++			be.PutUint64(data[112:], b.Generation)
++			copy(data[120:136], b.Invocation[:])
++			switch field {
++			case "session":
++				data[96] ^= 128
++			case "generation":
++				be.PutUint64(data[112:], b.Generation+1)
++			case "invocation":
++				data[120] ^= 128
++			}
++			pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++			if err != nil {
++				t.Fatal(err)
++			}
++			receiver := os.NewFile(uintptr(pair[0]), "receiver")
++			sender := os.NewFile(uintptr(pair[1]), "sender")
++			defer receiver.Close()
++			defer sender.Close()
++			if err := syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++				t.Fatal(err)
++			}
++			if err := syscall.Sendmsg(pair[1], data, nil, nil, 0); err != nil {
++				t.Fatal(err)
++			}
++			_, files, err := b.ReceiveAuthenticated(receiver, pidfd)
++			for _, file := range files {
++				file.Close()
++			}
++			if field == "control" && err != nil {
++				t.Fatalf("корректный HELLO отклонён: %v", err)
++			}
++			if field != "control" && err == nil {
++				t.Fatalf("принята чужая identity: %s", field)
++			}
++		})
++	}
++}
+diff --git a/common/yonikbroker/routing.go b/common/yonikbroker/routing.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/routing.go
+@@ -0,0 +1,173 @@
++package nativehooks
++
++import (
++	"context"
++	xsession "github.com/xtls/xray-core/common/session"
++	"os"
++	"sync"
++	"syscall"
++	"time"
++)
++
++// routingKey закрыт: config, env и caller assertions не создают authority.
++type routingKey struct{}
++
++// routingConsumer создаётся только closed worker handoff; production producer ещё не подключён.
++type routingConsumer struct {
++	denied         bool
++	handles        map[*Handle]struct{}
++	mu             sync.Mutex
++	session        *Session
++	required       bool
++	flow           Flow
++	bootstrap      Bootstrap
++	channel, pidfd *os.File
++	owned          *os.File
++	ownedHandle    *Handle
++	attached       AttachBody
++	sequence       Sequence
++	next           uint64
++	lookup         func(context.Context, Flow) (Evidence, error) // Только закрытый test fixture.
++}
++
++// RoutingEntry проверяет исходный tuple до forced tag, PickRoute и default outbound.
++// Отсутствие trusted handoff всегда закрывает routing.
++func RoutingEntry(ctx context.Context) error {
++	return guardEntry(ctx, BeforeRouting)
++}
++
++// AfterDNS требует новый proof после ответа resolver.
++func CheckAfterDNS(ctx context.Context) error { return guardEntry(ctx, AfterDNS) }
++
++// BeforeSocketDial получает новый proof исходного flow после DNS и ожиданий.
++func BeforeSocketDial(ctx context.Context) error {
++	return guardEntry(ctx, BeforeDial)
++}
++
++// denyFlow удерживает отказ в пределах consumer и освобождает его сокеты.
++func (c *routingConsumer) denyFlow() {
++	c.denied = true
++	for h := range c.handles {
++		_ = c.session.Release(h)
++	}
++	c.handles = nil
++}
++
++// acceptProof отделяет нарушение binding от отрицательного ответа на flow.
++func (c *routingConsumer) acceptProof(proof Evidence) error {
++	if proof.Binding != c.session.binding {
++		_ = c.session.Revoke()
++		return ErrDenied
++	}
++	return c.session.Guard(time.Now(), BeforeDial, c.required, c.flow, proof)
++}
++
++func guardEntry(ctx context.Context, stage Stage) error {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		return ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.session == nil {
++		return ErrDenied
++	}
++	if c.denied || ctx.Err() != nil {
++		c.denyFlow()
++		return ErrDenied
++	}
++	if err := c.session.Guard(time.Now(), stage, false, Flow{}, Evidence{}); err != nil {
++		c.denyFlow()
++		return err
++	}
++	if !c.required {
++		return nil
++	}
++	lookup := c.lookup
++	if lookup == nil {
++		lookup = c.lookupAuthenticated
++	}
++	proof, err := lookup(ctx, c.flow)
++	if err != nil || ctx.Err() != nil {
++		c.denyFlow()
++		return ErrDenied
++	}
++	if err := c.acceptProof(proof); err != nil {
++		c.denyFlow()
++		return err
++	}
++	return nil
++}
++
++// lookupAuthenticated не принимает proof от inbound/config: только authenticated wire reply.
++func (c *routingConsumer) lookupAuthenticated(ctx context.Context, flow Flow) (Evidence, error) {
++	if c.channel == nil || c.pidfd == nil || ctx.Err() != nil {
++		return Evidence{}, ErrDenied
++	}
++	c.next++
++	if c.sequence.Begin(c.next) != nil {
++		return Evidence{}, ErrDenied
++	}
++	started := time.Now()
++	fail := func() (Evidence, error) { c.sequence.Retire(); _ = c.session.Revoke(); return Evidence{}, ErrDenied }
++	request, err := EncodeLookup(c.bootstrap.Binding, c.next, flow)
++	if err != nil || c.bootstrap.CheckServer(c.pidfd) != nil {
++		return fail()
++	}
++	if err := syscall.Sendmsg(int(c.channel.Fd()), request, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		return fail()
++	}
++	reply, files, err := c.bootstrap.ReceiveAuthenticated(c.channel, c.pidfd)
++	for _, file := range files {
++		_ = file.Close()
++	}
++	if err != nil || len(files) != 0 || reply.Header.Kind != ReplyKind || reply.CheckBinding(c.bootstrap.Binding, c.next) != nil || c.sequence.Complete(c.next) != nil {
++		return fail()
++	}
++	// Сначала потребляем и проверяем ответ: late reply не попадёт следующему lookup.
++	if ctx.Err() != nil {
++		return Evidence{}, ErrDenied
++	}
++	now := time.Now()
++	ttl := EffectiveReplyTTL(reply.Reply.TTL, started, now)
++	return Evidence{Flow: flow, Binding: c.bootstrap.Binding, Status: reply.Reply.Status, Observed: now, Expires: now.Add(ttl), ExecutableDevice: reply.Reply.ExecutableDevice, ExecutableInode: reply.Reply.ExecutableInode}, nil
++}
++
++// HasFlowContext различает закрытый handoff и legacy callers; authority не создаёт.
++func HasFlowContext(ctx context.Context) bool {
++	if ctx == nil {
++		return false
++	}
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	return ok && c != nil
++}
++
++type dnsExchangeKey struct{}
++
++// DNSExchangeContext отделяет отмену caller от общего DNS I/O, сохраняя revoke.
++func DNSExchangeContext(ctx context.Context) (context.Context, context.CancelFunc) {
++	// Общий DNS I/O не разделяет изменяемый outbound caller с routing/blackhole.
++	outbounds := xsession.OutboundsFromContext(ctx)
++	cloned := make([]*xsession.Outbound, len(outbounds))
++	for i, outbound := range outbounds {
++		if outbound != nil {
++			value := *outbound
++			cloned[i] = &value
++		}
++	}
++	base := xsession.ContextWithOutbounds(context.WithoutCancel(ctx), cloned)
++	shared, cancel := context.WithCancel(context.WithValue(base, dnsExchangeKey{}, true))
++	c, _ := ctx.Value(routingKey{}).(*routingConsumer)
++	if c == nil {
++		return shared, cancel
++	}
++	c.mu.Lock()
++	session := c.session
++	c.mu.Unlock()
++	if session == nil {
++		cancel()
++		return shared, cancel
++	}
++	stop := context.AfterFunc(session.Context(), cancel)
++	return shared, func() { stop(); cancel() }
++}
+diff --git a/common/yonikbroker/routing_test.go b/common/yonikbroker/routing_test.go
+new file mode 100644
+index 0000000..ee82c61
+--- /dev/null
++++ b/common/yonikbroker/routing_test.go
+@@ -0,0 +1,109 @@
++package nativehooks
++
++import (
++	"context"
++	"io"
++	"net"
++	"testing"
++	"time"
++)
++
++func TestRoutingEntryClosedFixture(t *testing.T) {
++	if RoutingEntry(context.Background()) == nil {
++		t.Fatal("нет сессии")
++	}
++	for _, status := range []Status{Known, Unknown, Unavailable} {
++		s, p, _ := fixture(t)
++		p.Status = status
++		c := &routingConsumer{session: s, required: true, flow: p.Flow, lookup: func(context.Context, Flow) (Evidence, error) { return p, nil }}
++		ctx := context.WithValue(context.Background(), routingKey{}, c)
++		if err := RoutingEntry(ctx); (err == nil) != (status == Known) {
++			t.Fatal(status, err)
++		}
++		_ = s.Revoke()
++		if RoutingEntry(ctx) == nil {
++			t.Fatal("отзыв")
++		}
++	}
++}
++
++func TestRoutingEntryRequiresClosedConsumer(t *testing.T) {
++	s, p, _ := fixture(t)
++	for _, c := range []*routingConsumer{nil, {}, {session: s, required: true, flow: p.Flow}} {
++		ctx := context.WithValue(context.Background(), routingKey{}, c)
++		if RoutingEntry(ctx) == nil {
++			t.Fatal("нет trusted lookup")
++		}
++	}
++	s, _, _ = fixture(t)
++	ctx := context.WithValue(context.Background(), routingKey{}, &routingConsumer{session: s})
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal("non-app control", err)
++	}
++	cancelctx, cancel := context.WithCancel(ctx)
++	cancel()
++	if RoutingEntry(cancelctx) == nil {
++		t.Fatal("cancel")
++	}
++}
++
++func TestRoutingEntryCancelDuringLookup(t *testing.T) {
++	s, p, _ := fixture(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	c := &routingConsumer{session: s, required: true, flow: p.Flow, lookup: func(context.Context, Flow) (Evidence, error) { cancel(); return p, nil }}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if RoutingEntry(ctx) == nil {
++		t.Fatal("отмена во время lookup пропустила routing")
++	}
++	if s.Guard(p.Observed, BeforeRouting, true, p.Flow, p) != nil {
++		t.Fatal("отмена flow отозвала сессию")
++	}
++}
++
++func TestDNSLastWaiterKeepsCallerAuthority(t *testing.T) {
++	ctx, _ := ClosedDNSFixture(t)
++	neighbor, neighborPeer := net.Pipe()
++	defer neighborPeer.Close()
++	releaseNeighbor, err := OwnSocket(ctx, neighbor)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer releaseNeighbor()
++	exchange, cancel := DNSExchangeContext(ctx)
++	socket, peer := net.Pipe()
++	defer peer.Close()
++	release, err := OwnSocket(exchange, socket)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer release()
++	cancel()
++	// EOF доказывает завершение callback отмены, без scheduling sleep.
++	if err := peer.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := peer.Read(make([]byte, 1)); err != io.EOF {
++		t.Fatalf("DNS socket: %v", err)
++	}
++	if err := CheckAfterDNS(ctx); err != nil {
++		t.Fatalf("cache authority после last waiter: %v", err)
++	}
++	if err := BeforeSocketDial(ctx); err != nil {
++		t.Fatalf("dial после last waiter: %v", err)
++	}
++	go neighborPeer.Write([]byte{42})
++	if err := neighbor.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
++		t.Fatal(err)
++	}
++	b := make([]byte, 1)
++	if _, err := neighbor.Read(b); err != nil || b[0] != 42 {
++		t.Fatalf("neighbor: %v", err)
++	}
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	if err := c.session.Revoke(); err != nil {
++		t.Fatal(err)
++	}
++	if CheckAfterDNS(ctx) == nil || BeforeSocketDial(ctx) == nil {
++		t.Fatal("global revoke не терминален")
++	}
++}
+diff --git a/app/dispatcher/yonik_guard_test.go b/app/dispatcher/yonik_guard_test.go
+new file mode 100644
+--- /dev/null
++++ b/app/dispatcher/yonik_guard_test.go
+@@ -0,0 +1,24 @@
++package dispatcher
++
++import (
++	"context"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/session"
++	"github.com/xtls/xray-core/transport"
++	"testing"
++)
++
++func TestYonikGuardBeforeRouting(t *testing.T) {
++	d := new(DefaultDispatcher)
++	dst := net.TCPDestination(net.LocalHostIP, 443)
++	ctx := session.SetForcedOutboundTagToContext(context.Background(), "must-not-route")
++	if link, err := d.Dispatch(ctx, dst); err == nil || link != nil {
++		t.Fatal("Dispatch пропустил отсутствующий handoff")
++	}
++	if err := d.DispatchLink(ctx, dst, &transport.Link{}); err == nil {
++		t.Fatal("DispatchLink пропустил отсутствующий handoff")
++	}
++	if err := d.routedDispatch(ctx, &transport.Link{}, dst); err == nil {
++		t.Fatal("routedDispatch пропустил отсутствующий handoff")
++	}
++}
+diff --git a/app/dispatcher/default.go b/app/dispatcher/default.go
+index cae9735..0d275aa 100644
+--- a/app/dispatcher/default.go
++++ b/app/dispatcher/default.go
+@@ -2,6 +2,7 @@ package dispatcher
+ 
+ import (
+ 	"context"
++	nativehooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -265,6 +266,9 @@ func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResu
+ 
+ // Dispatch implements routing.Dispatcher.
+ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destination) (*transport.Link, error) {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		return nil, err
++	}
+ 	if !destination.IsValid() {
+ 		panic("Dispatcher: Invalid destination.")
+ 	}
+@@ -322,6 +326,9 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
+ 
+ // DispatchLink implements routing.Dispatcher.
+ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.Destination, outbound *transport.Link) error {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		return err
++	}
+ 	if !destination.IsValid() {
+ 		return errors.New("Dispatcher: Invalid destination.")
+ 	}
+@@ -341,7 +348,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
+ 	outbound = WrapLink(ctx, d.policy, d.stats, outbound)
+ 	sniffingRequest := content.SniffingRequest
+ 	if !sniffingRequest.Enabled {
+-		d.routedDispatch(ctx, outbound, destination)
++		return d.routedDispatch(ctx, outbound, destination)
+ 	} else {
+ 		cReader := &cachedReader{
+ 			reader: outbound.Reader.(buf.TimeoutReader),
+@@ -369,10 +376,8 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
+ 				ob.Target = destination
+ 			}
+ 		}
+-		d.routedDispatch(ctx, outbound, destination)
++		return d.routedDispatch(ctx, outbound, destination)
+ 	}
+-
+-	return nil
+ }
+ 
+ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, network net.Network) (SniffResult, error) {
+@@ -431,7 +436,12 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, netw
+ 	return contentResult, contentErr
+ }
+ 
+-func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination) {
++func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.Link, destination net.Destination) error {
++	if err := nativehooks.RoutingEntry(ctx); err != nil {
++		common.Close(link.Writer)
++		common.Interrupt(link.Reader)
++		return err
++	}
+ 	outbounds := session.OutboundsFromContext(ctx)
+ 	ob := outbounds[len(outbounds)-1]
+ 
+@@ -450,7 +460,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
+ 			errors.LogError(ctx, "non existing tag for platform initialized detour: ", forcedOutboundTag)
+ 			common.Close(link.Writer)
+ 			common.Interrupt(link.Reader)
+-			return
++			return nativehooks.ErrDenied
+ 		}
+ 	} else if d.router != nil {
+ 		if route, err := d.router.PickRoute(routingLink); err == nil {
+@@ -467,7 +477,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
+ 				errors.LogWarning(ctx, "non existing outTag: ", outTag)
+ 				common.Close(link.Writer)
+ 				common.Interrupt(link.Reader)
+-				return // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
++				return nativehooks.ErrDenied // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
+ 			}
+ 		} else {
+ 			if err != common.ErrNoClue {
+@@ -485,7 +495,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
+ 		errors.LogInfo(ctx, "default outbound handler not exist")
+ 		common.Close(link.Writer)
+ 		common.Interrupt(link.Reader)
+-		return
++		return nativehooks.ErrDenied
+ 	}
+ 
+ 	ob.Tag = handler.Tag()
+@@ -505,4 +515,5 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
+ 	}
+ 
+ 	handler.Dispatch(ctx, link)
++	return nil
+ }
+diff --git a/proxy/tun/tun_linux.go b/proxy/tun/tun_linux.go
+index 970cb4c..c7a5f9a 100644
+--- a/proxy/tun/tun_linux.go
++++ b/proxy/tun/tun_linux.go
+@@ -4,6 +4,8 @@ package tun
+ 
+ import (
+ 	"context"
++	nativehooks "github.com/xtls/xray-core/common/yonikbroker"
++	"io"
+ 	"net"
+ 	"net/netip"
+ 	"os/exec"
+@@ -198,51 +200,31 @@ func (t *LinuxTun) unsetSystemDNS() {
+ var _ Tun = (*LinuxTun)(nil)
+ 
+ // NewTun builds new tun interface handler (linux specific)
+-func NewTun(options *Config) (Tun, error) {
+-	tunFd, vnet, tunLink, fdProvided, err := openFromEnv(options.Name)
+-	if err != nil {
+-		return nil, err
+-	}
+-	if fdProvided {
+-		return &LinuxTun{
+-			fdTun:   newFdTun(tunFd, vnet),
+-			tunLink: tunLink,
+-			options: options,
+-		}, nil
+-	}
+-
+-	// with a virtio_net_hdr on every packet the system leaves its TCP segments as large as they are,
+-	// with their checksums not completed, and takes such segments. Without it where that is refused
+-	vnet = vnetSize
+-	tunFd, err = open(options.Name, unix.IFF_VNET_HDR)
+-	if err == nil && unix.IoctlSetInt(tunFd, unix.TUNSETOFFLOAD, unix.TUN_F_CSUM|unix.TUN_F_TSO4|unix.TUN_F_TSO6) != nil {
+-		_ = unix.Close(tunFd)
+-		err = unix.EINVAL
+-	}
+-	if err != nil {
+-		vnet = 0
+-		tunFd, err = open(options.Name, 0)
+-	}
+-	if err != nil {
+-		return nil, err
++func NewTun(options *Config, contexts ...context.Context) (Tun, error) {
++	if len(contexts) != 1 {
++		return nil, nativehooks.ErrDenied
+ 	}
+-
+-	tunLink, err = setup(options.Name, int(options.MTU))
++	opened, release, err := nativehooks.OpenTUN(contexts[0], options.Name, options.MTU, func(fd int) (io.Closer, error) {
++		link, err := netlink.LinkByName(options.Name)
++		if err != nil {
++			return nil, err
++		}
++		return &LinuxTun{fdTun: newFdTun(fd, 0), tunLink: link, options: options}, nil
++	})
+ 	if err != nil {
+-		_ = unix.Close(tunFd)
+ 		return nil, err
+ 	}
++	return &ownedTun{Tun: opened.(Tun), release: release}, nil
++}
+ 
+-	linuxTun := &LinuxTun{
+-		fdTun:   newFdTun(tunFd, vnet),
+-		tunLink: tunLink,
+-		options: options,
+-		ownsTun: true,
+-	}
+-
+-	return linuxTun, nil
++type ownedTun struct {
++	Tun
++	release func() error
+ }
+ 
++func (t *ownedTun) Close() error                                     { return t.release() }
++func newWorkerTun(ctx context.Context, options *Config) (Tun, error) { return NewTun(options, ctx) }
++
+ // openFromEnv takes the tun that was given to the process, with the size of the virtio_net_hdr of its packets
+ func openFromEnv(expectedName string) (int, int, netlink.Link, bool, error) {
+ 	fdStr := platform.NewEnvFlag(platform.TunFdKey).GetValue(func() string { return "" })
+diff --git a/proxy/tun/handler.go b/proxy/tun/handler.go
+index 59b643b..cd393a0 100644
+--- a/proxy/tun/handler.go
++++ b/proxy/tun/handler.go
+@@ -2,6 +2,7 @@ package tun
+ 
+ import (
+ 	"context"
++	nativehooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"net/netip"
+ 	"strings"
+ 	"syscall"
+@@ -96,7 +97,7 @@ func (t *Handler) Init(ctx context.Context, pm policy.Manager, dispatcher routin
+ 		t.sniffingRequest = content.SniffingRequest
+ 	}
+ 
+-	t.ctx = core.ToBackgroundDetachedContext(ctx)
++	t.ctx = nativehooks.CarryClosedSession(ctx, core.ToBackgroundDetachedContext(ctx))
+ 	t.policyManager = pm
+ 	t.dispatcher = dispatcher
+ 
+@@ -122,7 +123,7 @@ func (t *Handler) Init(ctx context.Context, pm policy.Manager, dispatcher routin
+ 
+ func (t *Handler) Start() error {
+ 	tunName := t.config.Name
+-	tunInterface, err := NewTun(t.config)
++	tunInterface, err := newWorkerTun(t.ctx, t.config)
+ 	if err != nil {
+ 		return err
+ 	}
+diff --git a/common/yonikbroker/closed_tun_linux.go b/common/yonikbroker/closed_tun_linux.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/closed_tun_linux.go
+@@ -0,0 +1,241 @@
++//go:build linux && !android
++
++package nativehooks
++
++import (
++	"context"
++	"io"
++	"net"
++	"os"
++	"sync"
++	"syscall"
++	"time"
++
++	"golang.org/x/sys/unix"
++)
++
++// closedAttach принимает владение только уже аутентифицированным worker handoff.
++// Production issuer пока не подключён; config/env не вызывают этот конструктор.
++func closedAttach(ctx context.Context, record []byte, channel, pidfd *os.File) (context.Context, error) {
++	ok := false
++	defer func() {
++		if !ok {
++			if channel != nil {
++				_ = channel.Close()
++			}
++			if pidfd != nil {
++				_ = pidfd.Close()
++			}
++		}
++	}()
++	b, err := DecodeBootstrap(record, 2)
++	if err != nil || ctx.Err() != nil {
++		return nil, ErrDenied
++	}
++	hello, files, err := b.ReceiveAuthenticated(channel, pidfd)
++	for _, f := range files {
++		_ = f.Close()
++	}
++	if err != nil || hello.Header.Kind != HelloKind {
++		return nil, ErrDenied
++	}
++	selected := uint64(OwnedTUN)
++	if hello.Hello.AppRequired {
++		selected = AllFeatures
++	}
++	features, err := EncodeFeatures(b.Binding, selected, hello.Hello.AppRequired, hello.Hello.Supported)
++	if err != nil {
++		return nil, err
++	}
++	if err = syscall.Sendmsg(int(channel.Fd()), features, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		return nil, ErrDenied
++	}
++	attach, files, err := b.ReceiveAuthenticated(channel, pidfd)
++	if err != nil || attach.Header.Kind != AttachKind || len(files) != 1 {
++		for _, f := range files {
++			_ = f.Close()
++		}
++		return nil, ErrDenied
++	}
++	f := files[0]
++	s, err := NewSession(b.Binding, hello.Hello.OwnerTTL)
++	if err != nil {
++		_ = f.Close()
++		return nil, err
++	}
++	if validateTUN(f, attach.Attach) != nil {
++		_ = f.Close()
++		_ = s.Revoke()
++		return nil, ErrDenied
++	}
++	c := &routingConsumer{session: s, required: hello.Hello.AppRequired, bootstrap: b, channel: channel, pidfd: pidfd, owned: f, attached: attach.Attach}
++	c.ownedHandle, err = s.Track(time.Now(), false, Flow{}, Evidence{}, f)
++	if err != nil {
++		_ = f.Close()
++		return nil, err
++	}
++	ack, err := EncodeAttachACK(b.Binding)
++	if err != nil {
++		_ = s.Revoke()
++		return nil, err
++	}
++	if err = syscall.Sendmsg(int(channel.Fd()), ack, nil, nil, syscall.MSG_DONTWAIT|syscall.MSG_NOSIGNAL); err != nil {
++		_ = s.Revoke()
++		return nil, ErrDenied
++	}
++	ok = true
++	go c.monitorTUN(ctx)
++	return context.WithValue(ctx, routingKey{}, c), nil
++}
++
++func validateTUN(f *os.File, a AttachBody) error {
++	return controlFile(f, func(fd int) error { return validateTUNFD(fd, a) })
++}
++
++func validateTUNFD(fd int, a AttachBody) error {
++	req, err := unix.NewIfreq("")
++	if err != nil || unix.IoctlIfreq(fd, unix.TUNGETIFF, req) != nil {
++		return ErrDenied
++	}
++	if req.Name() != a.Name || !plainTUNFlags(req.Uint16()) {
++		return ErrDenied
++	}
++	iface, err := net.InterfaceByName(a.Name)
++	if err != nil || iface.Index != int(a.Ifindex) || iface.MTU != int(a.MTU) {
++		return ErrDenied
++	}
++	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
++	if err != nil || flags&unix.FD_CLOEXEC == 0 {
++		return ErrDenied
++	}
++	status, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
++	if err != nil || status&unix.O_NONBLOCK == 0 {
++		return ErrDenied
++	}
++	return nil
++}
++
++type onceTUN struct {
++	io.Closer
++	once sync.Once
++	err  error
++}
++
++func (t *onceTUN) Close() error { t.once.Do(func() { t.err = t.Closer.Close() }); return t.err }
++
++// OpenTUN внедряет FD только из закрытого контекста. При успехе native constructor
++// владеет raw FD; при ошибке constructor обязан оставить raw FD вызывающему.
++// Возвращённый release используется вместо прямого Close ядра.
++func OpenTUN(ctx context.Context, name string, mtu uint32, factory func(int) (io.Closer, error)) (io.Closer, func() error, error) {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil || factory == nil {
++		return nil, nil, ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	success := false
++	defer func() {
++		if !success && c.session != nil {
++			_ = c.session.Revoke()
++		}
++	}()
++	if c.session == nil || c.owned == nil || ctx.Err() != nil || c.bootstrap.CheckServer(c.pidfd) != nil || c.session.Guard(time.Now(), BeforeRouting, false, Flow{}, Evidence{}) != nil || name != c.attached.Name || mtu != c.attached.MTU || validateTUN(c.owned, c.attached) != nil {
++		return nil, nil, ErrDenied
++	}
++	fd := -1
++	err := controlFile(c.owned, func(borrowed int) error {
++		var err error
++		fd, err = unix.FcntlInt(uintptr(borrowed), unix.F_DUPFD_CLOEXEC, 3)
++		return err
++	})
++	if err != nil {
++		return nil, nil, err
++	}
++	_ = c.session.Release(c.ownedHandle)
++	c.owned = nil
++	native, err := factory(fd)
++	if err != nil || native == nil {
++		_ = unix.Close(fd)
++		_ = c.session.Revoke()
++		return nil, nil, ErrDenied
++	}
++	closed := &onceTUN{Closer: native}
++	if ctx.Err() != nil || c.bootstrap.CheckServer(c.pidfd) != nil {
++		_ = closed.Close()
++		return nil, nil, ErrDenied
++	}
++	h, err := c.session.Track(time.Now(), false, Flow{}, Evidence{}, closed)
++	if err != nil {
++		_ = closed.Close()
++		return nil, nil, err
++	}
++	success = true
++	return native, func() error { return c.session.Release(h) }, nil
++}
++
++func (c *routingConsumer) monitorTUN(ctx context.Context) {
++	// Все пользователи channel/pidfd держат mu, включая завершение monitor.
++	defer func() {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		_ = c.session.Revoke()
++		_ = c.channel.Close()
++		_ = c.pidfd.Close()
++	}()
++	ticker := time.NewTicker(5 * time.Millisecond)
++	defer ticker.Stop()
++	for {
++		select {
++		case <-ctx.Done():
++			return
++		case <-c.session.Context().Done():
++			return
++		case <-ticker.C:
++			c.mu.Lock()
++			if c.bootstrap.CheckServer(c.pidfd) != nil {
++				c.mu.Unlock()
++				return
++			}
++			fd := int(c.channel.Fd())
++			var set syscall.FdSet
++			if fd < 0 || fd >= len(set.Bits)*64 {
++				c.mu.Unlock()
++				return
++			}
++			set.Bits[fd/64] |= 1 << uint(fd%64)
++			timeout := syscall.Timeval{}
++			n, err := syscall.Select(fd+1, &set, nil, nil, &timeout)
++			if err != nil {
++				c.mu.Unlock()
++				return
++			}
++			if n != 0 {
++				_, files, _ := c.bootstrap.ReceiveAuthenticated(c.channel, c.pidfd)
++				for _, f := range files {
++					_ = f.Close()
++				}
++				// Любое unsolicited сообщение (включая REVOKE), EOF или invalid frame отзывает custody.
++				c.mu.Unlock()
++				return
++			}
++			c.mu.Unlock()
++		}
++	}
++}
++
++// CarryClosedSession сохраняет только уже доверенную session при upstream detach.
++// Непроверенные context values и caller assertions authority не создают.
++func CarryClosedSession(source, target context.Context) context.Context {
++	c, ok := source.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		return target
++	}
++	return context.WithValue(target, routingKey{}, c)
++}
++
++// Оба закрытых конструктора читают Plain IP без virtio header.
++// PERSIST описывает хранение интерфейса, не packet framing; остальные биты запрещены.
++func plainTUNFlags(flags uint16) bool {
++	const plain = unix.IFF_TUN | unix.IFF_NO_PI
++	return flags == plain || flags == plain|unix.IFF_PERSIST
++}
+diff --git a/common/yonikbroker/closed_tun_linux_test.go b/common/yonikbroker/closed_tun_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/closed_tun_linux_test.go
+@@ -0,0 +1,322 @@
++//go:build linux && !android
++
++package nativehooks
++
++import (
++	"context"
++	"golang.org/x/sys/unix"
++	"io"
++	"net"
++	"os"
++	"strings"
++	"sync/atomic"
++	"syscall"
++	"testing"
++	"time"
++)
++
++// Frozen issuer fixture имеет только собственный bound TUN внутри отдельной netns.
++func closedTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	return closedTUNFixtureMode(t, "cancel")
++}
++
++var authenticatedFixtureSequence atomic.Uint32
++
++func closedTUNFixtureMode(t *testing.T, mode string, authority ...*atomic.Uint32) (context.Context, *os.File, func()) {
++	t.Helper()
++	known := len(mode) > 6 && mode[:6] == "known/"
++	if known {
++		mode = mode[6:]
++	}
++	persistent := strings.HasPrefix(mode, "persistent/")
++	mode = strings.TrimPrefix(mode, "persistent/")
++	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
++		t.Skip("нужен isolated namespace launcher")
++	}
++	current, err := os.Readlink("/proc/self/ns/net")
++	if err != nil || current == os.Getenv("YONIK_HOST_NETNS") {
++		t.Fatal("тест требует отдельную netns")
++	}
++	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	original := os.NewFile(uintptr(fd), "fixture-original")
++	t.Cleanup(func() { original.Close() })
++	name := "ynkfixture0"
++	if len(authority) != 0 {
++		name = "ynkpeer%d"
++	}
++	req, _ := unix.NewIfreq(name)
++	req.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
++	if err = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); err != nil {
++		t.Fatal(err)
++	}
++	if persistent {
++		if err = unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1); err != nil {
++			t.Fatal(err)
++		}
++		t.Cleanup(func() {
++			if err := unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 0); err != nil {
++				t.Error(err)
++			}
++		})
++		if err = unix.IoctlIfreq(fd, unix.TUNGETIFF, req); err != nil || req.Uint16() != 0x1801 {
++			t.Fatalf("persistent Plain flags=%#x err=%v", req.Uint16(), err)
++		}
++		t.Log("kernel persistent Plain TUNGETIFF=0x1801; wire semantic flags=0x1001")
++	}
++	iface, err := net.InterfaceByName(req.Name())
++	if err != nil {
++		t.Fatal(err)
++	}
++	b, pidfd := liveBootstrap(t)
++	record := roleRecord()
++	if len(authority) != 0 {
++		be.PutUint32(b.Binding.Nonce[28:], authenticatedFixtureSequence.Add(1))
++		copy(record[8:40], b.Binding.Nonce[:])
++	}
++	be.PutUint32(record[120:], b.ServerPID)
++	be.PutUint64(record[128:], b.ServerStarttime)
++	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	receiver := os.NewFile(uintptr(pair[0]), "fixture-receiver")
++	sender := os.NewFile(uintptr(pair[1]), "fixture-sender")
++	t.Cleanup(func() { sender.Close() })
++	if err = syscall.SetsockoptInt(pair[0], syscall.SOL_SOCKET, syscall.SO_PASSCRED, 1); err != nil {
++		t.Fatal(err)
++	}
++	hello := makeFrame(HelloKind, 0, b.Binding, 176)
++	copy(hello[96:112], b.Session[:])
++	be.PutUint64(hello[112:], b.Generation)
++	copy(hello[120:136], b.Invocation[:])
++	be.PutUint32(hello[136:], MaxFrameBytes)
++	be.PutUint16(hello[140:], 1)
++	be.PutUint64(hello[144:], uint64(OwnerTTL))
++	be.PutUint64(hello[152:], uint64(BootstrapTTL))
++	be.PutUint64(hello[160:], OwnedTUN)
++	if known {
++		be.PutUint64(hello[160:], AllFeatures)
++		be.PutUint64(hello[168:], 1)
++	}
++	attach := makeFrame(AttachKind, 0, b.Binding, 128)
++	be.PutUint32(attach[96:], 1)
++	be.PutUint32(attach[100:], uint32(iface.Index))
++	be.PutUint32(attach[104:], 0x1001)
++	be.PutUint32(attach[108:], uint32(iface.MTU))
++	copy(attach[112:], iface.Name)
++	issuerCtx, stopIssuer := context.WithCancel(context.Background())
++	issuerDone := make(chan struct{})
++	t.Cleanup(func() { stopIssuer(); <-issuerDone })
++	done := make(chan error, 1)
++	go func() {
++		defer close(issuerDone)
++		if e := syscall.Sendmsg(pair[1], hello, nil, nil, 0); e != nil {
++			done <- e
++			return
++		}
++		buffer := make([]byte, 256)
++		_, e := syscall.Read(pair[1], buffer)
++		if e != nil {
++			done <- e
++			return
++		}
++		if e = syscall.Sendmsg(pair[1], attach, syscall.UnixRights(fd), nil, 0); e != nil {
++			done <- e
++			return
++		}
++		_, e = syscall.Read(pair[1], buffer)
++		done <- e
++		if known && e == nil {
++			for {
++				if issuerCtx.Err() != nil {
++					return
++				}
++				n, _, e := syscall.Recvfrom(pair[1], buffer, syscall.MSG_DONTWAIT)
++				if e == syscall.EAGAIN {
++					time.Sleep(time.Millisecond)
++					continue
++				}
++				if e != nil || n == 0 {
++					return
++				}
++				request, e := DecodeFrame(buffer[:n], 0)
++				if e != nil || request.Header.Kind != LookupKind {
++					return
++				}
++				reply := makeFrame(ReplyKind, request.Header.RequestID, b.Binding, 168)
++				reply[96] = 1
++				be.PutUint16(reply[100:], 8)
++				be.PutUint64(reply[104:], uint64(OwnerTTL))
++				be.PutUint32(reply[120:], b.ServerPID)
++				be.PutUint64(reply[128:], b.ServerStarttime)
++				be.PutUint64(reply[136:], 1)
++				be.PutUint64(reply[144:], 2)
++				copy(reply[160:], "/fixture")
++				if len(authority) != 0 {
++					state := authority[0].Load()
++					if state == 1 || state == 2 {
++						reply = makeFrame(ReplyKind, request.Header.RequestID, b.Binding, 160)
++						reply[96] = 2
++						if state == 2 {
++							reply[96] = 3
++							reply[97] = 1
++						}
++					}
++					switch state {
++					case 3:
++						reply[24] ^= 1
++					case 4:
++						reply[64] ^= 1
++					case 5:
++						reply[32] ^= 1
++					case 6:
++						be.PutUint64(reply[104:], 0)
++					}
++				}
++				if syscall.Sendmsg(pair[1], reply, nil, nil, 0) != nil {
++					return
++				}
++			}
++		}
++	}()
++	ctx, cancel := context.WithCancel(context.Background())
++	if mode == "deadline" {
++		cancel()
++		ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
++	}
++	t.Cleanup(cancel)
++	result, err := closedAttach(ctx, record, receiver, pidfd)
++	if err != nil {
++		sender.Close()
++		t.Fatal(err)
++	}
++	select {
++	case err = <-done:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("issuer deadline")
++	}
++	consumer := result.Value(routingKey{}).(*routingConsumer)
++	t.Cleanup(func() {
++		cancel()
++		select {
++		case <-consumer.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Error("cleanup deadline")
++		}
++	})
++	revoke := cancel
++	if mode == "deadline" {
++		revoke = func() {}
++	}
++	if mode == "eof" {
++		revoke = func() { stopIssuer(); <-issuerDone; _ = sender.Close() }
++	}
++	if mode == "revoke" {
++		revoke = func() {
++			frame := makeFrame(RevokeKind, 0, b.Binding, 104)
++			be.PutUint32(frame[96:], 1)
++			_ = syscall.Sendmsg(pair[1], frame, nil, nil, 0)
++		}
++	}
++	return result, original, revoke
++}
++
++type fixtureCloser struct{ file *os.File }
++
++func (c *fixtureCloser) Close() error { return c.file.Close() }
++func TestClosedTUNAttachCustody(t *testing.T) {
++	for _, mode := range []string{"cancel", "eof", "revoke"} {
++		t.Run(mode, func(t *testing.T) { testClosedTUNCustody(t, mode) })
++	}
++}
++func testClosedTUNCustody(t *testing.T, mode string) {
++	ctx, original, cancel := closedTUNFixtureMode(t, mode)
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var received *os.File
++	_, release, err := OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(fd int) (io.Closer, error) {
++		received = os.NewFile(uintptr(fd), "native-duplicate")
++		return &fixtureCloser{received}, nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	cancel()
++	deadline := time.Now().Add(time.Second)
++	for {
++		if _, err = received.Stat(); err != nil {
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("cancel не закрыл native handle")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	if err = release(); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(int) (io.Closer, error) { t.Fatal("повторная инъекция"); return nil, nil }); err == nil {
++		t.Fatal("ATTACH повторно использован")
++	}
++	if _, err = original.Stat(); err != nil {
++		t.Fatal("helper original закрыт", err)
++	}
++}
++func TestOpenTUNWithoutHandoff(t *testing.T) {
++	called := false
++	_, _, err := OpenTUN(context.Background(), "ignored", 1500, func(int) (io.Closer, error) { called = true; return nil, nil })
++	if err == nil || called {
++		t.Fatal("нет closed custody", err, called)
++	}
++}
++
++func TestClosedTUNRejectMetadata(t *testing.T) {
++	ctx, _, _ := closedTUNFixture(t)
++	for _, item := range []struct {
++		name string
++		mtu  uint32
++	}{{"wrong", 1500}, {"ynkfixture0", 68}} {
++		if _, _, err := OpenTUN(ctx, item.name, item.mtu, func(int) (io.Closer, error) { t.Fatal("metadata bypass"); return nil, nil }); err == nil {
++			t.Fatal("metadata accepted")
++		}
++	}
++	f, err := os.Open("/dev/null")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer f.Close()
++	if validateTUN(f, AttachBody{Name: "ynkfixture0", MTU: 1500, Ifindex: 1}) == nil {
++		t.Fatal("не-TUN FD")
++	}
++}
++
++func TestClosedTUNOneUse(t *testing.T) {
++	ctx, _, _ := closedTUNFixture(t)
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var received *os.File
++	factory := func(fd int) (io.Closer, error) {
++		received = os.NewFile(uintptr(fd), "single-use")
++		return &fixtureCloser{received}, nil
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), factory); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err = OpenTUN(ctx, iface.Name, uint32(iface.MTU), func(int) (io.Closer, error) { t.Fatal("повторная инъекция"); return nil, nil }); err == nil {
++		t.Fatal("повторный ATTACH")
++	}
++	if _, err = received.Stat(); err == nil {
++		t.Fatal("close-on-error")
++	}
++}
+diff --git a/common/yonikbroker/tun_callsite_test.go b/common/yonikbroker/tun_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/tun_callsite_test.go
+@@ -0,0 +1,52 @@
++package nativehooks_test
++
++import (
++	"context"
++	nativehooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/proxy/tun"
++	"net"
++	"testing"
++	"time"
++)
++
++func TestActualTUNConstructor(t *testing.T)                { actualTUNConstructor(t, false) }
++func TestPersistentPlainActualTUNConstructor(t *testing.T) { actualTUNConstructor(t, true) }
++func actualTUNConstructor(t *testing.T, persistent bool) {
++	if _, err := tun.NewTun(&tun.Config{Name: "ignored", MTU: 1500}, context.Background()); err == nil {
++		t.Fatal("нет handoff")
++	}
++	fixture := nativehooks.ClosedTUNFixture
++	if persistent {
++		fixture = nativehooks.PersistentPlainTUNFixture
++	}
++	ctx, original, cancel := fixture(t)
++	ctx = nativehooks.CarryClosedSession(ctx, context.Background())
++	iface, err := net.InterfaceByName("ynkfixture0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	native, err := tun.NewTun(&tun.Config{Name: iface.Name, MTU: uint32(iface.MTU)}, ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = native.Start(); err != nil {
++		t.Fatal(err)
++	}
++	cancel()
++	done := make(chan error, 1)
++	go func() { _, err := native.ReadPacket(make([]byte, 2048)); done <- err }()
++	select {
++	case err = <-done:
++		if err == nil {
++			t.Fatal("закрытый TUN читает")
++		}
++	case <-time.After(time.Second):
++		t.Fatal("revoke не закрыл TUN")
++	}
++	if err = native.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = original.Stat(); err != nil {
++		t.Fatal("original", err)
++	}
++}
+diff --git a/common/yonikbroker/export_test.go b/common/yonikbroker/export_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/export_test.go
+@@ -0,0 +1,234 @@
++package nativehooks
++
++import (
++	"context"
++	"encoding/binary"
++	"net/netip"
++	"os"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func ClosedTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	ctx, original, cancel := closedTUNFixture(t)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	return ctx, original, func() {
++		cancel()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("native revoke deadline")
++		}
++	}
++}
++
++// ClosedDialFixture доступен только тестовому бинарнику, production issuer не открывает.
++func ClosedDialFixture(t *testing.T, mode string, protocol uint8) (context.Context, *int) {
++	t.Helper()
++	s, p, _ := fixture(t)
++	p.Flow.Protocol = protocol
++	calls := new(int)
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(cancel)
++	t.Cleanup(func() { _ = s.Revoke() })
++	c := &routingConsumer{session: s, required: true, flow: p.Flow}
++	c.lookup = func(context.Context, Flow) (Evidence, error) {
++		*calls++
++		p.Observed = time.Now()
++		p.Expires = p.Observed.Add(20 * time.Millisecond)
++		if *calls > 1 {
++			switch mode {
++			case "unknown":
++				p.Status = Unknown
++			case "unavailable":
++				p.Status = Unavailable
++			case "stale":
++				p.Expires = p.Observed.Add(-time.Millisecond)
++			case "cancel":
++				cancel()
++			case "revoke":
++				_ = s.Revoke()
++			}
++		}
++		return p, nil
++	}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if mode == "nohandoff" {
++		return context.Background(), calls
++	}
++	return ctx, calls
++}
++
++// ClosedDNSFixture меняет ответ broker только после начала controlled exchange.
++var dnsFixtureSequence atomic.Uint32
++
++func ClosedDNSFixture(t *testing.T) (context.Context, func(string)) {
++	s, p, _ := fixture(t)
++	s.maxTTL = time.Second
++	id := dnsFixtureSequence.Add(1)
++	binary.LittleEndian.PutUint32(p.Binding.Nonce[:4], id)
++	s.binding = p.Binding
++	p.Flow.Local = netip.AddrPortFrom(p.Flow.Local.Addr(), uint16(1024+id%60000))
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(cancel)
++	t.Cleanup(func() { _ = s.Revoke() })
++	c := &routingConsumer{session: s, required: true, flow: p.Flow}
++	mode := "known"
++	c.lookup = func(context.Context, Flow) (Evidence, error) {
++		reply := p
++		reply.Observed = time.Now()
++		reply.Expires = reply.Observed.Add(time.Second)
++		if mode == "unknown" {
++			reply.Status = Unknown
++		}
++		if mode == "unavailable" {
++			reply.Status = Unavailable
++		}
++		if mode == "stale" {
++			reply.Expires = reply.Observed.Add(-time.Millisecond)
++		}
++		if mode == "wrong-session" {
++			reply.Binding.Nonce[0]++
++		}
++		if mode == "wrong-binding" {
++			reply.Binding.ConfigDigest[0]++
++		}
++		if mode == "epoch" {
++			reply.Binding.Epoch++
++		}
++		return reply, nil
++	}
++	ctx = context.WithValue(ctx, routingKey{}, c)
++	if err := RoutingEntry(ctx); err != nil {
++		t.Fatal(err)
++	}
++	return ctx, func(next string) {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		mode = next
++		if next == "revoke" {
++			_ = s.Revoke()
++		}
++		if next == "cancel" {
++			cancel()
++		}
++	}
++}
++
++// ClosedRevokeFixture сохраняет authenticated ATTACH и wire Known issuer в test binary.
++func ClosedRevokeFixture(t *testing.T, mode string, protocol uint8) (context.Context, func()) {
++	ctx, _, control := closedTUNFixtureMode(t, "known/"+mode)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	_, p, _ := fixture(t)
++	p.Binding = c.bootstrap.Binding
++	p.Flow.Protocol = protocol
++	c.mu.Lock()
++	c.flow = p.Flow
++	c.mu.Unlock()
++	return ctx, func() {
++		control()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("revoke deadline")
++		}
++		if err := c.session.Revoke(); err != nil {
++			t.Fatal(err)
++		}
++		c.session.mu.Lock()
++		remaining := len(c.session.flows)
++		c.session.mu.Unlock()
++		if remaining != 0 {
++			t.Fatalf("owned flows после revoke: %d", remaining)
++		}
++		c.mu.Lock()
++		next := c.next
++		c.mu.Unlock()
++		t.Cleanup(func() {
++			c.mu.Lock()
++			defer c.mu.Unlock()
++			if c.next != next {
++				t.Error("lookup после revoke")
++			}
++		})
++	}
++}
++
++// ClosedAuthenticatedDNSFixture выдаёт proof только через private wire issuer.
++func ClosedAuthenticatedDNSFixture(t *testing.T) (context.Context, func(string)) {
++	state := new(atomic.Uint32)
++	ctx, _, revoke := closedTUNFixtureMode(t, "known/cancel", state)
++	ctx, cancel := context.WithCancel(ctx)
++	t.Cleanup(cancel)
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	_, p, _ := fixture(t)
++	c.mu.Lock()
++	c.flow = p.Flow
++	c.mu.Unlock()
++	t.Cleanup(func() {
++		revoke()
++		select {
++		case <-c.session.revokeDone:
++		case <-time.After(time.Second):
++			t.Fatal("flow release deadline")
++		}
++		c.session.mu.Lock()
++		remaining := len(c.session.flows)
++		c.session.mu.Unlock()
++		if remaining != 0 {
++			t.Errorf("authenticated flows остались: %d", remaining)
++		}
++	})
++	return ctx, func(mode string) {
++		switch mode {
++		case "unknown":
++			state.Store(1)
++		case "unavailable":
++			state.Store(2)
++		case "epoch":
++			state.Store(3)
++		case "wrong-session":
++			state.Store(4)
++		case "wrong-binding":
++			state.Store(5)
++		case "stale":
++			state.Store(6)
++		case "cancel":
++			cancel()
++		case "revoke":
++			revoke()
++		}
++	}
++}
++
++func AuthenticatedProofCount(ctx context.Context) uint64 {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.next
++}
++
++func AuthenticatedFlowCount(ctx context.Context) int {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	c.session.mu.Lock()
++	defer c.session.mu.Unlock()
++	return len(c.session.flows)
++}
++
++func WaitAuthenticatedRevoke(ctx context.Context) bool {
++	c := ctx.Value(routingKey{}).(*routingConsumer)
++	select {
++	case <-c.session.revokeDone:
++		return true
++	case <-time.After(time.Second):
++		return false
++	}
++}
++
++func PersistentPlainTUNFixture(t *testing.T) (context.Context, *os.File, func()) {
++	return closedTUNFixtureMode(t, "persistent/cancel")
++}
+diff --git a/proxy/tun/worker_other.go b/proxy/tun/worker_other.go
+new file mode 100644
+--- /dev/null
++++ b/proxy/tun/worker_other.go
+@@ -0,0 +1,7 @@
++//go:build !linux || android
++
++package tun
++
++import "context"
++
++func newWorkerTun(_ context.Context, options *Config) (Tun, error) { return NewTun(options) }
+diff --git a/common/yonikbroker/dial_callsite_test.go b/common/yonikbroker/dial_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/dial_callsite_test.go
+@@ -0,0 +1,63 @@
++package nativehooks_test
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	"github.com/xtls/xray-core/common/net"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/transport/internet"
++)
++
++type countingDialer struct{ calls int }
++
++func (d *countingDialer) Dial(context.Context, net.Address, net.Destination, *internet.SocketConfig) (net.Conn, error) {
++	d.calls++
++	return nil, errors.New("fixture dial")
++}
++func (*countingDialer) DestIpAddress() net.IP { return nil }
++
++func TestActualSystemDialGuard(t *testing.T) {
++	for _, network := range []net.Network{net.Network_TCP, net.Network_UDP} {
++		for _, mode := range []string{"unknown", "unavailable", "stale", "cancel", "revoke", "nohandoff", "known"} {
++			t.Run(network.String()+"/"+mode, func(t *testing.T) {
++				ctx, lookups := hooks.ClosedDialFixture(t, mode, map[net.Network]uint8{net.Network_TCP: 6, net.Network_UDP: 17}[network])
++				d := new(countingDialer)
++				internet.UseAlternativeSystemDialer(d)
++				defer internet.UseAlternativeSystemDialer(nil)
++				dest := net.Destination{Network: network, Address: net.LocalHostIP, Port: 443}
++				for _, opt := range []*internet.SocketConfig{nil, {}} {
++					_, _ = internet.DialSystem(ctx, dest, opt)
++				}
++				want := 0
++				if mode == "known" {
++					want = 2
++					if *lookups != 3 {
++						t.Fatalf("нет fresh lookup: %d", *lookups)
++					}
++				}
++				if d.calls != want {
++					t.Fatalf("dialcounter=%d, ожидалось %d", d.calls, want)
++				}
++			})
++		}
++	}
++}
++
++func TestActualLoopbackSocket(t *testing.T) {
++	listener, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	for _, network := range []net.Network{net.Network_TCP, net.Network_UDP} {
++		ctx, _ := hooks.ClosedDialFixture(t, "known", map[net.Network]uint8{net.Network_TCP: 6, net.Network_UDP: 17}[network])
++		addr := listener.Addr().(*net.TCPAddr)
++		conn, err := internet.DialSystem(ctx, net.Destination{Network: network, Address: net.LocalHostIP, Port: net.Port(addr.Port)}, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++		conn.Close()
++	}
++}
+diff --git a/transport/internet/dialer.go b/transport/internet/dialer.go
+index 6d7b905..3ec4c02 100644
+--- a/transport/internet/dialer.go
++++ b/transport/internet/dialer.go
+@@ -240,7 +240,7 @@ func DialSystem(ctx context.Context, dest net.Destination, sockopt *SocketConfig
+ 		}
+ 	}
+ 	if sockopt == nil {
+-		return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++		return guardedSystemDial(ctx, src, dest, sockopt)
+ 	}
+ 
+ 	if newDest, err := checkAddressPortStrategy(ctx, dest, sockopt); err == nil && newDest != nil {
+@@ -278,7 +278,7 @@ func DialSystem(ctx context.Context, dest net.Destination, sockopt *SocketConfig
+ 		return redirect(ctx, dest, sockopt.DialerProxy, h), nil
+ 	}
+ 
+-	return effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++	return guardedSystemDial(ctx, src, dest, sockopt)
+ }
+ 
+ func InitSystemDialer(dc dns.Client, om outbound.Manager) {
+diff --git a/transport/internet/happy_eyeballs.go b/transport/internet/happy_eyeballs.go
+index 08a8a0e..73203d6 100644
+--- a/transport/internet/happy_eyeballs.go
++++ b/transport/internet/happy_eyeballs.go
+@@ -157,7 +157,7 @@ func sortIPs(ips []net.IP, prioritizeIPv6 bool, interleave uint32) []net.IP {
+ }
+ 
+ func tcpTryDial(ctx context.Context, src net.Address, sockopt *SocketConfig, ip net.IP, port net.Port, index int, resultCh chan<- *result) {
+-	conn, err := effectiveSystemDialer.Dial(ctx, src, net.Destination{Address: net.IPAddress(ip), Network: net.Network_TCP, Port: port}, sockopt)
++	conn, err := guardedSystemDial(ctx, src, net.Destination{Address: net.IPAddress(ip), Network: net.Network_TCP, Port: port}, sockopt)
+ 	select {
+ 	case <-ctx.Done():
+ 		if conn != nil {
+diff --git a/transport/internet/system_dialer.go b/transport/internet/system_dialer.go
+--- a/transport/internet/system_dialer.go
++++ b/transport/internet/system_dialer.go
+@@ -10,6 +10,7 @@
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"github.com/xtls/xray-core/features/dns"
+ 	"github.com/xtls/xray-core/features/outbound"
+ )
+@@ -93,6 +94,9 @@
+ 				return nil
+ 			}
+ 		}
++		if err := hooks.BeforeSocketDial(ctx); err != nil {
++			return nil, err
++		}
+ 		packetConn, err := lc.ListenPacket(ctx, srcAddr.Network(), srcAddr.String())
+ 		var bindErr *BindError
+ 		if err != nil && runtime.GOOS == "windows" && go_errors.As(err, &bindErr) {
+@@ -168,6 +172,9 @@
+ 		}
+ 	}
+ 
++	if err := hooks.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
+ 	return dialer.DialContext(ctx, dest.Network.SystemString(), dest.NetAddr())
+ }
+ 
+@@ -247,3 +254,27 @@
+ func (c *FakePacketConn) LocalAddr() net.Addr {
+ 	return &net.UDPAddr{IP: []byte{0, 0, 0, 0}}
+ }
++
++// guardedSystemDial закрывает все вызовы effective dialer, включая Happy Eyeballs.
++func guardedSystemDial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
++	if err := hooks.BeforeSocketDial(ctx); err != nil {
++		return nil, err
++	}
++	conn, err := effectiveSystemDialer.Dial(ctx, src, dest, sockopt)
++	if err != nil {
++		return nil, err
++	}
++	release, err := hooks.OwnSocket(ctx, conn)
++	if err != nil {
++		return nil, err
++	}
++	return &ownedFlowConn{Conn: conn, release: release}, nil
++}
++
++// Close передаёт единственному session handle закрытие underlying connection.
++type ownedFlowConn struct {
++	net.Conn
++	release func() error
++}
++
++func (c *ownedFlowConn) Close() error { return c.release() }
+diff --git a/app/dns/dns.go b/app/dns/dns.go
+index e452bda..ae03818 100644
+--- a/app/dns/dns.go
++++ b/app/dns/dns.go
+@@ -5,6 +5,7 @@ import (
+ 	"context"
+ 	go_errors "errors"
+ 	"fmt"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"sort"
+ 	"strings"
+ 	"sync"
+@@ -253,6 +254,25 @@ func (s *DNS) MayUseSystemResolver() bool {
+ 
+ // LookupIP implements dns.Client.
+ func (s *DNS) LookupIP(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++	return s.lookupIP(s.ctx, domain, option)
++}
++
++// LookupIPWithContext проверяет свежую authority после любого результата DNS.
++func (s *DNS) LookupIPWithContext(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++	if ctx == nil || ctx.Err() != nil {
++		return nil, 0, hooks.ErrDenied
++	}
++	if s.script != nil {
++		return nil, 0, hooks.ErrDenied
++	}
++	ips, ttl, err := s.lookupIP(ctx, domain, option)
++	if guardErr := hooks.CheckAfterDNS(ctx); guardErr != nil {
++		return nil, 0, guardErr
++	}
++	return ips, ttl, err
++}
++
++func (s *DNS) lookupIP(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	// Normalize the FQDN form query
+ 	domain = strings.TrimSuffix(domain, ".")
+ 	if domain == "" {
+@@ -300,9 +320,9 @@ func (s *DNS) LookupIP(domain string, option dns.IPOption) ([]net.IP, uint32, er
+ 		return s.script.query(domain, option)
+ 	}
+ 	if s.enableParallelQuery {
+-		return s.parallelQuery(domain, option)
++		return s.parallelQuery(ctx, domain, option)
+ 	} else {
+-		return s.serialQuery(domain, option)
++		return s.serialQuery(ctx, domain, option)
+ 	}
+ }
+ 
+@@ -402,7 +422,7 @@ func mergeQueryErrors(domain string, errs []error) error {
+ 	return errors.New("returning nil for domain ", domain).Base(noRNF)
+ }
+ 
+-func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++func (s *DNS) serialQuery(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	var errs []error
+ 	for _, client := range s.sortClients(domain) {
+ 		if !option.FakeEnable && strings.EqualFold(client.Name(), "FakeDNS") {
+@@ -410,7 +430,10 @@ func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32,
+ 			continue
+ 		}
+ 
+-		ips, ttl, err := client.QueryIP(s.ctx, domain, option)
++		if ctx.Err() != nil {
++			return nil, 0, ctx.Err()
++		}
++		ips, ttl, err := client.QueryIP(ctx, domain, option)
+ 
+ 		if len(ips) > 0 {
+ 			return ips, ttl, nil
+@@ -425,11 +448,11 @@ func (s *DNS) serialQuery(domain string, option dns.IPOption) ([]net.IP, uint32,
+ 	return nil, 0, mergeQueryErrors(domain, errs)
+ }
+ 
+-func (s *DNS) parallelQuery(domain string, option dns.IPOption) ([]net.IP, uint32, error) {
++func (s *DNS) parallelQuery(ctx context.Context, domain string, option dns.IPOption) ([]net.IP, uint32, error) {
+ 	var errs []error
+ 	clients := s.sortClients(domain)
+ 
+-	resultsChan := asyncQueryAll(domain, option, clients, s.ctx)
++	resultsChan := asyncQueryAll(domain, option, clients, ctx)
+ 
+ 	groups, groupOf := makeGroups( /*s.ctx,*/ clients)
+ 	results := make([]*queryResult, len(clients))
+@@ -440,7 +463,12 @@ func (s *DNS) parallelQuery(domain string, option dns.IPOption) ([]net.IP, uint3
+ 
+ 	nextGroup := 0
+ 	for range clients {
+-		result := <-resultsChan
++		var result queryResult
++		select {
++		case <-ctx.Done():
++			return nil, 0, ctx.Err()
++		case result = <-resultsChan:
++		}
+ 		results[result.index] = &result
+ 
+ 		gi := groupOf[result.index]
+@@ -504,7 +532,7 @@ func asyncQueryAll(domain string, option dns.IPOption, clients []*Client, ctx co
+ 		go func(i int, c *Client) {
+ 			qctx := ctx
+ 			if !c.server.IsDisableCache() {
+-				nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeoutMs*2)
++				nctx, cancel := context.WithTimeout(ctx, c.timeoutMs*2)
+ 				qctx = nctx
+ 				defer cancel()
+ 			}
+diff --git a/common/yonikbroker/dns_callsite_test.go b/common/yonikbroker/dns_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/dns_callsite_test.go
+@@ -0,0 +1,611 @@
++package nativehooks_test
++
++import (
++	"context"
++	"fmt"
++	mdns "github.com/miekg/dns"
++	"github.com/xtls/xray-core/app/dispatcher"
++	appdns "github.com/xtls/xray-core/app/dns"
++	"github.com/xtls/xray-core/app/policy"
++	"github.com/xtls/xray-core/app/proxyman"
++	_ "github.com/xtls/xray-core/app/proxyman/outbound"
++	xlog "github.com/xtls/xray-core/common/log"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/serial"
++	"github.com/xtls/xray-core/common/session"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	fdns "github.com/xtls/xray-core/features/dns"
++	rdns "github.com/xtls/xray-core/features/routing/dns"
++	rsession "github.com/xtls/xray-core/features/routing/session"
++	"github.com/xtls/xray-core/proxy/freedom"
++	internet "github.com/xtls/xray-core/transport/internet"
++	"io"
++	"net"
++	"runtime"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestNativeDNSAfterReply(t *testing.T) {
++	for _, parallel := range []bool{false, true} {
++		for _, mode := range []string{"known", "cancel", "unknown", "epoch"} {
++			t.Run(map[bool]string{false: "serial", true: "parallel"}[parallel]+"/"+mode, func(t *testing.T) {
++				listener, err := net.Listen("tcp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				entered, release := make(chan struct{}), make(chan struct{})
++				server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					close(entered)
++					<-release
++					reply := new(mdns.Msg)
++					reply.SetReply(q)
++					rr, _ := mdns.NewRR("private.test. 60 IN A 192.0.2.17")
++					reply.Answer = []mdns.RR{rr}
++					_ = w.WriteMsg(reply)
++				})}
++				go server.ActivateAndServe()
++				t.Cleanup(func() { _ = server.Shutdown() })
++				cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, DisableCache: true, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + listener.Addr().String()))}}}}
++				instance, err := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer instance.Close()
++				ctx, change := hooks.ClosedDNSFixture(t)
++				ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++				route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(ctx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++				result := make(chan []xnet.IP, 1)
++				go func() { result <- route.GetTargetIPs() }()
++				select {
++				case <-entered:
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS exchange не начался")
++				}
++				change(mode)
++				close(release)
++				select {
++				case ips := <-result:
++					downstream := 0
++					if len(ips) > 0 {
++						downstream++
++					}
++					if mode == "known" {
++						if downstream != 1 || !ips[0].Equal(net.ParseIP("192.0.2.17")) {
++							t.Fatalf("private reply: %v", ips)
++						}
++					} else if downstream != 0 {
++						t.Fatalf("downstream=%d", downstream)
++					}
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS await завис")
++				}
++			})
++		}
++	}
++}
++
++// Два независимых authenticated caller используют один DNS question и exchanger.
++func TestNativeDNSConcurrentAuthority(t *testing.T) {
++	for _, transport := range []string{"tcp", "udp"} {
++		for _, parallel := range []bool{false, true} {
++			for _, mode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "wrong-session", "wrong-binding"} {
++				for _, victim := range []int{0, 1} {
++					t.Run(fmt.Sprintf("%s/parallel=%v/%s/victim=%d", transport, parallel, mode, victim), func(t *testing.T) {
++						listener, err := net.Listen("tcp", "127.0.0.1:0")
++						if err != nil {
++							t.Fatal(err)
++						}
++						entered, release := make(chan struct{}), make(chan struct{})
++						var queries atomic.Int32
++						server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++							if queries.Add(1) == 1 {
++								close(entered)
++							}
++							<-release
++							reply := new(mdns.Msg)
++							reply.SetReply(q)
++							rr, _ := mdns.NewRR("private.test. 60 IN A 192.0.2.17")
++							reply.Answer = []mdns.RR{rr}
++							_ = w.WriteMsg(reply)
++						})}
++						endpoint := "tcp+local://" + listener.Addr().String()
++						if transport == "udp" {
++							_ = listener.Close()
++							packet, err := net.ListenPacket("udp", "127.0.0.1:0")
++							if err != nil {
++								t.Fatal(err)
++							}
++							server.Listener = nil
++							server.PacketConn = packet
++							endpoint = "udp://" + packet.LocalAddr().String()
++						}
++						go server.ActivateAndServe()
++						defer server.Shutdown()
++						cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress(endpoint))}}}}
++						if transport == "udp" {
++							cfg.NameServer[0].Address = &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")), Port: uint32(server.PacketConn.LocalAddr().(*net.UDPAddr).Port)}
++						}
++						instance, err := core.New(&core.Config{Outbound: []*core.OutboundHandlerConfig{{ProxySettings: serial.ToTypedMessage(&freedom.Config{})}}, App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++						if err != nil {
++							t.Fatal(err)
++						}
++						defer instance.Close()
++						client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++						ctx0, change0 := hooks.ClosedDNSFixture(t)
++						ctx1, change1 := hooks.ClosedDNSFixture(t)
++						ctx0 = context.WithValue(ctx0, core.XrayKey(1), instance)
++						ctx1 = context.WithValue(ctx1, core.XrayKey(1), instance)
++						changes := []func(string){change0, change1}
++						option := fdns.IPOption{IPv4Enable: true}
++						results := []chan []net.IP{make(chan []net.IP, 1), make(chan []net.IP, 1)}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx0, "private.test", option)
++							if err != nil {
++								t.Logf("caller0 err=%v", err)
++							}
++							results[0] <- ips
++						}()
++						select {
++						case <-entered:
++						case <-time.After(5 * time.Second):
++							t.Fatal("нет exchange")
++						}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx1, "private.test", option)
++							if err != nil {
++								t.Logf("caller1 err=%v", err)
++							}
++							results[1] <- ips
++						}()
++						// Барьер подтверждает два реальных native fetch до выпуска DNS reply.
++						deadline := time.Now().Add(5 * time.Second)
++						for {
++							buf := make([]byte, 1<<20)
++							n := runtime.Stack(buf, true)
++							if strings.Count(string(buf[:n]), "app/dns.fetch(") >= 2 {
++								break
++							}
++							if time.Now().After(deadline) {
++								close(release)
++								t.Fatal("оба caller не вошли в native fetch")
++							}
++							runtime.Gosched()
++						}
++						changes[victim](mode)
++						close(release)
++						for i, ch := range results {
++							select {
++							case ips := <-ch:
++								allowed := mode == "known" || i != victim
++								if allowed {
++									if len(ips) != 1 || !ips[0].Equal(net.ParseIP("192.0.2.17")) {
++										t.Fatalf("caller %d должен получить адрес: %v", i, ips)
++									}
++								} else if len(ips) != 0 {
++									t.Fatalf("caller %d получил адрес без authority: %v", i, ips)
++								}
++							case <-time.After(5 * time.Second):
++								t.Fatal("await завис")
++							}
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("coalescing: queries=%d", queries.Load())
++						}
++						// Свежие вызовы используют общий native cache, но повторно проверяют каждого caller.
++						for i, ctx := range []context.Context{ctx0, ctx1} {
++							ips, _, _ := client.LookupIPWithContext(ctx, "private.test", option)
++							allowed := mode == "known" || i != victim
++							if allowed != (len(ips) == 1) {
++								t.Fatalf("cache caller %d: %v", i, ips)
++							}
++						}
++						// Отдельный caller прогревает routing cache, затем теряет authority.
++						cacheCtx, cacheChange := hooks.ClosedDNSFixture(t)
++						cacheCtx = context.WithValue(cacheCtx, core.XrayKey(1), instance)
++						cacheCtx = session.ContextWithOutbounds(cacheCtx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++						route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(cacheCtx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++						if ips := route.GetTargetIPs(); len(ips) != 1 {
++							t.Fatalf("warm routing cache: %v", ips)
++						}
++						cacheChange(mode)
++						if ips := route.GetTargetIPs(); (mode == "known") != (len(ips) == 1) {
++							t.Fatalf("routing cache после %s: %v", mode, ips)
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("cache miss: queries=%d", queries.Load())
++						}
++					})
++				}
++			}
++		}
++	}
++
++}
++
++func TestAuthenticatedDNSConcurrentAuthority(t *testing.T) {
++	internet.UseAlternativeSystemDialer(&actualSystemDialer{})
++	for _, transport := range []string{"tcp", "udp"} {
++		for _, parallel := range []bool{false} {
++			for _, mode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "wrong-session", "wrong-binding"} {
++				for _, victim := range []int{0} {
++					t.Run(fmt.Sprintf("%s/parallel=%v/%s/victim=%d", transport, parallel, mode, victim), func(t *testing.T) {
++						listener, err := net.Listen("tcp", "127.0.0.1:0")
++						if err != nil {
++							t.Fatal(err)
++						}
++						entered, release := make(chan struct{}), make(chan struct{})
++						var queries atomic.Int32
++						server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++							if queries.Add(1) == 1 {
++								close(entered)
++							}
++							<-release
++							reply := new(mdns.Msg)
++							reply.SetReply(q)
++							rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++							reply.Answer = []mdns.RR{rr}
++							_ = w.WriteMsg(reply)
++						})}
++						endpoint := "tcp+local://" + listener.Addr().String()
++						if transport == "udp" {
++							_ = listener.Close()
++							packet, err := net.ListenPacket("udp", "127.0.0.1:0")
++							if err != nil {
++								t.Fatal(err)
++							}
++							server.Listener = nil
++							server.PacketConn = packet
++							endpoint = "udp://" + packet.LocalAddr().String()
++						}
++						go server.ActivateAndServe()
++						defer server.Shutdown()
++						cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress(endpoint))}}}}
++						if transport == "udp" {
++							cfg.NameServer[0].Address = &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")), Port: uint32(server.PacketConn.LocalAddr().(*net.UDPAddr).Port)}
++						}
++						instance, err := core.New(&core.Config{Outbound: []*core.OutboundHandlerConfig{{ProxySettings: serial.ToTypedMessage(&freedom.Config{})}}, App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++						if err != nil {
++							t.Fatal(err)
++						}
++						defer instance.Close()
++						client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++						ctx0, change0 := hooks.ClosedAuthenticatedDNSFixture(t)
++						ctx1, change1 := hooks.ClosedAuthenticatedDNSFixture(t)
++						ctx0 = context.WithValue(ctx0, core.XrayKey(1), instance)
++						ctx1 = context.WithValue(ctx1, core.XrayKey(1), instance)
++						changes := []func(string){change0, change1}
++						option := fdns.IPOption{IPv4Enable: true}
++						results := []chan []net.IP{make(chan []net.IP, 1), make(chan []net.IP, 1)}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx0, "private.test", option)
++							if err != nil {
++								t.Logf("caller0 err=%v", err)
++							}
++							results[0] <- ips
++						}()
++						select {
++						case <-entered:
++						case <-time.After(5 * time.Second):
++							t.Fatal("нет exchange")
++						}
++						go func() {
++							ips, _, err := client.LookupIPWithContext(ctx1, "private.test", option)
++							if err != nil {
++								t.Logf("caller1 err=%v", err)
++							}
++							results[1] <- ips
++						}()
++						// Барьер подтверждает два реальных native fetch до выпуска DNS reply.
++						deadline := time.Now().Add(5 * time.Second)
++						for {
++							buf := make([]byte, 1<<20)
++							n := runtime.Stack(buf, true)
++							if strings.Count(string(buf[:n]), "app/dns.fetch(") >= 2 {
++								break
++							}
++							if time.Now().After(deadline) {
++								close(release)
++								t.Fatal("оба caller не вошли в native fetch")
++							}
++							runtime.Gosched()
++						}
++						before := []uint64{hooks.AuthenticatedProofCount(ctx0), hooks.AuthenticatedProofCount(ctx1)}
++						changes[victim](mode)
++						close(release)
++						for i, ch := range results {
++							select {
++							case ips := <-ch:
++								ctx := []context.Context{ctx0, ctx1}[i]
++								if (mode == "known" || i != victim) && hooks.AuthenticatedProofCount(ctx) <= before[i] {
++									t.Fatal("нет свежего proof после await")
++								}
++								actualEcho(t, ctx, transport, ips, mode == "known" || i != victim)
++								allowed := mode == "known" || i != victim
++								if allowed {
++									if len(ips) != 1 || !ips[0].Equal(net.ParseIP("127.0.0.1")) {
++										t.Fatalf("caller %d должен получить адрес: %v", i, ips)
++									}
++								} else if len(ips) != 0 {
++									t.Fatalf("caller %d получил адрес без authority: %v", i, ips)
++								}
++							case <-time.After(5 * time.Second):
++								t.Fatal("await завис")
++							}
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("coalescing: queries=%d", queries.Load())
++						}
++						// Свежие вызовы используют общий native cache, но повторно проверяют каждого caller.
++						for i, ctx := range []context.Context{ctx0, ctx1} {
++							ips, _, _ := client.LookupIPWithContext(ctx, "private.test", option)
++							allowed := mode == "known" || i != victim
++							if allowed != (len(ips) == 1) {
++								t.Fatalf("cache caller %d: %v", i, ips)
++							}
++						}
++						// Отдельный caller прогревает routing cache, затем теряет authority.
++						cacheCtx, cacheChange := hooks.ClosedAuthenticatedDNSFixture(t)
++						cacheCtx = context.WithValue(cacheCtx, core.XrayKey(1), instance)
++						cacheCtx = session.ContextWithOutbounds(cacheCtx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), 443)}})
++						route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(cacheCtx), instance.GetFeature(fdns.ClientType()).(fdns.Client))
++						if ips := route.GetTargetIPs(); len(ips) != 1 {
++							t.Fatalf("warm routing cache: %v", ips)
++						}
++						cacheChange(mode)
++						if ips := route.GetTargetIPs(); (mode == "known") != (len(ips) == 1) {
++							t.Fatalf("routing cache после %s: %v", mode, ips)
++						}
++						if queries.Load() != 1 && !(mode == "revoke" && victim == 0 && queries.Load() == 2) {
++							t.Fatalf("cache miss: queries=%d", queries.Load())
++						}
++					})
++				}
++			}
++		}
++	}
++
++}
++
++// actualEcho проверяет точный адрес, реальный socket и двусторонний payload.
++func actualEcho(t *testing.T, ctx context.Context, network string, ips []net.IP, allowed bool, revoke ...func()) {
++	t.Helper()
++	var port int
++	received := make(chan string, 1)
++	if network == "tcp" {
++		l, e := net.Listen("tcp", "127.0.0.1:0")
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer l.Close()
++		port = l.Addr().(*net.TCPAddr).Port
++		go func() {
++			c, e := l.Accept()
++			if e != nil {
++				return
++			}
++			defer c.Close()
++			c.SetDeadline(time.Now().Add(time.Second))
++			b := make([]byte, 4)
++			_, e = io.ReadFull(c, b)
++			if e == nil {
++				received <- string(b)
++				c.Write(b)
++				c.Read(make([]byte, 4))
++			}
++		}()
++	} else {
++		l, e := net.ListenPacket("udp", "127.0.0.1:0")
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer l.Close()
++		port = l.LocalAddr().(*net.UDPAddr).Port
++		go func() {
++			b := make([]byte, 4)
++			n, a, e := l.ReadFrom(b)
++			if e == nil {
++				received <- string(b[:n])
++				l.WriteTo(b[:n], a)
++			}
++		}()
++	}
++	counter := &actualSystemDialer{}
++	ctx = context.WithValue(ctx, actualCounterKey{}, counter)
++	egress := 0
++	if len(ips) > 0 {
++		if !ips[0].Equal(net.ParseIP("127.0.0.1")) {
++			t.Fatal("неверный адрес", ips)
++		}
++		dst := xnet.TCPDestination(xnet.IPAddress(ips[0]), xnet.Port(port))
++		if network == "udp" {
++			dst.Network = xnet.Network_UDP
++		}
++		if hooks.RoutingEntry(ctx) == nil {
++			c, e := internet.DialSystem(ctx, dst, nil)
++			if e == nil {
++				c.SetDeadline(time.Now().Add(time.Second))
++				_, e = c.Write([]byte("echo"))
++				b := make([]byte, 4)
++				if e == nil {
++					_, e = io.ReadFull(c, b)
++				}
++				defer c.Close()
++				if e != nil || string(b) != "echo" {
++					t.Fatal("echo", e, string(b))
++				}
++				select {
++				case v := <-received:
++					if v != "echo" {
++						t.Fatal(v)
++					}
++					egress++
++					if len(revoke) > 0 {
++						t.Logf("registered flows before revoke=%d", hooks.AuthenticatedFlowCount(ctx))
++						revoke[0]()
++						if !hooks.WaitAuthenticatedRevoke(ctx) {
++							t.Fatal("revoke не завершён")
++						}
++						deadline := time.Now().Add(time.Second)
++						for hooks.AuthenticatedFlowCount(ctx) != 0 && time.Now().Before(deadline) {
++							time.Sleep(time.Millisecond)
++						}
++						if hooks.AuthenticatedFlowCount(ctx) != 0 {
++							t.Fatal("flow остался после отзыва")
++						}
++						c.SetDeadline(time.Now().Add(time.Second))
++						if _, err := c.Write([]byte("late")); err == nil {
++							t.Fatal("subsequent Write разрешён после отзыва")
++						}
++						if _, err := c.Read(make([]byte, 4)); err == nil {
++							t.Fatal("subsequent Read разрешён после отзыва")
++						}
++						if next, err := internet.DialSystem(ctx, dst, nil); err == nil {
++							next.Close()
++							t.Fatal("subsequent dial разрешён")
++						}
++					}
++
++				case <-time.After(time.Second):
++					t.Fatal("нет egress")
++				}
++			}
++		}
++	}
++	expected := 0
++	if allowed {
++		expected = 1
++	}
++	dials, handoffs := counter.dials.Load(), counter.handoffs.Load()
++	if dials != int32(expected) || handoffs != int32(expected) || egress != expected {
++		t.Fatalf("actual dial=%d handoff=%d egress=%d want=%d", dials, handoffs, egress, expected)
++	}
++	t.Logf("actual %s dial=%d socket-handoff=%d egress=%d", network, dials, handoffs, egress)
++}
++
++type cacheCheckpoint struct {
++	change func(string)
++	mode   string
++	hits   atomic.Int32
++}
++
++func (h *cacheCheckpoint) Handle(m xlog.Message) {
++	if d, ok := m.(*xlog.DNSLog); ok && d.Status == xlog.DNSCacheHit && d.Domain == "private.test." {
++		h.hits.Add(1)
++		mode := h.mode
++		if mode == "" {
++			mode = "unknown"
++		}
++		h.change(mode)
++	}
++}
++
++// Checkpoint находится внутри реального cache-hit перед возвратом cached reply.
++func TestAuthenticatedCacheFence(t *testing.T) {
++	l, e := net.Listen("tcp", "127.0.0.1:0")
++	if e != nil {
++		t.Fatal(e)
++	}
++	var questions atomic.Int32
++	server := &mdns.Server{Listener: l, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++		questions.Add(1)
++		r := new(mdns.Msg)
++		r.SetReply(q)
++		rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++		r.Answer = []mdns.RR{rr}
++		w.WriteMsg(r)
++	})}
++	go server.ActivateAndServe()
++	defer server.Shutdown()
++	cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + l.Addr().String()))}}}}
++	instance, e := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++	if e != nil {
++		t.Fatal(e)
++	}
++	defer instance.Close()
++	ctx, change := hooks.ClosedAuthenticatedDNSFixture(t)
++	client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++	option := fdns.IPOption{IPv4Enable: true}
++	ips, _, e := client.LookupIPWithContext(ctx, "private.test", option)
++	if e != nil || len(ips) != 1 {
++		t.Fatal("warm", ips, e)
++	}
++	if hooks.RoutingEntry(ctx) != nil {
++		t.Fatal("entry отвергнут до cache")
++	}
++	h := &cacheCheckpoint{change: change}
++	xlog.RegisterHandler(h)
++	ips, _, e = client.LookupIPWithContext(ctx, "private.test", option)
++	if h.hits.Load() != 1 || questions.Load() != 1 {
++		t.Fatalf("cache checkpoint hits=%d questions=%d", h.hits.Load(), questions.Load())
++	}
++	if e == nil || len(ips) != 0 {
++		t.Fatalf("cache fence пропустил адрес: %v %v", ips, e)
++	}
++}
++
++type actualSystemDialer struct {
++	dials, handoffs atomic.Int32
++	real            internet.DefaultSystemDialer
++}
++
++func (d *actualSystemDialer) Dial(ctx context.Context, src xnet.Address, dst xnet.Destination, opt *internet.SocketConfig) (net.Conn, error) {
++	counter, _ := ctx.Value(actualCounterKey{}).(*actualSystemDialer)
++	if counter != nil {
++		counter.dials.Add(1)
++	}
++	c, e := d.real.Dial(ctx, src, dst, opt)
++	if e == nil && counter != nil {
++		counter.handoffs.Add(1)
++	}
++	return c, e
++}
++func (*actualSystemDialer) DestIpAddress() xnet.IP { return nil }
++
++type actualCounterKey struct{}
++
++func TestAuthenticatedSocketOwnership(t *testing.T) {
++	internet.UseAlternativeSystemDialer(&actualSystemDialer{})
++	defer internet.UseAlternativeSystemDialer(nil)
++	for _, network := range []string{"tcp", "udp"} {
++		for _, mode := range []string{"cancel", "revoke"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				l, e := net.Listen("tcp", "127.0.0.1:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				var questions atomic.Int32
++				server := &mdns.Server{Listener: l, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					questions.Add(1)
++					r := new(mdns.Msg)
++					r.SetReply(q)
++					rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++					r.Answer = []mdns.RR{rr}
++					w.WriteMsg(r)
++				})}
++				go server.ActivateAndServe()
++				defer server.Shutdown()
++				cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + l.Addr().String()))}}}}
++				instance, e := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer instance.Close()
++				ctx, change := hooks.ClosedAuthenticatedDNSFixture(t)
++				client := instance.GetFeature(fdns.ClientType()).(fdns.ContextClient)
++				option := fdns.IPOption{IPv4Enable: true}
++				ips, _, e := client.LookupIPWithContext(ctx, "private.test", option)
++				if e != nil || len(ips) != 1 {
++					t.Fatal("warm", ips, e)
++				}
++				if hooks.RoutingEntry(ctx) != nil {
++					t.Fatal("routing отказал Known")
++				}
++				actualEcho(t, ctx, network, ips, true, func() { change(mode) })
++			})
++		}
++	}
++}
+diff --git a/features/dns/client.go b/features/dns/client.go
+index 6eb4bd0..b564907 100644
+--- a/features/dns/client.go
++++ b/features/dns/client.go
+@@ -1,6 +1,7 @@
+ package dns
+ 
+ import (
++	"context"
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
+ 	"github.com/xtls/xray-core/common/serial"
+@@ -24,6 +25,11 @@ type Client interface {
+ 	LookupIP(domain string, option IPOption) ([]net.IP, uint32, error)
+ }
+ 
++// ContextClient передаёт контекст конкретного flow без изменения legacy Client.
++type ContextClient interface {
++	LookupIPWithContext(context.Context, string, IPOption) ([]net.IP, uint32, error)
++}
++
+ // ClientType returns the type of Client interface. Can be used for implementing common.HasType.
+ //
+ // xray:api:beta
+diff --git a/features/routing/dns/context.go b/features/routing/dns/context.go
+index 2cf9d26..9af9552 100644
+--- a/features/routing/dns/context.go
++++ b/features/routing/dns/context.go
+@@ -2,6 +2,7 @@ package dns
+ 
+ import (
+ 	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
+@@ -19,7 +20,16 @@ type ResolvableContext struct {
+ 
+ // GetTargetIPs overrides original routing.Context's implementation.
+ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
++	flow, hasFlow := ctx.Context.(interface{ FlowContext() context.Context })
++	managed := hasFlow && hooks.HasFlowContext(flow.FlowContext())
++	if managed && (flow.FlowContext() == nil || flow.FlowContext().Err() != nil) {
++		ctx.hasError = true
++		return nil
++	}
+ 	if len(ctx.cacheIPs) > 0 {
++		if managed && hooks.CheckAfterDNS(flow.FlowContext()) != nil {
++			return nil
++		}
+ 		return ctx.cacheIPs
+ 	}
+ 
+@@ -28,11 +38,27 @@ func (ctx *ResolvableContext) GetTargetIPs() []net.IP {
+ 	}
+ 
+ 	if domain := ctx.GetTargetDomain(); len(domain) != 0 {
+-		ips, _, err := ctx.dnsClient.LookupIP(domain, dns.IPOption{
++		option := dns.IPOption{
+ 			IPv4Enable: true,
+ 			IPv6Enable: true,
+ 			FakeEnable: false,
+-		})
++		}
++		var ips []net.IP
++		var err error
++		if managed {
++			client, ok := ctx.dnsClient.(dns.ContextClient)
++			if !ok {
++				ctx.hasError = true
++				return nil
++			}
++			ips, _, err = client.LookupIPWithContext(flow.FlowContext(), domain, option)
++			if err != nil {
++				ctx.hasError = true
++				return nil
++			}
++		} else {
++			ips, _, err = ctx.dnsClient.LookupIP(domain, option)
++		}
+ 		if err == nil {
+ 			ctx.cacheIPs = ips
+ 			return ips
+diff --git a/features/routing/session/context.go b/features/routing/session/context.go
+index e331c43..6002655 100644
+--- a/features/routing/session/context.go
++++ b/features/routing/session/context.go
+@@ -10,11 +10,15 @@ import (
+ 
+ // Context is an implementation of routing.Context, which is a wrapper of context.context with session info.
+ type Context struct {
+-	Inbound  *session.Inbound
+-	Outbound *session.Outbound
+-	Content  *session.Content
++	flowContext context.Context
++	Inbound     *session.Inbound
++	Outbound    *session.Outbound
++	Content     *session.Content
+ }
+ 
++// FlowContext сохраняет закрытую authority исходного flow.
++func (ctx *Context) FlowContext() context.Context { return ctx.flowContext }
++
+ // GetInboundTag implements routing.Context.
+ func (ctx *Context) GetInboundTag() string {
+ 	if ctx.Inbound == nil {
+@@ -156,8 +160,9 @@ func AsRoutingContext(ctx context.Context) routing.Context {
+ 	outbounds := session.OutboundsFromContext(ctx)
+ 	ob := outbounds[len(outbounds)-1]
+ 	return &Context{
+-		Inbound:  session.InboundFromContext(ctx),
+-		Outbound: ob,
+-		Content:  session.ContentFromContext(ctx),
++		flowContext: ctx,
++		Inbound:     session.InboundFromContext(ctx),
++		Outbound:    ob,
++		Content:     session.ContentFromContext(ctx),
+ 	}
+ }
+diff --git a/common/yonikbroker/freedom_callsite_test.go b/common/yonikbroker/freedom_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/freedom_callsite_test.go
+@@ -0,0 +1,179 @@
++package nativehooks_test
++
++import (
++	"context"
++	"errors"
++	mdns "github.com/miekg/dns"
++	"github.com/xtls/xray-core/app/dispatcher"
++	appdns "github.com/xtls/xray-core/app/dns"
++	"github.com/xtls/xray-core/app/policy"
++	"github.com/xtls/xray-core/app/proxyman"
++	_ "github.com/xtls/xray-core/app/proxyman/outbound"
++	"github.com/xtls/xray-core/common/buf"
++	xnet "github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/serial"
++	"github.com/xtls/xray-core/common/session"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/proxy/freedom"
++	"github.com/xtls/xray-core/transport"
++	"github.com/xtls/xray-core/transport/internet/stat"
++
++	"net"
++	"testing"
++	"time"
++)
++
++func TestFreedomDNSAfterReply(t *testing.T) {
++	for _, udp := range []bool{false, true} {
++		parallel := false
++		for _, mode := range []string{"known", "cancel", "unknown", "epoch", "revoke", "unavailable", "stale"} {
++			t.Run(map[bool]string{false: "tcp", true: "udp"}[udp]+"/"+mode, func(t *testing.T) {
++				listener, err := net.Listen("tcp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				entered, release := make(chan struct{}), make(chan struct{})
++				server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					close(entered)
++					<-release
++					reply := new(mdns.Msg)
++					reply.SetReply(q)
++					rr, _ := mdns.NewRR("private.test. 60 IN A 127.0.0.1")
++					reply.Answer = []mdns.RR{rr}
++					_ = w.WriteMsg(reply)
++				})}
++				go server.ActivateAndServe()
++				t.Cleanup(func() { _ = server.Shutdown() })
++				cfg := &appdns.Config{QueryStrategy: appdns.QueryStrategy_USE_IP4, DisableCache: true, EnableParallelQuery: parallel, NameServer: []*appdns.NameServer{{Address: &xnet.Endpoint{Address: xnet.NewIPOrDomain(xnet.DomainAddress("tcp+local://" + listener.Addr().String()))}}}}
++				instance, err := core.New(&core.Config{App: []*serial.TypedMessage{serial.ToTypedMessage(cfg), serial.ToTypedMessage(&dispatcher.Config{}), serial.ToTypedMessage(&proxyman.OutboundConfig{}), serial.ToTypedMessage(&policy.Config{})}})
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer instance.Close()
++				tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer tcpListener.Close()
++				go func() {
++					for {
++						c, err := tcpListener.Accept()
++						if err != nil {
++							return
++						}
++						_ = c.Close()
++					}
++				}()
++				ctx, change := hooks.ClosedDNSFixture(t)
++				ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: xnet.TCPDestination(xnet.DomainAddress("private.test"), xnet.Port(tcpListener.Addr().(*net.TCPAddr).Port))}})
++				object, err := core.CreateObject(instance, &freedom.Config{})
++				if err != nil {
++					t.Fatal(err)
++				}
++				handler := object.(*freedom.Handler)
++				socket, err := net.ListenPacket("udp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer socket.Close()
++				sender, err := net.ListenPacket("udp", "127.0.0.1:0")
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer sender.Close()
++				target := xnet.UDPDestination(xnet.DomainAddress("private.test"), xnet.Port(socket.LocalAddr().(*net.UDPAddr).Port))
++				writer := freedom.NewPacketWriter(ctx, &xnet.PacketConnWrapper{PacketConn: sender, Dest: socket.LocalAddr()}, handler, nil, xnet.Destination{}, xnet.UDPDestination(xnet.LocalHostIP, target.Port), nil)
++				dialer := new(freedomDialer)
++				result := make(chan error, 1)
++				go func() {
++					if udp {
++						packet := buf.New()
++						_, _ = packet.Write([]byte("private"))
++						packet.UDP = &target
++						result <- writer.WriteMultiBuffer(buf.MultiBuffer{packet})
++					} else {
++						result <- handler.Process(ctx, &transport.Link{}, dialer)
++					}
++				}()
++
++				select {
++				case <-entered:
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS exchange не начался")
++				}
++				change(mode)
++				close(release)
++				select {
++				case <-result:
++					downstream := dialer.calls
++					if udp {
++						_ = socket.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
++						p := make([]byte, 32)
++						n, _, _ := socket.ReadFrom(p)
++						if n > 0 {
++							downstream++
++						}
++					}
++					if mode == "known" {
++						if downstream == 0 {
++							t.Fatal("нет actual downstream")
++						}
++					} else if downstream != 0 {
++						t.Fatalf("downstream=%d", downstream)
++					}
++
++				case <-time.After(5 * time.Second):
++					t.Fatal("DNS await завис")
++				}
++			})
++		}
++	}
++}
++
++type freedomDialer struct{ calls int }
++
++func (d *freedomDialer) Dial(_ context.Context, dest xnet.Destination) (stat.Connection, error) {
++	if !dest.Address.IP().Equal(net.ParseIP("127.0.0.1")) {
++		panic("не private DNS")
++	}
++	c, err := net.DialTimeout("tcp", dest.NetAddr(), time.Second)
++	if err != nil {
++		return nil, err
++	}
++	_ = c.Close()
++	d.calls++
++	return nil, errors.New("controlled dial")
++}
++func (*freedomDialer) DestIpAddress() xnet.IP                                { return nil }
++func (*freedomDialer) SetOutboundGateway(context.Context, *session.Outbound) {}
++
++func TestFreedomReaderAfterAwait(t *testing.T) {
++	for _, mode := range []string{"known", "cancel", "revoke", "unknown", "epoch", "unavailable", "stale"} {
++		t.Run(mode, func(t *testing.T) {
++			ctx, change := hooks.ClosedDNSFixture(t)
++			socket, err := net.ListenPacket("udp", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer socket.Close()
++			sender, err := net.ListenPacket("udp", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer sender.Close()
++			_ = socket.SetReadDeadline(time.Now().Add(time.Second))
++			reader := freedom.NewPacketReader(ctx, &xnet.PacketConnWrapper{PacketConn: socket, Dest: sender.LocalAddr()}, &freedom.Handler{}, nil, xnet.Destination{}, xnet.UDPDestination(xnet.LocalHostIP, 443))
++			result := make(chan int, 1)
++			go func() { mb, _ := reader.ReadMultiBuffer(); n := len(mb); buf.ReleaseMulti(mb); result <- n }()
++			change(mode)
++			if _, err := sender.WriteTo([]byte("private"), socket.LocalAddr()); err != nil {
++				t.Fatal(err)
++			}
++			n := <-result
++			if (mode == "known") != (n == 1) {
++				t.Fatalf("handoff=%d mode=%s", n, mode)
++			}
++		})
++	}
++}
+diff --git a/common/yonikbroker/routing_legacy_test.go b/common/yonikbroker/routing_legacy_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/routing_legacy_test.go
+@@ -0,0 +1,41 @@
++package nativehooks_test
++
++import (
++	"context"
++	"github.com/golang/mock/gomock"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/session"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	fdns "github.com/xtls/xray-core/features/dns"
++	rdns "github.com/xtls/xray-core/features/routing/dns"
++	rsession "github.com/xtls/xray-core/features/routing/session"
++	"github.com/xtls/xray-core/testing/mocks"
++	"testing"
++)
++
++func TestRoutingLegacyAndMandatoryMissingAPI(t *testing.T) {
++	for _, mode := range []string{"legacy", "known", "cancel", "revoke", "unknown", "unavailable", "stale"} {
++		t.Run(mode, func(t *testing.T) {
++			ctx := context.Background()
++			if mode != "legacy" {
++				var change func(string)
++				ctx, change = hooks.ClosedDNSFixture(t)
++				change(mode)
++			}
++			client := mocks.NewDNSClient(gomock.NewController(t))
++			if mode == "legacy" {
++				client.EXPECT().LookupIP("private.test", gomock.Any()).Return([]net.IP{net.ParseIP("192.168.0.1")}, uint32(60), nil).Times(1)
++			}
++			ctx = session.ContextWithOutbounds(ctx, []*session.Outbound{{Target: net.TCPDestination(net.DomainAddress("private.test"), 443)}})
++			route := rdns.ContextWithDNSClient(rsession.AsRoutingContext(ctx), fdns.Client(client))
++			ips := route.GetTargetIPs()
++			if mode == "legacy" {
++				if len(ips) != 1 || !ips[0].Equal(net.ParseIP("192.168.0.1")) {
++					t.Fatalf("legacy DNS: %v", ips)
++				}
++			} else if len(ips) != 0 {
++				t.Fatalf("managed missing API: %v", ips)
++			}
++		})
++	}
++}
+diff --git a/proxy/freedom/freedom.go b/proxy/freedom/freedom.go
+index 85ae6ee..0f0415c 100644
+--- a/proxy/freedom/freedom.go
++++ b/proxy/freedom/freedom.go
+@@ -22,7 +22,9 @@ import (
+ 	"github.com/xtls/xray-core/common/signal"
+ 	"github.com/xtls/xray-core/common/task"
+ 	"github.com/xtls/xray-core/common/utils"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/features/dns"
+ 	"github.com/xtls/xray-core/features/policy"
+ 	"github.com/xtls/xray-core/features/stats"
+ 	"github.com/xtls/xray-core/proxy"
+@@ -57,7 +59,8 @@ func init() {
+ 			h.resolveStrategy = streamSettings.SocketSettings.DomainStrategy
+ 			h.usesDialerProxy = len(streamSettings.SocketSettings.DialerProxy) > 0
+ 		}
+-		if err := core.RequireFeatures(ctx, func(pm policy.Manager) error {
++		if err := core.RequireFeatures(ctx, func(pm policy.Manager, dc dns.Client) error {
++			h.dnsClient = dc
+ 			return h.Init(config.(*Config), pm)
+ 		}); err != nil {
+ 			return nil, err
+@@ -93,6 +96,7 @@ type FinalRule struct {
+ 
+ // Handler handles Freedom connections.
+ type Handler struct {
++	dnsClient       dns.Client
+ 	policyManager   policy.Manager
+ 	config          *Config
+ 	finalRules      []*FinalRule
+@@ -100,6 +104,32 @@ type Handler struct {
+ 	usesDialerProxy bool
+ }
+ 
++// resolveFlow не допускает system DNS fallback после managed отказа.
++func (h *Handler) resolveFlow(ctx context.Context, domain string) (net.Address, error) {
++	if ctx == nil || ctx.Err() != nil {
++		return nil, hooks.ErrDenied
++	}
++	client, ok := h.dnsClient.(dns.ContextClient)
++	if !ok {
++		return nil, hooks.ErrDenied
++	}
++	ips, _, err := client.LookupIPWithContext(ctx, domain, dns.IPOption{IPv4Enable: true, IPv6Enable: true})
++	if err != nil {
++		return nil, err
++	}
++	if err = hooks.CheckAfterDNS(ctx); err != nil {
++		return nil, err
++	}
++	if len(ips) == 0 {
++		return nil, hooks.ErrDenied
++	}
++	addr := net.IPAddress(ips[dice.Roll(len(ips))])
++	if addr == nil {
++		return nil, hooks.ErrDenied
++	}
++	return addr, nil
++}
++
+ func buildFinalRule(config *FinalRuleConfig) (*FinalRule, error) {
+ 	rule := &FinalRule{
+ 		action:     config.GetAction(),
+@@ -296,6 +326,18 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 	var blockedDest *net.Destination
+ 	var blockedRule *FinalRule
+ 	err := retry.ExponentialBackoff(5, 100).On(func() error {
++		if destination.Address.Family().IsDomain() && hooks.HasFlowContext(ctx) {
++			addr, err := h.resolveFlow(ctx, destination.Address.Domain())
++			if err != nil {
++				return err
++			}
++			destination.Address = addr
++		}
++		if hooks.HasFlowContext(ctx) {
++			if err := hooks.BeforeSocketDial(ctx); err != nil {
++				return err
++			}
++		}
+ 		if destination.Address.Family().IsDomain() {
+ 			if defaultRule != nil || len(h.finalRules) > 0 {
+ 				if strategy := h.resolveStrategy; strategy.HasStrategy() {
+@@ -408,7 +450,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 				writer = buf.NewWriter(conn)
+ 			}
+ 		} else {
+-			writer = NewPacketWriter(conn, h, defaultRule, UDPOverride, destination, outGateway)
++			writer = NewPacketWriter(ctx, conn, h, defaultRule, UDPOverride, destination, outGateway)
+ 			if h.config.Noises != nil {
+ 				errors.LogDebug(ctx, "NOISE", h.config.Noises)
+ 				writer = &NoisePacketWriter{
+@@ -443,7 +485,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 		if destination.Network == net.Network_TCP {
+ 			reader = buf.NewReader(conn)
+ 		} else {
+-			reader = NewPacketReader(conn, h, defaultRule, UDPOverride, destination)
++			reader = NewPacketReader(ctx, conn, h, defaultRule, UDPOverride, destination)
+ 		}
+ 		if err := buf.Copy(reader, output, buf.UpdateActivity(timer)); err != nil {
+ 			return errors.New("failed to process response").Base(err)
+@@ -462,7 +504,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 	return nil
+ }
+ 
+-func NewPacketReader(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination) buf.Reader {
++func NewPacketReader(ctx context.Context, conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination) buf.Reader {
+ 	iConn := conn
+ 	statConn, ok := iConn.(*stat.CounterConnection)
+ 	if ok {
+@@ -480,6 +522,7 @@ func NewPacketReader(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverr
+ 
+ 		return &PacketReader{
+ 			PacketConnWrapper: c,
++			flowContext:       ctx,
+ 			Counter:           counter,
+ 			Handler:           h,
+ 			DefaultRule:       defaultRule,
+@@ -492,6 +535,7 @@ func NewPacketReader(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverr
+ }
+ 
+ type PacketReader struct {
++	flowContext context.Context
+ 	*net.PacketConnWrapper
+ 	stats.Counter
+ 	Handler           *Handler
+@@ -510,6 +554,12 @@ func (r *PacketReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+ 			b.Release()
+ 			return nil, err
+ 		}
++		if hooks.HasFlowContext(r.flowContext) {
++			if err := hooks.BeforeSocketDial(r.flowContext); err != nil {
++				b.Release()
++				return nil, err
++			}
++		}
+ 		udpAddr := d.(*net.UDPAddr)
+ 		sourceAddr := net.IPAddress(udpAddr.IP)
+ 		if rule := r.Handler.matchFinalRule(net.Network_UDP, sourceAddr, net.Port(udpAddr.Port), r.DefaultRule); rule != nil && rule.action == RuleAction_Block {
+@@ -537,7 +587,7 @@ func (r *PacketReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+ }
+ 
+ // DialDest means the dial target used in the dialer when creating conn
+-func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination, outGateway net.Address) buf.Writer {
++func NewPacketWriter(ctx context.Context, conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination, outGateway net.Address) buf.Writer {
+ 	iConn := conn
+ 	statConn, ok := iConn.(*stat.CounterConnection)
+ 	if ok {
+@@ -556,6 +606,7 @@ func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverr
+ 		}
+ 		return &PacketWriter{
+ 			PacketConnWrapper: c,
++			flowContext:       ctx,
+ 			Counter:           counter,
+ 			Handler:           h,
+ 			DefaultRule:       defaultRule,
+@@ -568,6 +619,7 @@ func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverr
+ }
+ 
+ type PacketWriter struct {
++	flowContext context.Context
+ 	*net.PacketConnWrapper
+ 	stats.Counter
+ 	*Handler
+@@ -591,6 +643,7 @@ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+ 		}
+ 		var n int
+ 		var err error
++
+ 		if b.UDP != nil {
+ 			if w.UDPOverride.Address != nil {
+ 				b.UDP.Address = w.UDPOverride.Address
+@@ -598,6 +651,22 @@ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+ 			if w.UDPOverride.Port != 0 {
+ 				b.UDP.Port = w.UDPOverride.Port
+ 			}
++			if hooks.HasFlowContext(w.flowContext) {
++				if b.UDP != nil && b.UDP.Address.Family().IsDomain() {
++					addr, resolveErr := w.Handler.resolveFlow(w.flowContext, b.UDP.Address.Domain())
++					if resolveErr != nil {
++						b.Release()
++						buf.ReleaseMulti(mb)
++						return resolveErr
++					}
++					b.UDP.Address = addr
++				}
++				if guardErr := hooks.BeforeSocketDial(w.flowContext); guardErr != nil {
++					b.Release()
++					buf.ReleaseMulti(mb)
++					return guardErr
++				}
++			}
+ 			if b.UDP.Address.Family().IsDomain() {
+ 				if ip, ok := w.ResolvedUDPAddr.Load(b.UDP.Address.Domain()); ok {
+ 					b.UDP.Address = ip
+@@ -641,6 +710,13 @@ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+ 			}
+ 			n, err = w.PacketConnWrapper.WriteTo(b.Bytes(), destAddr)
+ 		} else {
++			if hooks.HasFlowContext(w.flowContext) {
++				if guardErr := hooks.BeforeSocketDial(w.flowContext); guardErr != nil {
++					b.Release()
++					buf.ReleaseMulti(mb)
++					return guardErr
++				}
++			}
+ 			n, err = w.PacketConnWrapper.Write(b.Bytes())
+ 		}
+ 		b.Release()
+diff --git a/common/yonikbroker/revoke_callsite_test.go b/common/yonikbroker/revoke_callsite_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/revoke_callsite_test.go
+@@ -0,0 +1,109 @@
++package nativehooks_test
++
++import (
++	N "github.com/xtls/xray-core/common/net"
++	H "github.com/xtls/xray-core/common/yonikbroker"
++	I "github.com/xtls/xray-core/transport/internet"
++	"io"
++	"net"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestActualOpenedFlowsRevoke(t *testing.T) {
++	for _, mode := range []string{"cancel", "eof", "revoke", "deadline"} {
++		for _, network := range []string{"tcp", "udp"} {
++			t.Run(mode+"/"+network, func(t *testing.T) {
++				protocol := uint8(6)
++				if network == "udp" {
++					protocol = 17
++				}
++				ctx, revoke := H.ClosedRevokeFixture(t, mode, protocol)
++				var address string
++				var port int
++				var wg sync.WaitGroup
++				if network == "tcp" {
++					l, err := net.Listen("tcp", "127.0.0.1:0")
++					if err != nil {
++						t.Fatal(err)
++					}
++					defer l.Close()
++					address = l.Addr().String()
++					port = l.Addr().(*net.TCPAddr).Port
++					wg.Add(4)
++					go func() {
++						for {
++							c, e := l.Accept()
++							if e != nil {
++								return
++							}
++							go func() { defer wg.Done(); defer c.Close(); _, _ = io.Copy(c, c) }()
++						}
++					}()
++				} else {
++					l, err := net.ListenPacket("udp", "127.0.0.1:0")
++					if err != nil {
++						t.Fatal(err)
++					}
++					defer l.Close()
++					address = l.LocalAddr().String()
++					port = l.LocalAddr().(*net.UDPAddr).Port
++					go func() {
++						b := make([]byte, 1024)
++						for {
++							n, a, e := l.ReadFrom(b)
++							if e != nil {
++								return
++							}
++							_, _ = l.WriteTo(b[:n], a)
++						}
++					}()
++				}
++				_ = address
++				_ = port
++				dial := func() (net.Conn, error) {
++					return I.DialSystem(ctx, N.Destination{Network: map[string]N.Network{"tcp": N.Network_TCP, "udp": N.Network_UDP}[network], Address: N.LocalHostIP, Port: N.Port(port)}, nil)
++				}
++				connections := make([]net.Conn, 4)
++				for i := range connections {
++					c, e := dial()
++					if e != nil {
++						t.Fatal(e)
++					}
++					connections[i] = c
++					defer c.Close()
++					_ = c.SetDeadline(time.Now().Add(time.Second))
++					if _, e = c.Write([]byte{42}); e != nil {
++						t.Fatal(e)
++					}
++					b := make([]byte, 1)
++					if _, e = io.ReadFull(c, b); e != nil || b[0] != 42 {
++						t.Fatalf("positive traffic: %v", e)
++					}
++				}
++				revoke()
++				for _, c := range connections {
++					_ = c.SetDeadline(time.Now().Add(time.Second))
++					if _, e := c.Write([]byte{43}); e == nil {
++						t.Fatal("revoked socket writes")
++					}
++					if _, e := c.Read(make([]byte, 1)); e == nil {
++						t.Fatal("revoked socket reads")
++					}
++					if e := c.Close(); e != nil {
++						t.Fatal(e)
++					}
++				}
++				if c, e := dial(); e == nil {
++					c.Close()
++					t.Fatal("dial after revoke")
++				}
++				if H.RoutingEntry(ctx) == nil || H.CheckAfterDNS(ctx) == nil || H.BeforeSocketDial(ctx) == nil {
++					t.Fatal("guard after revoke")
++				}
++				wg.Wait()
++			})
++		}
++	}
++}
+diff --git a/common/yonikbroker/socket.go b/common/yonikbroker/socket.go
+new file mode 100644
+index 0000000..894e71e
+--- /dev/null
++++ b/common/yonikbroker/socket.go
+@@ -0,0 +1,84 @@
++package nativehooks
++
++import (
++	"context"
++	"io"
++	"time"
++)
++
++// OwnSocket передаёт session единственное право закрытия опубликованного сокета.
++func OwnSocket(ctx context.Context, socket io.Closer) (func() error, error) {
++	c, ok := ctx.Value(routingKey{}).(*routingConsumer)
++	if !ok || c == nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.session == nil || c.denied || ctx.Err() != nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
++	if c.session.Guard(time.Now(), BeforeDial, false, Flow{}, Evidence{}) != nil {
++		_ = socket.Close()
++		return nil, ErrDenied
++	}
++	lookup := c.lookup
++	if lookup == nil {
++		lookup = c.lookupAuthenticated
++	}
++	var proof Evidence
++	var err error
++	if c.required {
++		proof, err = lookup(ctx, c.flow)
++	}
++	if err != nil || ctx.Err() != nil {
++		_ = socket.Close()
++		c.denyFlow()
++		return nil, ErrDenied
++	}
++	var handle *Handle
++	stop := context.AfterFunc(ctx, func() {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		if internal, _ := ctx.Value(dnsExchangeKey{}).(bool); internal {
++			// Завершение DNS I/O освобождает только его socket, сохраняя caller.
++			delete(c.handles, handle)
++			_ = c.session.Release(handle)
++			return
++		}
++		c.denyFlow()
++	})
++	owned := &socketCancellation{Closer: socket, stop: stop}
++	if c.required && c.acceptProof(proof) != nil {
++		_ = owned.Close()
++		c.denyFlow()
++		return nil, ErrDenied
++	}
++	handle, err = c.session.Track(time.Now(), c.required, c.flow, proof, owned)
++	if err != nil {
++		_ = owned.Close()
++		c.denyFlow()
++		return nil, err
++	}
++	if c.handles == nil {
++		c.handles = make(map[*Handle]struct{})
++	}
++	if internal, _ := ctx.Value(dnsExchangeKey{}).(bool); !internal {
++		c.handles[handle] = struct{}{}
++	}
++	return func() error {
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		delete(c.handles, handle)
++		return c.session.Release(handle)
++	}, nil
++}
++
++// Отзыв освобождает также регистрацию callback на ещё живом parent context.
++type socketCancellation struct {
++	io.Closer
++	stop func() bool
++}
++
++func (s *socketCancellation) Close() error { s.stop(); return s.Closer.Close() }
+diff --git a/app/dns/cache_controller.go b/app/dns/cache_controller.go
+--- a/app/dns/cache_controller.go
++++ b/app/dns/cache_controller.go
+@@ -14,7 +14,6 @@
+ 	dns_feature "github.com/xtls/xray-core/features/dns"
+ 
+ 	"golang.org/x/net/dns/dnsmessage"
+-	"golang.org/x/sync/singleflight"
+ )
+ 
+ const (
+@@ -37,7 +36,8 @@
+ 	pub           *pubsub.Service
+ 	cacheCleanup  *task.Periodic
+ 	highWatermark int
+-	requestGroup  singleflight.Group
++	exchangeMu    sync.Mutex
++	exchanges     map[string]*cachePending
+ }
+ 
+ func NewCacheController(name string, disableCache bool, serveStale bool, serveExpiredTTL uint32) *CacheController {
+@@ -245,14 +245,18 @@
+ func (c *CacheController) updateRecord(req *dnsRequest, rep *IPRecord) {
+ 	rtt := time.Since(req.start)
+ 
+-	switch req.reqType {
+-	case dnsmessage.TypeA:
+-		c.pub.Publish(req.domain+"4", rep)
+-	case dnsmessage.TypeAAAA:
+-		c.pub.Publish(req.domain+"6", rep)
++	publish := func() {
++		switch req.reqType {
++		case dnsmessage.TypeA:
++			c.pub.Publish(req.domain+"4", rep)
++		case dnsmessage.TypeAAAA:
++			c.pub.Publish(req.domain+"6", rep)
++		}
++
+ 	}
+ 
+ 	if c.disableCache {
++		publish()
+ 		errors.LogInfo(context.Background(), c.name, " got answer: ", req.domain, " ", req.reqType, " -> ", rep.IP, ", rtt: ", rtt)
+ 		return
+ 	}
+@@ -294,6 +298,8 @@
+ 	c.ips[req.domain] = newRec
+ 	c.Unlock()
+ 
++	publish()
++
+ 	if pubRecord != nil {
+ 		_, ttl, err := pubRecord.getIPs()
+ 		if ttl > 0 && !go_errors.Is(err, errRecordNotFound) {
+diff --git a/app/dns/dnscommon.go b/app/dns/dnscommon.go
+index 10597d5..ddcef3d 100644
+--- a/app/dns/dnscommon.go
++++ b/app/dns/dnscommon.go
+@@ -12,7 +12,7 @@ import (
+ 	"github.com/xtls/xray-core/common/log"
+ 	"github.com/xtls/xray-core/common/net"
+ 	"github.com/xtls/xray-core/common/session"
+-	"github.com/xtls/xray-core/core"
++
+ 	dns_feature "github.com/xtls/xray-core/features/dns"
+ 
+ 	"golang.org/x/net/dns/dnsmessage"
+@@ -258,7 +258,7 @@ L:
+ 
+ // toDnsContext create a new background context with parent inbound, session and dns log
+ func toDnsContext(ctx context.Context, addr string) context.Context {
+-	dnsCtx := core.ToBackgroundDetachedContext(ctx)
++	dnsCtx := context.WithoutCancel(ctx)
+ 	if inbound := session.InboundFromContext(ctx); inbound != nil {
+ 		dnsCtx = session.ContextWithInbound(dnsCtx, inbound)
+ 	}
+diff --git a/app/dns/nameserver_cached.go b/app/dns/nameserver_cached.go
+--- a/app/dns/nameserver_cached.go
++++ b/app/dns/nameserver_cached.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"context"
+ 	go_errors "errors"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"time"
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+@@ -65,12 +66,27 @@
+ 		key = key + "6"
+ 	}
+ 
+-	v, _, _ := s.getCacheController().requestGroup.Do(key, func() (any, error) {
+-		return doFetch(ctx, s, fqdn, option), nil
+-	})
+-	ret := v.(result)
++	shared, leave := cacheExchange(ctx, s, key, fqdn, option)
++	defer leave()
+ 
+-	return ret.ips, ret.ttl, ret.error
++	select {
++	case <-ctx.Done():
++		return nil, 0, ctx.Err()
++	case <-shared.done:
++		ret := shared.result
++		// Отзыв владельца общего socket не отзывает соседний flow.
++		if ret.error != nil && ctx.Err() == nil {
++			retryCtx, release := hooks.DNSExchangeContext(ctx)
++			defer release()
++			retryCtx, cancel := context.WithTimeout(retryCtx, 8*time.Second)
++			defer cancel()
++			stop := context.AfterFunc(ctx, cancel)
++			defer stop()
++			ret = doFetch(retryCtx, s, fqdn, option)
++		}
++		return ret.ips, ret.ttl, ret.error
++	}
++
+ }
+ 
+ type result struct {
+diff --git a/app/dns/nameserver_udp.go b/app/dns/nameserver_udp.go
+index 7761662..34d10bf 100644
+--- a/app/dns/nameserver_udp.go
++++ b/app/dns/nameserver_udp.go
+@@ -2,6 +2,7 @@ package dns
+ 
+ import (
+ 	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -26,6 +27,7 @@ type ClassicNameServer struct {
+ 	address         *net.Destination
+ 	requests        map[uint16]*udpDnsRequest
+ 	udpServer       *udp.Dispatcher
++	dispatcher      routing.Dispatcher
+ 	requestsCleanup *task.Periodic
+ 	reqID           uint32
+ 	clientIP        net.IP
+@@ -48,6 +50,7 @@ func NewClassicNameServer(address net.Destination, dispatcher routing.Dispatcher
+ 		address:         &address,
+ 		requests:        make(map[uint16]*udpDnsRequest),
+ 		clientIP:        clientIP,
++		dispatcher:      dispatcher,
+ 	}
+ 	s.requestsCleanup = &task.Periodic{
+ 		Interval: time.Minute,
+@@ -189,7 +192,18 @@ func (s *ClassicNameServer) sendQuery(ctx context.Context, noResponseErrCh chan<
+ 			}
+ 			return
+ 		}
+-		s.udpServer.Dispatch(toDnsContext(ctx, s.address.String()), *s.address, b)
++		server := s.udpServer
++		if hooks.HasFlowContext(ctx) {
++			// Managed exchange не переиспользует socket другого flow.
++			var isolated *udp.Dispatcher
++			isolated = udp.NewDispatcher(s.dispatcher, func(replyCtx context.Context, packet *udp_proto.Packet) {
++				s.HandleResponse(replyCtx, packet)
++				isolated.RemoveRay()
++			})
++			server = isolated
++			go func() { <-ctx.Done(); isolated.RemoveRay() }()
++		}
++		server.Dispatch(toDnsContext(ctx, s.address.String()), *s.address, b)
+ 	}
+ }
+ 
+diff --git a/app/dns/yonik_exchange.go b/app/dns/yonik_exchange.go
+new file mode 100644
+--- /dev/null
++++ b/app/dns/yonik_exchange.go
+@@ -0,0 +1,57 @@
++package dns
++
++import (
++	"context"
++	hooks "github.com/xtls/xray-core/common/yonikbroker"
++	D "github.com/xtls/xray-core/features/dns"
++	"time"
++)
++
++type cachePending struct {
++	waiters int
++	done    chan struct{}
++	cancel  context.CancelFunc
++	result  result
++}
++
++// Последний waiter освобождает общий upstream; отмена соседа не влияет на остальных.
++func cacheExchange(ctx context.Context, s CachedNameserver, key, fqdn string, option D.IPOption) (*cachePending, func()) {
++	c := s.getCacheController()
++	c.exchangeMu.Lock()
++	if c.exchanges == nil {
++		c.exchanges = make(map[string]*cachePending)
++	}
++	p := c.exchanges[key]
++	if p == nil {
++		shared, release := hooks.DNSExchangeContext(ctx)
++		query, cancel := context.WithTimeout(shared, 8*time.Second)
++		p = &cachePending{done: make(chan struct{}), cancel: cancel}
++		c.exchanges[key] = p
++		go func() {
++			defer release()
++			defer cancel()
++			ret := doFetch(query, s, fqdn, option)
++			c.exchangeMu.Lock()
++			p.result = ret
++			if c.exchanges[key] == p {
++				delete(c.exchanges, key)
++			}
++			close(p.done)
++			c.exchangeMu.Unlock()
++		}()
++	}
++	p.waiters++
++	c.exchangeMu.Unlock()
++
++	return p, func() {
++		c.exchangeMu.Lock()
++		defer c.exchangeMu.Unlock()
++		p.waiters--
++		if p.waiters == 0 {
++			if c.exchanges[key] == p {
++				delete(c.exchanges, key)
++			}
++			p.cancel()
++		}
++	}
++}
+diff --git a/app/dns/yonik_exchange_test.go b/app/dns/yonik_exchange_test.go
+new file mode 100644
+--- /dev/null
++++ b/app/dns/yonik_exchange_test.go
+@@ -0,0 +1,117 @@
++package dns
++
++import (
++	"context"
++	D "github.com/xtls/xray-core/features/dns"
++	"reflect"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++type heldExchange struct {
++	cache   *CacheController
++	started chan context.Context
++	retry   bool
++	calls   atomic.Int32
++}
++
++func (s *heldExchange) getCacheController() *CacheController { return s.cache }
++func (s *heldExchange) sendQuery(ctx context.Context, errs chan<- error, _ string, _ D.IPOption) {
++	s.started <- ctx
++	if s.retry && s.calls.Add(1) == 1 {
++		errs <- context.Canceled
++	}
++}
++func waitExchange(t *testing.T, ch <-chan context.Context) context.Context {
++	t.Helper()
++	select {
++	case ctx := <-ch:
++		return ctx
++	case <-time.After(time.Second):
++		t.Fatal("exchange не начат")
++		return nil
++	}
++}
++func endedExchange(t *testing.T, ctx context.Context) {
++	t.Helper()
++	select {
++	case <-ctx.Done():
++	case <-time.After(time.Second):
++		t.Fatal("upstream жив после последнего cancel")
++	}
++}
++func TestNativeDNSLastWaiterCancel(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2)}
++	assertReleased(t, s)
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan struct{})
++	go func() { defer close(done); fetch(ctx, s, "held.", D.IPOption{IPv4Enable: true}) }()
++	upstream := waitExchange(t, s.started)
++	cancel()
++	endedExchange(t, upstream)
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("caller жив")
++	}
++}
++func TestNativeDNSRetryCancel(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2), retry: true}
++	assertReleased(t, s)
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan struct{})
++	go func() { defer close(done); fetch(ctx, s, "retry.", D.IPOption{IPv4Enable: true}) }()
++	waitExchange(t, s.started)
++	retry := waitExchange(t, s.started)
++	cancel()
++	endedExchange(t, retry)
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("retry caller жив")
++	}
++}
++func TestNativeDNSWaiterIsolation(t *testing.T) {
++	s := &heldExchange{cache: NewCacheController("held", true, false, 0), started: make(chan context.Context, 2)}
++	a, ca := context.WithCancel(context.Background())
++	defer ca()
++	b, cb := context.WithCancel(context.Background())
++	defer cb()
++	_, leaveA := cacheExchange(a, s, "same", "same.", D.IPOption{IPv4Enable: true})
++	upstream := waitExchange(t, s.started)
++	_, leaveB := cacheExchange(b, s, "same", "same.", D.IPOption{IPv4Enable: true})
++	ca()
++	leaveA()
++	select {
++	case <-upstream.Done():
++		t.Fatal("отмена соседа убила exchange")
++	default:
++	}
++	cb()
++	leaveB()
++	endedExchange(t, upstream)
++}
++
++func assertReleased(t *testing.T, s *heldExchange) {
++	t.Helper()
++	t.Cleanup(func() {
++		deadline := time.Now().Add(time.Second)
++		for {
++			s.cache.exchangeMu.Lock()
++			n := len(s.cache.exchanges)
++			s.cache.exchangeMu.Unlock()
++			s.cache.pub.Cleanup()
++			s.cache.pub.RLock()
++			subs := reflect.ValueOf(s.cache.pub).Elem().FieldByName("subs").Len()
++			s.cache.pub.RUnlock()
++			if n == 0 && subs == 0 {
++				return
++			}
++			if time.Now().After(deadline) {
++				t.Fatalf("release exchanges=%d subscriptions=%d", n, subs)
++			}
++			time.Sleep(time.Millisecond)
++		}
++	})
++}
+diff --git a/common/yonikbroker/pipeline_test.go b/common/yonikbroker/pipeline_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/pipeline_test.go
+@@ -0,0 +1,189 @@
++package nativehooks_test
++
++import (
++	"fmt"
++	H "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/infra/conf/serial"
++	_ "github.com/xtls/xray-core/main/distro/all"
++	"io"
++	"net"
++	"os"
++	"os/exec"
++	"runtime"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestActualTUNPipeline(t *testing.T)          { actualTUNPipeline(t, false) }
++func TestPersistentPlainTUNPipeline(t *testing.T) { actualTUNPipeline(t, true) }
++func actualTUNPipeline(t *testing.T, persistent bool) {
++	baselineFD, baselineTasks := 0, 0
++	var baselineHeap uint64
++	for index, mode := range []string{"cancel", "eof", "revoke", "stop", "cancel", "eof", "revoke", "stop"} {
++		t.Run(mode, func(t *testing.T) {
++			fixtureMode := map[string]string{"stop": "cancel", "cancel": "cancel", "eof": "eof", "revoke": "revoke"}[mode]
++			if persistent {
++				fixtureMode = "persistent/" + fixtureMode
++			}
++			ctx, revoke := H.ClosedRevokeFixture(t, fixtureMode, 6)
++			l, err := net.Listen("tcp", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer l.Close()
++			accepted := make(chan net.Conn, 1)
++			writerDone := make(chan error, 1)
++			port := l.Addr().(*net.TCPAddr).Port
++			u, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", port))
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer u.Close()
++			go func() {
++				for {
++					c, e := l.Accept()
++					if e != nil {
++						return
++					}
++					go func() {
++						defer c.Close()
++						accepted <- c
++						b := make([]byte, 8)
++						if _, e = io.ReadFull(c, b); e != nil {
++							return
++						}
++						if _, e = c.Write(b); e != nil {
++							return
++						}
++						// Большой ответ удерживает writer и packet buffers, пока клиент не читает.
++						_, e = c.Write(make([]byte, 32<<20))
++						writerDone <- e
++					}()
++				}
++			}()
++			go func() {
++				b := make([]byte, 2048)
++				for {
++					n, a, e := u.ReadFrom(b)
++					if e != nil {
++						return
++					}
++					u.WriteTo(b[:n], a)
++				}
++			}()
++			config, err := serial.LoadJSONConfig(strings.NewReader(fmt.Sprintf(`{"inbounds":[{"protocol":"tun","settings":{"name":"ynkfixture0","MTU":1500}}],"outbounds":[{"protocol":"freedom","settings":{"redirect":"127.0.0.1:%d"}}]}`, port)))
++			if err != nil {
++				t.Fatal(err)
++			}
++			instance, err := core.NewWithContext(ctx, config)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer instance.Close()
++			if err = instance.Start(); err != nil {
++				t.Fatal(err)
++			}
++			for _, args := range [][]string{{"addr", "add", "198.18.0.1/24", "dev", "ynkfixture0"}, {"link", "set", "ynkfixture0", "up"}} {
++				if out, e := exec.Command("ip", args...).CombinedOutput(); e != nil {
++					t.Fatalf("ip: %s %v", out, e)
++				}
++			}
++			defer exec.Command("ip", "addr", "del", "198.18.0.1/24", "dev", "ynkfixture0").Run()
++			clients := make([]net.Conn, 0, 2)
++			for _, network := range []string{"tcp", "udp"} {
++				c, e := net.DialTimeout(network, "198.18.0.2:4242", time.Second)
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer c.Close()
++				clients = append(clients, c)
++				c.SetDeadline(time.Now().Add(2 * time.Second))
++				if _, e = c.Write([]byte("pipeline")); e != nil {
++					t.Fatal(e)
++				}
++				b := make([]byte, 8)
++				if _, e = io.ReadFull(c, b); e != nil || string(b) != "pipeline" {
++					t.Fatalf("%s positive traffic: %q %v", network, b, e)
++				}
++				t.Logf("%s TUN→routing→outbound echo подтверждён", network)
++			}
++			peer := <-accepted
++			defer peer.Close()
++			time.Sleep(30 * time.Millisecond)
++			select {
++			case <-writerDone:
++				t.Fatal("writer не удержан перед terminal")
++			default:
++			}
++			if mode == "stop" {
++				if err = instance.Close(); err != nil {
++					t.Fatal(err)
++				}
++			} else {
++				revoke()
++			}
++			select {
++			case e := <-writerDone:
++				if e == nil {
++					t.Fatal("удержанный writer завершился без ошибки")
++				}
++			case <-time.After(time.Second):
++				t.Fatal("outbound writer не завершился после terminal")
++			}
++			// После terminal новый payload не должен проходить через уже открытый UDP flow.
++			c := clients[1]
++			c.SetDeadline(time.Now().Add(100 * time.Millisecond))
++			c.Write([]byte("afterend"))
++			b := make([]byte, 8)
++			if _, e := c.Read(b); e == nil {
++				t.Fatal("UDP payload после terminal")
++			}
++			if mode != "stop" {
++				revoke()
++			}
++			deadline := time.Now().Add(time.Second)
++			for {
++				stack := make([]byte, 1<<20)
++				n := runtime.Stack(stack, true)
++				text := string(stack[:n])
++				active := strings.Contains(text, "route.(*ConnectionManager).connectionCopy") || strings.Contains(text, "proxy/tun.(*stack).read(")
++				if !active {
++					break
++				}
++				if time.Now().After(deadline) {
++					t.Fatalf("активные core I/O после terminal: %s", text)
++				}
++				time.Sleep(10 * time.Millisecond)
++			}
++			t.Log("terminal: удержанный outbound writer завершён; UDP traffic запрещён")
++
++		})
++		deadline := time.Now().Add(time.Second)
++		for {
++			runtime.GC()
++			fds, e := os.ReadDir("/proc/self/fd")
++			if e != nil {
++				t.Fatal(e)
++			}
++			tasks := runtime.NumGoroutine()
++			var memory runtime.MemStats
++			runtime.ReadMemStats(&memory)
++			if index == 0 {
++				baselineHeap = memory.HeapAlloc
++				baselineFD = len(fds)
++				baselineTasks = tasks
++				break
++			}
++			if len(fds) <= baselineFD && tasks <= baselineTasks && memory.HeapAlloc <= baselineHeap+(8<<20) {
++				t.Logf("terminal fd=%d tasks=%d baseline=%d/%d", len(fds), tasks, baselineFD, baselineTasks)
++				break
++			}
++			if time.Now().After(deadline) {
++				t.Fatalf("resource growth: fd=%d/%d tasks=%d/%d heap=%d/%d", len(fds), baselineFD, tasks, baselineTasks, memory.HeapAlloc, baselineHeap)
++			}
++			time.Sleep(10 * time.Millisecond)
++		}
++	}
++}
+diff --git a/common/yonikbroker/named_downstream_test.go b/common/yonikbroker/named_downstream_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/named_downstream_test.go
+@@ -0,0 +1,178 @@
++package nativehooks_test
++
++import (
++	"fmt"
++	mdns "github.com/miekg/dns"
++	"github.com/xtls/xray-core/common/buf"
++	xlog "github.com/xtls/xray-core/common/log"
++	xnet "github.com/xtls/xray-core/common/net"
++	H "github.com/xtls/xray-core/common/yonikbroker"
++	"github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/features/routing"
++	"github.com/xtls/xray-core/infra/conf/serial"
++	_ "github.com/xtls/xray-core/main/distro/all"
++	"io"
++	"net"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestNamedDownstream(t *testing.T) {
++	for _, network := range []string{"tcp", "udp"} {
++		for _, rawMode := range []string{"known", "cancel", "revoke", "epoch", "unknown", "unavailable", "stale", "cache/known", "cache/cancel", "cache/revoke", "cache/epoch", "cache/unknown", "cache/unavailable", "cache/stale", "changed-answer"} {
++			t.Run(network+"/"+rawMode, func(t *testing.T) {
++				mode := strings.TrimPrefix(rawMode, "cache/")
++				cached := strings.HasPrefix(rawMode, "cache/")
++				ctx, change := H.ClosedDNSFixture(t)
++				var egress atomic.Int32
++				tcp, e := net.Listen("tcp", "0.0.0.0:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer tcp.Close()
++				port := tcp.Addr().(*net.TCPAddr).Port
++				udp, e := net.ListenPacket("udp", fmt.Sprintf("0.0.0.0:%d", port))
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer udp.Close()
++				go func() {
++					for {
++						c, e := tcp.Accept()
++						if e != nil {
++							return
++						}
++						egress.Add(1)
++						go func() { defer c.Close(); io.Copy(c, c) }()
++					}
++				}()
++				go func() {
++					b := make([]byte, 64)
++					for {
++						n, a, e := udp.ReadFrom(b)
++						if e != nil {
++							return
++						}
++						egress.Add(1)
++						udp.WriteTo(b[:n], a)
++					}
++				}()
++				listener, e := net.Listen("tcp", "127.0.0.1:0")
++				if e != nil {
++					t.Fatal(e)
++				}
++				entered, release := make(chan struct{}, 8), make(chan struct{})
++				server := &mdns.Server{Listener: listener, Handler: mdns.HandlerFunc(func(w mdns.ResponseWriter, q *mdns.Msg) {
++					entered <- struct{}{}
++					<-release
++					r := new(mdns.Msg)
++					r.SetReply(q)
++					answer := "127.0.0.1"
++					if mode == "changed-answer" {
++						answer = "127.0.0.2"
++					}
++					rr, _ := mdns.NewRR("private.test. 60 IN A " + answer)
++					r.Answer = []mdns.RR{rr}
++					w.WriteMsg(r)
++				})}
++				go server.ActivateAndServe()
++				defer server.Shutdown()
++				config, e := serial.LoadJSONConfig(strings.NewReader(fmt.Sprintf(`{"dns":{"queryStrategy":"UseIPv4","servers":["tcp+local://%s"]},"routing":{"domainStrategy":"IPOnDemand","rules":[{"type":"field","ip":["127.0.0.1/32"],"outboundTag":"allowed"}]},"outbounds":[{"tag":"deny","protocol":"blackhole"},{"tag":"allowed","protocol":"freedom","settings":{"domainStrategy":"UseIPv4"}}]}`, listener.Addr())))
++				if e != nil {
++					t.Fatal(e)
++				}
++				instance, e := core.NewWithContext(ctx, config)
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer instance.Close()
++				if e = instance.Start(); e != nil {
++					t.Fatal(e)
++				}
++				done := make(chan error, 1)
++				run := func() {
++					go func() {
++						dst := xnet.TCPDestination(xnet.DomainAddress("private.test"), xnet.Port(port))
++						if network == "udp" {
++							dst.Network = xnet.Network_UDP
++						}
++						link, e := instance.GetFeature(routing.DispatcherType()).(routing.Dispatcher).Dispatch(ctx, dst)
++						if e != nil {
++							done <- e
++							return
++						}
++						b := buf.New()
++						b.Write([]byte("named"))
++						e = link.Writer.WriteMultiBuffer(buf.MultiBuffer{b})
++						if e == nil {
++							var mb buf.MultiBuffer
++							mb, e = link.Reader.ReadMultiBuffer()
++							buf.ReleaseMulti(mb)
++						}
++						done <- e
++					}()
++				}
++				run()
++				select {
++				case <-entered:
++				case <-time.After(3 * time.Second):
++					t.Fatal("DNS barrier не достигнут")
++				}
++				warmQuestions := 0
++				if cached {
++					close(release)
++					select {
++					case e := <-done:
++						if e != nil {
++							t.Fatal(e)
++						}
++					case <-time.After(4 * time.Second):
++						t.Fatal("cache warm echo timeout")
++					}
++					egress.Store(0)
++					warmQuestions = len(entered)
++				}
++
++				var checkpoint *cacheCheckpoint
++				if cached {
++					checkpoint = &cacheCheckpoint{change: change, mode: mode}
++					xlog.RegisterHandler(checkpoint)
++					run()
++				} else {
++					change(mode)
++					close(release)
++				}
++				if mode == "known" {
++					select {
++					case e := <-done:
++						if e != nil {
++							t.Fatal(e)
++						}
++					case <-time.After(3 * time.Second):
++						t.Fatal("нет echo")
++					}
++					if egress.Load() == 0 {
++						t.Fatal("нет egress")
++					}
++				} else {
++					select {
++					case <-done:
++					case <-time.After(time.Second):
++					}
++					if egress.Load() != 0 {
++						t.Fatalf("запрещённый egress %d", egress.Load())
++					}
++				}
++				if cached && checkpoint.hits.Load() == 0 {
++					t.Fatal("не достигнут actual cache-hit checkpoint")
++				}
++				if cached && len(entered) != warmQuestions {
++					t.Fatal("cache flow выполнил новый DNS exchange")
++				}
++				t.Logf("native routing→beforeDial→%s egress=%d mode=%s", network, egress.Load(), mode)
++			})
++		}
++	}
++}
+diff --git a/common/yonikbroker/monitor_close_linux_test.go b/common/yonikbroker/monitor_close_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/monitor_close_linux_test.go
+@@ -0,0 +1,63 @@
++//go:build linux && !android
++
++package nativehooks
++
++import (
++	"context"
++	"os"
++	"syscall"
++	"testing"
++	"time"
++)
++
++// Shutdown обязан дождаться пользователя borrowed FD под общим mutex.
++func TestMonitorCloseWaitsForBorrower(t *testing.T) {
++	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	channel := os.NewFile(uintptr(pair[0]), "channel")
++	defer channel.Close()
++	peer := os.NewFile(uintptr(pair[1]), "peer")
++	defer peer.Close()
++	pidfd, err := os.Open("/dev/null")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer pidfd.Close()
++	session, err := NewSession(Binding{Nonce: [32]byte{1}, ConfigDigest: [32]byte{2}, Epoch: 3}, time.Second)
++	if err != nil {
++		t.Fatal(err)
++	}
++	c := &routingConsumer{channel: channel, pidfd: pidfd, session: session}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	c.mu.Lock()
++	done := make(chan struct{})
++	go func() { c.monitorTUN(ctx); close(done) }()
++	select {
++	case <-done:
++		c.mu.Unlock()
++		t.Fatal("monitor закрыл borrowed FD до освобождения mutex")
++	case <-time.After(50 * time.Millisecond):
++	}
++	raw, err := channel.SyscallConn()
++	if err == nil {
++		err = raw.Control(func(fd uintptr) { _, err = syscall.GetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_TYPE) })
++	}
++	c.mu.Unlock()
++	if err != nil {
++		t.Fatalf("borrowed FD уже закрыт: %v", err)
++	}
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("monitor не завершился")
++	}
++	if err := raw.Control(func(uintptr) {}); err == nil {
++		t.Fatal("channel не закрыт")
++	}
++	if session.Context().Err() == nil {
++		t.Fatal("session не отозвана")
++	}
++}
+diff --git a/common/yonikbroker/flow_scope_test.go b/common/yonikbroker/flow_scope_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/flow_scope_test.go
+@@ -0,0 +1,167 @@
++package nativehooks
++
++import (
++	"context"
++	"net"
++	"net/netip"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++type countedSocket struct {
++	net.Conn
++	closes atomic.Int32
++}
++
++func (c *countedSocket) Close() error                 { c.closes.Add(1); return c.Conn.Close() }
++func TestSingleSessionFlowScope(t *testing.T)         { singleSessionFlowScope(t, false) }
++func TestAdmittedSingleSessionFlowScope(t *testing.T) { singleSessionFlowScope(t, true) }
++func singleSessionFlowScope(t *testing.T, admitted bool) {
++	for _, network := range []string{"tcp", "udp"} {
++		for _, mode := range []string{"cancel", "unknown", "unavailable", "revoke"} {
++			t.Run(network+"/"+mode, func(t *testing.T) {
++				s, p, _ := fixture(t)
++				defer func() { _ = s.Revoke() }()
++				globalRevoke := func() { _ = s.Revoke() }
++				if admitted {
++					ctx, _, wireRevoke := closedTUNFixtureMode(t, "known/revoke")
++					s = ctx.Value(routingKey{}).(*routingConsumer).session
++					p.Binding = s.binding
++					globalRevoke = func() {
++						wireRevoke()
++						select {
++						case <-s.Context().Done():
++						case <-time.After(time.Second):
++							t.Fatal("wire REVOKE не обработан")
++						}
++						_ = s.Revoke()
++					}
++				}
++				var address string
++				if network == "tcp" {
++					l, e := net.Listen("tcp", "127.0.0.1:0")
++					if e != nil {
++						t.Fatal(e)
++					}
++					defer l.Close()
++					address = l.Addr().String()
++					go func() {
++						for {
++							c, e := l.Accept()
++							if e != nil {
++								return
++							}
++							go func() {
++								defer c.Close()
++								b := make([]byte, 8)
++								for {
++									n, e := c.Read(b)
++									if e != nil {
++										return
++									}
++									_, _ = c.Write(b[:n])
++								}
++							}()
++						}
++					}()
++				} else {
++					l, e := net.ListenPacket("udp", "127.0.0.1:0")
++					if e != nil {
++						t.Fatal(e)
++					}
++					defer l.Close()
++					address = l.LocalAddr().String()
++					go func() {
++						b := make([]byte, 8)
++						for {
++							n, a, e := l.ReadFrom(b)
++							if e != nil {
++								return
++							}
++							_, _ = l.WriteTo(b[:n], a)
++						}
++					}()
++				}
++				makeFlow := func() (context.Context, context.CancelFunc, *routingConsumer, *countedSocket, func() error) {
++					ctx, cancel := context.WithCancel(context.Background())
++					c := &routingConsumer{session: s, required: true, flow: p.Flow}
++					c.lookup = func(context.Context, Flow) (Evidence, error) {
++						q := p
++						q.Flow = c.flow
++						q.Observed = time.Now()
++						q.Expires = q.Observed.Add(20 * time.Millisecond)
++						return q, nil
++					}
++					ctx = context.WithValue(ctx, routingKey{}, c)
++					conn, e := net.Dial(network, address)
++					if e != nil {
++						t.Fatal(e)
++					}
++					c.flow.Local = netip.MustParseAddrPort(conn.LocalAddr().String())
++					c.flow.Remote = netip.MustParseAddrPort(conn.RemoteAddr().String())
++					if network == "udp" {
++						c.flow.Protocol = 17
++					}
++					socket := &countedSocket{Conn: conn}
++					release, e := OwnSocket(ctx, socket)
++					if e != nil {
++						t.Fatal(e)
++					}
++					return ctx, cancel, c, socket, release
++				}
++				a, ca, c, sa, ra := makeFlow()
++				defer ca()
++				defer ra()
++				b, cb, _, sb, rb := makeFlow()
++				defer cb()
++				defer rb()
++				switch mode {
++				case "cancel":
++					ca()
++				case "unknown", "unavailable":
++					c.lookup = func(context.Context, Flow) (Evidence, error) {
++						q := p
++						q.Flow = c.flow
++						if mode == "unknown" {
++							q.Status = Unknown
++						} else {
++							q.Status = Unavailable
++						}
++						return q, nil
++					}
++				case "revoke":
++					globalRevoke()
++				}
++				if RoutingEntry(a) == nil {
++					t.Fatal("A разрешён")
++				}
++				if sa.closes.Load() == 0 {
++					t.Fatal("A не закрыт")
++				}
++				if mode == "revoke" {
++					if RoutingEntry(b) == nil || sb.closes.Load() == 0 {
++						t.Fatal("глобальный revoke не закрыл B")
++					}
++					return
++				}
++				if RoutingEntry(b) != nil || sb.closes.Load() != 0 {
++					t.Fatal("B отозван вместе с A")
++				}
++				_ = sb.SetDeadline(time.Now().Add(time.Second))
++				if _, e := sb.Write([]byte("echo")); e != nil {
++					t.Fatal(e)
++				}
++				buf := make([]byte, 4)
++				n, e := sb.Read(buf)
++				if e != nil || n != 4 || string(buf) != "echo" {
++					t.Fatalf("echo B: %q %v", buf, e)
++				}
++				t.Logf("A_close=%d B_close=%d B_echo_bytes=%d", sa.closes.Load(), sb.closes.Load(), n)
++				if RoutingEntry(a) == nil {
++					t.Fatal("A повторно разрешён")
++				}
++			})
++		}
++	}
++}
+diff --git a/common/yonikbroker/plain_tun_linux_test.go b/common/yonikbroker/plain_tun_linux_test.go
+new file mode 100644
+--- /dev/null
++++ b/common/yonikbroker/plain_tun_linux_test.go
+@@ -0,0 +1,115 @@
++package nativehooks
++
++import (
++	"golang.org/x/sys/unix"
++	"net"
++	"os"
++	"testing"
++)
++
++func TestPlainTUNFlags(t *testing.T) {
++	for flags := 0; flags <= 0xffff; flags++ {
++		want := flags == 0x1001 || flags == 0x1801
++		if plainTUNFlags(uint16(flags)) != want {
++			t.Fatalf("flags=%#x", flags)
++		}
++	}
++}
++
++func TestKernelPlainTUNValidation(t *testing.T) {
++	if os.Getenv("YONIK_ISOLATED_TUN_TEST") != "1" {
++		t.Skip("нужен isolated namespace launcher")
++	}
++	ns, err := os.Readlink("/proc/self/ns/net")
++	if err != nil || ns == os.Getenv("YONIK_HOST_NETNS") {
++		t.Fatal("нужна отдельная netns")
++	}
++	for _, item := range []struct {
++		name    string
++		flags   uint16
++		persist bool
++		header  int
++		want    bool
++	}{
++		{"plain", 0x1001, false, 0, true}, {"persistent_plain", 0x1001, true, 0, true},
++		{"vnet10", 0x5001, false, 10, false}, {"persistent_vnet10", 0x5001, true, 10, false},
++		{"vnet12", 0x5001, false, 12, false}, {"tap", 0x1002, false, 0, false},
++		{"pi", 0x0001, false, 0, false}, {"multiqueue", 0x1101, false, 0, false},
++		{"unknown", 0x1005, false, 0, false},
++	} {
++		t.Run(item.name, func(t *testing.T) {
++			fd, e := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
++			if e != nil {
++				t.Fatal(e)
++			}
++			defer unix.Close(fd)
++			req, _ := unix.NewIfreq("ynkcheck%d")
++			req.SetUint16(item.flags)
++			if e = unix.IoctlIfreq(fd, unix.TUNSETIFF, req); e != nil {
++				if item.want {
++					t.Fatal(e)
++				}
++				t.Logf("kernel отверг flags=%#x: %v", item.flags, e)
++				return
++			}
++			if item.persist {
++				if e = unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1); e != nil {
++					t.Fatal(e)
++				}
++				defer unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 0)
++			}
++			if item.header != 0 {
++				if e = unix.IoctlSetPointerInt(fd, unix.TUNSETVNETHDRSZ, item.header); e != nil {
++					t.Fatal(e)
++				}
++			}
++			if item.header != 0 {
++				actualHeader, err := unix.IoctlGetInt(fd, unix.TUNGETVNETHDRSZ)
++				if err != nil || actualHeader != item.header {
++					t.Fatalf("header=%d expected=%d err=%v", actualHeader, item.header, err)
++				}
++				t.Logf("kernel vnet header=%d", actualHeader)
++			}
++			if e = unix.IoctlIfreq(fd, unix.TUNGETIFF, req); e != nil {
++				t.Fatal(e)
++			}
++			actual := req.Uint16()
++			iface, e := net.InterfaceByName(req.Name())
++			if e != nil {
++				t.Fatal(e)
++			}
++			a := AttachBody{Name: iface.Name, Ifindex: uint32(iface.Index), MTU: uint32(iface.MTU)}
++			accepted := validateTUNFD(fd, a) == nil
++			if item.name == "pi" && actual&unix.IFF_NO_PI != 0 {
++				t.Logf("kernel нормализовал PI request в Plain: actual=%#x; PI flags deny проверяется exhaustive unit test", actual)
++				return
++			}
++			if item.name == "unknown" && actual&0x0004 == 0 {
++				t.Log("kernel удалил неизвестный бит; сохранённые unknown bits проверяются exhaustive unit test")
++				return
++			}
++			if accepted != item.want {
++				t.Fatalf("requested=%#x actual=%#x accepted=%v", item.flags, actual, accepted)
++			}
++			t.Logf("requested=%#x actual=%#x accepted=%v", item.flags, actual, accepted)
++			if !item.want {
++				return
++			}
++			if _, e = unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); e != nil {
++				t.Fatal(e)
++			}
++			if validateTUNFD(fd, a) == nil {
++				t.Fatal("нет CLOEXEC: FD принят")
++			}
++			if _, e = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC); e != nil {
++				t.Fatal(e)
++			}
++			if e = unix.SetNonblock(fd, false); e != nil {
++				t.Fatal(e)
++			}
++			if validateTUNFD(fd, a) == nil {
++				t.Fatal("blocking FD принят")
++			}
++		})
++	}
++}

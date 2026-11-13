@@ -1,0 +1,1 @@
+{"argv": ["go", "test", "-p=1", "-mod=readonly", "./proxy/tun"], "cwd": "/var/tmp/codex-myrs/transient/yonik-full-pinned-158-20261113/xray/build-source-xray"}

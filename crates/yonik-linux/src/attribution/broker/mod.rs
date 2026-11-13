@@ -300,6 +300,34 @@ pub struct Broker {
     cache: VecDeque<(Flow, OwnerSnapshot)>,
     last_cold: Option<Instant>,
 }
+#[cfg(test)]
+type CandidateHook = Box<dyn FnOnce(&mut OwnerSnapshot)>;
+#[cfg(test)]
+thread_local! {static CANDIDATE_HOOK: std::cell::RefCell<Option<CandidateHook>> = std::cell::RefCell::new(None);}
+
+// Одноразовый результат синхронного RPC; authority не сохраняется в cache.
+pub(super) struct ValidatedProjection {
+    owner: OwnerSnapshot,
+    path: String,
+    ttl: Duration,
+}
+impl ValidatedProjection {
+    pub(super) fn expiry(&self) -> Result<Instant, Unavailable> {
+        self.owner
+            .observed_from
+            .checked_add(DEADLINE)
+            .ok_or(Unavailable::Timeout)
+    }
+    pub(super) fn into_parts(self) -> (OwnerSnapshot, String, Duration) {
+        (self.owner, self.path, self.ttl)
+    }
+}
+pub(super) enum ProjectedLookup {
+    Known(ValidatedProjection),
+    Unknown,
+    Unavailable(Unavailable),
+}
+
 impl Broker {
     pub fn new(context: TrustedContext) -> Result<Self, Unavailable> {
         if rustix::process::getuid().as_raw() != context.target_uid
@@ -477,6 +505,37 @@ impl Broker {
             .ok_or(Unavailable::Timeout)?;
         Ok((validated, before, ttl))
     }
+    /// Candidate не покидает синхронную операцию до финальной проверки project.
+    pub(super) fn lookup_and_project(&mut self, flow: Flow, epoch: u64) -> ProjectedLookup {
+        #[allow(unused_mut)]
+        let mut candidate = self.lookup_candidate(flow, false);
+        #[cfg(test)]
+        if let Lookup::KnownOwner(snapshot) = &mut candidate {
+            CANDIDATE_HOOK.with(|h| {
+                if let Some(hook) = h.borrow_mut().take() {
+                    hook(snapshot);
+                }
+            });
+        }
+        let result = match candidate {
+            Lookup::KnownOwner(snapshot) => match self.project(flow, &snapshot, epoch) {
+                Ok((owner, path, ttl)) => {
+                    ProjectedLookup::Known(ValidatedProjection { owner, path, ttl })
+                }
+                Err(reason) => ProjectedLookup::Unavailable(reason),
+            },
+            Lookup::UnknownFlow => ProjectedLookup::Unknown,
+            Lookup::MechanismUnavailable(reason) => ProjectedLookup::Unavailable(reason),
+        };
+        if self.context.cancelled.load(Ordering::Acquire) && !self.context.revoked {
+            self.cache.clear();
+            return ProjectedLookup::Unavailable(Unavailable::Cancelled);
+        }
+        if matches!(result, ProjectedLookup::Unavailable(_)) {
+            self.cache.clear();
+        }
+        result
+    }
     /// Проверенный snapshot интервала lookup; не identity при рождении socket.
     pub fn lookup(&mut self, flow: Flow) -> Lookup {
         let result = self.lookup_inner(flow);
@@ -490,6 +549,9 @@ impl Broker {
         result
     }
     fn lookup_inner(&mut self, flow: Flow) -> Lookup {
+        self.lookup_candidate(flow, true)
+    }
+    fn lookup_candidate(&mut self, flow: Flow, revalidate: bool) -> Lookup {
         if self.context.revoked {
             return Lookup::MechanismUnavailable(Unavailable::Revoked);
         }
@@ -500,7 +562,11 @@ impl Broker {
         self.cache
             .retain(|(_, s)| s.observed_from.elapsed() < DEADLINE);
         if let Some((_, snapshot)) = self.cache.iter().find(|(key, _)| *key == flow) {
-            return match kernel::revalidate(&self.context, flow, snapshot) {
+            return match if revalidate {
+                kernel::revalidate(&self.context, flow, snapshot)
+            } else {
+                kernel::duplicate(snapshot)
+            } {
                 Ok(snapshot) => Lookup::KnownOwner(snapshot),
                 Err(reason) => {
                     self.cache.clear();
@@ -576,3 +642,6 @@ mod lookup_view_tests {
         assert_eq!(view.validate(), Err(Unavailable::Coverage));
     }
 }
+
+#[cfg(test)]
+pub(in crate::attribution) use kernel::report_cold_witnesses;

@@ -20,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
 from desktop_ui_smoke import execute, ui  # noqa: E402
 from engine_compile import probe, stop, wait_listener  # noqa: E402
 from engine_smoke import links  # noqa: E402
-from traffic_echo import echo_servers  # noqa: E402
+from traffic_echo import (  # noqa: E402
+    PAYLOAD_SIZE,
+    RESPONSE_PREFIX,
+    echo_servers,
+    receive_exact,
+)
 
 
 def inspect_core(binary: Path, source: dict, engine: str, gui_pid: int) -> int:
@@ -134,13 +139,17 @@ def main() -> None:
             gui_pids.append(process.pid)
         return process
 
+    short = sys.argv[5:] == ["--short"]
+    assert not sys.argv[5:] or short, "Неизвестные параметры"
     results = []
     with echo_servers(), patch("desktop_ui_smoke.subprocess.Popen", launch):
         for engine, relative in [
             ("xray", "xray-26.10.31/xray"),
             ("sing-box", "sing-box-1.14.4/sing-box"),
-        ]:
-            for transport, protocol in [("ws", "vmess"), ("grpc", "trojan")]:
+        ][: 1 if short else 2]:
+            for transport, protocol in [("ws", "vmess"), ("grpc", "trojan")][
+                : 1 if short else 2
+            ]:
                 source = {"type": protocol, "transport": {"type": transport}, "tls": {}}
 
                 def saved(
@@ -194,6 +203,19 @@ def main() -> None:
                                         engines / relative, source, engine, gui_pids[-1]
                                     )
                                 )
+                                # Endpoint доступен и при неверном peer: bypass
+                                # обязан провалить отрицательный контроль.
+                                payload = os.urandom(PAYLOAD_SIZE)
+                                with socket.create_connection(
+                                    ("127.0.0.1", 24081), timeout=2
+                                ) as direct:
+                                    direct.sendall(payload)
+                                    assert (
+                                        receive_exact(
+                                            direct, len(RESPONSE_PREFIX) + len(payload)
+                                        )
+                                        == RESPONSE_PREFIX + payload
+                                    )
                                 try:
                                     probe("127.0.0.1", False, timeout=2)
                                 except (OSError, ConnectionError):
@@ -291,6 +313,8 @@ def main() -> None:
                                         "closed": True,
                                         "reaped": pids,
                                         "oracle": True,
+                                        "direct_endpoint_available": True,
+                                        "peer_credentials_valid": not bad,
                                         "actual_writes_sha256": hashlib.sha256(
                                             (root / "observed.jsonl").read_bytes()
                                         ).hexdigest(),

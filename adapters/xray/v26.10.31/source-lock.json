@@ -1,0 +1,16 @@
+{
+  "engine": "xray",
+  "version": "26.10.31",
+  "source_url": "https://github.com/XTLS/Xray-core.git",
+  "tag": "v26.10.31",
+  "commit": "a4a3dff5b20c2faae567b742c172c7b95e75c083",
+  "archive_url": "https://codeload.github.com/XTLS/Xray-core/tar.gz/a4a3dff5b20c2faae567b742c172c7b95e75c083",
+  "archive_sha256": "7dba1dd055bdc854a2c5311610872c9bf6315ddb0a741fb8c2206212cec51b53",
+  "module_sha256": {
+    "go.mod": "ad8701ad59ba44b28c4c8adf924271e0df9c8b0a854662cfda9a61996a42d882",
+    "go.sum": "4ead70b9e65f181080638e3e40d850336b85b40bb51cdb2115b814489219c4e3"
+  },
+  "native_protocol": null,
+  "adapter_features": {},
+  "publisher_binary_identity_inferred": false
+}

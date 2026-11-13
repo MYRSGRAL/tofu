@@ -20,7 +20,7 @@ use yonik_application::{ConfigDigest, EnvironmentStamp};
 
 #[path = "session_host.rs"]
 mod session_host;
-use session_host::{ActiveSession, SessionArtifact};
+use session_host::{ActiveSession, HelperTunCustody, SessionArtifact};
 
 const STATE_PATH: &str = "/run/yonik/network";
 const MAX_PLAN_BYTES: usize = 64 * 1024;
@@ -90,6 +90,7 @@ struct Backend {
     supervisor: Option<super::SystemWorkerSupervisor>,
     worker_uncertain: bool,
     active: Option<ActiveSession>,
+    tun_custody: Option<HelperTunCustody>,
     registry: Option<super::TrustedRegistry>,
     exited: Arc<tokio::sync::Notify>,
     #[cfg(test)]
@@ -172,6 +173,7 @@ impl SystemProtectionHost {
                 supervisor: None,
                 worker_uncertain: false,
                 active: None,
+                tun_custody: None,
                 registry: None,
                 exited: backend_exited,
                 #[cfg(test)]

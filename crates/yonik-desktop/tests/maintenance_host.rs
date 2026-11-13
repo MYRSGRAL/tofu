@@ -82,7 +82,12 @@ fn desktop_host_backup_restore_new_path_and_shutdown() {
     drop(host);
     for directory in [root.join("data"), destination] {
         for entry in fs::read_dir(&directory).expect("fixture") {
-            fs::remove_file(entry.expect("файл").path()).expect("очистка");
+            let entry = entry.expect("fixture entry");
+            if directory == root.join("data") && entry.file_name() == "presets" {
+                fs::remove_dir(entry.path()).expect("очистка пустого каталога presets");
+            } else {
+                fs::remove_file(entry.path()).expect("очистка");
+            }
         }
         fs::remove_dir(directory).expect("очистка каталога");
     }
