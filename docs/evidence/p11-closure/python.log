@@ -22,6 +22,6 @@ test_roundtrip_and_languages (tools.tests.test_check_diagnostic_export.ExportTes
 test_strict_types_and_schema (tools.tests.test_check_diagnostic_export.ExportTests.test_strict_types_and_schema) ... ok
 
 ----------------------------------------------------------------------
-Ran 21 tests in 0.327s
+Ran 21 tests in 0.368s
 
 OK

@@ -58,7 +58,8 @@ class AcceptanceClosure(unittest.TestCase):
                     with self.subTest(reason=reason, slot=slot, generation=generation):
                         raw = json.dumps(doc).encode()
                         accepted = slot in identity["slots"] and (
-                            generation is not None or not identity["generation_required"]
+                            generation is not None
+                            or not identity["generation_required"]
                         )
                         if accepted:
                             self.assertEqual(json.loads(export_metadata(raw)), doc)

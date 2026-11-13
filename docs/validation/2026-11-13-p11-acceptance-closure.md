@@ -22,7 +22,8 @@ gate интегрированного head; весь P11 этим leaf не за
 - `python tools/check_translations.py`: 374 inline-пары, 160 ключей, 17 QML.
 - На точных incoming refs 145/149/152 отдельно извлечены catalog, V2 JSON и Main.qml
   через git show; тот же gate RU/EN и всех reason × slot × generation: 6 PASS.
-- `git diff --check`: PASS. Ruff отсутствует в PATH; format/lint не заявлены.
+- `git diff --check`: PASS. Ruff отсутствует в PATH; первоначальный CI указал перенос строки в новом test.
+  Перенос исправлен точно по diff Ruff 0.17.4; итоговый lint ожидается в CI.
 - Rust/GUI кампании не повторялись. Новый gate проверяет контракт, но не заменяет
   Rust producer/export tests и integrated-head final gate.
 
