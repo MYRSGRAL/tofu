@@ -1201,5 +1201,261 @@
       "source"
     ],
     "generation_required": true
+  },
+  "source_service_invalid_source": {
+    "code": "INVALID_INPUT",
+    "message_key": "invalid_input",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_corrupt_snapshot": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_no_snapshot": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_exhausted": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_foreign_approval": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_stale_update": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_service_worker": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_invalid_input": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_unsafe_path": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_unsupported_version": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_corrupt": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_storage": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_conflict": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_repository_not_found": {
+    "code": "STORAGE",
+    "message_key": "storage",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_hwid_required": {
+    "code": "HWID_REQUIRED",
+    "message_key": "hwid_required",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_hwid_limit": {
+    "code": "HWID_LIMIT",
+    "message_key": "hwid_limit",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_hwid_rejected": {
+    "code": "HWID_REJECTED",
+    "message_key": "hwid_rejected",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_hwid_redirect": {
+    "code": "HWID_REDIRECT",
+    "message_key": "hwid_redirect",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_unsupported_peer_verification": {
+    "code": "UNSUPPORTED_PROXY",
+    "message_key": "unsupported_proxy",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_fetch_failed": {
+    "code": "FETCH",
+    "message_key": "fetch",
+    "stage": "source_fetch",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_selection_repository_failed": {
+    "code": "PROFILE_UNAVAILABLE",
+    "message_key": "profile_unavailable",
+    "stage": "source_selection",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
+  },
+  "source_service_import_failed": {
+    "code": "IMPORT",
+    "message_key": "import",
+    "stage": "source_service",
+    "slots": [
+      "error",
+      "source",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "scheduler_service_import_failed": {
+    "code": "IMPORT",
+    "message_key": "import",
+    "stage": "scheduler_service",
+    "slots": [
+      "error",
+      "source"
+    ],
+    "generation_required": true
   }
 }

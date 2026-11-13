@@ -83,3 +83,8 @@ required-features = ["gui", "test-support"]
 name = "p11schedulerIntervalE2E"
 path = "examples/p11schedulerIntervalE2E.rs"
 required-features = ["gui", "test-support"]
+
+[[example]]
+name = "p11schedulerImportE2E"
+path = "examples/p11schedulerImportE2E.rs"
+required-features = ["gui", "test-support"]
