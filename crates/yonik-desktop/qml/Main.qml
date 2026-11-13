@@ -688,9 +688,10 @@ ApplicationWindow {
                         enabled: window.state.ready && !window.state.busy && count > 0
                         Accessible.name: window.tr("Источник серверов", "Server source")
                     }
-                    ActionButton { objectName: "refreshSourceButton"; text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: window.send({command: "refresh"}) }
+                    ActionButton { objectName: "refreshSourceButton"; text: window.tr("Обновить", "Refresh"); enabled: window.state.ready && window.state.source_local === false && window.state.source_id !== null && !window.state.busy && !window.state.pending; onClicked: window.send({command: "refresh"}) }
                     ActionButton { objectName: "sourceOptionsButton"; text: window.tr("Ещё", "More"); leftPadding: 8; rightPadding: 8; Accessible.name: window.tr("Параметры подписки", "Source options"); checkable: true; checked: window.sourceOptions; enabled: window.state.source_id !== null; onClicked: window.sourceOptions = !window.sourceOptions }
                 }
+                SmallLabel { objectName: "localSourceLabel"; visible: window.state.source_local === true; text: window.tr("Локальный источник", "Local source") }
                 RowLayout {
                     visible: window.state.sources_total > 64
                     SmallLabel { Layout.fillWidth: true; text: window.tr("Подписки: ", "Subscriptions: ") + (window.state.sources_offset + 1) + "–" + (window.state.sources_offset + window.state.sources.length) + " / " + window.state.sources_total }
@@ -702,7 +703,7 @@ ApplicationWindow {
                     visible: window.sourceOptions && window.state.source_id !== null
                     RowLayout {
                     Layout.fillWidth: true
-                    CheckBox { objectName: "subscriptionHwidChoice"; Layout.fillWidth: true; text: window.tr("ID устройства", "Device ID"); checked: window.state.source_hwid_enabled === true; enabled: window.state.ready && !window.state.busy && !window.state.pending; onToggled: window.send({command: "set_source_hwid", enabled: checked}) }
+                    CheckBox { objectName: "subscriptionHwidChoice"; Layout.fillWidth: true; text: window.tr("ID устройства", "Device ID"); checked: window.state.source_hwid_enabled === true; enabled: window.state.ready && window.state.source_local === false && !window.state.busy && !window.state.pending; onToggled: window.send({command: "set_source_hwid", enabled: checked}) }
                     HelpButton { explanation: window.tr("Отправляет провайдеру случайный стабильный ID, без данных оборудования. Изменение повторно загружает подписку.", "Sends a random stable ID without hardware data. Changing it refreshes the subscription.") }
                     }
                     RowLayout {
@@ -1063,6 +1064,7 @@ ApplicationWindow {
             SpinBox {
                 id: scheduleHours
                 objectName: "subscriptionInterval"
+                enabled: window.state.source_local === false
                 from: 24; to: 1193046
                 value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
                 editable: true
@@ -1071,6 +1073,7 @@ ApplicationWindow {
             }
             CheckBox {
                 objectName: "subscriptionBackground"
+                enabled: window.state.source_local === false
                 text: window.tr("Разрешить обновления в фоне", "Allow background updates")
                 checked: window.state.subscription_background === true
                 onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
@@ -1391,6 +1394,7 @@ ApplicationWindow {
                 TextField { id: sourceUrl; objectName: "sourceUrlInput"; Layout.fillWidth: true; maximumLength: 8192; echoMode: reveal.checked ? TextInput.Normal : TextInput.Password; selectByMouse: true; inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData; Accessible.name: window.tr("Секретная ссылка подписки", "Secret subscription URL") }
                 CheckBox { id: reveal; objectName: "revealSourceUrl"; text: window.tr("Показать", "Show") }
             }
+            ActionButton { objectName: "manualEntryButton"; text: window.tr("Сервер вручную", "Manual server"); enabled: window.editable && !window.state.pending; onClicked: { addDialog.close(); manualEntry.open() } }
             PlainLabel { text: window.tr("Текст или файл конфигурации", "Configuration text or file") }
             TextArea {
                 id: localImportText; objectName: "localImportTextInput"
@@ -1449,6 +1453,11 @@ ApplicationWindow {
         }
         }
         onOpened: { sourceUrl.clear(); sourceName.clear(); sourceHwid.checked = false; if (window.pasteOnOpen) sourceUrl.paste(); window.pasteOnOpen = false; sourceUrl.forceActiveFocus() }
+    }
+    ManualEntry {
+        id: manualEntry
+        english: window.language === "en"
+        onSubmitted: function(name, text) { window.submitLocalImport({command: "import_text", name: name, text: text}) }
     }
     FileDialog {
         id: localImportFile; objectName: "localImportFileDialog"

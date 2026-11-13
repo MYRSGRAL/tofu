@@ -300,7 +300,11 @@ pub fn export_snapshot_v2(raw: &str) -> Option<String> {
         if let Some(generation) = generation {
             let field = if matches!(
                 expected.stage,
-                context::Stage::CatalogRead | context::Stage::StorageWrite
+                context::Stage::CatalogRead
+                    | context::Stage::StorageWrite
+                    | context::Stage::SourceService
+                    | context::Stage::SourceFetch
+                    | context::Stage::SourceSelection
             ) {
                 "command_generation"
             } else if matches!(
