@@ -78,3 +78,25 @@ Evidence вне TTL: `/home/myrs/projects/yonik/local/evidence/local-socks-resou
 - SHA256 `sing-box.raw.json`: `da73ac38b8e2a7fea31e00f33a7d1c4fe50f62b06bf6543fc770d7ebeed3a8fc`
 - SHA256 `xray.raw.json`: `e783c598f8ba761f26ac323cef42cc60055feb25df7f21c740216c34fa58feae`
 - SHA256 `canary.json`: `d4ac3487de18415a4ee2958f0e535aa0de3b81614a278cb94ec38cc7e330f309`
+
+## Узкое закрытие P2 peer oracle — 2026-11-14
+
+Добавлен независимый negative control тем же сохранённым DesktopHost binary:
+собственный pinned peer приостановлен через SIGSTOP с подтверждением WIFSTOPPED.
+При этом direct curl с проверкой CA и `--noproxy "*"` получает HTTPS 204.
+Затем новый DesktopHost получает тот же профиль и настоящий `connect`:
+обязан выдать только `ready`, завершиться с Timeout без Connected и не достичь
+HTTPS. Если Connect обойдёт peer, этот oracle отвергнет его успешный ACK/exit.
+SIGCONT выполняется в finally; затем новый host проходит Connect/HTTPS/Stop,
+reap/rebind и closed. Контроль выполняется для обоих cores.
+
+Режим `--peer-gate-only` выполняет только эти controls и один восстановленный
+positive на core. Кампания 2×100 не повторялась; исходные resource evidence и
+бинарник не изменены. На обоих cores direct=204, denied=exit 1 / Error: Timeout,
+HTTPS при отказе не достигнут; после восстановления positive и closed PASS.
+Это закрывает чувствительность oracle к direct bypass, не расширяет прежние
+границы component witness и не доказывает общий native admission.
+
+Evidence: `/home/myrs/projects/yonik/local/evidence/local-socks-resource-peer-negative/`.
+Binding фиксирует обновлённый Python harness, неизменённый Rust source и старый
+retained binary; пересборки Rust не было. Ruff format/check и diff-check PASS.
