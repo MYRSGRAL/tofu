@@ -59,6 +59,27 @@ def measure(pid: int) -> dict:
     }
 
 
+def verify_frame_canary(before: dict, after: dict) -> None:
+    if (
+        not before["visible"]
+        or not after["visible"]
+        or after["frames"] <= before["frames"]
+    ):
+        raise RuntimeError("Frame oracle нечувствителен")
+
+
+def verify_phase(phase: str, start: dict, end: dict) -> None:
+    visible = {"hidden": False, "static-open": True}[phase]
+    if (
+        start["visible"] != visible
+        or end["visible"] != visible
+        or end["visibility_events"] != start["visibility_events"]
+    ):
+        raise RuntimeError("Visibility changed during phase")
+    if phase == "hidden" and end["frames"] != start["frames"]:
+        raise RuntimeError("Hidden frame gate")
+
+
 def main() -> None:
     home = Path("/home/fixture")
     if Path.home() != home or os.getuid() == 0:
@@ -113,6 +134,14 @@ def main() -> None:
                 if time.monotonic() > deadline:
                     raise TimeoutError("Ready deadline")
                 time.sleep(0.5)
+            command("Open")
+            time.sleep(1)
+            canary_before = command("Snapshot")
+            command("VisibleFrameCanary")
+            time.sleep(1)
+            canary_after = command("Snapshot")
+            verify_frame_canary(canary_before, canary_after)
+            terminal["frame_canary"] = {"before": canary_before, "after": canary_after}
             phases = []
             with (output / "samples.jsonl").open("w") as samples:
                 for phase, action, visible in [
@@ -151,6 +180,7 @@ def main() -> None:
                             max(0, min(next_sample, start + 900) - time.monotonic())
                         )
                     end_state = command("Snapshot")
+                    verify_phase(phase, start_state, end_state)
                     phases.append(
                         {
                             "phase": phase,

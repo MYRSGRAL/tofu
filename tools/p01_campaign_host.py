@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -64,18 +65,20 @@ def main() -> None:
                     stdout=vm_log,
                     stderr=vm_log,
                 )
-            connection = root / "connection.json"
-            deadline = time.monotonic() + 600
-            while not connection.exists():
-                if time.monotonic() > deadline or (
-                    vm is not None and vm.poll() is not None
-                ):
-                    raise TimeoutError("VM setup deadline")
-                time.sleep(5)
-            info = json.loads(connection.read_text())
-            ssh = info["ssh"]
             complete = False
+            ssh = None
+            info = None
             try:
+                connection = root / "connection.json"
+                deadline = time.monotonic() + 600
+                while not connection.exists():
+                    if time.monotonic() > deadline or (
+                        vm is not None and vm.poll() is not None
+                    ):
+                        raise TimeoutError("VM setup deadline")
+                    time.sleep(5)
+                info = json.loads(connection.read_text())
+                ssh = info["ssh"]
                 for source, destination in [
                     (BINARY, "/usr/local/bin/yonik-desktop"),
                     (
@@ -139,6 +142,7 @@ def main() -> None:
             finally:
                 if not complete:
                     terminal["preserved_root"] = str(root)
+                if not complete and ssh is not None:
                     for name in ["terminal.json", "samples.jsonl", "gui.log"]:
                         try:
                             (output / name).write_bytes(
@@ -148,9 +152,18 @@ def main() -> None:
                             terminal.setdefault("harvest_errors", []).append(
                                 type(error).__name__
                             )
-                (root / "finish").touch()
+                if root.is_dir():
+                    (root / "finish").touch()
                 if vm is not None:
-                    vm.wait(timeout=60)
+                    try:
+                        try:
+                            vm.wait(timeout=60)
+                        except subprocess.TimeoutExpired:
+                            # SIGINT даёт Python wrapper выполнить finally и reap QEMU.
+                            vm.send_signal(signal.SIGINT)
+                            vm.wait(timeout=45)
+                    finally:
+                        vm_log.close()
                 else:
                     deadline = time.monotonic() + 60
                     while Path(f"/proc/{info['vm_pid']}").exists():
@@ -158,7 +171,7 @@ def main() -> None:
                             raise TimeoutError("First VM reap deadline")
                         time.sleep(1)
                 vm_log.close()
-                if Path(f"/proc/{info['vm_pid']}").exists():
+                if info is not None and Path(f"/proc/{info['vm_pid']}").exists():
                     raise RuntimeError("VM remains active; refusing cleanup")
                 # Только собственный восстановимый overlay; ELF/evidence вне root.
                 if complete:
