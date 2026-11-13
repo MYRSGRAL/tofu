@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import select
+import signal
 import socket
 import statistics
 import subprocess
@@ -113,9 +114,93 @@ def command(process: subprocess.Popen, text: str, expected: str) -> None:
         raise RuntimeError("Нет ACK " + expected)
 
 
+def denied_probe(
+    binary: Path,
+    engines: Path,
+    engine: str,
+    root: Path,
+    env: dict[str, str],
+    peer_process: subprocess.Popen,
+    peer_port: int,
+    port: int,
+    https: object,
+    output: Path,
+) -> None:
+    """Тот же production Connect обязан отказать без peer, даже при живом HTTPS."""
+    url = f"https://127.0.0.1:{https.server_port}/"
+    peer_process.send_signal(signal.SIGSTOP)
+    try:
+        stopped_pid, status = os.waitpid(peer_process.pid, os.WUNTRACED)
+        assert stopped_pid == peer_process.pid and os.WIFSTOPPED(status)
+        direct = subprocess.run(
+            [
+                "curl",
+                "--silent",
+                "--show-error",
+                "--fail",
+                "--noproxy",
+                "*",
+                "--cacert",
+                str(root / "health.ca.pem"),
+                "--max-time",
+                "3",
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert direct.returncode == 0 and direct.stdout == "204", direct.stderr
+        assert https.requested.is_set(), "Direct control не достиг HTTPS"
+        https.requested.clear()
+        data = root / f"{engine}-denied"
+        data.mkdir(mode=0o700)
+        started = time.monotonic()
+        denied = subprocess.run(
+            [
+                str(binary),
+                str(data),
+                str(engines),
+                engine,
+                f"vless://{UUID}@127.0.0.1:{peer_port}#Synthetic",
+                url,
+                str(port),
+            ],
+            input="connect\n",
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=35,
+        )
+        result = dict(
+            direct_status=direct.stdout,
+            peer_stopped=True,
+            exit_code=denied.returncode,
+            stdout=denied.stdout,
+            stderr=denied.stderr,
+            elapsed_seconds=time.monotonic() - started,
+            https_reached=https.requested.is_set(),
+        )
+        (output / f"{engine}.peer-denied.json").write_text(json.dumps(result, indent=2))
+        assert denied.stdout.splitlines() == ["ready"], result
+        assert denied.returncode != 0 and "Timeout" in denied.stderr, result
+        assert not https.requested.is_set(), (
+            "Production Connect обошёл остановленный peer"
+        )
+    finally:
+        peer_process.send_signal(signal.SIGCONT)
+
+
 def main() -> None:
     binary, engines, output = (Path(arg).resolve() for arg in sys.argv[1:4])
     output.mkdir(parents=True, exist_ok=True)
+    peer_gate_only = sys.argv[4:] == ["--peer-gate-only"]
+    if sys.argv[4:] and not peer_gate_only:
+        raise ValueError("Неизвестный режим стенда")
     # Канарейка использует реальные собственные FD; production не получает fault.
     held = []
     canary = []
@@ -169,7 +254,19 @@ def main() -> None:
                         root,
                         port=peer_port,
                         target_ports=str(https.server_port),
-                    ):
+                    ) as peer_process:
+                        denied_probe(
+                            binary,
+                            engines,
+                            engine,
+                            root,
+                            env,
+                            peer_process,
+                            peer_port,
+                            port,
+                            https,
+                            output,
+                        )
                         data = root / engine
                         data.mkdir(mode=0o700)
                         rows = []
@@ -195,7 +292,7 @@ def main() -> None:
                             try:
                                 command(process, "", "ready")
                                 rows.append(sample(process.pid, 0))
-                                for cycle in range(1, 101):
+                                for cycle in range(1, 2 if peer_gate_only else 101):
                                     https.requested.clear()
                                     command(process, "connect", "connect")
                                     assert https.requested.is_set(), (
@@ -264,7 +361,11 @@ def main() -> None:
                                 process.stdout.close()
                                 if not process.stdin.closed:
                                     process.stdin.close()
-                        summary = oracle(rows)
+                        summary = (
+                            {"result": "PEER_NEGATIVE_AND_RESTORED_POSITIVE"}
+                            if peer_gate_only
+                            else oracle(rows)
+                        )
                         (output / f"{engine}.json").write_text(
                             json.dumps(
                                 dict(
