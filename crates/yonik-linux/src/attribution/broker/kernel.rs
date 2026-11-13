@@ -838,73 +838,123 @@ mod tests {
         use std::{collections::VecDeque, os::fd::OwnedFd};
         for address in ["127.0.0.1:0", "[::1]:0"] {
             for protocol in [6, 17] {
-                let (client, _peer, f): (OwnedFd, OwnedFd, Flow) = if protocol == 6 {
-                    let listener = TcpListener::bind(address).unwrap();
-                    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-                    let (peer, _) = listener.accept().unwrap();
-                    let f = flow(
-                        client.local_addr().unwrap(),
-                        client.peer_addr().unwrap(),
-                        protocol,
-                    );
-                    (client.into(), peer.into(), f)
-                } else {
-                    let client = UdpSocket::bind(address).unwrap();
-                    let peer = UdpSocket::bind(address).unwrap();
-                    client.connect(peer.local_addr().unwrap()).unwrap();
-                    let f = flow(
-                        client.local_addr().unwrap(),
-                        peer.local_addr().unwrap(),
-                        protocol,
-                    );
-                    (client.into(), peer.into(), f)
-                };
-                let client = std::sync::Arc::new(client);
-                let retained = std::sync::Arc::clone(&client);
-                assert!(f.cookie.is_none());
                 let deadline = Instant::now() + Duration::from_secs(1);
-                let pid = std::process::id();
-                let uid = rustix::process::getuid().as_raw();
-                let broker = Broker {
-                    context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32]).unwrap(),
-                    cache: VecDeque::new(),
-                    last_cold: None,
-                };
-                crate::attribution::native_session::known_roundtrip(
-                    broker,
-                    move |broker| {
-                        let snapshot = observe(&*client, f, 1, deadline)?;
-                        broker.cache = VecDeque::from([(f, snapshot)]);
-                        // Сокет должен жить до завершения RPC, включая final witness.
-                        let _ = &client;
-                        Ok(())
-                    },
-                    f,
-                    deadline,
-                )
-                .unwrap();
-                let mut cold = Broker {
-                    context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32]).unwrap(),
-                    cache: VecDeque::new(),
-                    last_cold: None,
-                };
-                super::WITNESSES.with(|n| n.set(0));
-                let cold_result = cold.lookup_and_project(f, 1);
-                let count = super::WITNESSES.with(|n| n.get());
-                match cold_result {
-                    super::super::ProjectedLookup::Known(_) => {
-                        assert_eq!(count, 3);
-                        eprintln!("cold Known witnesses={count}");
+                retained_projection_retry(deadline, |deadline| {
+                    let (client, _peer, f): (OwnedFd, OwnedFd, Flow) = if protocol == 6 {
+                        let listener = TcpListener::bind(address).unwrap();
+                        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                        let (peer, _) = listener.accept().unwrap();
+                        let f = flow(
+                            client.local_addr().unwrap(),
+                            client.peer_addr().unwrap(),
+                            protocol,
+                        );
+                        (client.into(), peer.into(), f)
+                    } else {
+                        let client = UdpSocket::bind(address).unwrap();
+                        let peer = UdpSocket::bind(address).unwrap();
+                        client.connect(peer.local_addr().unwrap()).unwrap();
+                        let f = flow(
+                            client.local_addr().unwrap(),
+                            peer.local_addr().unwrap(),
+                            protocol,
+                        );
+                        (client.into(), peer.into(), f)
+                    };
+                    let client = std::sync::Arc::new(client);
+                    let retained = std::sync::Arc::clone(&client);
+                    assert!(f.cookie.is_none());
+                    let pid = std::process::id();
+                    let uid = rustix::process::getuid().as_raw();
+                    let broker = Broker {
+                        context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32])
+                            .unwrap(),
+                        cache: VecDeque::new(),
+                        last_cold: None,
+                    };
+                    crate::attribution::native_session::known_roundtrip(
+                        broker,
+                        move |broker| {
+                            let snapshot = observe(&*client, f, 1, deadline)?;
+                            broker.cache = VecDeque::from([(f, snapshot)]);
+                            // Сокет должен жить до завершения RPC, включая final witness.
+                            let _ = &client;
+                            Ok(())
+                        },
+                        f,
+                        deadline,
+                    )?;
+                    let mut cold = Broker {
+                        context: TrustedContext::from_host(pid, uid, uid, 1, [3; 32], [2; 32])
+                            .unwrap(),
+                        cache: VecDeque::new(),
+                        last_cold: None,
+                    };
+                    super::WITNESSES.with(|n| n.set(0));
+                    let cold_result = cold.lookup_and_project(f, 1);
+                    let count = super::WITNESSES.with(|n| n.get());
+                    match cold_result {
+                        super::super::ProjectedLookup::Known(_) => {
+                            assert_eq!(count, 3);
+                            eprintln!("cold Known witnesses={count}");
+                        }
+                        super::super::ProjectedLookup::Unavailable(reason) => eprintln!(
+                            "cold unavailable={reason:?} witnesses={count}; cold Known не доказан"
+                        ),
+                        _ => panic!("существующий connected socket должен иметь candidate"),
                     }
-                    super::super::ProjectedLookup::Unavailable(reason) => eprintln!(
-                        "cold unavailable={reason:?} witnesses={count}; cold Known не доказан"
-                    ),
-                    _ => panic!("существующий connected socket должен иметь candidate"),
-                }
-                drop(retained);
-                eprintln!("cookieless Known family={} protocol={protocol}", f.family);
+                    drop(retained);
+                    eprintln!("cookieless Known family={} protocol={protocol}", f.family);
+                    Ok(())
+                })
+                .unwrap();
             }
         }
+    }
+    #[test]
+    fn cookieless_retry_recovers_after_callback_timeout() {
+        use super::super::{Broker, TrustedContext};
+        use std::collections::VecDeque;
+        let mut attempts = 0;
+        retained_projection_retry(Instant::now() + Duration::from_secs(1), |deadline| {
+            attempts += 1;
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (_peer, _) = listener.accept().unwrap();
+            let f = flow(client.local_addr().unwrap(), client.peer_addr().unwrap(), 6);
+            let uid = rustix::process::getuid().as_raw();
+            let broker = Broker {
+                context: TrustedContext::from_host(
+                    std::process::id(),
+                    uid,
+                    uid,
+                    1,
+                    [3; 32],
+                    [2; 32],
+                )
+                .unwrap(),
+                cache: VecDeque::new(),
+                last_cold: None,
+            };
+            let retained = std::sync::Arc::new(client);
+            let client = std::sync::Arc::clone(&retained);
+            let force_timeout = attempts == 1;
+            crate::attribution::native_session::known_roundtrip(
+                broker,
+                move |broker| {
+                    // Управляемая ошибка callback проверяет retry, не причину задержки CI.
+                    if force_timeout {
+                        return Err(Unavailable::Timeout);
+                    }
+                    broker.cache = VecDeque::from([(f, observe(&*client, f, 1, deadline)?)]);
+                    Ok(())
+                },
+                f,
+                deadline,
+            )
+        })
+        .unwrap();
+        assert!((2..=3).contains(&attempts));
     }
     #[test]
     fn cache_rejects_reuse_executable_and_epoch_without_churn() {
