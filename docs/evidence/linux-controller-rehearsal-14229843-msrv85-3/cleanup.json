@@ -1,0 +1,7 @@
+{
+  "task": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-3",
+  "removed_by_controller": true,
+  "target_created": false,
+  "cargo_builds": 0,
+  "cargo_clean_needed": false
+}

@@ -1,0 +1,48 @@
+{
+  "state": "COLLECTED",
+  "gate": {
+    "status": "PASS",
+    "scope": "local-TCB-provenance-preflight",
+    "release_id": "linux-controller-rehearsal-14229843-msrv85-3",
+    "source": {
+      "commit": "14229843f9a11bf98ec4f5992df00f3247102ea2",
+      "tree": "7daa4ebb7cc25d3ceafab76809afc78753dc5ec3"
+    },
+    "final_linux_acceptance": false
+  },
+  "package": {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-3/package.tar",
+    "size": 443166720,
+    "sha256": "229a71a54cf2d0e6e6b83396476acb3ea54138ff0b988b93110ce6b7a3f5c740"
+  },
+  "source": {
+    "commit": "14229843f9a11bf98ec4f5992df00f3247102ea2",
+    "tree": "7daa4ebb7cc25d3ceafab76809afc78753dc5ec3"
+  },
+  "new_rust_builds": 0,
+  "source_offers": 169,
+  "core_dependencies": {
+    "xray": 44,
+    "sing-box": 136
+  },
+  "old_registries_unchanged": true,
+  "final_linux_acceptance": false,
+  "brotli": {
+    "xray": [
+      {
+        "module": "github.com/andybalholm/brotli",
+        "version": "v1.2.3",
+        "h1": "h1:8H1qwOkl2LPfjf3YezB90JnCliZb6SInJ/OJkEbA5NQ=",
+        "zip_sha256": "3017c784cffc7f0019a6573efcb6d861be4bd08e2072532a88ff39280f3ec15c"
+      }
+    ],
+    "sing-box": [
+      {
+        "module": "github.com/andybalholm/brotli",
+        "version": "v1.1.0",
+        "h1": "h1:eLKJA0d02Lf0mVpIDgYnqXcUn0GqVmEFny3VuID1U3M=",
+        "zip_sha256": "61bc9b753662e2101c63bfc9562f660e9ceca9866010948f1aaccb05cf9e263a"
+      }
+    ]
+  }
+}

@@ -13,13 +13,14 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterator, Protocol
 from urllib.parse import urlsplit
 
@@ -55,6 +56,9 @@ CONTROLLED_ENV = (
     "GIT_TERMINAL_PROMPT",
     "TMPDIR",
 )
+RUST_REUSE_PRIOR = "linux-controller-rehearsal-14229843-msrv85-2"
+RUST_REUSE_TARGET = "linux-controller-rehearsal-14229843-msrv85-3"
+RUST_REUSE_REVIEW = "969f65b68f9283f81d77d9c6f1f2c00d8f26934e"
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
 JOB_SOURCE = "ce356b452675036fab3388ef64ea03f8f00910ce"
 JOB_BINARIES = {
@@ -295,14 +299,18 @@ def source_offers(root: Path) -> dict:
     for row in rows:
         url = urlsplit(row["zip_url"])
         if (
-            row["module"] in result
+            not isinstance(row["module"], str)
+            or not isinstance(row["version"], str)
             or not re.fullmatch(r"[a-f0-9]{64}", row["zip_sha256"])
             or url.scheme != "https"
             or not url.hostname
             or url.username
         ):
             raise NotReady("Некорректный frozen Go source offer")
-        result[row["module"]] = row
+        key = (row["module"], row["version"])
+        if key in result and result[key] != row:
+            raise NotReady("Конфликт frozen Go source offer module/version")
+        result[key] = row
     return result
 
 
@@ -514,27 +522,48 @@ def check_core(
         or "\tbuild\tGOARCH=amd64" not in build_info
     ):
         raise NotReady("GoBuildInfo несовместим с Linux amd64")
-    dependencies = {}
-    for line in build_info.splitlines():
-        fields = line.strip().split("\t")
-        if fields[0] == "dep" and len(fields) >= 4:
-            dependencies[fields[1]] = (fields[2], fields[3])
-        if fields[0] == "=>":
-            raise NotReady("Go replacement требует отдельного frozen source binding")
-    pinned = source_offers(root)
-    for module, (version, checksum) in dependencies.items():
-        if module not in pinned or (
-            pinned[module]["version"],
-            pinned[module]["h1"],
-        ) != (version, checksum):
-            raise NotReady("Go dependency отсутствует в frozen compliance")
+    dependencies = resolve_dependencies(build_info, source_offers(root))
     return {
         "manifest": manifest,
         "elf": elf_file(binary),
         "go_build_info": build_info,
         "abi": codec,
-        "dependencies": sorted(dependencies),
+        "dependencies": dependencies,
     }
+
+
+def resolve_dependencies(build_info: str, pinned: dict) -> list[dict]:
+    dependencies = {}
+    for line in build_info.splitlines():
+        fields = line.strip().split("\t")
+        if fields[0] == "=>":
+            raise NotReady("Go replacement требует отдельного frozen source binding")
+        if fields[0] != "dep":
+            continue
+        if len(fields) != 4:
+            raise NotReady("Неполный Go dependency BuildInfo")
+        _, module, version, checksum = fields
+        row = pinned.get((module, version))
+        if row is None or row["h1"] != checksum:
+            raise NotReady("Go dependency отсутствует в frozen compliance")
+        resolved = {key: row[key] for key in ("module", "version", "h1", "zip_sha256")}
+        if module in dependencies and dependencies[module] != resolved:
+            raise NotReady("Конфликт Go dependency в одном core")
+        dependencies[module] = resolved
+    return [dependencies[name] for name in sorted(dependencies)]
+
+
+def required_offers(root: Path, cores: dict) -> list[dict]:
+    pinned = source_offers(root)
+    required = {}
+    for core in cores.values():
+        resolved = resolve_dependencies(core["go_build_info"], pinned)
+        if resolved != core["dependencies"]:
+            raise NotReady("Подменён core/source offer binding")
+        for row in resolved:
+            key = (row["module"], row["version"])
+            required[key] = pinned[key]
+    return [required[key] for key in sorted(required)]
 
 
 def pkginfo(root: Path) -> bytes:
@@ -575,16 +604,11 @@ def package_files(
         for path in folder.iterdir():
             if path.suffix in (".json", ".patch"):
                 files[f"usr/share/yonik/sources/{engine}/{path.name}"] = (0o644, path)
-    rows = source_offers(root).values()
-    required = {
-        name for record in core_records.values() for name in record["dependencies"]
-    }
-    for row in rows:
-        if row["module"] in required:
-            files[f"usr/share/yonik/sources/go/{row['zip_sha256']}.zip"] = (
-                0o644,
-                artifacts / "go-sources" / (row["zip_sha256"] + ".zip"),
-            )
+    for row in required_offers(root, core_records):
+        files[f"usr/share/yonik/sources/go/{row['zip_sha256']}.zip"] = (
+            0o644,
+            artifacts / "go-sources" / (row["zip_sha256"] + ".zip"),
+        )
     files["usr/share/yonik/sources/release-source.tar"] = (
         0o644,
         artifacts / "source.tar",
@@ -708,6 +732,172 @@ def restore_job_source(
         runner.run(["git", "apply", str(patch)], source, env)
 
 
+def rust_reuse_pins(repo: Path) -> dict:
+    # Root согласовал именно эти partial facts, не произвольный caller record.
+    path = f"docs/evidence/{RUST_REUSE_PRIOR}/registry-inventory.json"
+    inventory = json.loads(git(repo, "show", RUST_REUSE_REVIEW + ":" + path))
+    prefix = (
+        "/home/myrs/projects/yonik/local/release-controller/" + RUST_REUSE_PRIOR + "/"
+    )
+    pins = {}
+    for row in inventory:
+        if not row["path"].startswith(prefix):
+            raise NotReady("Неверный fixed partial-build inventory")
+        relative = row["path"][len(prefix) :]
+        parts = PurePosixPath(relative).parts
+        if not parts or ".." in parts or relative in pins:
+            raise NotReady("Некорректный partial-build inventory path")
+        pins[relative] = {"size": row["size"], "sha256": row["sha256"]}
+    return pins
+
+
+def read_pinned_partial(directory: Path, relative: str, pin: dict) -> bytes:
+    parts = PurePosixPath(relative).parts
+    if not parts or relative.startswith("/") or ".." in parts:
+        raise NotReady("Недопустимый partial-build path")
+    parent = _private_directory(directory)
+    try:
+        for part in parts[:-1]:
+            child = _private_directory(part, parent)
+            os.close(parent)
+            parent = child
+        fd = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+        )
+        with os.fdopen(fd, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_nlink != 1
+                or metadata.st_mode & 0o022
+                or metadata.st_size != pin["size"]
+                or (
+                    (
+                        relative
+                        in ("frozen.json", "failure.json", "trusted-core-job.json")
+                        or relative.endswith(".command.json")
+                    )
+                    and stat.S_IMODE(metadata.st_mode) != 0o600
+                )
+            ):
+                raise NotReady("Небезопасный/изменённый partial-build artifact")
+            if hashlib.file_digest(stream, "sha256").hexdigest() != pin["sha256"]:
+                raise NotReady("Partial-build SHA mismatch")
+            # Большие core/source archives только хешируются; Rust и records читаются.
+            if (
+                relative in RUST
+                or relative.endswith(".json")
+                or relative in ("controller-logs/0.stdout", "controller-logs/1.stdout")
+            ):
+                stream.seek(0)
+                return stream.read()
+            return b""
+    finally:
+        os.close(parent)
+
+
+def rust_toolchain_hashes() -> dict[str, str]:
+    return {name: sha(RUST_BIN / name) for name in ("rustc", "cargo")}
+
+
+def reuse_rust(
+    repo: Path,
+    registry: Path,
+    release: str,
+    record: dict,
+    artifacts: Path,
+    toolchains: dict,
+) -> dict:
+    if release != RUST_REUSE_TARGET:
+        raise NotReady("Rust reuse разрешён только fixed root-selected rehearsal ID")
+    pins = rust_reuse_pins(repo)
+    required = {
+        "frozen.json",
+        "failure.json",
+        "source.tar",
+        *RUST,
+        *{f"controller-logs/{i}.command.json" for i in range(4)},
+        "controller-logs/0.stdout",
+        "controller-logs/1.stdout",
+    }
+    if not required <= pins.keys():
+        raise NotReady("Нет fixed partial-build facts")
+    with release_lock(registry, RUST_REUSE_PRIOR, writer=False) as prior:
+        data = {
+            name: read_pinned_partial(prior, name, pin) for name, pin in pins.items()
+        }
+        frozen = json.loads(data["frozen.json"])
+        if any(
+            frozen[key] != record[key] for key in ("source", "recipe", "archive_sha256")
+        ):
+            raise NotReady("Rust reuse source/tree/archive/recipe mismatch")
+        # Tooling мог измениться только после prior job: его старые hashes проверяются
+        # по согласованному Git revision, а новый freeze связывает новые hashes.
+        for name, checksum in frozen["tooling_sha256"].items():
+            if (
+                digest(git(repo, "show", RUST_REUSE_REVIEW + ":tools/" + name))
+                != checksum
+            ):
+                raise NotReady("Неверный prior controller tooling hash")
+        failure = json.loads(data["failure.json"])
+        if (
+            failure.get("status") != "BLOCKED"
+            or failure.get("final_linux_acceptance") is not False
+            or failure.get("reason") != "Некорректный frozen Go source offer"
+        ):
+            raise NotReady("Неверный prior partial-build failure boundary")
+        prior_task = TRANSIENT / ("release-controller-" + RUST_REUSE_PRIOR)
+        commands = [
+            ["rustc", "--version"],
+            ["cargo", "--version"],
+            *[[SLOT, *command] for command in RECIPE["rust_commands"]],
+        ]
+        for index, expected in enumerate(commands):
+            row = json.loads(data[f"controller-logs/{index}.command.json"])
+            controlled = row.get("controlled_env", {})
+            expected_env = {
+                "RUSTUP_TOOLCHAIN": RUST_PROFILE,
+                "RUSTC": str(RUST_BIN / "rustc"),
+                "CARGO_BUILD_JOBS": "1",
+                "CARGO_TARGET_DIR": str(prior_task / "target"),
+                "TMPDIR": str(prior_task / "tmp"),
+                "YONIK_BUILD_ID": "0.1.0+" + record["source"]["commit"],
+            }
+            if (
+                row["argv"] != expected
+                or row["exit"] != 0
+                or row["cwd"] != str(prior_task / "source")
+                or any(
+                    controlled.get(key) != value for key, value in expected_env.items()
+                )
+                or controlled.get("PATH", "").split(os.pathsep)[0] != str(RUST_BIN)
+            ):
+                raise NotReady("Нет успешных exact Rust commands/profile в prior job")
+        for index, name in enumerate(("rustc", "cargo")):
+            if toolchains[name] != data[f"controller-logs/{index}.stdout"].decode():
+                raise NotReady("Rust reuse toolchain version mismatch")
+        elf_records = {}
+        for name in RUST:
+            elf_records[name] = elf_header(data[name][:64], len(data[name]))
+            with (artifacts / name).open("xb") as stream:
+                stream.write(data[name])
+        lineage = {
+            "schema": 1,
+            "build_performed": False,
+            "prior_release_id": RUST_REUSE_PRIOR,
+            "reviewed_evidence_commit": RUST_REUSE_REVIEW,
+            "source": record["source"],
+            "archive_sha256": record["archive_sha256"],
+            "prior_artifacts": pins,
+            "toolchains": toolchains,
+            "elf": elf_records,
+            "toolchain_binary_sha256_observed_at_reuse": rust_toolchain_hashes(),
+        }
+        write_record(artifacts / "rust-lineage.json", lineage)
+        return lineage
+
+
 def _collect(
     repo: Path, registry: Path, release: str, task: Path, runner: TrustedRunner
 ) -> dict:
@@ -730,13 +920,20 @@ def _collect(
                 for name in ("rustc", "cargo")
             }
             try:
-                for command in RECIPE["rust_commands"]:
-                    runner.run([SLOT, *command], root, env)
-                elf_records = {}
-                for name in RUST:
-                    binary = input_path(task / "target/release", name)
-                    elf_records[name] = elf_file(binary)
-                    shutil.copyfile(binary, artifacts / name)
+                rust_lineage = None
+                if release == RUST_REUSE_TARGET:
+                    rust_lineage = reuse_rust(
+                        repo, registry, release, record, artifacts, toolchains
+                    )
+                    elf_records = rust_lineage["elf"]
+                else:
+                    for command in RECIPE["rust_commands"]:
+                        runner.run([SLOT, *command], root, env)
+                    elf_records = {}
+                    for name in RUST:
+                        binary = input_path(task / "target/release", name)
+                        elf_records[name] = elf_file(binary)
+                        shutil.copyfile(binary, artifacts / name)
                 cores = {}
                 for engine in VERSIONS:
                     build = task / engine
@@ -826,29 +1023,24 @@ def _collect(
                     logs = build / "build-native-adapter-logs"
                     if logs.exists():
                         shutil.copytree(logs, artifacts / engine / "builder-logs")
-                offers = source_offers(root).values()
-                required = {
-                    name for core in cores.values() for name in core["dependencies"]
-                }
                 (artifacts / "go-sources").mkdir(mode=0o700)
-                for row in offers:
-                    if row["module"] in required:
-                        target = artifacts / "go-sources" / (row["zip_sha256"] + ".zip")
-                        if not target.exists():
-                            runner.run(
-                                [
-                                    "curl",
-                                    "--fail",
-                                    "--location",
-                                    "--output",
-                                    str(target),
-                                    row["zip_url"],
-                                ],
-                                root,
-                                env,
-                            )
-                        if sha(target) != row["zip_sha256"]:
-                            raise NotReady("Go source offer hash mismatch")
+                for row in required_offers(root, cores):
+                    target = artifacts / "go-sources" / (row["zip_sha256"] + ".zip")
+                    if not target.exists():
+                        runner.run(
+                            [
+                                "curl",
+                                "--fail",
+                                "--location",
+                                "--output",
+                                str(target),
+                                row["zip_url"],
+                            ],
+                            root,
+                            env,
+                        )
+                    if sha(target) != row["zip_sha256"]:
+                        raise NotReady("Go source offer hash mismatch")
                 files = package_files(root, artifacts, cores)
                 payload = write_package(artifacts / "package.tar", files, pkginfo(root))
                 context = {
@@ -862,6 +1054,7 @@ def _collect(
                     "cores": cores,
                     "payload": payload,
                     "trusted_native_job": accepted,
+                    "rust_lineage": rust_lineage,
                     "artifact_sha256": {
                         path.relative_to(artifacts).as_posix(): sha(path)
                         for path in artifacts.rglob("*")
@@ -889,6 +1082,13 @@ def validate_payload(package: Path, frozen: Path, context: dict) -> None:
 
     if sha(package) != context["package_sha256"]:
         raise NotReady("Package отличается от actual controller build")
+    for row in required_offers(frozen, context["cores"]):
+        member = f"usr/share/yonik/sources/go/{row['zip_sha256']}.zip"
+        if context["payload"].get(member) != {
+            "mode": 0o644,
+            "sha256": row["zip_sha256"],
+        }:
+            raise NotReady("Нет точного source offer в package binding")
     ordinary = expected_files(frozen)
     bound = {
         name: (row["mode"], row["sha256"])

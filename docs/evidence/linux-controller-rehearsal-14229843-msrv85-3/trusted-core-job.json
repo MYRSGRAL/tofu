@@ -1,0 +1,9 @@
+{
+  "source_review_commit": "ce356b452675036fab3388ef64ea03f8f00910ce",
+  "job_path": "/home/myrs/projects/yonik/local/evidence/full-pinned-158-20261113",
+  "binary_sha256": {
+    "sing-box": "8a1683227b52a94ef904f8cdfbb676b16f9cf4409e68c046d3a5c7acebe591b5",
+    "xray": "68d802801b6be344f6fda5546803f2f38d49ace1cc50c4e37155fd0818d6083d"
+  },
+  "acceptance_context_sha256": "d9d07f95d78daa4375e0ae2d41a00f2b69dd7159ec1fdc108e5977f06109652b"
+}
