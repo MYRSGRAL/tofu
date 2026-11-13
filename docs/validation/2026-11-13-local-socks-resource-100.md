@@ -100,3 +100,13 @@ HTTPS при отказе не достигнут; после восстанов
 Evidence: `/home/myrs/projects/yonik/local/evidence/local-socks-resource-peer-negative/`.
 Binding фиксирует обновлённый Python harness, неизменённый Rust source и старый
 retained binary; пересборки Rust не было. Ruff format/check и diff-check PASS.
+
+Аварийный внешний timeout отдельно проверен: probe запускается в собственной
+session; перед cleanup producer останавливается, session members проверяются по
+PID/starttime и удерживаемым pidfd. SIGKILL и terminal readiness проверяются для
+host и core, даже если у core отдельная process group. Результат: два коротких
+cleanup-теста PASS; parent-only negative control оставляет занятый listener и
+обнаруживается oracle, исправленный helper освобождает listener.
+После исправления оба real peer-negative/restored-positive controls повторены
+на прежнем Rust binary: PASS. Новые hashes/логи — в `cleanup-fixed/binding.json`.
+Ни Rust rebuild, ни 2×100 ресурсная кампания не повторялись.

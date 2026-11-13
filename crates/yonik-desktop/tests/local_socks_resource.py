@@ -114,6 +114,74 @@ def command(process: subprocess.Popen, text: str, expected: str) -> None:
         raise RuntimeError("Нет ACK " + expected)
 
 
+def run_probe(
+    command: list[str], env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess:
+    """Отдельная session удерживает и core с собственной process group."""
+    with subprocess.Popen(
+        command,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate("connect\n", timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Host ещё не reaped: его PID/session нельзя переиспользовать.
+            # Останавливаем producer до перечисления принадлежащих session процессов.
+            process.send_signal(signal.SIGSTOP)
+            stopped, status = os.waitpid(process.pid, os.WUNTRACED)
+            if stopped != process.pid or not os.WIFSTOPPED(status):
+                raise RuntimeError(
+                    "Не удалось остановить probe перед cleanup"
+                ) from None
+            handles = []
+            try:
+                for entry in Path("/proc").iterdir():
+                    if not entry.name.isdecimal():
+                        continue
+                    try:
+                        fields = (entry / "stat").read_text().rsplit(") ", 1)[1].split()
+                        if int(fields[3]) != process.pid:
+                            continue
+                        handle = os.pidfd_open(int(entry.name))
+                        # Повторная проверка после открытия исключает PID reuse в scan.
+                        try:
+                            current = (
+                                (entry / "stat").read_text().rsplit(") ", 1)[1].split()
+                            )
+                            valid = (
+                                fields[19] == current[19]
+                                and int(current[3]) == process.pid
+                            )
+                        except (FileNotFoundError, ProcessLookupError):
+                            os.close(handle)
+                            continue
+                        if not valid:
+                            os.close(handle)
+                            continue
+                        handles.append(handle)
+                    except (FileNotFoundError, ProcessLookupError, PermissionError):
+                        continue
+                for handle in handles:
+                    try:
+                        signal.pidfd_send_signal(handle, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # Процесс уже завершился; pidfd всё равно проверяется ниже.
+                process.communicate(timeout=5)
+                for handle in handles:
+                    if not select.select([handle], [], [], 5)[0]:
+                        raise RuntimeError("Процесс probe session жив после cleanup")
+            finally:
+                for handle in handles:
+                    os.close(handle)
+            raise
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def denied_probe(
     binary: Path,
     engines: Path,
@@ -160,7 +228,7 @@ def denied_probe(
         data = root / f"{engine}-denied"
         data.mkdir(mode=0o700)
         started = time.monotonic()
-        denied = subprocess.run(
+        denied = run_probe(
             [
                 str(binary),
                 str(data),
@@ -170,10 +238,7 @@ def denied_probe(
                 url,
                 str(port),
             ],
-            input="connect\n",
             env=env,
-            capture_output=True,
-            text=True,
             timeout=35,
         )
         result = dict(
