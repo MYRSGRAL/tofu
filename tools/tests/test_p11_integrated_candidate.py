@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,16 @@ def fresh(blobs: dict[str, str], root: Path = ROOT) -> bool:
     )
 
 
+def producer_log(evidence: dict[str, str], root: Path = ROOT) -> bytes:
+    binding = json.loads((root / evidence["binding"]).read_text())
+    if binding["source_head"] != evidence["source"]:
+        raise ValueError("Producer evidence относится к другому source")
+    log = (root / evidence["log"]).read_bytes()
+    if hashlib.sha256(log).hexdigest() != evidence["log_sha256"]:
+        raise ValueError("SHA256 producer log не совпадает")
+    return log
+
+
 class IntegratedCandidate(unittest.TestCase):
     def setUp(self) -> None:
         self.ledger = json.loads(LEDGER.read_text())
@@ -39,6 +50,18 @@ class IntegratedCandidate(unittest.TestCase):
         subprocess.run(
             ["git", "merge-base", "--is-ancestor", source, "HEAD"], cwd=ROOT, check=True
         )
+        if self.ledger.get("source_accepted_in_main"):
+            subprocess.run(
+                [
+                    "git",
+                    "merge-base",
+                    "--is-ancestor",
+                    source,
+                    self.ledger["accepted_main_observed"],
+                ],
+                cwd=ROOT,
+                check=True,
+            )
         damaged = dict(self.ledger["source_blobs"])
         damaged[next(iter(damaged))] = "0" * 40
         self.assertFalse(fresh(damaged), "Устаревшее evidence должно отклоняться")
@@ -83,7 +106,6 @@ class IntegratedCandidate(unittest.TestCase):
 
     def test_reused_producer_evidence_is_bound_and_not_runtime_claim(self) -> None:
         evidence = self.ledger["producer_evidence"]
-        binding_path = ROOT / evidence["binding"]
         # Локальный полный log не обязателен для CI; source binding проверяется Git.
         if git("rev-parse", "--is-shallow-repository") == "true":
             self.skipTest(
@@ -95,18 +117,19 @@ class IntegratedCandidate(unittest.TestCase):
                     git("rev-parse", f"{evidence['source']}:{path}"),
                     self.ledger["source_blobs"][path],
                 )
-        if binding_path.exists():
-            binding = json.loads(binding_path.read_text())
-            self.assertEqual(binding["source_head"], evidence["source"])
-            log = (ROOT / evidence["log"]).read_bytes()
-            self.assertEqual(hashlib.sha256(log).hexdigest(), evidence["log_sha256"])
-            for test in (
-                "fetch_causes_strict_v2_generation_fence",
-                "probe_producer_exports_typed_failure_and_rejects_stale_generation",
-                "boundaries_preserve_admission_and_replacement_failures",
-                "join_failure_keeps_owner_context_and_unconfirmed_drain",
-                "thread_start_failure_publishes_closed_context_before_return",
-                "manual_source_failure_сохраняет_enum_до_публикации",
-                "actual_backup_conflict_is_bound_to_ack_and_v1_is_unchanged",
-            ):
-                self.assertIn((test + " ... ok").encode(), log)
+        log = producer_log(evidence)
+        for test in (
+            "fetch_causes_strict_v2_generation_fence",
+            "probe_producer_exports_typed_failure_and_rejects_stale_generation",
+            "boundaries_preserve_admission_and_replacement_failures",
+            "join_failure_keeps_owner_context_and_unconfirmed_drain",
+            "thread_start_failure_publishes_closed_context_before_return",
+            "manual_source_failure_сохраняет_enum_до_публикации",
+            "actual_backup_conflict_is_bound_to_ack_and_v1_is_unchanged",
+        ):
+            self.assertIn((test + " ... ok").encode(), log)
+
+    def test_missing_local_evidence_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="p11-missing-evidence-") as temporary:
+            with self.assertRaises(FileNotFoundError):
+                producer_log(self.ledger["producer_evidence"], Path(temporary))

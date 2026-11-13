@@ -42,11 +42,25 @@ Producer evidence повторно используется с `538ff996507ccc25
 доказательство исполнения каждого error arm в GUI. Storage/Transport не получают
 выдуманный errno. Unknown fallback не считается потерей известной причины.
 
-Локально: 25 Python tests PASS, RU/EN 374 пары / 160 ключей / 17 QML,
+Локально после исправления gate: 26 Python tests PASS, RU/EN 373 пары / 104 ключа / 16 QML,
 Ruff 0.17.4 format/check PASS. Rust, GUI и 16 новых probes не запускались.
 Тяжёлых временных сборок не создавалось.
 
-P11 в main **не closed**. #172 OPEN на момент проверки, observed main
-`b199563a32420d309e63bf6fb137dbf8aab08641`. Следующий конкретный gap — принятие
-reviewed source172 с успешной CI и подтверждение его ancestry в accepted main.
-Изменение любого связанного blob требует обновления evidence и конечного gate.
+#172 принят в main commit `d74e61884385cd20f659112182142b05cacb958e` после
+чистого review и зелёного CI. Ancestry source172 → observed main
+`3e64220fc16b7cfdd2170bd0fffc7049d056c8a7` подтверждена. Merge больше не pending.
+
+Полный P11/native issuer этим gate **не closed**: проверяются исходные 14
+границ и прежние scoped proofs, а не будущие helper/native issuers или исполнение
+каждого error arm. Следующий gate — отдельная проверка их actual production
+publication после завершения admission/issuer. Изменение любого связанного blob
+требует обновления evidence и конечного gate.
+
+Полный локальный gate теперь обязательно читает binding и producer log.
+Отсутствие любого файла, несовпадение source или SHA256 даёт FAIL; CI с shallow
+history по-прежнему явно SKIP исторического evidence, а не локальный acceptance
+PASS. Проверено на той же полной Git history: прежний gate без binding давал
+exit 0; исправленный — exit 1; после подстановки неизменённых сохранённых
+артефактов — PASS. Отдельный negative test проверяет отсутствующее evidence.
+
+Evidence исправления: `/home/myrs/projects/yonik/local/evidence/pr174-acceptance-gate-fix/`.

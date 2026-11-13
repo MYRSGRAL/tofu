@@ -3,7 +3,7 @@
   "source": "6f45329b2e0a9b1659232fd4558d75308a6bc6c7",
   "candidate_integrated_acceptance": "static-contract-and-reused-scoped-producers",
   "P11_main_closed": false,
-  "accepted_main_observed": "b199563a32420d309e63bf6fb137dbf8aab08641",
+  "accepted_main_observed": "3e64220fc16b7cfdd2170bd0fffc7049d056c8a7",
   "original_inventory": {
     "original_frozen_source": "cceede520842a17e4ef548807f63f64b2be19226",
     "provenance": "R2 original inventory in parent conversation; bda669/684 are review-task identifiers, NOT git refs",
@@ -483,7 +483,8 @@
   "limits": [
     "Статический конечный gate и повторное использование scoped evidence; новые Rust/GUI/runtime не запускались.",
     "14 boundaries, representative identities не являются исчерпывающим списком enum.",
-    "P11 в main не closed: source172 pending; принятие candidate и ancestry main — разные условия.",
+    "14 boundaries приняты в main; полный P11/native issuer этим статическим gate не закрывается.",
     "16 новых probes не запускались; compile-only permission не расширяется."
-  ]
+  ],
+  "source_accepted_in_main": true
 }
