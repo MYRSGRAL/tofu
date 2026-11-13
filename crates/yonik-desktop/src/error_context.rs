@@ -27,6 +27,7 @@ pub enum Stage {
     StorageOpen,
     EngineStart,
     EngineRun,
+    Probe,
     Cleanup,
     HelperRpc,
     RoutingSave,
@@ -116,6 +117,12 @@ pub enum Cause {
     EngineStartFailed,
     EngineStartExited,
     EngineExited,
+    ProbeHttpStatus,
+    ProbeTimeout,
+    ProbeTls,
+    ProbeTransport,
+    ProbeCheckFailed,
+    ProbeNetworkChanged,
     CleanupFailed,
     HelperUnsupported,
     HelperDenied,
@@ -492,6 +499,12 @@ impl Cause {
             Self::EngineStartFailed | Self::EngineStartExited => {
                 ("ENGINE_FAILED", "engine_failed", Stage::EngineStart)
             }
+            Self::ProbeHttpStatus => ("CHECK_HTTP_STATUS", "check_http_status", Stage::Probe),
+            Self::ProbeTimeout => ("CHECK_TIMEOUT", "check_timeout", Stage::Probe),
+            Self::ProbeTls => ("CHECK_TLS", "check_tls", Stage::Probe),
+            Self::ProbeTransport => ("CHECK_TRANSPORT", "check_transport", Stage::Probe),
+            Self::ProbeCheckFailed => ("CHECK_FAILED", "check_failed", Stage::Probe),
+            Self::ProbeNetworkChanged => ("NETWORK_CHANGED", "network_changed", Stage::Probe),
             Self::EngineExited => ("ENGINE_FAILED", "engine_failed", Stage::EngineRun),
             Self::CleanupFailed => ("CLEANUP_FAILED", "cleanup_failed", Stage::Cleanup),
             Self::HelperUnsupported => {

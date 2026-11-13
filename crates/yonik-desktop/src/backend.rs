@@ -2652,6 +2652,44 @@ struct SessionUpdate {
     network_stamp: Option<NetworkStamp>,
 }
 
+fn probe_session_update(
+    result: ProbeResult,
+    target: &ProbeTarget,
+    generation: u64,
+    network_stamp: Option<NetworkStamp>,
+    network_observed: bool,
+) -> SessionUpdate {
+    let passed = target.accepts(result);
+    let context = (!passed).then_some(match result {
+        ProbeResult::Response { .. } => Cause::ProbeHttpStatus,
+        ProbeResult::Timeout => Cause::ProbeTimeout,
+        ProbeResult::Tls => Cause::ProbeTls,
+        ProbeResult::Transport => Cause::ProbeTransport,
+    });
+    let error = context.map(|cause| ContextFailure::new(cause).error.key());
+    let mut proof: HealthResultDto = result.into();
+    proof.network_epoch = network_stamp.map(|stamp| stamp.to_string());
+    proof.network_observed = network_observed;
+    SessionUpdate {
+        context,
+        generation: Some(generation),
+        status: if passed { "Connected" } else { "Limited" },
+        error,
+        probe_result: Some(proof),
+        network_stamp,
+    }
+}
+
+fn probe_operation_error(error: HostError, cause: &mut Option<Cause>) -> &'static str {
+    if error == HostError::Cancelled {
+        *cause = None;
+        "cancelled"
+    } else {
+        *cause = Some(Cause::ProbeCheckFailed);
+        "check_failed"
+    }
+}
+
 fn network_matches(network: Option<NetworkSnapshot>, stamp: Option<NetworkStamp>) -> bool {
     match (network, stamp) {
         (Some(network), Some(stamp)) => network.is_current(stamp),
@@ -2687,6 +2725,16 @@ fn apply_session_update(
             .error_contexts
             .clear(crate::diagnostics::context::Slot::Connection);
         state.connection_error = Some("network_changed");
+        state.error_contexts.set_generation(
+            Slot::Error,
+            Cause::ProbeNetworkChanged,
+            Some(state.error_generation),
+        );
+        state.error_contexts.set_generation(
+            Slot::Connection,
+            Cause::ProbeNetworkChanged,
+            Some(state.error_generation),
+        );
         state.probe_result = None;
         return;
     }
@@ -2738,6 +2786,16 @@ fn synchronize_network(state: &mut Snapshot, network: Option<NetworkSnapshot>) {
                 .error_contexts
                 .clear(crate::diagnostics::context::Slot::Connection);
             state.connection_error = Some("network_changed");
+            state.error_contexts.set_generation(
+                Slot::Error,
+                Cause::ProbeNetworkChanged,
+                Some(state.error_generation),
+            );
+            state.error_contexts.set_generation(
+                Slot::Connection,
+                Cause::ProbeNetworkChanged,
+                Some(state.error_generation),
+            );
         }
     }
 }
@@ -3460,42 +3518,21 @@ async fn session(
             _ = network_invalidated(&mut network, network_stamp) => None,
             result = session.check(&target, &mut cancel) => Some(result),
         };
-        let result = result.transpose().map_err(|e| {
-            if e == HostError::Cancelled {
-                "cancelled"
-            } else {
-                "check_failed"
-            }
+        let result = result.transpose().map_err(|error| {
+            probe_operation_error(error, &mut operation_cause)
         })?;
         if let Some(result) = result.filter(|_| {
             network_matches(network.as_ref().map(NetworkWatch::current), network_stamp)
         }) {
-            let passed = target.accepts(result);
-            let error = if passed {
-                None
-            } else {
-                Some(match result {
-                    ProbeResult::Response { .. } => "check_http_status",
-                    ProbeResult::Timeout => "check_timeout",
-                    ProbeResult::Tls => "check_tls",
-                    ProbeResult::Transport => "check_transport",
-                })
-            };
-            let mut proof: HealthResultDto = result.into();
-            proof.network_epoch = network_stamp.map(|stamp| stamp.to_string());
-            proof.network_observed = checked_network.is_some_and(NetworkSnapshot::fully_observed);
-            let _ = updates.send(SessionUpdate {
-                context: None,
-                generation: Some(generation),
-                status: if passed { "Connected" } else { "Limited" },
-                error,
-                probe_result: Some(proof),
-                network_stamp,
-            }).await;
+            let update = probe_session_update(
+                result, &target, generation, network_stamp,
+                checked_network.is_some_and(NetworkSnapshot::fully_observed),
+            );
+            let _ = updates.send(update).await;
         } else {
-            session.invalidate_check().map_err(|_| "check_failed")?;
+            session.invalidate_check().map_err(|error| probe_operation_error(error, &mut operation_cause))?;
             let _ = updates.send(SessionUpdate {
-                context: None,
+                context: Some(Cause::ProbeNetworkChanged),
                 generation: Some(generation),
                 status: "Limited",
                 error: Some("network_changed"),
@@ -3513,10 +3550,10 @@ async fn session(
                 }),
                 _ = network_changed(&mut network) => {
                     if !network_matches(network.as_ref().map(NetworkWatch::current), network_stamp) {
-                        session.invalidate_check().map_err(|_| "check_failed")?;
+                        session.invalidate_check().map_err(|error| probe_operation_error(error, &mut operation_cause))?;
                         network_stamp = network.as_ref().map(|watch| watch.current().stamp);
                         let _ = updates.send(SessionUpdate {
-                            context: None,
+                            context: Some(Cause::ProbeNetworkChanged),
                             generation: Some(generation),
                             status: "Limited",
                             error: Some("network_changed"),
@@ -6455,5 +6492,131 @@ mod integration_policy_cancel_tests {
             assert!(command.cancels_policy_connect());
         }
         assert!(!Command::PresetCancel { request_id: 4 }.cancels_policy_connect());
+    }
+}
+
+#[cfg(test)]
+mod probe_context_tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn emitted(state: &Snapshot) -> String {
+        let captured = Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: Callback = Arc::new(move |raw| *output.lock().expect("snapshot") = raw);
+        state.emit(&callback);
+        let raw = captured.lock().expect("snapshot").clone();
+        raw
+    }
+
+    #[test]
+    fn probe_failure_and_network_loss_have_current_context() {
+        let mut cause = Some(Cause::EngineExited);
+        assert_eq!(
+            probe_operation_error(HostError::Cancelled, &mut cause),
+            "cancelled"
+        );
+        assert!(
+            cause.is_none(),
+            "ожидаемая отмена не является ошибкой probe"
+        );
+        assert_eq!(
+            probe_operation_error(HostError::State, &mut cause),
+            "check_failed"
+        );
+        assert_eq!(cause, Some(Cause::ProbeCheckFailed));
+        let mut state = Snapshot::new(true);
+        state.error_generation = 9;
+        apply_session_update(
+            &mut state,
+            SessionUpdate {
+                status: "Error",
+                error: Some("check_failed"),
+                context: cause,
+                generation: Some(9),
+                probe_result: None,
+                network_stamp: None,
+            },
+            None,
+        );
+        assert!(crate::diagnostics::export_snapshot_v2(&emitted(&state)).is_some());
+        state.status = "Connected";
+        state.network_epoch = Some("previous-network".into());
+        synchronize_network(&mut state, None);
+        assert_eq!(state.status, "Limited");
+        let export =
+            crate::diagnostics::export_snapshot_v2(&emitted(&state)).expect("network loss context");
+        let value: Value = serde_json::from_str(&export).expect("V2");
+        for context in value["errors"].as_array().expect("contexts") {
+            assert_eq!(context["reason"], "probe_network_changed");
+            assert_eq!(context["generation"], "9");
+        }
+    }
+
+    #[test]
+    fn probe_producer_exports_typed_failure_and_rejects_stale_generation() {
+        let target = ProbeTarget::new(
+            "https://fixture.invalid/PRIVATE-PATH",
+            Duration::from_secs(1),
+        )
+        .expect("target");
+        for (result, reason) in [
+            (
+                ProbeResult::Response {
+                    status: 503,
+                    elapsed: Duration::from_millis(1),
+                },
+                "probe_http_status",
+            ),
+            (ProbeResult::Timeout, "probe_timeout"),
+            (ProbeResult::Tls, "probe_tls"),
+            (ProbeResult::Transport, "probe_transport"),
+        ] {
+            let mut state = Snapshot::new(true);
+            state.error_generation = 7;
+            apply_session_update(
+                &mut state,
+                probe_session_update(result, &target, 7, None, false),
+                None,
+            );
+            assert_eq!(state.status, "Limited");
+            let raw = emitted(&state);
+            let export = crate::diagnostics::export_snapshot_v2(&raw)
+                .expect("actual producer must provide typed context");
+            let value: Value = serde_json::from_str(&export).expect("V2");
+            let contexts = value["errors"].as_array().expect("contexts");
+            assert_eq!(contexts.len(), 2);
+            for context in contexts {
+                assert_eq!(context["reason"], reason);
+                assert_eq!(context["stage"], "probe");
+                assert_eq!(context["generation"], "7");
+                assert_eq!(context["params"], serde_json::json!({}));
+            }
+            assert!(!export.contains("PRIVATE-PATH"));
+            assert!(!export.contains("fixture.invalid"));
+            let success = ProbeResult::Response {
+                status: 204,
+                elapsed: Duration::from_millis(1),
+            };
+            apply_session_update(
+                &mut state,
+                probe_session_update(success, &target, 6, None, false),
+                None,
+            );
+            assert_eq!(
+                emitted(&state),
+                raw,
+                "late success must not replace current failure"
+            );
+            apply_session_update(
+                &mut state,
+                probe_session_update(success, &target, 7, None, false),
+                None,
+            );
+            assert_eq!(state.status, "Connected");
+            assert!(state.connection_error.is_none());
+            let current: Value = serde_json::from_str(&emitted(&state)).expect("snapshot");
+            assert_eq!(current["error_contexts"], serde_json::json!([]));
+        }
     }
 }

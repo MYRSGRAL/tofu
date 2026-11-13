@@ -1580,5 +1580,65 @@
       "maintenance_ack"
     ],
     "generation_required": true
+  },
+  "probe_http_status": {
+    "code": "CHECK_HTTP_STATUS",
+    "message_key": "check_http_status",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "probe_timeout": {
+    "code": "CHECK_TIMEOUT",
+    "message_key": "check_timeout",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "probe_tls": {
+    "code": "CHECK_TLS",
+    "message_key": "check_tls",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "probe_transport": {
+    "code": "CHECK_TRANSPORT",
+    "message_key": "check_transport",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "probe_check_failed": {
+    "code": "CHECK_FAILED",
+    "message_key": "check_failed",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
+  },
+  "probe_network_changed": {
+    "code": "NETWORK_CHANGED",
+    "message_key": "network_changed",
+    "stage": "probe",
+    "slots": [
+      "error",
+      "connection"
+    ],
+    "generation_required": true
   }
 }
