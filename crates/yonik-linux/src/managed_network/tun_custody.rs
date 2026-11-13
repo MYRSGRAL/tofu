@@ -16,6 +16,25 @@ pub(crate) struct BoundTun {
     pub(super) framing: Framing,
 }
 impl BoundTun {
+    pub(crate) fn duplicate_for_attach(&self) -> Result<std::os::fd::OwnedFd, TunError> {
+        rustix::io::fcntl_dupfd_cloexec(self.queue.as_fd(), 0).map_err(|_| TunError::Io)
+    }
+    pub(crate) fn attach_metadata(&self) -> Result<[u8; 32], TunError> {
+        if self.framing != Framing::Plain || self.index == 0 || self.mtu < 68 {
+            return Err(TunError::Rejected);
+        }
+        self.queue.verify().map_err(|_| TunError::Evidence)?;
+        let mut metadata = [0; 32];
+        metadata[..4].copy_from_slice(&1u32.to_be_bytes());
+        metadata[4..8].copy_from_slice(&self.index.to_be_bytes());
+        // IFF_PERSIST — kernel state, wire передаёт только semantic framing.
+        metadata[8..12].copy_from_slice(&0x1001u32.to_be_bytes());
+        metadata[12..16].copy_from_slice(&u32::from(self.mtu).to_be_bytes());
+        let name = self.queue.name().as_bytes();
+        metadata[16..16 + name.len()].copy_from_slice(name);
+        Ok(metadata)
+    }
+
     pub(crate) fn transferred(&mut self) {
         self.operation = None;
     }

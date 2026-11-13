@@ -1,4 +1,4 @@
-//! Только три согласованных fixed ioctl. Queue не предоставляет FD или Clone.
+//! Только три согласованных fixed ioctl. Queue не передаёт owning FD и не реализует Clone.
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")))]
 compile_error!("TUN wrapper проверен только для Linux x86_64 GNU");
 use std::{
@@ -45,6 +45,13 @@ impl Queue {
             name: name.into(),
             framing,
         })
+    }
+    /// Заимствование очереди не передаёт владение и не создаёт authority.
+    pub fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        std::os::fd::AsFd::as_fd(&self.file)
+    }
+    pub fn name(&self) -> &str {
+        &self.name
     }
     pub fn verify(&self) -> Result<()> {
         kernel::inspect(&self.file, &self.name, self.framing)

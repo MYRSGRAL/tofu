@@ -367,7 +367,7 @@ impl SessionArtifact {
     }
 }
 pub(super) struct HelperTunCustody {
-    bound: crate::managed_network::tun::BoundTun,
+    bound: Arc<crate::managed_network::tun::BoundTun>,
 }
 pub(super) struct ActiveSession {
     artifact: Arc<SessionArtifact>,
@@ -518,10 +518,13 @@ impl Backend {
             )
             .await
             .map_err(unavailable)?;
-        self.tun_custody = Some(HelperTunCustody { bound });
-        if let Some(custody) = self.tun_custody.as_mut() {
-            custody.bound.transferred();
-        }
+        self.tun_custody = Some(HelperTunCustody {
+            bound: Arc::new(bound),
+        });
+        let custody = self.tun_custody.as_mut().ok_or(ServiceError::Unavailable)?;
+        Arc::get_mut(&mut custody.bound)
+            .ok_or(ServiceError::Unavailable)?
+            .transferred();
         Ok(())
     }
     // Вызывается только после успешного supervisor.recover; не admission API.

@@ -129,6 +129,12 @@ async fn real_journal_queue_custody_controls() {
                 .is_err()
         );
         bound.transferred();
+        let bound = std::sync::Arc::new(bound);
+        if framing == Framing::Plain {
+            crate::attribution::native_session::bound_terminal_controls(bound.clone());
+        } else {
+            assert!(bound.attach_metadata().is_err());
+        }
         assert_eq!(fds(), count + 1);
         bound
             .project(
