@@ -1,6 +1,7 @@
 # N4: ограниченное предложение test-only consumer bridge
 
-Статус: NEEDS ROOT CONTRACT; runtime consumer acceptance НЕ выполнена.
+Статус: пункты 1–4 явно согласованы root; реализация и component acceptance
+описаны в `2026-11-14-n4-consumer-component.md`. Ниже сохранён согласованный контракт.
 Зависимая база PR171: `ca801bc1b6916522954b6e97a081b305f7b0bfe7`.
 В отдельную ветку обычным merge включён main `ec363a94799eab491fce76dae0ae85a30438802b`
 (PR126 с Go158). PR171 и исходные refs не изменялись. PR167

@@ -222,3 +222,57 @@ async fn real_journal_queue_custody_controls() {
     fs::remove_file(path.join("journal.json")).unwrap();
     fs::remove_dir(path).unwrap();
 }
+
+#[tokio::test]
+#[ignore = "Только same-UID isolated user/net/mount namespace и отдельные Go test ELF"]
+async fn real_journal_actual_consumer() {
+    let ns = fs::File::open("/proc/thread-self/ns/net").unwrap();
+    let (dev, ino) = super::super::namespace(&ns).unwrap();
+    let owner = Ownership::new(rustix::process::getuid().as_raw(), 7, 9, dev, ino).unwrap();
+    let mut executor = TunExecutor::isolated_fixture(owner).unwrap();
+    let path = std::env::temp_dir().join(format!("yonik-n4-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut journal = Journal::open(&path, owner).unwrap();
+    for engine in ["XRAY", "SING_BOX"] {
+        let binary = std::path::PathBuf::from(std::env::var(format!("YONIK_N4_{engine}")).unwrap());
+        for mode in ["cancel", "revoke", "stop", "wrongmetadata"] {
+            let baseline = fds();
+            executor
+                .ensure_tun_with_framing(&mut journal, 1, 7, false)
+                .await
+                .unwrap();
+            executor
+                .configure_link(&mut journal, 1, 1400)
+                .await
+                .unwrap();
+            let (_keep, mut cancel) = Cancellation::new();
+            let mut bound = executor
+                .bind_session_queue(&journal, 1, 1400, Framing::Plain, &mut cancel)
+                .await
+                .unwrap();
+            bound.transferred();
+            let bound = std::sync::Arc::new(bound);
+            if mode == "wrongmetadata" {
+                ip(&["link", "set", "dev", "tofu00000007", "mtu", "1500"]);
+            }
+            crate::attribution::native_session::bound_consumer_fixture(
+                bound.clone(),
+                &path.join("control.sock"),
+                &binary,
+                mode,
+            );
+            assert_eq!(std::sync::Arc::strong_count(&bound), 1);
+            assert_eq!(fds(), baseline + 1);
+            drop(bound);
+            assert_eq!(fds(), baseline);
+            executor.remove_tun(&mut journal, 1).await.unwrap();
+            eprintln!(
+                "N4 {engine}/{mode}: owner released before Journal cleanup; FD baseline restored"
+            );
+        }
+    }
+    drop(journal);
+    fs::remove_file(path.join("journal.json")).unwrap();
+    fs::remove_dir(path).unwrap();
+}
