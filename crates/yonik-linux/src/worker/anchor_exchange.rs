@@ -734,6 +734,21 @@ mod tests {
     }
     #[test]
     fn actual_v3_bound_report_channel() {
+        const CHILD: &str = "YONIK_V3_REPORT_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // FD oracle охватывает весь процесс; соседние lib-тесты меняют его FD.
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "worker::anchor_exchange::tests::actual_v3_bound_report_channel",
+                    "--exact",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success(), "изолированный v3 FD oracle");
+            return;
+        }
         for attack in [
             "valid",
             "nonce",
