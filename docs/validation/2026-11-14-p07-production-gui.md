@@ -83,7 +83,10 @@ Oracle не исключает zombie из terminal group. Краткоживу�
 ## Границы GUI доказательства и координация W3
 
 За интервал hidden в каждом прогоне: 0 log page changes, 1 stateChanged (visibility),
-cursor неизменен. Это прямое наблюдение отсутствия UI обработки каждой строки.
+cursor неизменен. Это доказывает только указанные внешние notifications/cursor,
+а не отсутствие внутренней обработки строк или polling. Для этого пункта статус
+**WAITING_W3_API**: нужен пассивный observer фактического consumer path.
+Полный P07 PASS данным наблюдением не заявляется.
 GUI управление проходит реальные handlers во время producer; latency измерена
 до наблюдения snapshot и включает 25-мс sampling driver. Продуктовый budget не задан.
 

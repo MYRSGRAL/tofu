@@ -94,3 +94,12 @@ Source archive, executable и build/check логи сохранены вне TTL
 ссылок на transient выполнен cargo clean; собственный transient root удалён.
 Cargo.lock вернулся к accepted байтам: Cargo только переместил workspace записи,
 зависимости не менялись. Чужие untracked cross-UID файлы сохранены и не включены.
+
+## Уточнение source binding после review
+
+`p07-concurrent-binding.json` schema 2 явно разделяет archived campaign source и
+проверенный файл Git `b01a3a1`. Runtime executable относится к source member
+в сохранённом archive (SHA `844b864…`), а текущий файл имеет SHA `e942b655…`.
+Изменения ограничены cfg-гейтами и unsupported main; workload не менялся.
+Это не exact-current-head build proof. Хеши source archive, executable и raw
+логов сохранены; результаты старого binary не присвоены новому source.
