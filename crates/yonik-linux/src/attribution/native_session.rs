@@ -3,7 +3,8 @@ use super::{
     broker::{Broker, Lookup, Unavailable},
     native_wire::{self as wire, Header, Kind, Malformed, Sequence},
 };
-use std::os::fd::OwnedFd;
+use crate::managed_network::tun::BoundTun;
+use std::{os::fd::OwnedFd, sync::Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
@@ -29,9 +30,38 @@ pub struct Session {
     sequence: Sequence,
 }
 struct Roles {
-    tun: OwnedFd,
+    tun: TunRole,
     worker: OwnedFd,
     broker: Option<Broker>,
+}
+
+// Production хранит только helper-owned queue; raw FD доступен лишь fixture.
+#[cfg_attr(not(test), allow(dead_code))]
+enum TunRole {
+    Bound(Arc<BoundTun>),
+    #[cfg(test)]
+    Fixture {
+        fd: Arc<OwnedFd>,
+        metadata: [u8; 32],
+    },
+}
+impl TunRole {
+    fn metadata(&self) -> Result<[u8; 32], Malformed> {
+        match self {
+            Self::Bound(bound) => bound.attach_metadata().map_err(|_| Malformed),
+            #[cfg(test)]
+            Self::Fixture { metadata, .. } => Ok(*metadata),
+        }
+    }
+    fn duplicate(&self) -> Result<OwnedFd, Malformed> {
+        match self {
+            Self::Bound(bound) => bound.duplicate_for_attach().map_err(|_| Malformed),
+            #[cfg(test)]
+            Self::Fixture { fd, .. } => {
+                rustix::io::fcntl_dupfd_cloexec(fd.as_ref(), 0).map_err(|_| Malformed)
+            }
+        }
+    }
 }
 
 impl Session {
@@ -101,31 +131,23 @@ impl Session {
     }
     /// ATTACH metadata предоставляется только resource owner. Ровно один
     /// duplicate создаётся здесь; при ошибке сессия целиком отзывается.
-    pub fn attach(
-        &mut self,
-        features: &[u8],
-        metadata: &[u8; 32],
-    ) -> Result<(Vec<u8>, OwnedFd), Malformed> {
-        let result = self.attach_inner(features, metadata);
+    pub fn attach(&mut self, features: &[u8]) -> Result<(Vec<u8>, OwnedFd), Malformed> {
+        let result = self.attach_inner(features);
         if result.is_err() {
             self.close();
         }
         result
     }
-    fn attach_inner(
-        &mut self,
-        features: &[u8],
-        metadata: &[u8; 32],
-    ) -> Result<(Vec<u8>, OwnedFd), Malformed> {
+    fn attach_inner(&mut self, features: &[u8]) -> Result<(Vec<u8>, OwnedFd), Malformed> {
         if self.phase != Phase::Features || self.header(features)?.kind != Kind::Features {
             return Err(Malformed);
         }
         wire::selected_features(features, self.app_required)?;
         let mut bytes = self.frame(Kind::Attach)?;
-        bytes[96..128].copy_from_slice(metadata);
-        Header::decode(&bytes, 1)?;
         let roles = self.roles.as_ref().ok_or(Malformed)?;
-        let fd = rustix::io::fcntl_dupfd_cloexec(&roles.tun, 0).map_err(|_| Malformed)?;
+        bytes[96..128].copy_from_slice(&roles.tun.metadata()?);
+        Header::decode(&bytes, 1)?;
+        let fd = roles.tun.duplicate()?;
         self.phase = Phase::Ack;
         Ok((bytes, fd))
     }
@@ -197,7 +219,9 @@ impl Session {
 // Транспорт не создаёт authority: Session по-прежнему выпускает только helper.
 mod transport;
 #[cfg(test)]
-pub(super) use transport::tests::known_roundtrip;
+pub(crate) use transport::tests::bound_terminal_controls;
+#[cfg(test)]
+pub(super) use transport::tests::{cold_roundtrip, known_roundtrip};
 
 impl Drop for Session {
     fn drop(&mut self) {
@@ -215,6 +239,15 @@ impl Drop for Roles {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
+    pub(super) fn metadata() -> [u8; 32] {
+        let mut metadata = [0; 32];
+        metadata[..4].copy_from_slice(&1u32.to_be_bytes());
+        metadata[4..8].copy_from_slice(&1u32.to_be_bytes());
+        metadata[8..12].copy_from_slice(&0x1001u32.to_be_bytes());
+        metadata[12..16].copy_from_slice(&1500u32.to_be_bytes());
+        metadata[16..20].copy_from_slice(b"tun0");
+        metadata
+    }
     pub(super) fn fixture() -> (Session, UnixStream) {
         let (worker, peer) = UnixStream::pair().unwrap();
         let tun = std::fs::File::open("/dev/null").unwrap();
@@ -229,7 +262,10 @@ mod tests {
                 invocation: [5; 16],
                 app_required: false,
                 roles: Some(Roles {
-                    tun: tun.into(),
+                    tun: TunRole::Fixture {
+                        fd: Arc::new(tun.into()),
+                        metadata: metadata(),
+                    },
                     worker: worker.into(),
                     broker: None,
                 }),
@@ -255,13 +291,7 @@ mod tests {
         let mut features = s.frame(Kind::Features).unwrap();
         features[96..104].copy_from_slice(&wire::FEATURES.to_be_bytes());
         features[104..112].copy_from_slice(&wire::OWNED_TUN.to_be_bytes());
-        let mut metadata = [0; 32];
-        metadata[..4].copy_from_slice(&1u32.to_be_bytes());
-        metadata[4..8].copy_from_slice(&1u32.to_be_bytes());
-        metadata[8..12].copy_from_slice(&0x1001u32.to_be_bytes());
-        metadata[12..16].copy_from_slice(&1500u32.to_be_bytes());
-        metadata[16..20].copy_from_slice(b"tun0");
-        let (attach, duplicate) = s.attach(&features, &metadata).unwrap();
+        let (attach, duplicate) = s.attach(&features).unwrap();
         assert_eq!(Header::decode(&attach, 1).unwrap().kind, Kind::Attach);
         drop(duplicate);
         let mut ack = s.frame(Kind::AttachAck).unwrap();
@@ -273,10 +303,48 @@ mod tests {
         assert_eq!(peer.read(&mut [0]).unwrap(), 0);
     }
     #[test]
+    fn attach_duplicate_and_close_preserve_original_owner() {
+        use std::os::fd::AsRawFd;
+        let (mut session, _) = fixture();
+        let original = match &session.roles.as_ref().unwrap().tun {
+            TunRole::Fixture { fd, .. } => Arc::clone(fd),
+            _ => unreachable!(),
+        };
+        session.hello().unwrap();
+        let mut features = session.frame(Kind::Features).unwrap();
+        features[96..104].copy_from_slice(&wire::FEATURES.to_be_bytes());
+        features[104..112].copy_from_slice(&wire::OWNED_TUN.to_be_bytes());
+        let (_, duplicate) = session.attach(&features).unwrap();
+        assert_ne!(duplicate.as_raw_fd(), original.as_raw_fd());
+        assert!(
+            rustix::io::fcntl_getfd(&duplicate)
+                .unwrap()
+                .contains(rustix::io::FdFlags::CLOEXEC)
+        );
+        session.close();
+        assert_eq!(Arc::strong_count(&original), 1);
+        assert!(rustix::io::fcntl_getfd(original.as_ref()).is_ok());
+        drop(duplicate);
+        assert!(rustix::io::fcntl_getfd(original.as_ref()).is_ok());
+    }
+    #[test]
+    fn malformed_owner_metadata_closes_session_before_duplicate() {
+        let (mut session, _) = fixture();
+        if let TunRole::Fixture { metadata, .. } = &mut session.roles.as_mut().unwrap().tun {
+            metadata[8..12].copy_from_slice(&0x5001u32.to_be_bytes());
+        }
+        session.hello().unwrap();
+        let mut features = session.frame(Kind::Features).unwrap();
+        features[96..104].copy_from_slice(&wire::FEATURES.to_be_bytes());
+        features[104..112].copy_from_slice(&wire::OWNED_TUN.to_be_bytes());
+        assert!(session.attach(&features).is_err());
+        assert!(session.roles.is_none());
+    }
+    #[test]
     fn malformed_features_retire_and_release_descriptors() {
         let (mut s, mut peer) = fixture();
         s.hello().unwrap();
-        assert!(s.attach(&[], &[0; 32]).is_err());
+        assert!(s.attach(&[]).is_err());
         assert_eq!(s.phase, Phase::Closed);
         assert!(s.roles.is_none());
         use std::io::Read;
