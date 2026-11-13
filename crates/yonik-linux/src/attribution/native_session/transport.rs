@@ -140,12 +140,12 @@ thread_local! {
 impl Session {
     /// Потребляет все роли. metadata — только от helper resource owner.
     /// cancel не является authority и может только отозвать существующую сессию.
-    pub fn serve(mut self, metadata: &[u8; 32], cancel: &AtomicBool) -> Result<(), Unavailable> {
-        let result = self.serve_inner(metadata, cancel);
+    pub fn serve(mut self, cancel: &AtomicBool) -> Result<(), Unavailable> {
+        let result = self.serve_inner(cancel);
         self.close();
         result
     }
-    fn serve_inner(&mut self, metadata: &[u8; 32], cancel: &AtomicBool) -> Result<(), Unavailable> {
+    fn serve_inner(&mut self, cancel: &AtomicBool) -> Result<(), Unavailable> {
         let socket = rustix::io::fcntl_dupfd_cloexec(
             &self.roles.as_ref().ok_or(Unavailable::Authority)?.worker,
             0,
@@ -160,9 +160,7 @@ impl Session {
         let hello = self.hello().map_err(|_| Unavailable::Malformed)?;
         send(&socket, &hello, None, expires, cancel)?;
         let features = receive(&socket, expires, cancel)?;
-        let (attach, fd) = self
-            .attach(&features, metadata)
-            .map_err(|_| Unavailable::Malformed)?;
+        let (attach, fd) = self.attach(&features).map_err(|_| Unavailable::Malformed)?;
         send(&socket, &attach, Some(&fd), expires, cancel)?;
         drop(fd);
         let ack = receive(&socket, expires, cancel)?;
@@ -293,6 +291,58 @@ pub(super) mod tests {
         metadata[16..20].copy_from_slice(b"tun0");
         (session, peer, metadata)
     }
+    pub(crate) fn bound_terminal_controls(
+        bound: std::sync::Arc<crate::managed_network::tun::BoundTun>,
+    ) {
+        let count = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let baseline = count();
+        let owners = std::sync::Arc::strong_count(&bound);
+        for mode in 0..3 {
+            let (mut session, peer, _) = fixture();
+            session.roles.as_mut().unwrap().tun = super::super::TunRole::Bound(bound.clone());
+            let cancel = std::sync::Arc::new(AtomicBool::new(mode == 0));
+            let flag = cancel.clone();
+            let thread = std::thread::spawn(move || session.serve(&flag));
+            if mode != 0 {
+                let hello = handshake(&peer, true);
+                if mode == 1 {
+                    cancel.store(true, Ordering::Release);
+                } else {
+                    let mut revoke = hello[..104].to_vec();
+                    Header {
+                        kind: Kind::Revoke,
+                        request_id: 0,
+                        epoch: 1,
+                        digest: [2; 32],
+                    }
+                    .write(&mut revoke)
+                    .unwrap();
+                    revoke[96..104].fill(0);
+                    revoke[99] = 1;
+                    send(
+                        &peer,
+                        &revoke,
+                        None,
+                        Instant::now() + Duration::from_secs(1),
+                        &AtomicBool::new(false),
+                    )
+                    .unwrap();
+                }
+            }
+            assert_eq!(
+                thread.join().unwrap(),
+                if mode == 2 {
+                    Ok(())
+                } else {
+                    Err(Unavailable::Cancelled)
+                }
+            );
+            drop(peer);
+            assert_eq!(count(), baseline);
+            assert_eq!(std::sync::Arc::strong_count(&bound), owners);
+            assert!(bound.attach_metadata().is_ok());
+        }
+    }
     fn handshake(peer: &OwnedFd, acknowledge: bool) -> Vec<u8> {
         handshake_delayed(peer, acknowledge, Duration::ZERO)
     }
@@ -385,7 +435,7 @@ pub(super) mod tests {
         flow: super::super::super::broker::Flow,
         deadline: Instant,
     ) -> Result<(), Unavailable> {
-        let (mut session, peer, metadata) = fixture();
+        let (mut session, peer, _metadata) = fixture();
         session.roles.as_mut().unwrap().broker = Some(broker);
         let thread = std::thread::spawn(move || {
             BEFORE_LOOKUP.with(|hook| {
@@ -393,7 +443,7 @@ pub(super) mod tests {
                     prepare(session.roles.as_mut().unwrap().broker.as_mut().unwrap())
                 }));
             });
-            session.serve(&metadata, &AtomicBool::new(false))
+            session.serve(&AtomicBool::new(false))
         });
         // Задержка bootstrap заведомо превышает owner TTL; наблюдение ещё не начато.
         let exchange = (|| {
@@ -476,8 +526,8 @@ pub(super) mod tests {
     }
     #[test]
     fn socket_handshake_reply_correlation_and_replay_retire() {
-        let (session, peer, metadata) = fixture();
-        let thread = std::thread::spawn(move || session.serve(&metadata, &AtomicBool::new(false)));
+        let (session, peer, _metadata) = fixture();
+        let thread = std::thread::spawn(move || session.serve(&AtomicBool::new(false)));
         let hello = handshake(&peer, true);
         let mut lookup = vec![0; 144];
         Header {
@@ -509,10 +559,10 @@ pub(super) mod tests {
     #[test]
     fn socket_negative_controls_and_cleanup() {
         for mode in 0..5 {
-            let (session, peer, metadata) = fixture();
+            let (session, peer, _metadata) = fixture();
             let cancel = std::sync::Arc::new(AtomicBool::new(false));
             let flag = cancel.clone();
-            let thread = std::thread::spawn(move || session.serve(&metadata, &flag));
+            let thread = std::thread::spawn(move || session.serve(&flag));
             if mode == 0 {
                 drop(peer);
                 assert_eq!(thread.join().unwrap(), Err(Unavailable::Disconnected));
@@ -556,7 +606,7 @@ pub(super) mod tests {
     fn expired_send_backpressure_and_wrong_socket_fail_closed() {
         let (session, _peer) = super::super::tests::fixture();
         assert_eq!(
-            session.serve(&[0; 32], &AtomicBool::new(false)),
+            session.serve(&AtomicBool::new(false)),
             Err(Unavailable::Malformed)
         );
         let (session, peer, _) = fixture();
@@ -649,9 +699,8 @@ pub(super) mod tests {
     #[test]
     fn foreign_epoch_and_wrong_phase_rejected_over_socket() {
         for kind in [Kind::Lookup, Kind::AttachAck] {
-            let (session, peer, metadata) = fixture();
-            let thread =
-                std::thread::spawn(move || session.serve(&metadata, &AtomicBool::new(false)));
+            let (session, peer, _metadata) = fixture();
+            let thread = std::thread::spawn(move || session.serve(&AtomicBool::new(false)));
             let hello = handshake(&peer, true);
             let mut bytes = vec![0; kind.fixed_bytes().unwrap()];
             Header {
@@ -676,14 +725,14 @@ pub(super) mod tests {
     }
     #[test]
     fn socket_ack_timeout_and_revoke() {
-        let (session, peer, metadata) = fixture();
-        let thread = std::thread::spawn(move || session.serve(&metadata, &AtomicBool::new(false)));
+        let (session, peer, _metadata) = fixture();
+        let thread = std::thread::spawn(move || session.serve(&AtomicBool::new(false)));
         handshake(&peer, false);
         // ATTACH отправлен; отсутствие ACK завершает роли по общему deadline.
         assert_eq!(thread.join().unwrap(), Err(Unavailable::Timeout));
         drop(peer);
-        let (session, peer, metadata) = fixture();
-        let thread = std::thread::spawn(move || session.serve(&metadata, &AtomicBool::new(false)));
+        let (session, peer, _metadata) = fixture();
+        let thread = std::thread::spawn(move || session.serve(&AtomicBool::new(false)));
         let hello = handshake(&peer, true);
         let mut revoke = hello[..104].to_vec();
         Header {
