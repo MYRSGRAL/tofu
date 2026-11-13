@@ -16,6 +16,9 @@ pub enum Slot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    SourceService,
+    SourceFetch,
+    SourceSelection,
     SchedulerInitialize,
     SchedulerAdmission,
     SchedulerService,
@@ -40,6 +43,30 @@ pub enum Stage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cause {
+    SourceServiceInvalidSource,
+    SourceServiceCorruptSnapshot,
+    SourceServiceNotFound,
+    SourceServiceNoSnapshot,
+    SourceServiceExhausted,
+    SourceServiceForeignApproval,
+    SourceServiceStaleUpdate,
+    SourceServiceWorker,
+    SourceRepositoryInvalidInput,
+    SourceRepositoryUnsafePath,
+    SourceRepositoryUnsupportedVersion,
+    SourceRepositoryCorrupt,
+    SourceRepositoryStorage,
+    SourceRepositoryConflict,
+    SourceRepositoryNotFound,
+    SourceFetchHwidRequired,
+    SourceFetchHwidLimit,
+    SourceFetchHwidRejected,
+    SourceFetchHwidRedirect,
+    SourceFetchUnsupportedPeerVerification,
+    SourceFetchFailed,
+    SourceSelectionRepositoryFailed,
+    SourceServiceImportFailed,
+
     SchedulerInitializeInvalidLimits,
     SchedulerInitializeExhausted,
     SchedulerInvalidLimits,
@@ -56,6 +83,7 @@ pub enum Cause {
     SchedulerServiceForeignApproval,
     SchedulerServiceStaleUpdate,
     SchedulerServiceWorker,
+    SchedulerServiceImportFailed,
     SchedulerRepositoryInvalidInput,
     SchedulerRepositoryUnsafePath,
     SchedulerRepositoryUnsupportedVersion,
@@ -175,6 +203,10 @@ impl Cause {
             return matches!(slot, Slot::MaintenanceAck | Slot::Error | Slot::Connection);
         }
         match self.identity().2 {
+            Stage::SourceService => matches!(slot, Slot::Error | Slot::Source | Slot::Connection),
+            Stage::SourceFetch | Stage::SourceSelection => {
+                matches!(slot, Slot::Error | Slot::Source)
+            }
             Stage::MaintenanceAdmission
             | Stage::MaintenanceCopy
             | Stage::MaintenanceDrain
@@ -198,6 +230,39 @@ impl Cause {
     }
     fn identity(self) -> (&'static str, &'static str, Stage) {
         match self {
+            Self::SourceServiceInvalidSource => {
+                ("INVALID_INPUT", "invalid_input", Stage::SourceService)
+            }
+            Self::SourceServiceCorruptSnapshot => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceNotFound => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceNoSnapshot => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceExhausted => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceForeignApproval => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceStaleUpdate => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceServiceWorker => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryInvalidInput => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryUnsafePath => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryUnsupportedVersion => {
+                ("STORAGE", "storage", Stage::SourceService)
+            }
+            Self::SourceRepositoryCorrupt => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryStorage => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryConflict => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceRepositoryNotFound => ("STORAGE", "storage", Stage::SourceService),
+            Self::SourceFetchHwidRequired => ("HWID_REQUIRED", "hwid_required", Stage::SourceFetch),
+            Self::SourceFetchHwidLimit => ("HWID_LIMIT", "hwid_limit", Stage::SourceFetch),
+            Self::SourceFetchHwidRejected => ("HWID_REJECTED", "hwid_rejected", Stage::SourceFetch),
+            Self::SourceFetchHwidRedirect => ("HWID_REDIRECT", "hwid_redirect", Stage::SourceFetch),
+            Self::SourceFetchUnsupportedPeerVerification => {
+                ("UNSUPPORTED_PROXY", "unsupported_proxy", Stage::SourceFetch)
+            }
+            Self::SourceFetchFailed => ("FETCH", "fetch", Stage::SourceFetch),
+            Self::SourceSelectionRepositoryFailed => (
+                "PROFILE_UNAVAILABLE",
+                "profile_unavailable",
+                Stage::SourceSelection,
+            ),
+            Self::SourceServiceImportFailed => ("IMPORT", "import", Stage::SourceService),
             Self::SchedulerInitializeInvalidLimits | Self::SchedulerInitializeExhausted => {
                 ("STARTUP", "startup", Stage::SchedulerInitialize)
             }
@@ -219,6 +284,7 @@ impl Cause {
                 ("STORAGE", "storage", Stage::SchedulerService)
             }
             Self::SchedulerServiceStaleUpdate => ("STORAGE", "storage", Stage::SchedulerService),
+            Self::SchedulerServiceImportFailed => ("IMPORT", "import", Stage::SchedulerService),
             Self::SchedulerServiceWorker => ("STORAGE", "storage", Stage::SchedulerService),
             Self::SchedulerRepositoryInvalidInput => {
                 ("STORAGE", "storage", Stage::SchedulerService)

@@ -26,6 +26,10 @@ def main() -> None:
         ]
         if controlled:
             cases = [(1, "ws"), (2, "grpc")]
+            if "--only-ws" in sys.argv:
+                cases = cases[:1]
+            elif "--only-grpc" in sys.argv:
+                cases = cases[1:]
         for case_number, (index, transport) in enumerate(cases):
             steps.extend(
                 [
