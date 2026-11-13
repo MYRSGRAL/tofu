@@ -1,0 +1,489 @@
+{
+  "schema_version": 1,
+  "source": "6f45329b2e0a9b1659232fd4558d75308a6bc6c7",
+  "candidate_integrated_acceptance": "static-contract-and-reused-scoped-producers",
+  "P11_main_closed": false,
+  "accepted_main_observed": "b199563a32420d309e63bf6fb137dbf8aab08641",
+  "original_inventory": {
+    "original_frozen_source": "cceede520842a17e4ef548807f63f64b2be19226",
+    "provenance": "R2 original inventory in parent conversation; bda669/684 are review-task identifiers, NOT git refs",
+    "boundaries": [
+      {
+        "id": "scheduler_fetch",
+        "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+        "boundary": "ScheduleFailure::service Fetch",
+        "incoming_pr": "149"
+      },
+      {
+        "id": "manual_subscription",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "map_subscription before DesktopError; manual command/task result",
+        "incoming_pr": "150"
+      },
+      {
+        "id": "probe_results",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "session ProbeResult Response/Timeout/Tls/Transport",
+        "incoming_pr": "152"
+      },
+      {
+        "id": "probe_host_error",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "session.check HostError other than expected Cancelled",
+        "incoming_pr": "152"
+      },
+      {
+        "id": "maintenance_shutdown",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "runtime.shutdown outer error",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_admission_report",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "shutdown_report admission failures previously discarded",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_service_close",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "service.close result",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_repository_close",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "repository.close result",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_reload",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "schedule.load failure cause propagation",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_replacement",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "schedule.replacement failure cause propagation",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_rollback",
+        "file": "crates/yonik-desktop/src/maintenance_job.rs",
+        "boundary": "two rollback close calls: primary replacement wins; drain remains false on close failure",
+        "incoming_pr": "145"
+      },
+      {
+        "id": "maintenance_task_join",
+        "file": "crates/yonik-desktop/src/backend.rs",
+        "boundary": "maintenance JoinError before Outcome; no false drain",
+        "incoming_pr": "145"
+      }
+    ],
+    "separate": [
+      {
+        "id": "scheduler_import",
+        "pr": 148
+      },
+      {
+        "id": "thread_start_before_actor",
+        "pr": 154
+      }
+    ],
+    "constraints": [
+      "Count production boundaries, not enum variants",
+      "Unknown UI code safe generic fallback allowed; loss of known typed cause on publication is the gap",
+      "No fabricated errno from Storage/Transport",
+      "Actual GUI every enum not normative; representative producer/export controls accepted",
+      "Helper issuer-dependent cases separate from independent producer fixes",
+      "FR16 rotation separate from P11 metadata export"
+    ]
+  },
+  "source_blobs": {
+    "crates/yonik-desktop/src/backend.rs": "a80e30d4d33dc39dc36d2d00eeeff1bb7c84dd7a",
+    "crates/yonik-desktop/src/desktop_schedule.rs": "bd25055d78c25bec80962642fccfb7c794f08485",
+    "crates/yonik-desktop/src/maintenance_job.rs": "0e0c2501dba89c92d53655f7403ec23c39d43d62",
+    "crates/yonik-desktop/src/source_failure.rs": "9919805a8ea9f6cb42ca71a8499d6c6df50ba547",
+    "crates/yonik-desktop/src/backend_startup.rs": "741ee725c1f5bd2cb44dce837fe175fa26aee16f",
+    "crates/yonik-desktop/src/bridge_impl.rs": "8b08e39fc87ba56a85bcd33b5f6df6f5287b90b2",
+    "crates/yonik-desktop/src/bridge_pending.rs": "3465c144ddc676e26eecb8218da70f17dd81f613",
+    "crates/yonik-desktop/src/error_context.rs": "3e073a36e9da581fbcd378c69e8e5d9dd3c4b9f4",
+    "crates/yonik-desktop/src/diagnostics.rs": "017eda2ab7a0983feff5db7fe68a2bf3687b8af2",
+    "docs/specs/diagnostic-context-v2.json": "80b7f9b14535d57e5f38ccc7ad3a1f02de4a7a81",
+    "docs/specs/diagnostic-message-catalog.json": "e3638a69c1e4c848ff8425da1c35330156e4d84c",
+    "crates/yonik-desktop/qml/Main.qml": "63ded01be5cd305c14d94fd7c0680966974c2638",
+    "tools/check_diagnostic_export_v2.py": "0e519214acdcd24e4de5cf5fc767ac2766da970b"
+  },
+  "boundaries": [
+    {
+      "id": "scheduler_fetch",
+      "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+      "boundary": "ScheduleFailure::service Fetch",
+      "publication": "ScheduleFailure::service → schedule_error → Error/Source; scheduler_generation",
+      "representative_contract": {
+        "scheduler_service_fetch_failed": {
+          "code": "FETCH",
+          "message_key": "fetch",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_required": {
+          "code": "HWID_REQUIRED",
+          "message_key": "hwid_required",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_limit": {
+          "code": "HWID_LIMIT",
+          "message_key": "hwid_limit",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_rejected": {
+          "code": "HWID_REJECTED",
+          "message_key": "hwid_rejected",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_hwid_redirect": {
+          "code": "HWID_REDIRECT",
+          "message_key": "hwid_redirect",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "scheduler_service_unsupported_proxy": {
+          "code": "UNSUPPORTED_PROXY",
+          "message_key": "unsupported_proxy",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "manual_subscription",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "map_subscription before DesktopError; manual command/task result",
+      "publication": "SourceFailure::subscription/selection/schedule → Snapshot::source_failure → Error + Source/Connection; command/scheduler generation",
+      "representative_contract": {
+        "source_service_invalid_source": {
+          "code": "INVALID_INPUT",
+          "message_key": "invalid_input",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "source_repository_storage": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "source_fetch_failed": {
+          "code": "FETCH",
+          "message_key": "fetch",
+          "stage": "source_fetch",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        },
+        "source_service_import_failed": {
+          "code": "IMPORT",
+          "message_key": "import",
+          "stage": "source_service",
+          "slots": [
+            "error",
+            "source",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "probe_results",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "session ProbeResult Response/Timeout/Tls/Transport",
+      "publication": "probe_health_update/probe_operation_error → SessionUpdate → apply_session_update (generation/key fence) → Error/Connection",
+      "representative_contract": {
+        "probe_http_status": {
+          "code": "CHECK_HTTP_STATUS",
+          "message_key": "check_http_status",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_timeout": {
+          "code": "CHECK_TIMEOUT",
+          "message_key": "check_timeout",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_tls": {
+          "code": "CHECK_TLS",
+          "message_key": "check_tls",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        },
+        "probe_transport": {
+          "code": "CHECK_TRANSPORT",
+          "message_key": "check_transport",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "probe_host_error",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "session.check HostError other than expected Cancelled",
+      "publication": "probe_health_update/probe_operation_error → SessionUpdate → apply_session_update (generation/key fence) → Error/Connection",
+      "representative_contract": {
+        "probe_check_failed": {
+          "code": "CHECK_FAILED",
+          "message_key": "check_failed",
+          "stage": "probe",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_shutdown",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "runtime.shutdown outer error",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_scheduler_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_admission_report",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "shutdown_report admission failures previously discarded",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_scheduler_admission_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_service_close",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "service.close result",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_service_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_repository_close",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "repository.close result",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_repository_drain_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_reload",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "schedule.load failure cause propagation",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_reload_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_replacement",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "schedule.replacement failure cause propagation",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_replacement_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_rollback",
+      "file": "crates/yonik-desktop/src/maintenance_job.rs",
+      "boundary": "two rollback close calls: primary replacement wins; drain remains false on close failure",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_schedule_replacement_failed": {
+          "code": "STORAGE",
+          "message_key": "storage",
+          "stage": "maintenance_reopen",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "maintenance_task_join",
+      "file": "crates/yonik-desktop/src/backend.rs",
+      "boundary": "maintenance JoinError before Outcome; no false drain",
+      "publication": "run_owned Outcome.cause / joined JoinError → Failure::context → backend job_context → set_ack MaintenanceAck(request_id,envelope.generation)",
+      "representative_contract": {
+        "maintenance_task_failed": {
+          "code": "CLEANUP_FAILED",
+          "message_key": "cleanup_failed",
+          "stage": "maintenance_drain",
+          "slots": [
+            "maintenance_ack"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "scheduler_import",
+      "file": "crates/yonik-desktop/src/desktop_schedule.rs",
+      "boundary": "SubscriptionError::Import",
+      "publication": "ScheduleFailure::service → schedule_error → Error/Source; scheduler_generation",
+      "representative_contract": {
+        "scheduler_service_import_failed": {
+          "code": "IMPORT",
+          "message_key": "import",
+          "stage": "scheduler_service",
+          "slots": [
+            "error",
+            "source"
+          ],
+          "generation_required": true
+        }
+      }
+    },
+    {
+      "id": "thread_start_before_actor",
+      "file": "crates/yonik-desktop/src/backend_startup.rs",
+      "boundary": "thread::Builder::spawn Err before actor",
+      "publication": "finish_thread_start Err → StartupFailure::snapshot → callback → bridge pending synchronous take → Error/Connection; no generation",
+      "representative_contract": {
+        "backend_thread_start_failed": {
+          "code": "STARTUP",
+          "message_key": "startup",
+          "stage": "startup",
+          "slots": [
+            "error",
+            "connection"
+          ],
+          "generation_required": false
+        }
+      }
+    }
+  ],
+  "producer_evidence": {
+    "source": "538ff996507ccc2566d9330e5148e7d4d1767587",
+    "log_sha256": "84ba02851f1662b663b14ea756a0a52efa6c96ea3fc509fcbc83527e8e52aab2",
+    "log": "local/validation/desktop-reviewed-integration/desktop-tests.log",
+    "binding": "local/validation/desktop-reviewed-integration/source-binding.json"
+  },
+  "limits": [
+    "Статический конечный gate и повторное использование scoped evidence; новые Rust/GUI/runtime не запускались.",
+    "14 boundaries, representative identities не являются исчерпывающим списком enum.",
+    "P11 в main не closed: source172 pending; принятие candidate и ancestry main — разные условия.",
+    "16 новых probes не запускались; compile-only permission не расширяется."
+  ]
+}
