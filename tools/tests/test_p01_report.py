@@ -1,11 +1,13 @@
 """Проверка gate сводки на синтетических JSON, не GUI acceptance."""
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import p01_report
 
 
@@ -60,6 +62,10 @@ class ReportGateTests(unittest.TestCase):
                         "state": "COMPLETE",
                         "reaped": True,
                         "clock_ticks": 100,
+                        "frame_canary": {
+                            "before": {"visible": True, "frames": 1},
+                            "after": {"visible": True, "frames": 2},
+                        },
                         "phases": phases,
                     }
                 )
@@ -117,6 +123,21 @@ class ReportGateTests(unittest.TestCase):
                 self.assertRaises(RuntimeError),
             ):
                 p01_report.main()
+
+    def test_broken_canary_cannot_produce_complete_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.fixture(root)
+            path = root / "repeat-1" / "terminal.json"
+            data = json.loads(path.read_text())
+            data["frame_canary"]["after"]["frames"] = 1
+            path.write_text(json.dumps(data))
+            with (
+                patch.object(p01_report, "ROOT", root),
+                self.assertRaises(RuntimeError),
+            ):
+                p01_report.main()
+            self.assertFalse((root / "summary.json").exists())
 
     def test_short_phase_and_hidden_frames_cannot_produce_summary(self) -> None:
         for duration, frames in [(899, 0), (900, 1)]:
