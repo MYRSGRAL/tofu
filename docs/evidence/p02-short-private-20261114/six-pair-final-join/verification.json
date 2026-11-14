@@ -1,0 +1,22 @@
+{
+  "comparison_sha256": "6abdf4e5170c0883f52291962b438f69b484ddeb5f914e420da381ef6a38b1e1",
+  "deterministic_artifacts": [
+    "comparison.json",
+    "report.md"
+  ],
+  "independent_windows_recomputed": 12,
+  "inputs_sha256": "32586cb580e385d583c437ba54be130d7b55a64e306907052b8e2b828d56fc4d",
+  "negative_cases_rejected": [
+    "identity_drift",
+    "unknown_child",
+    "sampler_in_group",
+    "truncated_window",
+    "sample_hash_mismatch"
+  ],
+  "report_sha256": "0f403045bff87c21cf1503d8d31ef7382094c7e7cd352d45bc9b0bfbd0433bdf",
+  "ruff": "Не найден в PATH; зависимости не устанавливались.",
+  "runtime_drivers_imported": 0,
+  "runtime_measurements_started": 0,
+  "status": "DATA_CHECKS_PASSED_REVIEW_REQUIRED",
+  "unchanged_input_count": 297
+}
