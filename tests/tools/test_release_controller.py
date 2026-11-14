@@ -284,6 +284,48 @@ class ControllerTest(unittest.TestCase):
             )
         )
 
+    def test_retained_source_and_elfs_synced_before_capture(self) -> None:
+        self.freeze()
+        synced = set()
+        original_sync = os.fsync
+        original_retain = c.retain_build_capture
+
+        def sync(fd: int) -> None:
+            name = Path(os.readlink(f"/proc/self/fd/{fd}")).name
+            synced.add(name)
+            original_sync(fd)
+
+        def retain(*args, **kwargs) -> dict:
+            self.assertTrue({"source.tar", *c.RUST}.issubset(synced))
+            return original_retain(*args, **kwargs)
+
+        with (
+            patch.object(c.os, "fsync", side_effect=sync),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            self.collect()
+
+    def test_retained_elf_sync_failure_preserves_target(self) -> None:
+        self.freeze()
+        original_sync = os.fsync
+
+        def sync(fd: int) -> None:
+            if Path(os.readlink(f"/proc/self/fd/{fd}")).name == "yonik-worker":
+                raise OSError("fixture ELF fsync failure")
+            original_sync(fd)
+
+        with patch.object(c.os, "fsync", side_effect=sync):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+        self.assertFalse((self.registry / "unit/build-capture-manifest.json").exists())
+
     def test_final_profile_freeze_and_hash_rejection(self) -> None:
         for name in c.final_capture_profile()["tooling_sha256"]:
             shutil.copyfile(TOOLS / name, self.repo / "tools" / name)

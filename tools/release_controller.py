@@ -1116,6 +1116,26 @@ def reuse_collected(
         return result
 
 
+def sync_retained_build_inputs(artifacts: Path, elfs: list[str]) -> None:
+    """Данные должны стать durable до capture-marker и удаления target."""
+    for name in ("source.tar", *elfs):
+        path = input_path(artifacts, name)
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise NotReady("Retained build input не regular file")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    directory = os.open(
+        artifacts, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    )
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _collect(
     repo: Path, registry: Path, release: str, task: Path, runner: TrustedRunner
 ) -> dict:
@@ -1168,6 +1188,7 @@ def _collect(
                         binary = input_path(task / "target/release", name)
                         elf_records[name] = elf_file(binary)
                         shutil.copyfile(binary, artifacts / name)
+                    sync_retained_build_inputs(artifacts, list(RUST))
                     build_capture = retain_build_capture(
                         root,
                         task / "target",
