@@ -210,6 +210,42 @@ class CaptureTests(unittest.TestCase):
                 child.kill.assert_called_once()
                 child.stdout.close.assert_called_once()
 
+    def test_ipv6_only_changes_are_observed(self) -> None:
+        for key in ("routes6", "rules6"):
+            with self.subTest(key=key):
+                fixture = Fixture()
+                base = c.collect("baseline", NONCE, CASE, backend=fixture)
+                self.assertIn(key, fixture.calls)
+                self.assertIn("-6", c.COMMANDS[key])
+                live, stopped = copy.deepcopy(base), copy.deepcopy(base)
+                live["provenance"]["stage"] = "connected"
+                stopped["provenance"]["stage"] = "stopped"
+                live["observations"]["units"][c.UNITS[0]]["members"] = [
+                    {"pid": 8, "start_ticks": 4, "uids": [0] * 4}
+                ]
+                stopped["observations"]["tracked_processes"] = [
+                    {"pid": 8, "start_ticks": 4, "absent": True}
+                ]
+                stopped["observations"]["network"][key] = ["e" * 64]
+                self.assertFalse(
+                    c.compare_cleanup(base, live, stopped)["network_restored"]
+                )
+                base["observations"]["network"][key] = ["d" * 64]
+                self.assertEqual(
+                    c.compare_cleanup(base, live, stopped)["foreign_missing"][key],
+                    ["d" * 64],
+                )
+                original = fixture.command
+                fixture.command = lambda name: (
+                    (_ for _ in ()).throw(PermissionError())
+                    if name == key
+                    else original(name)
+                )
+                self.assertEqual(
+                    c.collect("baseline", NONCE, CASE, backend=fixture)["status"],
+                    "UNAVAILABLE",
+                )
+
     def test_arbitrary_command_never_spawns(self) -> None:
         with patch.object(c.subprocess, "Popen") as spawn:
             with self.assertRaises(c.Unavailable):

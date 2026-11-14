@@ -74,7 +74,7 @@ observations:
       populated: null | 0 | 1
       members: [{pid, start_ticks, uids}]
   network:
-    links, addresses, routes, rules, nft: [canonical JSON object SHA256hex64]
+    links, addresses, routes, rules, routes6, rules6, nft: [canonical JSON object SHA256hex64]
   artifacts:
     /usr/lib/yonik/yonik-helper: {sha256: SHA256hex64, size: int}
     /usr/lib/yonik/yonik-worker: {sha256: SHA256hex64, size: int}

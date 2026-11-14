@@ -37,6 +37,8 @@ COMMANDS = {
     "addresses": ("/usr/bin/ip", "-j", "address", "show"),
     "routes": ("/usr/bin/ip", "-j", "route", "show", "table", "all"),
     "rules": ("/usr/bin/ip", "-j", "rule", "show"),
+    "routes6": ("/usr/bin/ip", "-6", "-j", "route", "show", "table", "all"),
+    "rules6": ("/usr/bin/ip", "-6", "-j", "rule", "show"),
     "nft": ("/usr/bin/nft", "-j", "list", "ruleset"),
 }
 for _unit in UNITS:
@@ -246,7 +248,7 @@ def unit(backend: SystemBackend, name: str) -> dict[str, Any]:
 
 def network(backend: SystemBackend) -> dict[str, list[str]]:
     result = {}
-    for key in ("links", "addresses", "routes", "rules", "nft"):
+    for key in ("links", "addresses", "routes", "rules", "routes6", "rules6", "nft"):
         data = decode(backend.command(key))
         if key == "nft":
             require(type(data) is dict and set(data) == {"nftables"})
@@ -520,7 +522,8 @@ def validate_capture(data: dict[str, Any]) -> None:
         if value["main"] is not None:
             identity(value["main"])
     require(
-        set(observations["network"]) == {"links", "addresses", "routes", "rules", "nft"}
+        set(observations["network"])
+        == {"links", "addresses", "routes", "rules", "routes6", "rules6", "nft"}
     )
     for values in observations["network"].values():
         require(type(values) is list)
