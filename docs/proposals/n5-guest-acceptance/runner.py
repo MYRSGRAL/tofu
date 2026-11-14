@@ -1,7 +1,7 @@
 """Закрытый guest-only N5 runner. Импорт и --plan не запускают процессы.
 
 Receipt observer не выдаёт production authority. Исполнение возможно только после
-отдельного USER grant, sealing fixture/driver и удаления source blockers review-ом.
+отдельного USER grant и sealing настоящих fixture/driver/observer.
 """
 
 from __future__ import annotations
@@ -18,12 +18,14 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
+from fixture import preflight
+
 PACKAGE = Path(__file__).parent
 DRIVER = "/usr/lib/yonik-acceptance/n5-guest-driver"
 DRIVER_ARGV = (DRIVER, "--receipt-protocol=n5-v1")
 FIXTURE = Path("/usr/lib/yonik-acceptance/sealed-guest-fixture-v1.json")
 GRANT = Path("/usr/lib/yonik-acceptance/n5-user-grant.json")
-SOURCE = "3e3127d30f66ac4d41aa5d5e7ff643e08bef5fb8"
+SOURCE = "7000c59bca687a53cfa35e45137d0299cd1440f0"
 MAX_JSON = 65536
 MAX_FRAME = 4096
 MAX_TOTAL = 1048576
@@ -185,10 +187,8 @@ def authorize(
     for name in ("runner_sha256", "fixture_sha256", "grant_sha256"):
         if not digest(authorization.get(name)):
             raise Refused("MISSING_PINS")
-    if (
-        fixture.get("schema") != "SEALED_GUEST_FIXTURE_V1"
-        or fixture.get("status") != "SEALED"
-    ):
+    # Строгая DATA-схема fixture.py не допускает status/n5_acceptance.
+    if preflight(fixture).status != "READY":
         raise Refused("MISSING_FIXTURE")
     if (
         grant.get("schema") != "N5_USER_GRANT_V1"
@@ -206,22 +206,11 @@ def authorize(
         or grant.get("source_commit") != SOURCE
     ):
         raise Refused("SOURCE_BINDING")
-    n5 = fixture.get("n5_acceptance", {})
-    if set(n5.get("artifacts", {})) != ARTIFACTS or not all(
-        digest(v) for v in n5["artifacts"].values()
-    ):
-        raise Refused("MISSING_ARTIFACTS")
-    if (
-        not digest(n5.get("kernel_build_id"), 40)
-        or type(n5.get("caller_uid")) is not int
-        or not 0 < n5["caller_uid"] < 2**32
-    ):
-        raise Refused("FIXTURE_IDENTITY")
     if grant.get("cases") != [f"{core}:{case}" for core in CORES for case in CASES]:
         raise Refused("CASE_GRANT")
-    controls = n5.get("controls", {})
-    if set(controls) != set(CASES) or not all(digest(v) for v in controls.values()):
-        raise Refused("MISSING_SEALED_CONTROLS")
+    # READY DATA не доказывает after-setup closure и actual observer provenance.
+    # Совместимого sealed driver/control binding пока нет; не изобретаем extension.
+    raise Refused("MISSING_ACTUAL_DRIVER_AND_FIXTURE")
 
 
 def environment(uid: int) -> dict[str, str]:
@@ -540,23 +529,7 @@ def execute(
     ):
         if sha_file(path) != authorization[key]:
             raise Refused("SEALED_INPUT_CHANGED")
-    expected = fixture["n5_acceptance"]
-    if sha_file(Path(DRIVER)) != expected["artifacts"]["driver"]:
-        raise Refused("DRIVER_CHANGED")
-    deadline = time.monotonic() + CAMPAIGN_SECONDS
-    driver = None
-    try:
-        driver = ProcessDriver(expected["caller_uid"])
-        # Один case на один owned guest campaign. UNKNOWN никогда не ведёт к Apply G2.
-        return [run_case(driver, core, case, expected, deadline)]
-    except (Refused, OSError, subprocess.SubprocessError):
-        raise RuntimeFailure("DRIVER_OR_CLEANUP_UNKNOWN") from None
-    finally:
-        if driver is not None:
-            try:
-                driver.close()
-            except (OSError, subprocess.SubprocessError):
-                raise RuntimeFailure("DRIVER_REAP_UNKNOWN") from None
+    raise Refused("MISSING_ACTUAL_DRIVER_AND_FIXTURE")
 
 
 def main(argv: list[str] | None = None) -> int:

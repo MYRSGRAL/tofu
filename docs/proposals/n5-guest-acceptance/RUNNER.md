@@ -1,6 +1,6 @@
 # N5: закрытый guest acceptance package
 
-**NOT EXECUTED / EXECUTION CLOSED / MISSING FIXTURE / SOURCE BLOCKED.**
+**NOT EXECUTED / EXECUTION CLOSED / MISSING ACTUAL DRIVER AND FIXTURE.**
 Этот пакет добавляет только proposal Python/JSON/docs. Импорт runner, AST и mock
 unit tests не исполняют Desktop/helper/worker/engine и не читают runtime paths.
 Ни USER software grant, ни review/CI PR216 не разрешают этот runtime campaign.
@@ -15,26 +15,36 @@ argv/env, потоковый bounded JSON protocol, verifier полей/полн
 **MISSING**. `test_runner.py` подставляет исключительно in-memory mock transport;
 PASS тестов означает корректность runner/oracle, не actual N5 admission.
 
-Source target: `3e3127d30f66ac4d41aa5d5e7ff643e08bef5fb8`. Exact git blobs
+Source target: `7000c59bca687a53cfa35e45137d0299cd1440f0`. Exact git blobs
 перечислены в `cases.json`. Это source pins, не trusted deployed ELF tuple.
 Старые FR16 artifacts/test ELF/control bd5 source не считаются новой production
 сборкой. Frozen fixed16 coverage identity отдельно от actual deployed worker
 ELF/source/kernel identity. Контроль не изменяет frozen primitive/receipt.
 
-Два конкретных blocker в этом source:
+Два прежних source blocker сняты только на уровне исходников: default Desktop
+output проходит native path; app-UID remote leaf и INSPECT preparation отделяют
+broker credentials от root helper. `authorization.json.source_blockers=[]` не
+является runtime grant или доказательством actual admission. Прямой Apply,
+поддельный profile и synthetic receipts по-прежнему недопустимы.
 
-* `crates/yonik-desktop/src/system_session.rs`, `SystemSession::apply` вызывает
-  `SystemClient::apply_output`. `helper/session_host.rs::start_inner` при
-  `artifact.attribution_required` отвергает `output.is_some()` как Unsupported.
-  Прямой Apply вместо default Desktop path не исправляет этот acceptance case.
-* `packaging/systemd/yonik-helper.service`: `User=root`, CAP_NET_ADMIN.
-  `attribution/broker/mod.rs::Broker::build` требует actual uid/euid == app owner
-  UID и нулевые CapInh/CapPrm/CapEff/CapAmb. Thread в helper сохраняет credentials.
-  Нельзя объявить root/helper thread independently admitted app-UID broker.
+Root candidate включает CORE `3ebd1be7affb7d524f32596cbb7f9340e8d806c0`
+и PIPE `062a802766a9da18f819ee84377da894d85b0427`: Linux/NSFS/Cargo blobs
+совпадают с PIPE062, Desktop backend/main — с принятым
+`48ce74304a3fb7263ccc7e2c06d96394113a687d`. Source reviews CORE typed 5edef,
+PIPE transport 91ead, preparation e38 — CLEAN; cross-UID 847 не сообщил других
+blocker. Final clippy/named IPC execution остаются PENDING, PR216 — DRAFT,
+не принят. Это переданный source-review контекст, не новые выполненные проверки.
 
-Они записаны в `authorization.json.source_blockers`; execution gate отвергает
-непустой список. Для future source correction нужны отдельные product changes,
-review, обновление source/blob/ELF pins и новый sealing. Пакет их не делает.
+Production v4: main report ровно 512 bytes и **ровно один owning executable FD**
+actual worker (`/proc/self/exe`), authenticated SCM credentials; отдельный namespace
+frame несёт **ровно три namespace FD**. Это разные frames: нельзя считать exe FD
+четвёртым namespace FD или принимать main report без executable. CORE потребляет
+этот authenticated FD; custody сохраняется до подтверждённой остановки.
+
+Исторический target `3e3127d30f66ac4d41aa5d5e7ff643e08bef5fb8` и прежние
+source pins остаются историей Git. Старые execution/evidence не перепривязываются
+к 7000; новый source target не означает новую сборку или runtime PASS.
+
 Также MISSING настоящий scoped observer: текущие private DATA4/issuer/roles не
 становятся внешне наблюдаемыми от наличия JSON field или reporter digest.
 Нужен source-bound, независимо reviewed guest driver/observer с provenance
@@ -49,40 +59,31 @@ actual-used artifacts и их source/build/provenance receipts. Base image са�
 скачивает, не собирает, не устанавливает и не запускает VM; guest provisioning,
 VM custody/serial transport/quarantine остаются отдельным W3 prerequisite.
 
-Предлагаемое расширение sealed JSON (согласуется через root; до согласования
-не считать finalized fixture schema):
+Runner использует текущую строгую DATA-схему `fixture.py.preflight`: manifest
+имеет schema/source_commit/source_archive_sha256/guest_base_sha256/
+guest_provenance_sha256/kernel_build_id/coverage_policy_sha256/artifacts/units/
+profile/environment. Поля `status` и `n5_acceptance` в неё не входят и отвергаются.
+`READY` означает лишь полноту DATA; after-setup receipt отдельно проверяется
+`fixture.py.validate_receipt` и не заменяет разрешения на исполнение.
 
-```
-schema = "SEALED_GUEST_FIXTURE_V1"
-status = "SEALED"
-source_commit = exact reviewed source
-n5_acceptance = {
-  caller_uid: nonzero u32,
-  kernel_build_id: nonzero lowerhex40,
-  artifacts: {desktop, helper, worker, source_archive, profile,
-              kernel_notes, xray, sing-box, driver}: lowerhex64,
-  controls: {each of 9 fixed case names}: reviewed control-receipt SHA256
-}
-```
-
-Это extension, не замена полного W3 closure receipt. `kernel_build_id` здесь —
-hex20 observer identity; installed sidecar schema1 использует **JSON array[20]**.
-Sidecar должен проверять exact actual ELF/source, release/machine/build-id;
+Binding реального driver/observer и девяти control receipts в этой схеме пока
+отсутствует. Runner явно отказывает с `MISSING_ACTUAL_DRIVER_AND_FIXTURE` даже
+при формально полном manifest/grant; JSON extension или fake receipts не создают
+этот prerequisite. ProcessDriver/oracles остаются подготовленным кодом для pure
+mock checks; подключение actual driver потребует source-bound reviewed binding.
+Это не дополнительный gate, а существующий незакрытый driver prerequisite.
+Installed sidecar schema1 использует **JSON array[20]** для kernel build-id;
 report/receipt hashes не являются самостоятельной production authority.
-`artifacts.driver` должен связывать actual source-reviewed driver ELF; controls
-ссылаются на immutable approved per-case guest artifacts/barriers. Не достаточно
-caller bool `supported=true` или hash произвольного input. Пока нет реальных
-артефактов, соответствующие поля — MISSING, не null/zero/template trusted pins.
 
 Отдельный USER runtime grant обязан быть exact sealed artifact. Будущий grant:
 `schema=N5_USER_GRANT_V1`, `explicit_user_runtime_grant=true`, source_commit,
 fixture_sha256, runner_sha256 и exact 18 case IDs в deterministic order.
 `authorization.json` после нового явного grant и review должен иметь
 `execution=AUTHORIZED`, пустые source_blockers и actual runner/fixture/grant SHA.
-Runner сравнивает actual bytes всех трёх с pins; CLI/env не включают authority.
+Проверка actual bytes всех трёх против pins остаётся обязательной; CLI/env не включают authority.
 SHA самого `authorization.json` должен быть зафиксирован outer W3 launch receipt.
 Не включать authorization в hash самого себя: этот файл — separate approval input.
-Исполнение без reviewed source correction и exact fixture/grant НЕ РАЗРЕШЕНО.
+Исполнение без actual driver/observer, exact fixture и отдельного grant НЕ РАЗРЕШЕНО.
 
 Fixed installed inputs будущего guest:
 
@@ -92,7 +93,7 @@ Fixed installed inputs будущего guest:
 * `/usr/lib/yonik-acceptance/n5-guest-driver` — immutable executable, actual SHA
   из sealed fixture; driver и ancestors root-owned, без write/symlink substitution.
 
-Runner будет работать **внутри** sealed owned guest от `caller_uid`; outer owner
+Будущий подключённый runner должен работать **внутри** sealed owned guest от `caller_uid`; outer owner
 обязан отдельно доказать VM identity/no host mounts/no outbound/closure/custody.
 Host launch не является допустимым режимом. Запись произвольного fixture JSON
 не заменяет эти доказательства. До PID1/caller/graph sealing выполнение запрещено.

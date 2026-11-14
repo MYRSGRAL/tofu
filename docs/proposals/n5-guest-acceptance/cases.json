@@ -1,28 +1,33 @@
 {
   "schema": "N5_GUEST_CASES_V1",
-  "source_commit": "3e3127d30f66ac4d41aa5d5e7ff643e08bef5fb8",
+  "source_commit": "7000c59bca687a53cfa35e45137d0299cd1440f0",
   "executed": false,
   "execution": "CLOSED",
   "source_blobs": {
-    "crates/yonik-linux/src/helper/native_bootstrap.rs": "ff399344aedde33c8890a1060c1ecc11c6c8c39a",
-    "crates/yonik-linux/src/helper/native_profile.rs": "451bf899544082d65955fb764e83d8b49e991e15",
-    "crates/yonik-linux/src/helper/systemd_worker.rs": "0889ec3e36a1ddfb11863292bfabbf260fad28ec",
-    "crates/yonik-linux/src/helper/session_host.rs": "f58fe4b28becd3e2318c375cc0d00fff5a3360a1",
+    "crates/yonik-linux/src/helper/native_bootstrap.rs": "5fcf6dae529a93abf18a96eb3029beef52bfab43",
+    "crates/yonik-linux/src/helper/native_profile.rs": "050021b5cc1c4494283a090ce628369b637fcf1a",
+    "crates/yonik-linux/src/helper/systemd_worker.rs": "df52f1fe638d0a19b1e49f4c4963d3c66d65ec74",
+    "crates/yonik-linux/src/helper/session_host.rs": "3fae66a2e2610e79eb2d18c7d143bc42dc1e47f7",
     "crates/yonik-linux/src/worker/native_data.rs": "7578156cda8ae7a3d856b4dffeb79a03cedad2f1",
-    "crates/yonik-linux/src/worker/anchor_exchange.rs": "244e3cc1408696a57ed5bb44cdc6d62e36b5ed76",
+    "crates/yonik-linux/src/worker/anchor_exchange.rs": "b827f87d2f7584f3828b4e6f63741bf13ae45e5d",
     "crates/yonik-linux/src/worker/role_handoff.rs": "038c15576437104ea6c85e23c4eb02eb6a093cc0",
-    "crates/yonik-linux/src/attribution/native_session.rs": "d3bb7e7d40d9732a08435b194b956a770fc57ef4",
+    "crates/yonik-linux/src/attribution/native_session.rs": "e10f52bef1a3d90ef24fc9fb56152321a09aac63",
     "crates/yonik-linux/src/attribution/native_session/transport.rs": "d4bcc6432c7270fcd8ed20c45797de62e08c70b1",
-    "crates/yonik-linux/src/attribution/broker/mod.rs": "a8cbcaf0c1aaaa254d410a3996b0f42ed1e70438",
+    "crates/yonik-linux/src/attribution/broker/mod.rs": "ff148cbd0d4eb37d2ca46e9b0382c9db409572bf",
     "crates/yonik-desktop/src/system_session.rs": "1ac8de560eb525ddd89ea5e2766ddd20cdf142ff",
-    "packaging/systemd/yonik-helper.service": "7d5b811576612c4bf0a8f3d53d16d68267cfdbe6"
+    "packaging/systemd/yonik-helper.service": "7d5b811576612c4bf0a8f3d53d16d68267cfdbe6",
+    "crates/yonik-desktop/src/main.rs": "65b73a8b05aa22931da8dc38d78a664a43412877",
+    "crates/yonik-desktop/src/backend.rs": "bf39569e5f603f5dbad89d735923045cd58a72aa",
+    "crates/yonik-linux/src/attribution/broker/remote.rs": "fe2fa2db9cabfa55aeb988162793ae33ab33ed96",
+    "Cargo.lock": "76d6c2f54917be94d6f93099b12c493f11bd7139",
+    "crates/yonik-nsfs/src/lib.rs": "993072463db330f95c4d79559063ea5b0edde7c5"
   },
   "cases": [
     {
       "id": "xray:positive",
       "core": "xray",
       "case": "positive",
-      "status": "SOURCE_BLOCKED",
+      "status": "MISSING_ACTUAL_DRIVER_AND_FIXTURE",
       "oracle": "Actual immutable producer/profile → DATA4 → coverage issuer → roles once → ATTACH ACK → actual health → Stop/cgroup-empty/reap/closed.",
       "control_receipt_sha256": "MISSING",
       "future_argv": [
@@ -175,7 +180,7 @@
       "id": "sing-box:positive",
       "core": "sing-box",
       "case": "positive",
-      "status": "SOURCE_BLOCKED",
+      "status": "MISSING_ACTUAL_DRIVER_AND_FIXTURE",
       "oracle": "Actual immutable producer/profile → DATA4 → coverage issuer → roles once → ATTACH ACK → actual health → Stop/cgroup-empty/reap/closed.",
       "control_receipt_sha256": "MISSING",
       "future_argv": [

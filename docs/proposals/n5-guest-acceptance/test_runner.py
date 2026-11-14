@@ -108,6 +108,54 @@ class PureRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.Refused, "MISSING_PINS"):
             runner.authorize(authorization, {}, {})
 
+    def test_strict_fixture_rejects_old_runner_extension(self) -> None:
+        authorization = {
+            "schema": "N5_AUTHORIZATION_V1",
+            "execution": "AUTHORIZED",
+            "source_blockers": [],
+            **{
+                key: "1" * 64
+                for key in ("runner_sha256", "fixture_sha256", "grant_sha256")
+            },
+        }
+        fixture = {
+            "schema": "SEALED_GUEST_FIXTURE_V1",
+            "source_commit": runner.SOURCE,
+            "status": "SEALED",
+            "n5_acceptance": expected(),
+        }
+        with self.assertRaisesRegex(runner.Refused, "MISSING_FIXTURE"):
+            runner.authorize(authorization, fixture, {})
+
+    def test_ready_data_and_grant_cannot_substitute_actual_driver(self) -> None:
+        authorization = {
+            "schema": "N5_AUTHORIZATION_V1",
+            "execution": "AUTHORIZED",
+            "source_blockers": [],
+            "source_commit": runner.SOURCE,
+            **{
+                key: "1" * 64
+                for key in ("runner_sha256", "fixture_sha256", "grant_sha256")
+            },
+        }
+        grant = {
+            "schema": "N5_USER_GRANT_V1",
+            "explicit_user_runtime_grant": True,
+            "source_commit": runner.SOURCE,
+            "fixture_sha256": "1" * 64,
+            "runner_sha256": "1" * 64,
+            "cases": [
+                f"{core}:{case}" for core in runner.CORES for case in runner.CASES
+            ],
+        }
+        # Мок только результата DATA validator; никаких actual receipts/процессов.
+        with patch.object(runner, "preflight") as preflight:
+            preflight.return_value.status = "READY"
+            with self.assertRaisesRegex(
+                runner.Refused, "MISSING_ACTUAL_DRIVER_AND_FIXTURE"
+            ):
+                runner.authorize(authorization, {"source_commit": runner.SOURCE}, grant)
+
     def test_duplicate_bytes_and_json_nonobject_rejected(self) -> None:
         for data in (b'{"x":1,"x":2}', b"[]", b"x" * (runner.MAX_FRAME + 1)):
             with self.assertRaises(runner.Refused):
