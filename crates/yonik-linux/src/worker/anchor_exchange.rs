@@ -511,6 +511,9 @@ impl NamespaceObservation {
         *observation.custody.kernel.lock().unwrap() = Some(report);
         observation
     }
+    pub(crate) fn same_custody(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.custody, &other.custody)
+    }
     pub(crate) fn take_handoff(&self) -> Result<OwnedFd, WorkerError> {
         if self.custody.expired() {
             return Err(WorkerError::Timeout);
@@ -527,7 +530,7 @@ impl NamespaceObservation {
         stamp: &crate::helper::native_bootstrap::RuntimeScopeStamp,
     ) -> Result<(), WorkerError> {
         stamp.validate_admission().map_err(|_| WorkerError::Peer)?;
-        if stamp.namespace_identity() != self.identity() {
+        if !stamp.owns_observation(self) {
             return Err(WorkerError::Peer);
         }
         let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
@@ -1359,6 +1362,27 @@ mod tests {
         assert_eq!(witness.retained_namespace_count(), 2);
         witness.revoke();
         assert_eq!(witness.retained_namespace_count(), 0);
+    }
+    #[test]
+    fn revoked_custody_denies_use_but_retains_owned_fds_until_drop() {
+        use std::os::fd::AsRawFd;
+        let observation = NamespaceObservation::new(
+            [
+                OwnedFd::from(File::open("/dev/null").unwrap()),
+                OwnedFd::from(File::open("/dev/null").unwrap()),
+            ],
+            [(1, 1); 3],
+            Instant::now() + DEADLINE,
+        )
+        .unwrap();
+        let fd = observation.custody.fds.lock().unwrap().as_ref().unwrap()[0].as_raw_fd();
+        observation.revoke();
+        assert_eq!(observation.retained_namespace_count(), 0);
+        assert!(observation.bind_run([1; 32], [1; 16], 1, 1).is_err());
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        assert!(observation.same_custody(&observation));
+        drop(observation);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_err());
     }
     #[test]
     fn legacy_rights_remain_queued_after_bootstrap_peek() {
