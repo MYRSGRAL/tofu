@@ -399,7 +399,8 @@ class Child:
                 raise BenchmarkError("Timeout ожидания ack")
             self.pump(min(remaining, 1.0))
             self.alive()
-        if len(self.pending) != 1:
+        # Хвост после первой строки уже относится к незапрошенному второму ответу.
+        if len(self.pending) != 1 or self.buffer:
             raise BenchmarkError("Более одного ack на действие")
         return self.pending.pop(), time.monotonic_ns()
 
