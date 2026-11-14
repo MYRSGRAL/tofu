@@ -1292,6 +1292,24 @@ impl Snapshot {
                 .set_generation(Slot::Source, cause, generation);
         }
     }
+    fn schedule_replacement(
+        &mut self,
+        replacement: std::result::Result<DesktopSchedule, desktop_schedule::ScheduleFailure>,
+        previous_generation: u64,
+    ) -> Option<DesktopSchedule> {
+        match replacement {
+            Ok(schedule) => Some(schedule),
+            Err(failure) => {
+                // При отказе initialize новое поколение ещё не выделено.
+                let generation = failure
+                    .cause
+                    .filter(|cause| cause.needs_generation())
+                    .map(|_| previous_generation);
+                self.schedule_error(failure, generation);
+                None
+            }
+        }
+    }
     fn session_error(&mut self, cause: Cause, generation: u64) {
         self.contextual_error(false, ContextFailure::new(cause));
         self.error_contexts
@@ -4320,7 +4338,10 @@ async fn run(
                     .state
                     .schedule_error(error, Some(scheduled.generation));
             }
-            if let Ok(mut replacement) = scheduled.replacement() {
+            if let Some(mut replacement) = actor
+                .state
+                .schedule_replacement(scheduled.replacement(), scheduled.generation)
+            {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor
                         .state
@@ -4380,7 +4401,7 @@ async fn run(
                 if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
-                    if let Ok(mut replacement) = scheduled.replacement() {
+                    if let Some(mut replacement) = actor.state.schedule_replacement(scheduled.replacement(), scheduled.generation) {
                         if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
                         actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
