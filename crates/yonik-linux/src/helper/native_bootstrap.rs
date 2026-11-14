@@ -489,3 +489,5 @@ mod split_receive_tests {
 }
 
 pub(crate) use super::service::BusPeerIdentity;
+
+pub(crate) use super::systemd_worker::{PeerVerifierLease, VerifiedPeerVerifier};

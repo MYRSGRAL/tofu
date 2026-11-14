@@ -1,0 +1,340 @@
+//! Canonical app-UID inspector. Никаких RuntimeScope/TUN/Session permits.
+use super::inspect_codec::{self as wire, Binding};
+use super::lookup_channel::{Channel, Packet, credentials, fence};
+use super::lookup_codec::FRAME;
+use super::{DEADLINE, Unavailable};
+use crate::attribution::{AttributionFailure, CapturedBusScope};
+use crate::helper::native_bootstrap::{PeerVerifierLease, VerifiedStaticInstalledImage};
+use std::{
+    fs::{self, File},
+    os::{
+        fd::{AsFd, OwnedFd},
+        unix::fs::MetadataExt,
+    },
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+pub(crate) struct VerifiedPeerSnapshot {
+    files: [OwnedFd; 4],
+    view: [(u64, u64); 3],
+    executable: (u64, u64),
+}
+impl VerifiedPeerSnapshot {
+    fn from_packet(packet: Packet) -> Result<Self, Unavailable> {
+        let files: [OwnedFd; 4] = packet
+            .rights
+            .try_into()
+            .map_err(|_| Unavailable::Malformed)?;
+        let mut view = [(0, 0); 3];
+        for ((fd, expected), slot) in files[..3]
+            .iter()
+            .zip([
+                yonik_nsfs::NamespaceType::Net,
+                yonik_nsfs::NamespaceType::Pid,
+                yonik_nsfs::NamespaceType::Mount,
+            ])
+            .zip(&mut view)
+        {
+            if yonik_nsfs::namespace_type(fd).map_err(|_| Unavailable::Coverage)? != expected {
+                return Err(Unavailable::Coverage);
+            }
+            let st = rustix::fs::fstat(fd).map_err(|_| Unavailable::Coverage)?;
+            *slot = (st.st_dev, st.st_ino);
+        }
+        let st = rustix::fs::fstat(&files[3]).map_err(|_| Unavailable::Coverage)?;
+        if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
+            return Err(Unavailable::Coverage);
+        }
+        Ok(Self {
+            files,
+            view,
+            executable: (st.st_dev, st.st_ino),
+        })
+    }
+    pub(crate) fn namespace_view(&self) -> [(u64, u64); 3] {
+        self.view
+    }
+    fn same(&self, other: &Self) -> bool {
+        self.view == other.view && self.executable == other.executable
+    }
+}
+struct Protocol {
+    channel: Channel,
+    binding: Binding,
+    id: u64,
+}
+impl Protocol {
+    fn observe(
+        &mut self,
+        deadline: Instant,
+        lease: &PeerVerifierLease,
+    ) -> Result<VerifiedPeerSnapshot, Unavailable> {
+        self.id = self.id.checked_add(1).ok_or(Unavailable::Limit)?;
+        self.channel
+            .send(&self.binding.encode(wire::INSPECT, self.id)?, &[], deadline)?;
+        let packet = self.channel.receive(FRAME, Some(deadline))?;
+        credentials(packet.credentials, lease.pid(), lease.uid())?;
+        self.binding
+            .validate(&packet.bytes, wire::RESULT, self.id, packet.rights.len())?;
+        if packet.bytes[9] != 0 {
+            return Err(Unavailable::Coverage);
+        }
+        let snapshot = VerifiedPeerSnapshot::from_packet(packet)?;
+        fence(deadline)?;
+        Ok(snapshot)
+    }
+}
+pub(crate) struct PeerAttestation {
+    protocol: Mutex<Protocol>,
+    lease: PeerVerifierLease,
+    source: VerifiedStaticInstalledImage,
+    captured: Arc<CapturedBusScope>,
+    snapshot: Arc<VerifiedPeerSnapshot>,
+    _inspector: VerifiedPeerSnapshot,
+}
+impl PeerAttestation {
+    pub(in crate::attribution) fn connect(
+        socket: OwnedFd,
+        lease: PeerVerifierLease,
+        captured: Arc<CapturedBusScope>,
+        source: VerifiedStaticInstalledImage,
+    ) -> Result<Arc<Self>, AttributionFailure> {
+        captured.validate()?;
+        source.revalidate().map_err(native)?;
+        lease.validate().map_err(native)?;
+        let deadline = source.deadline();
+        fence(deadline).map_err(native)?;
+        if captured.uid != lease.uid() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        let binding = Binding {
+            uid: captured.uid,
+            caller: captured.pid,
+            caller_start: captured.start,
+            nonce: captured.nonce,
+            server: std::process::id(),
+            server_start: crate::attribution::start_time(std::process::id())?,
+            invocation: lease.invocation(),
+            inspector: lease.pid(),
+            inspector_start: lease.start(),
+        };
+        let channel = Channel::new(socket).map_err(native)?;
+        channel
+            .send(
+                &binding.encode(wire::HELLO, 0).map_err(native)?,
+                &[],
+                deadline,
+            )
+            .map_err(native)?;
+        let packet = channel.receive(FRAME, Some(deadline)).map_err(native)?;
+        credentials(packet.credentials, lease.pid(), lease.uid()).map_err(native)?;
+        binding
+            .validate(&packet.bytes, wire::ACK, 0, packet.rights.len())
+            .map_err(native)?;
+        let inspector = VerifiedPeerSnapshot::from_packet(packet).map_err(native)?;
+        let image =
+            File::from(rustix::io::fcntl_dupfd_cloexec(&inspector.files[3], 3).map_err(native)?);
+        lease.verify_image(&image).map_err(native)?;
+        source.verify_image(&image).map_err(native)?;
+        let mut protocol = Protocol {
+            channel,
+            binding,
+            id: 0,
+        };
+        let snapshot = Arc::new(
+            protocol
+                .observe(deadline.min(Instant::now() + DEADLINE), &lease)
+                .map_err(native)?,
+        );
+        captured.validate()?;
+        source.validate().map_err(native)?;
+        lease.validate().map_err(native)?;
+        fence(deadline).map_err(native)?;
+        // Canonical supervisor сохраняет readonly snapshot до confirmed-empty.
+        lease
+            .retain_snapshot(Arc::clone(&snapshot))
+            .map_err(native)?;
+        Ok(Arc::new(Self {
+            protocol: Mutex::new(protocol),
+            lease,
+            source,
+            captured,
+            snapshot,
+            _inspector: inspector,
+        }))
+    }
+    pub(in crate::attribution) fn matches(
+        &self,
+        lease: &PeerVerifierLease,
+        source: &VerifiedStaticInstalledImage,
+    ) -> bool {
+        self.lease.same_observer(lease) && self.source.same_source(source)
+    }
+    pub(in crate::attribution) fn verify(&self) -> Result<(), AttributionFailure> {
+        let deadline = Instant::now() + DEADLINE;
+        self.captured.validate()?;
+        self.source.validate().map_err(native)?;
+        self.lease.validate().map_err(native)?;
+        fence(deadline).map_err(native)?;
+        let mut protocol = self
+            .protocol
+            .try_lock()
+            .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        let fresh = protocol.observe(deadline, &self.lease).map_err(native)?;
+        if !self.snapshot.same(&fresh) {
+            self.lease.revoke();
+            protocol.channel.shutdown();
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        self.captured.validate()?;
+        self.source.validate().map_err(native)?;
+        self.lease.validate().map_err(native)?;
+        fence(deadline).map_err(native)
+    }
+    pub(in crate::attribution) fn view(&self) -> [(u64, u64); 3] {
+        self.snapshot.view
+    }
+    pub(in crate::attribution) fn append_identity(&self, hash: &mut sha2::Sha256) {
+        use sha2::Digest;
+        for (dev, ino) in self.snapshot.view {
+            hash.update(dev.to_be_bytes());
+            hash.update(ino.to_be_bytes());
+        }
+        hash.update(self.snapshot.executable.0.to_be_bytes());
+        hash.update(self.snapshot.executable.1.to_be_bytes());
+    }
+}
+fn native<E>(_: E) -> AttributionFailure {
+    AttributionFailure::NativeMechanismUnverified
+}
+impl Drop for PeerAttestation {
+    fn drop(&mut self) {
+        self.lease.revoke();
+        self.protocol
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .channel
+            .shutdown();
+    }
+}
+fn inspect_files(binding: &Binding, deadline: Instant) -> Result<[File; 4], AttributionFailure> {
+    let pid = binding.caller;
+    let verify = || -> Result<(), AttributionFailure> {
+        if crate::attribution::start_time(pid)? != binding.caller_start
+            || fs::metadata(format!("/proc/{pid}"))
+                .map_err(|_| AttributionFailure::ProcUnavailable)?
+                .uid()
+                != binding.uid
+        {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        Ok(())
+    };
+    verify()?;
+    crate::attribution::probe_process(pid)?;
+    let denied = |e: std::io::Error| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            AttributionFailure::ForeignUidDenied
+        } else {
+            AttributionFailure::ProcUnavailable
+        }
+    };
+    let files = [
+        File::open(format!("/proc/{pid}/ns/net")).map_err(denied)?,
+        File::open(format!("/proc/{pid}/ns/pid")).map_err(denied)?,
+        File::open(format!("/proc/{pid}/ns/mnt")).map_err(denied)?,
+        File::open(format!("/proc/{pid}/exe")).map_err(denied)?,
+    ];
+    for (fd, path) in files.iter().zip([
+        format!("/proc/{pid}/ns/net"),
+        format!("/proc/{pid}/ns/pid"),
+        format!("/proc/{pid}/ns/mnt"),
+        format!("/proc/{pid}/exe"),
+    ]) {
+        let before = fd.metadata().map_err(denied)?;
+        let after = fs::metadata(path).map_err(denied)?;
+        if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+    }
+    verify()?;
+    fence(deadline).map_err(|_| AttributionFailure::ProcUnavailable)?;
+    Ok(files)
+}
+pub(super) fn serve(
+    channel: Channel,
+    hello: Packet,
+    bootstrap: Instant,
+) -> Result<(), Unavailable> {
+    if !hello.rights.is_empty() {
+        return Err(Unavailable::Malformed);
+    }
+    let binding = Binding::hello(&hello.bytes)?;
+    credentials(hello.credentials, binding.server, 0)?;
+    if crate::attribution::start_time(binding.server)
+        .map_err(native)
+        .is_err()
+        || binding.inspector != std::process::id()
+        || super::start(binding.server)? != binding.server_start
+        || super::start(std::process::id())? != binding.inspector_start
+    {
+        return Err(Unavailable::Authority);
+    }
+    super::lookup_leaf::validate_identity(binding.uid)?;
+    let files = [
+        File::open("/proc/self/ns/net"),
+        File::open("/proc/self/ns/pid"),
+        File::open("/proc/self/ns/mnt"),
+        File::open("/proc/self/exe"),
+    ];
+    let files: Vec<File> = files
+        .into_iter()
+        .collect::<std::io::Result<_>>()
+        .map_err(|_| Unavailable::Coverage)?;
+    channel.send(
+        &binding.encode(wire::ACK, 0)?,
+        &files.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+        bootstrap,
+    )?;
+    drop(files);
+    let mut last = 0;
+    loop {
+        let packet = match channel.receive(FRAME, None) {
+            Ok(packet) => packet,
+            Err(Unavailable::Disconnected) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let deadline = Instant::now() + DEADLINE;
+        credentials(packet.credentials, binding.server, 0)?;
+        let id = super::lookup_codec::u64_at(&packet.bytes, 88)?;
+        if id <= last {
+            return Err(Unavailable::Malformed);
+        }
+        last = id;
+        binding.validate(&packet.bytes, wire::INSPECT, id, packet.rights.len())?;
+        super::lookup_leaf::validate_identity(binding.uid)?;
+        let mut reply = binding.encode(wire::RESULT, id)?;
+        let files = inspect_files(&binding, deadline);
+        match files {
+            Ok(files) => channel.send(
+                &reply,
+                &files.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+                deadline,
+            )?,
+            Err(error) => {
+                reply[9] = 1;
+                let reason: u16 = match error {
+                    AttributionFailure::ProcUnavailable => 1,
+                    AttributionFailure::ForeignUidDenied => 2,
+                    AttributionFailure::ProcessChanged => 3,
+                    AttributionFailure::ScanLimit => 4,
+                    AttributionFailure::NativeMechanismUnverified => 5,
+                    AttributionFailure::WorkerIsCaller => 6,
+                };
+                reply[10..12].copy_from_slice(&reason.to_be_bytes());
+                channel.send(&reply, &[], deadline)?;
+            }
+        }
+    }
+}
