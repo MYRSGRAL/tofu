@@ -51,17 +51,25 @@ def main() -> int:
     archive = args.retained / "source.tar.gz"
     binary = args.retained / "p03_integrated"
     integrity = all(
-        digest(path.read_bytes()) == bindings["local/validation/p03-integrated/" + path.name]
+        digest(path.read_bytes())
+        == bindings["local/validation/p03-integrated/" + path.name]
         for path in (archive, binary)
     )
-    tracked = subprocess.check_output(
-        ["git", "ls-files", "-z", "crates", "Cargo.toml", "Cargo.lock"], cwd=ROOT
-    ).decode().strip("\0").split("\0")
+    tracked = (
+        subprocess.check_output(
+            ["git", "ls-files", "-z", "crates", "Cargo.toml", "Cargo.lock"], cwd=ROOT
+        )
+        .decode()
+        .strip("\0")
+        .split("\0")
+    )
     differences = compare(ROOT, archive, tracked)
     result = {
         "acceptance": False,
         "kind": "retained-source-preflight-only",
-        "base": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "base": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
         "retained_integrity": integrity,
         "binary_sha256": digest(binary.read_bytes()),
         "archive_sha256": digest(archive.read_bytes()),
