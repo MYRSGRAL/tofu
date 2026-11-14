@@ -878,7 +878,7 @@ fn concurrent_authorization_has_exactly_one_winner() {
     });
 }
 
-fn binding_test_payload() -> Arc<WorkerPayload> {
+pub(super) fn binding_test_payload() -> Arc<WorkerPayload> {
     use sha2::Digest;
     let path = std::path::Path::new("/usr/bin/true");
     let bytes = std::fs::read(path).unwrap();
@@ -967,38 +967,7 @@ fn duplicate_kernel_report_revokes_all_custody() {
 
 fn authorized_result_fixture() -> (RunAuthority, AuthorizedRun) {
     let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
-    let authorization = owner.authorize([4; 32]).unwrap();
-    let guard = authorization.guard();
-    let kernel =
-        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
-    authorization.bind_custody(&kernel).unwrap();
-    let payload = binding_test_payload();
-    let binding = InvocationBinding {
-        authorization,
-        observation: BootstrapUnitObservation {
-            pid: 42,
-            uid: 0,
-            gid: 0,
-            start: 1,
-            invocation: [3; 16],
-            expires: Instant::now() + DEADLINE,
-            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
-        },
-        digest: payload.digest(),
-        payload,
-        kernel: Some(kernel),
-    };
-    // Только ownership fixture: не имитирует successful canonical verification/mint.
-    let result = AuthorizedRun {
-        ticket: WorkerTicket {
-            pid: 42,
-            invocation: [3; 16],
-        },
-        lease: AuthorizedLease {
-            binding,
-            _guard: guard,
-        },
-    };
+    let result = unit_owner_result(&owner, binding_test_payload());
     (owner, result)
 }
 
@@ -1095,4 +1064,55 @@ fn accepted_binding_rejects_expiry_and_identity_drift() {
         }),
         Err(WorkerSupervisorError::UnitProofGap)
     ));
+}
+
+#[test]
+fn owner_link_requires_exact_owner_and_payload_even_with_equal_bytes() {
+    let (owner, result) = authorized_result_fixture();
+    let payload = Arc::clone(&result.lease.binding.payload);
+    let equal_payload = binding_test_payload();
+    assert_eq!(payload.digest(), equal_payload.digest());
+    assert!(!Arc::ptr_eq(&payload, &equal_payload));
+    let foreign_owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    // Unit link boundary: fixture не проходит canonical cgroup identity.
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &payload)
+            .is_ok()
+    );
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&foreign_owner, &payload)
+            .is_err()
+    );
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &equal_payload)
+            .is_err()
+    );
+    assert!(result.validate_owner(&owner, &payload).is_err());
+    owner.revoke();
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &payload)
+            .is_err()
+    );
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        0
+    );
 }

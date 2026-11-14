@@ -1,6 +1,6 @@
 //! Владелец двух фиксированных systemd worker, с подтверждением пустой cgroup.
 //! Accepted подтверждает передачу FD, но не готовность сети и не Applied.
-use super::run_authorization::{RunAuthorization, RunRevocationGuard};
+use super::run_authorization::{RunAuthority, RunAuthorization, RunRevocationGuard};
 use crate::{
     Cancellation,
     worker::{WorkerAck, WorkerMode, WorkerPayload, WorkerStatus},
@@ -108,9 +108,42 @@ pub(crate) struct AuthorizedRun {
 }
 #[allow(dead_code)]
 impl AuthorizedRun {
+    pub(super) fn validate_owner(
+        &self,
+        owner: &RunAuthority,
+        payload: &Arc<WorkerPayload>,
+    ) -> Result<()> {
+        self.ticket()?;
+        self.lease.binding.validate_owner(owner, payload)
+    }
+    // Только retention/link unit boundary: намеренно не заменяет validate_owner.
+    #[cfg(test)]
+    pub(super) fn unit_validate_owner_link(
+        &self,
+        owner: &RunAuthority,
+        payload: &Arc<WorkerPayload>,
+    ) -> Result<()> {
+        if self
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .map(|kernel| kernel.retained_namespace_count())
+            != Some(2)
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.lease.binding.validate_owner(owner, payload)
+    }
     /// Ticket не является admission; доступ требует живого retained binding.
     pub(crate) fn ticket(&self) -> Result<&WorkerTicket> {
         self.lease.binding.validate()?;
+        if self.ticket.pid != self.lease.binding.observation.pid
+            || self.ticket.invocation != self.lease.binding.observation.invocation
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+
         if self
             .lease
             .binding
@@ -256,6 +289,15 @@ impl InvocationBinding {
             return Err(WorkerSupervisorError::Stale);
         }
         self.observation.validate_identity()
+    }
+    fn validate_owner(&self, owner: &RunAuthority, payload: &Arc<WorkerPayload>) -> Result<()> {
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        if !Arc::ptr_eq(&self.payload, payload) {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        Ok(())
     }
     fn validate_state(&self, state: &WorkerState) -> Result<()> {
         self.observation.validate_state(state)
@@ -1392,3 +1434,48 @@ fn empty_events(contents: &str) -> Result<bool> {
 #[cfg(test)]
 #[path = "systemd_worker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn unit_owner_result(
+    owner: &RunAuthority,
+    payload: Arc<WorkerPayload>,
+) -> AuthorizedRun {
+    let authorization = owner.authorize([4; 32]).unwrap();
+    let (_, session, generation) = authorization.challenge_context().unwrap();
+    let guard = authorization.guard();
+    let kernel = crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation(
+        session, generation,
+    );
+    authorization.bind_custody(&kernel).unwrap();
+    let binding = InvocationBinding {
+        authorization,
+        observation: BootstrapUnitObservation {
+            pid: 42,
+            uid: 0,
+            gid: 0,
+            start: 1,
+            invocation: [3; 16],
+            expires: Instant::now() + DEADLINE,
+            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
+        },
+        digest: payload.digest(),
+        payload,
+        kernel: Some(kernel),
+    };
+    // Только ownership fixture: не имитирует successful canonical verification/mint.
+    AuthorizedRun {
+        ticket: WorkerTicket {
+            pid: 42,
+            invocation: [3; 16],
+        },
+        lease: AuthorizedLease {
+            binding,
+            _guard: guard,
+        },
+    }
+}
+
+#[cfg(test)]
+pub(super) fn unit_owner_payload() -> Arc<WorkerPayload> {
+    tests::binding_test_payload()
+}

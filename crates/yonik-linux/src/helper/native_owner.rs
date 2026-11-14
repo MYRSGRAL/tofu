@@ -17,6 +17,7 @@ struct NativeOwnerLease<A, Q, R> {
     queue: Q,
     network_stamp: crate::NetworkStamp,
     network_epoch: u64,
+    owner: crate::managed_network::Ownership,
     authority: RunAuthority,
     run: Option<R>,
 }
@@ -30,6 +31,7 @@ pub(in super::super) struct NativeOwnerState<
     last_generation: u64,
     consumed: BTreeSet<u64>,
     lease: Option<NativeOwnerLease<A, Q, R>>,
+    active: Option<NativeOwnerLease<A, Q, R>>,
 }
 impl<A, Q, R> NativeOwnerState<A, Q, R> {
     pub(in super::super) fn fresh() -> Self {
@@ -43,6 +45,7 @@ impl<A, Q, R> NativeOwnerState<A, Q, R> {
             last_generation: 0,
             consumed: BTreeSet::new(),
             lease: None,
+            active: None,
         }
     }
     // Нет production caller: legacy compile намеренно оставляет stamp=None.
@@ -75,11 +78,31 @@ impl<A, Q, R> NativeOwnerState<A, Q, R> {
         }
         Ok(())
     }
+    fn activate_checked(
+        &mut self,
+        run: R,
+        validate: impl FnOnce(&NativeOwnerLease<A, Q, R>, &R) -> Result<(), ServiceError>,
+    ) -> Result<(), ServiceError> {
+        let pending = self.lease.as_ref().ok_or(ServiceError::Unavailable)?;
+        if self.active.is_some() || pending.run.is_some() {
+            self.revoke();
+            return Err(ServiceError::Busy);
+        }
+        if let Err(error) = validate(pending, &run) {
+            self.revoke();
+            return Err(error);
+        }
+        // После проверки нет await/ошибок: весь lease перемещается целиком.
+        let mut pending = self.lease.take().ok_or(ServiceError::Unavailable)?;
+        pending.run = Some(run);
+        self.active = Some(pending);
+        Ok(())
+    }
     pub(in super::super) fn busy(&self) -> bool {
-        self.lease.is_some()
+        self.lease.is_some() || self.active.is_some()
     }
     pub(in super::super) fn revoke(&mut self) {
-        if let Some(lease) = &self.lease {
+        for lease in self.lease.iter().chain(self.active.iter()) {
             lease.authority.revoke();
         }
         // Неизвестный stop сохраняет queue/artifact/run; Busy до confirmed recover.
@@ -91,6 +114,7 @@ impl<A, Q, R> NativeOwnerState<A, Q, R> {
     pub(in super::super) fn release_confirmed(&mut self) {
         self.revoke();
         self.lease = None;
+        self.active = None;
     }
 }
 impl<A, Q, R> Drop for NativeOwnerState<A, Q, R> {
@@ -101,12 +125,33 @@ impl<A, Q, R> Drop for NativeOwnerState<A, Q, R> {
 
 // Нет constructor из caller данных: record создаётся только после async проверок.
 #[allow(dead_code)]
-struct VerifiedNativeNetworkCommit {
-    artifact: Arc<SessionArtifact>,
-    queue: Arc<crate::managed_network::tun::BoundTun>,
+struct VerifiedNativeNetworkCommit<A = SessionArtifact, Q = crate::managed_network::tun::BoundTun> {
+    artifact: Arc<A>,
+    queue: Arc<Q>,
     stamp: crate::NetworkStamp,
     epoch: u64,
     owner: crate::managed_network::Ownership,
+}
+
+// Общий синхронный boundary: unit fixtures проверяют эти же gates без TUN mint.
+impl<A, Q> VerifiedNativeNetworkCommit<A, Q> {
+    fn validate_network_binding(
+        &self,
+        canonical: Option<&Arc<Q>>,
+        snapshot: crate::NetworkSnapshot,
+        epoch: u64,
+        owner: Option<crate::managed_network::Ownership>,
+    ) -> Result<(), ServiceError> {
+        if epoch != self.epoch
+            || !snapshot.is_current(self.stamp)
+            || !snapshot.fully_observed()
+            || owner != Some(self.owner)
+            || !canonical.is_some_and(|queue| Arc::ptr_eq(queue, &self.queue))
+        {
+            return Err(super::stale());
+        }
+        Ok(())
+    }
 }
 
 // Закрытая граница: production caller и compile stamping ещё не подключаются.
@@ -167,16 +212,19 @@ impl super::Backend {
         if self.worker_uncertain || self.active.is_some() || self.native_owner.busy() {
             return Err(ServiceError::Busy);
         }
-        if record.epoch != self.epoch
-            || !self.snapshot()?.is_current(record.stamp)
-            || !self.snapshot()?.fully_observed()
-            || self.journal.as_ref().map(|j| j.ownership()) != Some(record.owner)
-            || !self
-                .tun_custody
-                .as_ref()
-                .is_some_and(|c| Arc::ptr_eq(&c.bound, &record.queue))
-            || self.context(record.artifact.uid)? != record.artifact.context
-        {
+        self.revalidate_native_context(record)
+    }
+    fn revalidate_native_context(
+        &self,
+        record: &VerifiedNativeNetworkCommit,
+    ) -> Result<(), ServiceError> {
+        record.validate_network_binding(
+            self.tun_custody.as_ref().map(|custody| &custody.bound),
+            self.snapshot()?,
+            self.epoch,
+            self.journal.as_ref().map(|journal| journal.ownership()),
+        )?;
+        if self.context(record.artifact.uid)? != record.artifact.context {
             return Err(super::stale());
         }
         record.queue.attach_metadata().map_err(super::unavailable)?;
@@ -190,6 +238,36 @@ impl super::Backend {
             return Err(ServiceError::Unsupported);
         }
         Ok(())
+    }
+    fn activate_native_owner(&mut self, run: AuthorizedRun) -> Result<(), ServiceError> {
+        let validation = (|| {
+            if self.worker_uncertain || self.active.is_some() {
+                return Err(ServiceError::Busy);
+            }
+            let pending = self
+                .native_owner
+                .lease
+                .as_ref()
+                .ok_or(ServiceError::Unavailable)?;
+            let record = VerifiedNativeNetworkCommit {
+                artifact: Arc::clone(&pending.artifact),
+                queue: Arc::clone(&pending.queue),
+                stamp: pending.network_stamp,
+                epoch: pending.network_epoch,
+                owner: pending.owner,
+            };
+            self.revalidate_native_context(&record)?;
+            run.validate_owner(&pending.authority, &pending.artifact.payload)
+                .map_err(super::unavailable)
+        })();
+        if let Err(error) = validation {
+            self.native_owner.revoke();
+            return Err(error);
+        }
+        self.native_owner.activate_checked(run, |pending, run| {
+            run.validate_owner(&pending.authority, &pending.artifact.payload)
+                .map_err(super::unavailable)
+        })
     }
     fn commit_native_owner(
         &mut self,
@@ -210,6 +288,7 @@ impl super::Backend {
             network_stamp: record.stamp,
             network_epoch: record.epoch,
             authority,
+            owner: record.owner,
             run: None,
         });
         Ok(())
@@ -286,6 +365,7 @@ mod tests {
             authority,
             network_stamp: monitor.watch().current().stamp,
             network_epoch: 1,
+            owner: crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap(),
         });
         assert!(token.challenge_context().is_ok());
         owner.revoke();
@@ -318,6 +398,7 @@ mod tests {
             authority,
             network_stamp: monitor.watch().current().stamp,
             network_epoch: 1,
+            owner: crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap(),
         });
         drop(owner);
         assert!(pending_token.challenge_context().is_err());
@@ -325,5 +406,259 @@ mod tests {
             (Arc::strong_count(&artifact), Arc::strong_count(&queue)),
             (1, 1)
         );
+    }
+    #[tokio::test]
+    async fn final_binding_retains_artifact_a_and_rejects_wrong_queue_and_network_change() {
+        let monitor = crate::NetworkMonitor::start().unwrap();
+        let mut snapshot = monitor.watch().current();
+        snapshot.coverage = crate::NetworkCoverage {
+            routes: true,
+            resolver: true,
+            manager: true,
+        };
+        snapshot.exhausted = false;
+        // Только source-backed unit boundary. Ни kernel queue, ни network proof здесь не mintятся.
+        let owner = crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap();
+        let artifact_a = Arc::new(vec![1, 2, 3]);
+        let artifact_b = Arc::new(vec![1, 2, 3]);
+        let queue_a = Arc::new(());
+        let queue_b = Arc::new(());
+        let record = VerifiedNativeNetworkCommit {
+            artifact: Arc::clone(&artifact_a),
+            queue: Arc::clone(&queue_a),
+            stamp: snapshot.stamp,
+            epoch: 1,
+            owner,
+        };
+        drop(artifact_a);
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), snapshot, 1, Some(owner))
+                .is_ok()
+        );
+        assert!(!Arc::ptr_eq(&record.artifact, &artifact_b));
+        assert_eq!(Arc::strong_count(&record.artifact), 1);
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_b), snapshot, 1, Some(owner))
+                .is_err()
+        );
+        assert!(
+            record
+                .validate_network_binding(None, snapshot, 1, Some(owner))
+                .is_err()
+        );
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), snapshot, 2, Some(owner))
+                .is_err()
+        );
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), snapshot, 1, None)
+                .is_err()
+        );
+        let other_monitor = crate::NetworkMonitor::start().unwrap();
+        let mut changed_snapshot = snapshot;
+        changed_snapshot.stamp = other_monitor.watch().current().stamp;
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), changed_snapshot, 1, Some(owner))
+                .is_err()
+        );
+        snapshot.coverage.manager = false;
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), snapshot, 1, Some(owner))
+                .is_err()
+        );
+        snapshot.coverage.manager = true;
+        snapshot.exhausted = true;
+        assert!(
+            record
+                .validate_network_binding(Some(&queue_a), snapshot, 1, Some(owner))
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn synchronous_transfer_keeps_lease_and_failed_late_result_keeps_recovery_slot() {
+        let monitor = crate::NetworkMonitor::start().unwrap();
+        let mut owner = TestOwner::from_session(Some([1; 16]));
+        let artifact = Arc::new(());
+        let queue = Arc::new(());
+        let run = Arc::new(());
+        let authority = RunAuthority::new([1; 16], 1, 1).unwrap();
+        let token = authority.authorize([2; 32]).unwrap();
+        owner.lease = Some(NativeOwnerLease {
+            artifact: Arc::clone(&artifact),
+            queue: Arc::clone(&queue),
+            network_stamp: monitor.watch().current().stamp,
+            network_epoch: 1,
+            owner: crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap(),
+            authority,
+            run: None,
+        });
+        owner
+            .activate_checked(Arc::clone(&run), |pending, _| {
+                token
+                    .validate_owner(&pending.authority)
+                    .map_err(|_| ServiceError::Unavailable)
+            })
+            .unwrap();
+        assert!(owner.lease.is_none());
+        assert!(owner.active.is_some());
+        assert!(token.validate().is_ok());
+        assert_eq!(Arc::strong_count(&run), 2);
+        owner.revoke();
+        assert!(token.validate().is_err());
+        assert!(owner.busy());
+        owner.release_confirmed();
+        assert_eq!(Arc::strong_count(&run), 1);
+        let authority = RunAuthority::new([1; 16], 2, 1).unwrap();
+        let token = authority.authorize([3; 32]).unwrap();
+        authority.revoke();
+        owner.lease = Some(NativeOwnerLease {
+            artifact,
+            queue,
+            authority,
+            network_stamp: monitor.watch().current().stamp,
+            network_epoch: 1,
+            owner: crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap(),
+            run: None,
+        });
+        assert!(
+            owner
+                .activate_checked(run, |pending, _| {
+                    token
+                        .validate_owner(&pending.authority)
+                        .map_err(|_| ServiceError::Unavailable)
+                })
+                .is_err()
+        );
+        assert!(owner.lease.is_some());
+        assert!(owner.active.is_none());
+        assert!(owner.busy());
+    }
+    struct UnitArtifact {
+        payload: Arc<crate::worker::WorkerPayload>,
+    }
+    type UnitRunOwner = NativeOwnerState<Arc<UnitArtifact>, Arc<()>, AuthorizedRun>;
+    fn unit_pending_owner(stamp: crate::NetworkStamp) -> UnitRunOwner {
+        let mut owner = UnitRunOwner::from_session(Some([2; 16]));
+        owner.lease = Some(NativeOwnerLease {
+            artifact: Arc::new(UnitArtifact {
+                payload: crate::helper::systemd_worker::unit_owner_payload(),
+            }),
+            queue: Arc::new(()),
+            network_stamp: stamp,
+            network_epoch: 9,
+            owner: crate::managed_network::Ownership::new(1, 1, 1, 1, 1).unwrap(),
+            authority: RunAuthority::new([2; 16], 7, 9).unwrap(),
+            run: None,
+        });
+        owner
+    }
+    fn unit_activate(owner: &mut UnitRunOwner, run: AuthorizedRun) -> Result<(), ServiceError> {
+        owner.activate_checked(run, |pending, run| {
+            run.unit_validate_owner_link(&pending.authority, &pending.artifact.payload)
+                .map_err(super::super::unavailable)
+        })
+    }
+    #[tokio::test]
+    async fn exact_authorized_run_moves_without_early_guard_drop_and_unknown_stop_retains_it() {
+        let monitor = crate::NetworkMonitor::start().unwrap();
+        let mut owner = unit_pending_owner(monitor.watch().current().stamp);
+        let pending = owner.lease.as_ref().unwrap();
+        let queue = Arc::clone(&pending.queue);
+        let artifact = Arc::clone(&pending.artifact);
+        let run = crate::helper::systemd_worker::unit_owner_result(
+            &pending.authority,
+            Arc::clone(&artifact.payload),
+        );
+        unit_activate(&mut owner, run).unwrap();
+        assert!(owner.lease.is_none());
+        let active = owner.active.as_ref().unwrap();
+        assert!(!active.authority.is_revoked());
+        assert!(
+            active
+                .run
+                .as_ref()
+                .unwrap()
+                .unit_validate_owner_link(&active.authority, &artifact.payload)
+                .is_ok()
+        );
+        assert_eq!(
+            (Arc::strong_count(&artifact), Arc::strong_count(&queue)),
+            (2, 2)
+        );
+        owner.revoke();
+        let active = owner.active.as_ref().unwrap();
+        assert!(
+            active
+                .run
+                .as_ref()
+                .unwrap()
+                .unit_validate_owner_link(&active.authority, &artifact.payload)
+                .is_err()
+        );
+        assert!(owner.busy());
+        assert_eq!(
+            (Arc::strong_count(&artifact), Arc::strong_count(&queue)),
+            (2, 2)
+        );
+        owner.release_confirmed();
+        assert_eq!(
+            (Arc::strong_count(&artifact), Arc::strong_count(&queue)),
+            (1, 1)
+        );
+    }
+    #[tokio::test]
+    async fn wrong_owner_and_equal_bytes_wrong_payload_revoke_without_losing_pending_slot() {
+        let monitor = crate::NetworkMonitor::start().unwrap();
+        for wrong_owner in [true, false] {
+            let mut owner = unit_pending_owner(monitor.watch().current().stamp);
+            let pending = owner.lease.as_ref().unwrap();
+            let foreign = RunAuthority::new([2; 16], 7, 9).unwrap();
+            let payload = if wrong_owner {
+                Arc::clone(&pending.artifact.payload)
+            } else {
+                crate::helper::systemd_worker::unit_owner_payload()
+            };
+            assert_eq!(payload.digest(), pending.artifact.payload.digest());
+            let run = crate::helper::systemd_worker::unit_owner_result(
+                if wrong_owner {
+                    &foreign
+                } else {
+                    &pending.authority
+                },
+                payload,
+            );
+            assert!(unit_activate(&mut owner, run).is_err());
+            assert!(owner.lease.is_some());
+            assert!(owner.active.is_none());
+            assert!(owner.busy());
+            assert!(owner.lease.as_ref().unwrap().authority.is_revoked());
+        }
+    }
+    #[tokio::test]
+    async fn cancellation_before_active_keeps_revoked_pending_recovery_ownership() {
+        let monitor = crate::NetworkMonitor::start().unwrap();
+        let owner = unit_pending_owner(monitor.watch().current().stamp);
+        let pending = owner.lease.as_ref().unwrap();
+        let run = crate::helper::systemd_worker::unit_owner_result(
+            &pending.authority,
+            Arc::clone(&pending.artifact.payload),
+        );
+        let mut future = Box::pin(async move {
+            let _run = run;
+            std::future::pending::<()>().await;
+        });
+        assert!(futures_util::poll!(future.as_mut()).is_pending());
+        assert!(!pending.authority.is_revoked());
+        drop(future);
+        assert!(owner.lease.as_ref().unwrap().authority.is_revoked());
+        assert!(owner.active.is_none());
+        assert!(owner.busy());
     }
 }
