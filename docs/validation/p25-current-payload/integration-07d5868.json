@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "scope": "integration-only receipt; no actual final build",
+  "recorded_at_utc": "2026-11-14T12:21:30.779711+00:00",
+  "accepted_base": "07d5868f58de8f73e9005f21a4ec3945b4b7a14d",
+  "integration_head_tested": "c0cfa4aff26378501df1f8ff61b9b38aeedc89aa",
+  "ordinary_merge": {
+    "parents": [
+      "8d618ddf53b87dea267d5be078635b886d8dd44b",
+      "07d5868f58de8f73e9005f21a4ec3945b4b7a14d"
+    ],
+    "conflicts": false
+  },
+  "preserved_ancestors": [
+    "9f51fae1988fe10c8eba8de3cea9b924128b4419",
+    "fb3061e9d2ae906e20889dc06a91b4213a073a46",
+    "8d618ddf53b87dea267d5be078635b886d8dd44b",
+    "07d5868f58de8f73e9005f21a4ec3945b4b7a14d"
+  ],
+  "capture_tooling_unchanged_from_root_fix": {
+    "ref": "8d618ddf53b87dea267d5be078635b886d8dd44b",
+    "blobs": {
+      "tools/release_controller.py": "83a709c37c2c3d7feac64be318cc6fd949412acc",
+      "tools/_p25_capture_producer.py": "69b64c6dd6a7328536eb02a0c43dbffdbc8e6b4a",
+      "tools/_p25_final_profile.py": "f7ae073bcf6172c67b509f71684100accfed6a6d",
+      "tools/p25_cxx_capture_wrapper.py": "138bdcf637d9a3e1c96fb5bbf8671f51954886a4",
+      "tools/p25_capture_build_closure.py": "de860c36aebee89cc11bc118a24ccb985e568efa",
+      "tests/tools/test_release_controller.py": "2839e9737e4bb7a706975da640835961dda77994",
+      "tools/tests/test_p25_final_profile.py": "c477751e1f00c849b5292211ab046730b78cf524",
+      "tools/tests/test_p25_capture_producer.py": "19d72fe02a0f81a9920466728c555c6ea62fa507",
+      "tools/tests/test_p25_capture_build_closure.py": "23a8b4fd69030cfc8dbeed2a54368dfdfb9adb6e"
+    }
+  },
+  "checks": {
+    "normal": {
+      "command": "python -m pytest -q tools/tests/test_p25_final_profile.py tools/tests/test_p25_capture_producer.py tools/tests/test_p25_capture_build_closure.py tests/tools/test_release_controller.py",
+      "exit": 0,
+      "passed": 117,
+      "subtests_passed": 33
+    },
+    "optimized": {
+      "command": "python -O -m pytest -q tools/tests/test_p25_final_profile.py tools/tests/test_p25_capture_producer.py tools/tests/test_p25_capture_build_closure.py tests/tools/test_release_controller.py",
+      "exit": 0,
+      "passed": 117,
+      "subtests_passed": 33,
+      "warning": "expected pytest warning about asserts outside rewritten test modules under -O"
+    },
+    "ruff": {
+      "binary": "/home/myrs/projects/yonik/local/orchestration/tools/ruff-0.17.4/ruff",
+      "check_exit": 0,
+      "format_check_exit": 0,
+      "paths": [
+        "tools/release_controller.py",
+        "tools/_p25_capture_producer.py",
+        "tools/_p25_final_profile.py",
+        "tools/p25_cxx_capture_wrapper.py",
+        "tools/p25_capture_build_closure.py",
+        "tests/tools/test_release_controller.py",
+        "tools/tests/test_p25_final_profile.py",
+        "tools/tests/test_p25_capture_producer.py",
+        "tools/tests/test_p25_capture_build_closure.py"
+      ]
+    },
+    "attribution_manifest": {
+      "path": "docs/validation/p25-current-payload/qt-file-attribution-candidate/manifest.json",
+      "sha256": "61be289836c2fb662de96c3cd22469894543ac8e65cb1a07eda6bc646a47f6e6",
+      "verified_file_pins": 30
+    },
+    "diff_check_exit": 0
+  },
+  "root_fsync_review": {
+    "fix": "8d618ddf53b87dea267d5be078635b886d8dd44b",
+    "changed_by_implementation_agent": false,
+    "narrow_review": "PENDING_SEPARATE_ROOT_REVIEW",
+    "root_reported_red_assertions": 4,
+    "red_replayed_here": false
+  },
+  "actual_build_compiler_qt_query_download_vm_install_release_executed": false,
+  "historical_package142_promoted": false,
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false,
+  "pr_action": "single coherent PR; no watch or PR merge"
+}

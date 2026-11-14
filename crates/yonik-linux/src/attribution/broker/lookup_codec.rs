@@ -113,6 +113,9 @@ impl LookupBinding {
         if kind != RESULT && bytes[9..12] != [0; 3] {
             return Err(Unavailable::Malformed);
         }
+        if matches!(kind, HELLO_ACK | REVOKE) && bytes[148..].iter().any(|byte| *byte != 0) {
+            return Err(Unavailable::Malformed);
+        }
         Ok(())
     }
     pub(super) fn request(&self, id: u64, flow: Flow) -> Result<[u8; FRAME], Unavailable> {
@@ -249,6 +252,23 @@ mod tests {
             },
         ] {
             assert!(binding.request(1, value).is_err());
+        }
+    }
+
+    #[test]
+    fn pure_lookup_control_rejects_every_reserved_tail_byte() {
+        let binding = binding();
+        for kind in [HELLO_ACK, REVOKE] {
+            let bytes = binding.encode(kind, 0).unwrap();
+            assert!(binding.validate(&bytes, kind, 0, FRAME).is_ok());
+            for index in 148..FRAME {
+                let mut invalid = bytes;
+                invalid[index] = 1;
+                assert!(matches!(
+                    binding.validate(&invalid, kind, 0, FRAME),
+                    Err(Unavailable::Malformed)
+                ));
+            }
         }
     }
 }
