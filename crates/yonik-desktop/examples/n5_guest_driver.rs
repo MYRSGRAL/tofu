@@ -180,16 +180,19 @@ fn run() -> Result<()> {
                     connected_since,
                     &fixture,
                 )?);
-                stopped_since = capture::now();
                 let stopped = host.as_mut().ok_or("NO_HOST")?.stop()?;
                 if stopped["status"] != "Disconnected" {
                     return Err("RECOVERY_REQUIRED");
                 }
                 phase = 3;
             }
-            protocol::Action::Cleanup if phase == 3 => {
+            protocol::Action::CloseDesktopOwner if phase == 3 => {
                 host.as_mut().ok_or("NO_HOST")?.close()?;
                 let _owned_kernel = baseline.as_ref().ok_or("NO_BASELINE")?.cleanup()?;
+                stopped_since = capture::now();
+                phase = 4;
+            }
+            protocol::Action::Cleanup if phase == 4 => {
                 let stopped =
                     capture::read("stopped", request.core.name(), stopped_since, &fixture)?;
                 let cleanup = capture::compare(
