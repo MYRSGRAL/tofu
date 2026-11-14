@@ -525,11 +525,15 @@ pub struct SystemWorkerSupervisor {
     native_custody: Option<crate::worker::anchor_exchange::NamespaceRetention>,
     lookup_leaf: Option<lookup_leaf::LeafPending>,
     peer_verifier: Option<lookup_leaf::PeerPending>,
+    peer_inspection: Option<JoinHandle<Result<()>>>,
     native_lookup_transfer: Option<JoinHandle<Result<crate::attribution::broker::RemoteLookup>>>,
     native_remote: Option<crate::attribution::broker::RemoteLookup>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
+        if let Some(inspection) = self.peer_inspection.take() {
+            std::mem::forget(inspection);
+        }
         // Preparation может жить при clean fixed worker units; неизвестный stop не освобождает permit.
         if let Some(verifier) = self.peer_verifier.take() {
             std::mem::forget(verifier);
@@ -614,6 +618,7 @@ impl SystemWorkerSupervisor {
                 native_custody: None,
                 lookup_leaf: None,
                 peer_verifier: None,
+                peer_inspection: None,
                 native_lookup_transfer: None,
                 native_remote: None,
             };
@@ -761,6 +766,32 @@ impl SystemWorkerSupervisor {
         self.cleanup(cancel, deadline).await
     }
     /// Conditional native start. Отсутствующий immutable deployment закрывает admission.
+    pub(crate) async fn attest_preparation(
+        &mut self,
+        peer: Arc<crate::attribution::PeerProcess>,
+        source: super::native_bootstrap::VerifiedStaticInstalledImage,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        if self.peer_inspection.is_some() {
+            return Err(WorkerSupervisorError::Busy);
+        }
+        let verifier = self
+            .launch_peer_verifier(
+                peer.captured().map_err(unavailable)?,
+                &source,
+                cancel,
+                deadline,
+            )
+            .await?;
+        let permit = Arc::clone(&self.permit);
+        self.peer_inspection = Some(tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            peer.attest(verifier, source).map_err(unavailable)
+        }));
+        wait_owned(&mut self.peer_inspection, cancel, deadline).await??;
+        Ok(())
+    }
     #[allow(clippy::too_many_arguments)] // Каждый owning вход проверяется отдельным boundary.
     pub(crate) async fn start_native(
         &mut self,
@@ -1095,6 +1126,9 @@ impl SystemWorkerSupervisor {
         bounded(cancel, deadline, self.validate_contract()).await?;
         self.clean = false;
         self.current = None;
+        if self.peer_inspection.is_some() {
+            let _result = wait_owned(&mut self.peer_inspection, cancel, deadline).await?;
+        }
         self.cleanup(cancel, deadline).await?;
         self.stop_peer_verifier(cancel, deadline).await
     }

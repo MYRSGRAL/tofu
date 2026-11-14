@@ -33,6 +33,7 @@ pub(crate) struct VerifiedPeerVerifier {
 struct PeerObservation {
     identity: Arc<LeafIdentity>,
     revoked: AtomicBool,
+    snapshot: std::sync::Mutex<Option<Arc<crate::attribution::VerifiedPeerSnapshot>>>,
 }
 pub(crate) struct PeerVerifierLease(Arc<PeerObservation>);
 impl VerifiedPeerVerifier {
@@ -68,6 +69,21 @@ impl PeerVerifierLease {
     }
     pub(crate) fn revoke(&self) {
         self.0.revoked.store(true, Ordering::Release);
+    }
+    pub(crate) fn retain_snapshot(
+        &self,
+        snapshot: Arc<crate::attribution::VerifiedPeerSnapshot>,
+    ) -> Result<()> {
+        self.validate()?;
+        let mut retained = self.0.snapshot.lock().map_err(unavailable)?;
+        if let Some(first) = retained.as_ref() {
+            first
+                .require_same_identity(&snapshot)
+                .map_err(unavailable)?;
+        } else {
+            *retained = Some(snapshot);
+        }
+        self.validate()
     }
     pub(crate) fn same_observer(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -501,6 +517,7 @@ impl SystemWorkerSupervisor {
         let observer = Arc::new(PeerObservation {
             identity,
             revoked: AtomicBool::new(false),
+            snapshot: std::sync::Mutex::new(None),
         });
         let pending = self
             .peer_verifier
@@ -900,6 +917,106 @@ mod tests {
         format!(
             "Uid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapBnd:\t0\nCapAmb:\t0\nNoNewPrivs:\t1\n"
         )
+    }
+    fn property_fixture() -> (Properties, Properties, String) {
+        use zbus::zvariant::{OwnedValue, Value};
+        fn owned(value: Value<'_>) -> OwnedValue {
+            value.try_into().unwrap()
+        }
+        let name = leaf_unit([1; 32]);
+        let unit = Properties::from([
+            ("Transient".into(), OwnedValue::from(true)),
+            ("Id".into(), owned(Value::from(name.clone()))),
+            (
+                "ControlGroup".into(),
+                owned(Value::from(format!("/system.slice/{name}"))),
+            ),
+        ]);
+        let mut service = Properties::new();
+        for (key, value) in [
+            ("User", "1000"),
+            ("Group", "2000"),
+            ("KillMode", "control-group"),
+            ("DevicePolicy", "closed"),
+            ("Type", "exec"),
+            ("ProtectSystem", "no"),
+            ("ProtectHome", "no"),
+        ] {
+            service.insert(key.into(), owned(Value::from(value)));
+        }
+        for key in ["CapabilityBoundingSet", "AmbientCapabilities"] {
+            service.insert(key.into(), OwnedValue::from(0u64));
+        }
+        service.insert("NoNewPrivileges".into(), OwnedValue::from(true));
+        for key in [
+            "PrivateTmp",
+            "PrivateMounts",
+            "PrivateNetwork",
+            "PrivateUsers",
+            "PrivatePIDs",
+            "PrivateDevices",
+        ] {
+            service.insert(key.into(), OwnedValue::from(false));
+        }
+        for key in ["ReadOnlyPaths", "ReadWritePaths", "InaccessiblePaths"] {
+            service.insert(key.into(), owned(Value::from(Vec::<String>::new())));
+        }
+        for key in ["BindPaths", "BindReadOnlyPaths"] {
+            service.insert(
+                key.into(),
+                owned(Value::from(Vec::<(String, String, bool, u64)>::new())),
+            );
+        }
+        let exec: ExecCommands = vec![(
+            IMAGE.into(),
+            vec![IMAGE.into(), "--lookup".into()],
+            false,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )];
+        service.insert("ExecStart".into(), owned(Value::from(exec)));
+        (unit, service, name)
+    }
+    #[test]
+    fn canonical_leaf_requires_baseline_view_and_zero_caps() {
+        let (unit, service, name) = property_fixture();
+        assert!(validate_properties(&unit, &service, 1000, 2000, &name, false).is_ok());
+        for property in [
+            "PrivateTmp",
+            "PrivateMounts",
+            "PrivateNetwork",
+            "PrivateUsers",
+            "PrivatePIDs",
+            "PrivateDevices",
+        ] {
+            let (_, mut service, _) = property_fixture();
+            service.insert(property.into(), true.into());
+            assert!(
+                validate_properties(&unit, &service, 1000, 2000, &name, false).is_err(),
+                "{property}"
+            );
+        }
+        let (_, mut service, _) = property_fixture();
+        service.insert("CapabilityBoundingSet".into(), (1u64 << 12).into());
+        assert!(validate_properties(&unit, &service, 1000, 2000, &name, false).is_err());
+        let (_, mut service, _) = property_fixture();
+        service.remove("PrivateMounts");
+        assert!(validate_properties(&unit, &service, 1000, 2000, &name, false).is_err());
+    }
+    #[test]
+    fn namespace_creating_bind_paths_are_rejected() {
+        let (unit, mut service, name) = property_fixture();
+        let paths = vec![("/tmp".to_owned(), "/tmp".to_owned(), false, 0u64)];
+        service.insert(
+            "BindPaths".into(),
+            zbus::zvariant::Value::from(paths).try_into().unwrap(),
+        );
+        assert!(validate_properties(&unit, &service, 1000, 2000, &name, false).is_err());
     }
     #[test]
     fn transient_name_is_closed_nonce_identity_without_caller_path() {
