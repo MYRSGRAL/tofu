@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -21,7 +22,16 @@ from engine_host import https_server, peer
 from local_socks_alternating import command
 from local_socks_resource import children, identity
 
-PIN = "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a"
+CORES = {
+    "sing-box": (
+        "sing-box-1.14.4/sing-box",
+        "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+    ),
+    "xray": (
+        "xray-26.10.31/xray",
+        "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+    ),
+}
 
 
 def free_port() -> int:
@@ -69,11 +79,12 @@ def observe(core: dict, fd: int, port: int) -> dict:
     )
 
 
-def run(binary: Path, engines: Path, output: Path) -> None:
+def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> None:
     assert os.getpid() == 1, "Supervisor должен быть namespace init"
-    core_path = engines / "sing-box-1.14.4/sing-box"
-    assert hashlib.sha256(core_path.read_bytes()).hexdigest() == PIN
-    result: dict = dict(engine="sing-box", pin=PIN, observations=[])
+    relative, pin = CORES[engine]
+    core_path = engines / relative
+    assert hashlib.sha256(core_path.read_bytes()).hexdigest() == pin
+    result: dict = dict(engine=engine, pin=pin, observations=[])
     try:
         with tempfile.TemporaryDirectory(prefix="p09-owned-") as temporary:
             root = Path(temporary)
@@ -101,7 +112,7 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                         peer_port = free_port()
                         with peer(
                             core_path,
-                            "sing-box",
+                            engine,
                             root,
                             port=peer_port,
                             target_ports=str(https.server_port),
@@ -116,7 +127,7 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                                             str(binary),
                                             str(data),
                                             str(engines),
-                                            "sing-box",
+                                            engine,
                                             f"vless://{UUID}@127.0.0.1:{peer_port}#Synthetic",
                                             f"https://127.0.0.1:{https.server_port}/",
                                             str(port),
@@ -141,7 +152,7 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                                         pids = children(host.pid)
                                         assert len(pids) == 1, pids
                                         core = capture(pids.pop())
-                                        assert core["exe_sha256"] == PIN
+                                        assert core["exe_sha256"] == pin
                                         fd = os.pidfd_open(core["pid"])
                                         tracked.append((core, fd))
                                         case["host"] = capture(host.pid)
@@ -176,8 +187,15 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                                             )
                                             case["host_exit"] = -signal.SIGKILL
                                             start = time.monotonic()
-                                            for delay in (0, 1, 1, 1):
-                                                time.sleep(delay)
+                                            for offset in (0, 1, 2, 3):
+                                                time.sleep(
+                                                    max(
+                                                        0,
+                                                        start
+                                                        + offset
+                                                        - time.monotonic(),
+                                                    )
+                                                )
                                                 observation = observe(core, fd, port)
                                                 observation["elapsed"] = (
                                                     time.monotonic() - start
@@ -186,6 +204,9 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                                                     observation
                                                 )
                                             last = result["observations"][-1]
+                                            assert last["elapsed"] <= 3.2, (
+                                                "Превышена граница observation"
+                                            )
                                             case["verdict"] = (
                                                 "survives"
                                                 if last["same_identity"]
@@ -203,7 +224,7 @@ def run(binary: Path, engines: Path, output: Path) -> None:
                                             }
                                             for pid in children(host.pid) - known:
                                                 core = capture(pid)
-                                                assert core["exe_sha256"] == PIN
+                                                assert core["exe_sha256"] == pin
                                                 tracked.append(
                                                     (core, os.pidfd_open(pid))
                                                 )
@@ -247,10 +268,19 @@ def run(binary: Path, engines: Path, output: Path) -> None:
 
 
 if __name__ == "__main__":
-    binary, engines, output = (Path(value).resolve() for value in sys.argv[1:4])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary", type=Path)
+    parser.add_argument("engines", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--engine", choices=CORES, default="sing-box")
+    parser.add_argument("--inside", action="store_true")
+    args = parser.parse_args()
+    binary, engines, output = (
+        value.resolve() for value in (args.binary, args.engines, args.output)
+    )
     output.mkdir(parents=True, exist_ok=True)
-    if sys.argv[4:] == ["--inside"]:
-        run(binary, engines, output)
+    if args.inside:
+        run(binary, engines, output, args.engine)
     else:
         subprocess.run(
             [
@@ -265,6 +295,8 @@ if __name__ == "__main__":
                 str(binary),
                 str(engines),
                 str(output),
+                "--engine",
+                args.engine,
                 "--inside",
             ],
             check=True,
