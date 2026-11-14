@@ -1,5 +1,8 @@
 # Частный software X11 preflight
 
+Продолжение с утверждённым Probe/native counter: [PROBE-RESULT.md](PROBE-RESULT.md).
+Описанное ниже — историческое состояние первой итерации PR191.
+
 Это ограниченный кандидат, **не готовность к длинному benchmark**. Physical
 Plasma/Wayland, GPU, энергия, screenshot geometry и toolkit winner не доказаны.
 P01/P02 long campaigns могли создавать шум; их процессы не менялись.
