@@ -28,6 +28,7 @@ struct Deployment {
     policy_id: String,
     policy_sha256: [u8; 32],
     kernel_release: String,
+    kernel_build_id: [u8; 20],
     kernel_machine: String,
     kernel_abi: String,
 }
@@ -122,6 +123,7 @@ fn parse_bytes(bytes: &[u8]) -> Result<Deployment> {
         || value.worker_sha256 == [0; 32]
         || value.source_archive_sha256 == [0; 32]
         || value.policy_sha256 == [0; 32]
+        || value.kernel_build_id == [0; 20]
         || value.kernel_release.is_empty()
         || value.kernel_release.len() > 128
         || !value
@@ -155,6 +157,16 @@ impl InstalledContract {
         }
         let source = fixed_file(&directory, "native-source-v1.tar")?;
         if hash(&source, MAX_SOURCE, false)? != deployment.source_archive_sha256 {
+            return Err(Error::Untrusted);
+        }
+        let kernel = child(&child(&root()?, "sys")?, "kernel")?;
+        let notes = fixed_file(&kernel, "notes")?;
+        let mut data = Vec::new();
+        notes
+            .take(65537)
+            .read_to_end(&mut data)
+            .map_err(|_| Error::Unavailable)?;
+        if data.len() > 65536 || kernel_build_id(&data)? != deployment.kernel_build_id {
             return Err(Error::Untrusted);
         }
         // Читаем declared kernel/proc TCB, не запускаем feature probes.
@@ -256,7 +268,7 @@ mod tests {
         serde_json::json!({ "schema":1, "worker_sha256":vec![1u8;32],
             "source_archive_sha256":vec![2u8;32],"policy_id":POLICY,
             "policy_sha256":vec![3u8;32],"kernel_release":"6.18.1-test",
-            "kernel_machine":std::env::consts::ARCH,"kernel_abi":ABI })
+            "kernel_build_id":vec![4u8;20],"kernel_machine":std::env::consts::ARCH,"kernel_abi":ABI })
     }
     #[test]
     fn pure_deployment_metadata_accepts_complete_contract_data() {
@@ -294,5 +306,73 @@ mod tests {
             value[field] = bad.into();
             assert!(parse_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
         }
+    }
+}
+
+/// Linux exports native-endian ELF notes; only a single complete GNU build-id is accepted.
+fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
+    if notes.len() > 65536 {
+        return Err(Error::Untrusted);
+    }
+    let mut offset = 0usize;
+    let mut found = None;
+    while offset < notes.len() {
+        let header = notes
+            .get(offset..offset.checked_add(12).ok_or(Error::Untrusted)?)
+            .ok_or(Error::Untrusted)?;
+        let word = |n| u32::from_ne_bytes(header[n..n + 4].try_into().unwrap_or([0; 4])) as usize;
+        let (namesz, descsz, kind) = (word(0), word(4), word(8));
+        offset += 12;
+        let name_end = offset.checked_add(namesz).ok_or(Error::Untrusted)?;
+        let name = notes.get(offset..name_end).ok_or(Error::Untrusted)?;
+        let desc_start = name_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
+        let desc_end = desc_start.checked_add(descsz).ok_or(Error::Untrusted)?;
+        let desc = notes.get(desc_start..desc_end).ok_or(Error::Untrusted)?;
+        if kind == 3 && name == b"GNU\0" {
+            if found.is_some() || descsz != 20 {
+                return Err(Error::Untrusted);
+            }
+            let id: [u8; 20] = desc.try_into().map_err(|_| Error::Untrusted)?;
+            if id == [0; 20] {
+                return Err(Error::Untrusted);
+            }
+            found = Some(id);
+        }
+        offset = desc_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
+        if offset > notes.len() {
+            return Err(Error::Untrusted);
+        }
+    }
+    found.ok_or(Error::Unavailable)
+}
+#[cfg(test)]
+mod kernel_note_tests {
+    use super::*;
+    fn note() -> Vec<u8> {
+        let mut data = Vec::new();
+        for value in [4u32, 20, 3] {
+            data.extend(value.to_ne_bytes());
+        }
+        data.extend(b"GNU\0");
+        data.extend([1u8; 20]);
+        data
+    }
+    #[test]
+    fn pure_kernel_build_id_accepts_exact_note() {
+        assert_eq!(kernel_build_id(&note()).unwrap(), [1; 20]);
+    }
+    #[test]
+    fn pure_kernel_build_id_rejects_truncation_duplicate_zero_and_oversize() {
+        let data = note();
+        for end in 0..data.len() {
+            assert!(kernel_build_id(&data[..end]).is_err());
+        }
+        let mut duplicate = data.clone();
+        duplicate.extend(&data);
+        assert!(kernel_build_id(&duplicate).is_err());
+        let mut zero = data;
+        zero[16..].fill(0);
+        assert!(kernel_build_id(&zero).is_err());
+        assert!(kernel_build_id(&vec![0; 65537]).is_err());
     }
 }
