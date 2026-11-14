@@ -10,6 +10,7 @@ import socket
 import sqlite3
 import subprocess
 import time
+from contextlib import closing
 from pathlib import Path
 
 HOME = Path("/home/fixture")
@@ -157,7 +158,9 @@ def main() -> None:
             ("backup", DATA / "copies/backup3.sqlite"),
         ]:
             if path.exists():
-                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+                with closing(
+                    sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+                ) as db:
                     result[label] = {
                         "schema": db.execute("PRAGMA user_version").fetchone()[0],
                         "integrity_ok": db.execute("PRAGMA integrity_check").fetchone()[
