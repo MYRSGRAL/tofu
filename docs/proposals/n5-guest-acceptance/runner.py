@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from fixture import preflight, validate_receipt
+from fixture import preflight
 
 PACKAGE = Path(__file__).parent
 DRIVER = "/usr/lib/yonik-acceptance/n5-guest-driver"
@@ -224,6 +224,12 @@ def environment(uid: int) -> dict[str, str]:
 
 
 class Driver(Protocol):
+    def before_start(self, deadline: float) -> None: ...
+
+    def after_await(self, deadline: float) -> None: ...
+
+    def after_close_desktop_owner(self, deadline: float) -> None: ...
+
     def exchange(
         self, core: str, case: str, action: str, deadline: float
     ) -> dict[str, Any]: ...
@@ -232,7 +238,7 @@ class Driver(Protocol):
 class ProcessDriver:
     """Будущий sealed guest observer. Никаких shell/argv/config/env override."""
 
-    def __init__(self, uid: int) -> None:
+    def __init__(self, uid: int, gid: int) -> None:
         self.process = subprocess.Popen(
             DRIVER_ARGV,
             cwd="/",
@@ -241,12 +247,15 @@ class ProcessDriver:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            user=uid,
+            group=gid,
+            extra_groups=(),
+            close_fds=True,
         )
         try:
             self.pidfd = os.pidfd_open(self.process.pid)
         except OSError:
-            self.process.kill()
-            self.process.wait(timeout=5)
+            # Без pidfd ownership не подтверждено: child сохраняется owner.
             raise RuntimeFailure("PIDFD_REQUIRED_AFTER_LAUNCH") from None
         assert self.process.stdin is not None and self.process.stdout is not None
         os.set_blocking(self.process.stdin.fileno(), False)
@@ -273,6 +282,8 @@ class ProcessDriver:
         )
         assert self.process.stdin is not None and self.process.stdout is not None
         writer, reader = self.process.stdin.fileno(), self.process.stdout.fileno()
+        if select.select([reader], [], [], 0)[0]:
+            raise Refused("UNSOLICITED_FRAME_OR_EOF")
         while request:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([], [writer], [], remaining)[1]:
@@ -315,12 +326,14 @@ class ProcessDriver:
                 except subprocess.TimeoutExpired:
                     signal.pidfd_send_signal(self.pidfd, signal.SIGKILL)
                     self.process.wait(timeout=5)
-        finally:
-            os.close(self.pidfd)
-            if self.process.stdin:
-                self.process.stdin.close()
-            if self.process.stdout:
-                self.process.stdout.close()
+        except BaseException:
+            # Неподтверждённый reap: сохранить pidfd и pipes для quarantine.
+            raise
+        os.close(self.pidfd)
+        if self.process.stdin:
+            self.process.stdin.close()
+        if self.process.stdout:
+            self.process.stdout.close()
 
 
 # Исторические CASES/PREFIX выше сохраняют исходные IDs proposal, не runtime gate.
@@ -570,35 +583,33 @@ def run_case(
     deadline = min(campaign_deadline, time.monotonic() + CASE_SECONDS)
     if deadline <= time.monotonic():
         return {"core": core, "case": case, "status": "BLOCKED", "reason": "DEADLINE"}
-    # Полный witness обязан включать actual cleanup; Disconnected не empty fence.
-    failure = False
-    stopped = False
+    # После неизвестного результата команды boundary утрачен: recovery запрещён.
     try:
-        for action in ("start", "await", "stop"):
-            stopped |= action == "stop"
+        for seq, action in enumerate(
+            ("start", "await", "stop", "close_desktop_owner"), 1
+        ):
+            if action == "start":
+                driver.before_start(deadline)
             progress = driver.exchange(core, case, action, deadline)
             if (
                 progress
                 != {
                     "schema": 2,
-                    "seq": progress.get("seq"),
+                    "seq": seq,
                     "core": core,
                     "case": case,
                     "stage": action,
                 }
                 or type(progress.get("seq")) is not int
-                or progress["seq"] <= 0
             ):
                 raise Refused("PROGRESS_PROTOCOL")
-    except (Refused, OSError):
-        failure = True
-    cleanup_deadline = min(campaign_deadline, time.monotonic() + CLEANUP_SECONDS)
-    try:
-        if not stopped:
-            stopped = True
-            driver.exchange(core, case, "stop", cleanup_deadline)
+            if action == "await":
+                driver.after_await(deadline)
+            elif action == "close_desktop_owner":
+                driver.after_close_desktop_owner(deadline)
+        cleanup_deadline = min(deadline, time.monotonic() + CLEANUP_SECONDS)
         receipt = driver.exchange(core, case, "cleanup", cleanup_deadline)
-        if receipt.get("core") != core or receipt.get("case") != case:
+        if receipt.get("seq") != 5:
             raise Refused("RECEIPT_BINDING")
         check_receipt(receipt, expected)
     except (Refused, OSError):
@@ -608,68 +619,18 @@ def run_case(
             "status": "QUARANTINED",
             "reason": "MISSING_ACTUAL_WITNESS",
         }
-    return {
-        "core": core,
-        "case": case,
-        "status": "FAIL" if failure else "PASS",
-        "reason": "DRIVER_FAILURE" if failure else None,
-    }
+    return {"core": core, "case": case, "status": "PASS", "reason": None}
 
 
 def execute(
     authorization: dict[str, Any], core: str = "xray", case: str = "positive"
 ) -> list[dict[str, Any]]:
-    # Closed status проверяется ДО чтения любых guest/runtime путей.
     if authorization.get("execution") != "AUTHORIZED":
         raise Refused("EXECUTION_CLOSED")
-    if core not in CORES or case not in CASES:
-        raise Refused("CASE_NOT_ALLOWED")
-    fixture, grant = read_json(FIXTURE), read_json(GRANT)
-    authorize(authorization, fixture, grant)
-    for path, key in (
-        (Path(__file__), "runner_sha256"),
-        (FIXTURE, "fixture_sha256"),
-        (GRANT, "grant_sha256"),
-    ):
-        if sha_file(path) != authorization[key]:
-            raise Refused("SEALED_INPUT_CHANGED")
-    launch = read_json(LAUNCH, 4 * 1024 * 1024)
-    if sha_file(LAUNCH) != authorization["launch_sha256"]:
-        raise Refused("LAUNCH_CHANGED")
-    if (
-        launch.get("schema") != "N5_TRUSTED_LAUNCH_V1"
-        or validate_receipt(fixture, launch.get("after_setup")).status != "READY"
-    ):
-        raise Refused("UNTRUSTED_AFTER_SETUP")
-    controls = launch["controls"]
-    expected = {
-        "trusted_capture_sha256": authorization["launch_sha256"],
-        "executing_source_sha256": fixture["source_archive_sha256"],
-        "controls": controls,
-        "source_commit": fixture["source_commit"],
-        "manifest_sha256": launch["manifest_sha256"],
-        "core": core,
-        "artifacts": {
-            a["installed_path"]: {"sha256": a["sha256"], "size": a["size"]}
-            for a in fixture["artifacts"].values()
-        },
-    }
-    if case != "positive":
-        return [
-            {
-                "core": core,
-                "case": case,
-                "status": "UNAVAILABLE",
-                "reason": "SOURCE_ONLY",
-            }
-        ]
-    driver = ProcessDriver(controls["caller_uid"])
-    try:
-        return [
-            run_case(driver, core, case, expected, time.monotonic() + CAMPAIGN_SECONDS)
-        ]
-    finally:
-        driver.close()
+    # Переданный JSON не является root authority; только sealed coordinator.
+    from coordinator import run_owned_guest
+
+    return [run_owned_guest(core, case)]
 
 
 def main(argv: list[str] | None = None) -> int:
