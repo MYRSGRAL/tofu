@@ -842,13 +842,14 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
     .unwrap();
     let mut executor = TunExecutor::isolated_fixture(owner).unwrap();
     let (_keep, mut cancel) = crate::Cancellation::new();
-    let baseline = crate::read_topology(&mut cancel, super::DEADLINE)
-        .await
-        .unwrap();
+    let (baseline, baseline_capture) =
+        crate::network::read_topology_captured(&mut cancel, super::DEADLINE)
+            .await
+            .unwrap();
     let plan = crate::helper::SessionNetworkPlan::reserve_for_engine(
         owner,
         &baseline,
-        yonik_engine::Engine::Xray,
+        yonik_engine::Engine::SingBox,
     )
     .unwrap();
     let path = std::env::temp_dir().join(format!("yonik-backend-custody-{}", std::process::id()));
@@ -871,8 +872,26 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
         .retain_canonical_queue(&plan, &executor, &mut cancel)
         .await
         .unwrap();
+    let plan = super::native_owner::check_actual_boundaries_with_synthetic_inputs(
+        &mut backend,
+        index,
+        &mut cancel,
+        plan,
+        baseline,
+        baseline_capture,
+    )
+    .await;
     assert!(backend.active.is_none());
     assert!(backend.has_session());
+    #[cfg(feature = "test-support")]
+    let queue_fd = std::os::fd::AsRawFd::as_raw_fd(
+        &backend
+            .tun_custody
+            .as_ref()
+            .unwrap()
+            .bound
+            .queue_fd_for_test(),
+    );
     backend.worker_uncertain = true;
     let mut recovery = super::BackendRecovery {
         backend: &mut backend,
@@ -888,6 +907,8 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
     recovery.backend.worker_uncertain = false;
     recovery.backend.release_stopped_resources();
     assert!(recovery.backend.tun_custody.is_none());
+    #[cfg(feature = "test-support")]
+    assert!(!std::path::Path::new(&format!("/proc/self/fd/{queue_fd}")).exists());
     // В userns host-root /usr не отображён как uid0: production open правильно
     // отказывает. Cleanup проверяется реальным существующим isolated executor.
     plan.cleanup_after_worker(

@@ -295,6 +295,368 @@ impl super::Backend {
     }
 }
 
+// Вызывается только существующим isolated user/net fixture после real queue bind.
+#[cfg(test)]
+pub(super) async fn check_actual_boundaries_with_synthetic_inputs(
+    backend: &mut super::Backend,
+    index: u32,
+    cancel: &mut crate::Cancellation,
+    plan: crate::helper::SessionNetworkPlan,
+    baseline: crate::LinuxTopology,
+    baseline_capture: crate::network::TopologyCapture,
+) -> crate::helper::SessionNetworkPlan {
+    use crate::helper::memory::config_budget;
+    use crate::network::{lookup_route_captured, read_topology_captured};
+    let (current, _) = read_topology_captured(cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let link = current
+        .links
+        .iter()
+        .find(|link| link.index == index)
+        .unwrap()
+        .clone();
+    let uid = rustix::process::getuid().as_raw();
+    let owner = backend.journal.as_ref().unwrap().ownership();
+    let endpoint = current
+        .addresses
+        .iter()
+        .find(|address| address.index == index && address.address.is_ipv4())
+        .unwrap()
+        .address;
+    let query = crate::RouteQuery::new(endpoint, uid)
+        .with_mark(plan.socket_mark())
+        .with_transport(crate::TransportProtocol::Tcp, None, Some(443));
+    let (route, route_capture) = lookup_route_captured(query, cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let artifact = Arc::new(SessionArtifact {
+        bundle: None,
+        payload: crate::helper::systemd_worker::unit_owner_payload(),
+        plan,
+        baseline,
+        baseline_capture,
+        route,
+        route_capture,
+        context: backend.context(uid).unwrap(),
+        uid,
+        worker_uid: uid,
+        kill_switch: false,
+        attribution_required: false,
+        peer: Some(Arc::new(
+            crate::attribution::PeerProcess::capture(std::process::id(), uid).unwrap(),
+        )),
+        endpoint,
+        port: 443,
+        protocol: crate::TransportProtocol::Tcp,
+        memory: config_budget().reserve(1).unwrap(),
+        native_owner_stamp: Some(backend.native_owner.reserve().unwrap()),
+    });
+    // Реальный producer: отсутствие peer/canonical prerequisites не выдаёт record.
+    assert!(
+        backend
+            .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+            .await
+            .is_err()
+    );
+    assert!(!backend.native_owner.busy());
+    // Продвигаем actual producer дальше через штатный isolated nft API.
+    let policy = super::compile_protection(&artifact.baseline, false).unwrap();
+    backend.policy(owner, policy).await.unwrap();
+    assert!(
+        !backend.watch.current().fully_observed(),
+        "Fixture не должен молча становиться canonical context"
+    );
+    assert!(
+        backend
+            .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+            .await
+            .is_err()
+    );
+    assert!(!backend.native_owner.busy());
+    let queue = Arc::clone(&backend.tun_custody.as_ref().unwrap().bound);
+    let stamp = backend.watch.current().stamp;
+    let epoch = backend.epoch;
+    // Typed forged records — исключительно negative controls, не producer proof.
+    for stale_epoch in [true, false] {
+        let record = VerifiedNativeNetworkCommit {
+            artifact: Arc::clone(&artifact),
+            queue: Arc::clone(&queue),
+            stamp,
+            epoch: if stale_epoch { epoch + 1 } else { epoch },
+            owner: if stale_epoch {
+                owner
+            } else {
+                crate::managed_network::Ownership::new(
+                    uid,
+                    owner.session() + 1,
+                    1,
+                    owner.namespace().0,
+                    owner.namespace().1,
+                )
+                .unwrap()
+            },
+        };
+        assert!(backend.revalidate_native(&record).is_err());
+        assert!(backend.commit_native_owner(record).is_err());
+        assert!(!backend.native_owner.busy());
+        assert!(backend.native_owner.consumed.is_empty());
+    }
+    for case in 0..4 {
+        let authority = RunAuthority::new([2; 16], 7, epoch).unwrap();
+        let foreign = RunAuthority::new([2; 16], 7, epoch).unwrap();
+        let payload = if case == 1 {
+            crate::helper::systemd_worker::unit_owner_payload()
+        } else {
+            Arc::clone(&artifact.payload)
+        };
+        assert_eq!(payload.digest(), artifact.payload.digest());
+        let run = crate::helper::systemd_worker::unit_owner_result(
+            if case == 0 { &foreign } else { &authority },
+            payload,
+        );
+        if case >= 2 {
+            authority.revoke();
+        }
+        // Полный validator реально вызван; canonical identity остаётся CLOSED.
+        assert!(run.validate_owner(&authority, &artifact.payload).is_err());
+        backend.native_owner.lease = Some(NativeOwnerLease {
+            artifact: Arc::clone(&artifact),
+            queue: Arc::clone(&queue),
+            network_stamp: stamp,
+            network_epoch: epoch,
+            owner,
+            authority,
+            run: None,
+        });
+        if case == 3 {
+            backend.worker_uncertain = true;
+        }
+        assert!(backend.activate_native_owner(run).is_err());
+        assert!(backend.native_owner.active.is_none());
+        let pending = backend.native_owner.lease.as_ref().unwrap();
+        assert!(pending.authority.is_revoked());
+        assert!(Arc::ptr_eq(&pending.artifact, &artifact));
+        assert!(Arc::ptr_eq(&pending.queue, &queue));
+        assert!(backend.native_owner.busy());
+        backend.worker_uncertain = false;
+        backend.native_owner.release_confirmed();
+    }
+    // Source availability синтетическая; topology/route/nft/peer/queue остаются real.
+    let (publisher, watch) = crate::network::unit_source_publisher();
+    for source in [
+        crate::network::NetworkSource::Routes,
+        crate::network::NetworkSource::Resolver,
+        crate::network::NetworkSource::Manager,
+    ] {
+        publisher.unit_ready(source);
+    }
+    backend.watch = watch;
+    let mut artifact = Arc::try_unwrap(artifact).ok().unwrap();
+    artifact.context = backend.context(uid).unwrap();
+    let mut artifact = Arc::new(artifact);
+    assert!(backend.watch.current().fully_observed());
+
+    // Record потребляется целиком: commit не принимает независимый artifact B.
+    let artifact_b = Arc::new(SessionArtifact {
+        bundle: artifact.bundle,
+        payload: Arc::clone(&artifact.payload),
+        plan: crate::helper::SessionNetworkPlan::reserve_for_engine(
+            owner,
+            &artifact.baseline,
+            yonik_engine::Engine::Xray,
+        )
+        .unwrap(),
+        baseline: artifact.baseline.clone(),
+        baseline_capture: artifact.baseline_capture,
+        route: artifact.route.clone(),
+        route_capture: artifact.route_capture,
+        context: artifact.context,
+        uid,
+        worker_uid: uid,
+        kill_switch: false,
+        attribution_required: false,
+        peer: artifact.peer.clone(),
+        endpoint,
+        port: 443,
+        protocol: artifact.protocol,
+        memory: config_budget().reserve(1).unwrap(),
+        native_owner_stamp: Some(NativeArtifactStamp {
+            session: artifact.native_owner_stamp.as_ref().unwrap().session,
+            generation: artifact.native_owner_stamp.as_ref().unwrap().generation,
+        }),
+    });
+    assert!(!Arc::ptr_eq(&artifact, &artifact_b));
+    assert_eq!(artifact.context, artifact_b.context);
+    let record = backend
+        .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&record.artifact, &artifact));
+    backend.commit_native_owner(record).unwrap();
+    let pending = backend.native_owner.lease.as_ref().unwrap();
+    assert!(Arc::ptr_eq(&pending.artifact, &artifact));
+    assert!(!Arc::ptr_eq(&pending.artifact, &artifact_b));
+    assert_eq!(Arc::strong_count(&artifact_b), 1);
+    let run = crate::helper::systemd_worker::unit_raw_identity_result(
+        &pending.authority,
+        Arc::clone(&artifact.payload),
+    );
+    run.validate_owner(&pending.authority, &artifact.payload)
+        .unwrap();
+    backend.activate_native_owner(run).unwrap();
+    assert!(backend.native_owner.lease.is_none());
+    let active = backend.native_owner.active.as_ref().unwrap();
+    active
+        .run
+        .as_ref()
+        .unwrap()
+        .validate_owner(&active.authority, &artifact.payload)
+        .unwrap();
+    backend.invalidate().unwrap();
+    let active = backend.native_owner.active.as_ref().unwrap();
+    assert!(
+        active
+            .run
+            .as_ref()
+            .unwrap()
+            .validate_owner(&active.authority, &artifact.payload)
+            .is_err()
+    );
+    assert!(backend.native_owner.busy());
+    backend.native_owner.release_confirmed();
+    Arc::get_mut(&mut artifact).unwrap().context = backend.context(uid).unwrap();
+    // Повторный actual producer может проверить A, но consume не переиздаёт generation.
+    let record = backend
+        .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+        .await
+        .unwrap();
+    assert!(backend.commit_native_owner(record).is_err());
+    assert!(!backend.native_owner.busy());
+    drop(artifact_b);
+
+    // Реальный record после changed/lost не публикуется.
+    for lost in [false, true] {
+        let value = Arc::get_mut(&mut artifact).unwrap();
+        value.native_owner_stamp = Some(backend.native_owner.reserve().unwrap());
+        value.context = backend.context(uid).unwrap();
+        let record = backend
+            .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+            .await
+            .unwrap();
+        if lost {
+            publisher.unit_lost(crate::network::NetworkSource::Manager);
+        } else {
+            publisher.unit_changed(crate::network::NetworkSource::Routes);
+        }
+        assert!(backend.commit_native_owner(record).is_err());
+        assert!(!backend.native_owner.busy());
+        publisher.unit_ready(crate::network::NetworkSource::Manager);
+    }
+    // Wrong canonical Arc: обе owning queues настоящие, metadata одинаковы.
+    #[cfg(feature = "test-support")]
+    {
+        use std::os::fd::AsRawFd;
+        let value = Arc::get_mut(&mut artifact).unwrap();
+        value.native_owner_stamp = Some(backend.native_owner.reserve().unwrap());
+        value.context = backend.context(uid).unwrap();
+        let record = backend
+            .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+            .await
+            .unwrap();
+        let duplicate = Arc::new(queue.duplicate_same_kernel_queue_for_test().unwrap());
+        let fd = duplicate.queue_fd_for_test().as_raw_fd();
+        assert_eq!(
+            duplicate.attach_metadata().unwrap(),
+            queue.attach_metadata().unwrap()
+        );
+        assert!(!Arc::ptr_eq(&duplicate, &queue));
+        let original = backend.tun_custody.as_mut().unwrap().bound.clone();
+        backend.tun_custody.as_mut().unwrap().bound = duplicate;
+        assert!(backend.commit_native_owner(record).is_err());
+        assert!(!backend.native_owner.busy());
+        backend.tun_custody.as_mut().unwrap().bound = original;
+        assert!(!std::path::Path::new(&format!("/proc/self/fd/{fd}")).exists());
+        queue.attach_metadata().unwrap();
+    }
+    for case in 0..5 {
+        let value = Arc::get_mut(&mut artifact).unwrap();
+        value.native_owner_stamp = Some(backend.native_owner.reserve().unwrap());
+        value.context = backend.context(uid).unwrap();
+        let record = backend
+            .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+            .await
+            .unwrap();
+        backend.commit_native_owner(record).unwrap();
+        let pending = backend.native_owner.lease.as_ref().unwrap();
+        let stamp = artifact.native_owner_stamp.as_ref().unwrap();
+        let foreign = RunAuthority::new(stamp.session, stamp.generation, backend.epoch).unwrap();
+        let payload = if case == 1 {
+            crate::helper::systemd_worker::unit_owner_payload()
+        } else {
+            Arc::clone(&artifact.payload)
+        };
+        assert_eq!(payload.digest(), artifact.payload.digest());
+        let run = crate::helper::systemd_worker::unit_raw_identity_result(
+            if case == 0 {
+                &foreign
+            } else {
+                &pending.authority
+            },
+            payload,
+        );
+        // Canonical raw predicates проходят до намеренного нарушения link/lifetime.
+        run.ticket().unwrap();
+        if case == 2 {
+            pending.authority.revoke();
+        }
+        if case == 3 {
+            backend.worker_uncertain = true;
+        }
+        if case == 4 {
+            let mut future = Box::pin(async move {
+                let _run = run;
+                std::future::pending::<()>().await;
+            });
+            assert!(futures_util::poll!(future.as_mut()).is_pending());
+            drop(future);
+        } else {
+            assert!(backend.activate_native_owner(run).is_err());
+        }
+        let retained = backend.native_owner.lease.as_ref().unwrap();
+        assert!(retained.authority.is_revoked());
+        assert!(Arc::ptr_eq(&retained.artifact, &artifact));
+        assert!(Arc::ptr_eq(&retained.queue, &queue));
+        assert!(backend.native_owner.active.is_none());
+        assert!(backend.native_owner.busy());
+        backend.worker_uncertain = false;
+        backend.native_owner.release_confirmed();
+    }
+    let value = Arc::get_mut(&mut artifact).unwrap();
+    value.native_owner_stamp = Some(backend.native_owner.reserve().unwrap());
+    value.context = backend.context(uid).unwrap();
+    let record = backend
+        .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+        .await
+        .unwrap();
+    backend.commit_native_owner(record).unwrap();
+    backend.epoch = u64::MAX;
+    assert!(backend.invalidate().is_err());
+    assert!(
+        backend
+            .native_owner
+            .lease
+            .as_ref()
+            .unwrap()
+            .authority
+            .is_revoked()
+    );
+    assert!(backend.native_owner.busy());
+    assert!(backend.native_owner.reserve().is_err());
+    backend.native_owner.release_confirmed();
+    Arc::try_unwrap(artifact).ok().unwrap().plan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
