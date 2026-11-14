@@ -163,13 +163,22 @@ class ProcessGuard:
             fd = None
             try:
                 # Сначала pidfd, затем проверка текущей ownership: PID из /proc
-                # мог исчезнуть/переиспользоваться до открытия fd.
+                # мог исчезнуть/переиспользоваться до открытия fd. Для ancestry
+                # parent pidfd повторно проверяется ПОСЛЕ pin/read child: иначе
+                # exit/reuse числового parent PID мог бы приписать чужой child.
                 fd = os.pidfd_open(pid)
                 stat = proc_stat(pid)
                 if Path(f"/proc/{pid}").stat().st_uid != os.getuid():
                     return False
+                parent_fd = self.pidfd if parent == leader else self.tracked.get(parent)
                 owned = (
-                    stat["sid"] == leader if parent is None else stat["ppid"] == parent
+                    stat["sid"] == leader
+                    if parent is None
+                    else (
+                        stat["ppid"] == parent
+                        and parent_fd is not None
+                        and not exited(parent_fd)
+                    )
                 )
                 if not owned:
                     return False

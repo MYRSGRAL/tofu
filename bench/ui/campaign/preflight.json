@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "wrapper_base": "0c184394de3a336048c065f74075e3555fc70068",
-  "snapshot": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4",
-  "snapshot_sha256": "794b70eb938b822c306b5d50601f070b5fd439368abab8dafe95413842930d6f",
+  "snapshot": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5",
+  "snapshot_sha256": "41c155cac5aacaa27f950f6b8d7f6e1d0b1cc256c6d6ac4b1972f39011c2bc5c",
   "snapshot_manifest": {
     "schema_version": 1,
     "origin_worktree": "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea",
@@ -48,7 +48,7 @@
       "bench/ui/slint/build.rs": "e7633e1cf3784835363479d9a90080df78dfd2d5de0bc056b0de6eef146e67e3",
       "bench/ui/slint/src/main.rs": "68585224f514f4095dbc16487c77af1fb014590c916c76f9465488a59431ced6",
       "bench/ui/slint/ui/app.slint": "728f4c925ed1d282537a12cc23c4750300c1ba9bc8832afd7f71a5481642b2c1",
-      "bench/ui/campaign/runner.py": "64811e0bdc7b4dcbf4323ac0e0a583fec213be9d79e95036ca144ee97b623f9d",
+      "bench/ui/campaign/runner.py": "5ffca9abba9638acb46974f7ea4fca3840d17a02f8f7d8312e8af0a3ffb66e31",
       "bin/yonik-bench-qt": "17327809c3695ddad629d527e93ac511f0db212ccb0f992976b11a0d3eb19f34",
       "bin/yonik-bench-gtk": "7b67c230e520f27e42dc2c2bb0d0e60a202de89d23b6d8e9f6837c4c07182dc2",
       "bin/yonik-bench-slint": "1def798736dbf7f3252ecf170675271d896fd78f969287feeae884ca6e6c6934",
@@ -247,40 +247,40 @@
   },
   "future_launch": {
     "authorized": false,
-    "cwd": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4",
+    "cwd": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5",
     "argv": [
       "/usr/bin/setsid",
       "--wait",
       "/usr/bin/python3.14",
       "-I",
       "-B",
-      "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bench/ui/campaign/runner.py",
+      "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bench/ui/campaign/runner.py",
       "--mode",
       "campaign",
       "--manifest-sha256",
-      "794b70eb938b822c306b5d50601f070b5fd439368abab8dafe95413842930d6f",
+      "41c155cac5aacaa27f950f6b8d7f6e1d0b1cc256c6d6ac4b1972f39011c2bc5c",
       "--output",
-      "/home/myrs/projects/yonik/local/evidence/ui-campaign-191-full-v4"
+      "/home/myrs/projects/yonik/local/evidence/ui-campaign-191-full-v5"
     ],
-    "shell": "cd /home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4 && exec /usr/bin/setsid --wait /usr/bin/python3.14 -I -B /home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bench/ui/campaign/runner.py --mode campaign --manifest-sha256 794b70eb938b822c306b5d50601f070b5fd439368abab8dafe95413842930d6f --output /home/myrs/projects/yonik/local/evidence/ui-campaign-191-full-v4",
+    "shell": "cd /home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5 && exec /usr/bin/setsid --wait /usr/bin/python3.14 -I -B /home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bench/ui/campaign/runner.py --mode campaign --manifest-sha256 41c155cac5aacaa27f950f6b8d7f6e1d0b1cc256c6d6ac4b1972f39011c2bc5c --output /home/myrs/projects/yonik/local/evidence/ui-campaign-191-full-v5",
     "launcher_sha256": "9971d6c18af5b0f48caa9fea5a89f60981f3216091a7f6991aa178d5c918d5b6"
   },
   "short": {
     "exit_code": 0,
-    "terminal": "/home/myrs/projects/yonik/local/evidence/ui-campaign-191-short-v4/terminal.json",
-    "terminal_sha256": "aa7d1c433265cac596f2128c26b82116486b3ec67ffe6da861917cab60e1d57e",
-    "receipt_sha256": "41452d16a2906a32473e450f502ff3ade64553433ba42b9ee900af0d467c23f5",
+    "terminal": "/home/myrs/projects/yonik/local/evidence/ui-campaign-191-short-v5/terminal.json",
+    "terminal_sha256": "d2522ea3ff7e23f17627226e47fcc78d97e6c8c494bf62757459150d062795b2",
+    "receipt_sha256": "fb687aafd443a97b316566015b0e7d9768300e06fbd0c25769986f1a89713ccf",
     "ready": {
       "event": "snapshot_ready",
-      "receipt_sha256": "41452d16a2906a32473e450f502ff3ade64553433ba42b9ee900af0d467c23f5",
-      "manifest_sha256": "794b70eb938b822c306b5d50601f070b5fd439368abab8dafe95413842930d6f",
+      "receipt_sha256": "fb687aafd443a97b316566015b0e7d9768300e06fbd0c25769986f1a89713ccf",
+      "manifest_sha256": "41c155cac5aacaa27f950f6b8d7f6e1d0b1cc256c6d6ac4b1972f39011c2bc5c",
       "reference_audit": {
         "verified_no_references": true,
         "forbidden": "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea",
         "pids": [
-          1930112,
-          1930114,
-          1930117
+          1947407,
+          1947410,
+          1947412
         ],
         "surfaces": [
           "cwd",
@@ -291,13 +291,13 @@
           "sys.path",
           "python code source"
         ],
-        "monotonic_ns": 56374781774329
+        "monotonic_ns": 57059260237544
       },
       "process_identity": {
-        "pid": 1930112,
-        "start_ticks": 5655449,
-        "pgid": 1930112,
-        "sid": 1930112,
+        "pid": 1947407,
+        "start_ticks": 5723895,
+        "pgid": 1947407,
+        "sid": 1947407,
         "namespaces": {
           "pid": "pid:[4026531836]",
           "user": "user:[4026531837]",
@@ -317,12 +317,12 @@
     "cells": [
       {
         "cell": "rep1-gtk-1000",
-        "sha256": "aae387bd3dac0e1b47ed9b486f500fe8110a06229572e8e19c426aee941a15c4",
+        "sha256": "428c1125f22663dd091549883c13f51e032554ea27a3e14343d39e3802fad96a",
         "identity": {
-          "pid": 1930126,
-          "start_ticks": 5655644,
-          "pgid": 1930126,
-          "sid": 1930126,
+          "pid": 1947446,
+          "start_ticks": 5724084,
+          "pgid": 1947446,
+          "sid": 1947446,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -331,9 +331,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -353,12 +353,12 @@
       },
       {
         "cell": "rep1-gtk-10000",
-        "sha256": "0395d61b8ab3c88ea07cd814966ff3643316936a41a06621b5e0d846c37ac27c",
+        "sha256": "afb9c145360283e15b5f0b5599af70c2ea06746c1154f4cdcb9cfdb343951653",
         "identity": {
-          "pid": 1930207,
-          "start_ticks": 5656203,
-          "pgid": 1930207,
-          "sid": 1930207,
+          "pid": 1947847,
+          "start_ticks": 5724667,
+          "pgid": 1947847,
+          "sid": 1947847,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -367,9 +367,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -389,12 +389,12 @@
       },
       {
         "cell": "rep1-qt-1000",
-        "sha256": "9f8fc814ae1c10b3ccca2dc027530c71fd213ee132b47076540d90e0e22b64fa",
+        "sha256": "b681b97f3da8ffb55f7d0f9cb32b5afc5f5c0531de94ebee420cfd6db643006a",
         "identity": {
-          "pid": 1930117,
-          "start_ticks": 5655465,
-          "pgid": 1930117,
-          "sid": 1930117,
+          "pid": 1947412,
+          "start_ticks": 5723913,
+          "pgid": 1947412,
+          "sid": 1947412,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -403,9 +403,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -425,12 +425,12 @@
       },
       {
         "cell": "rep1-qt-10000",
-        "sha256": "005a8cb168afe1fdf016b505539f75a3ce6a54290e9eda1a42597e981eac1b46",
+        "sha256": "324fe3b12f3eb97c39e4034aa90c3e3ade3fd5a44059b9ee9095ec4537a08324",
         "identity": {
-          "pid": 1930199,
-          "start_ticks": 5656024,
-          "pgid": 1930199,
-          "sid": 1930199,
+          "pid": 1947707,
+          "start_ticks": 5724472,
+          "pgid": 1947707,
+          "sid": 1947707,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -439,9 +439,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -461,12 +461,12 @@
       },
       {
         "cell": "rep1-slint-1000",
-        "sha256": "5196c1f26f16a9d3159bcd79a4b4767c814cbac659384fe60968fb567fc6b4de",
+        "sha256": "67a4623c091492fdc508cbe8d5028f5cce3cb14f4ba746de50d575ab6e136c99",
         "identity": {
-          "pid": 1930154,
-          "start_ticks": 5655850,
-          "pgid": 1930154,
-          "sid": 1930154,
+          "pid": 1947575,
+          "start_ticks": 5724284,
+          "pgid": 1947575,
+          "sid": 1947575,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -475,9 +475,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -485,7 +485,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 11
+            "frame_delta": 9
           },
           {
             "name": "hidden",
@@ -497,12 +497,12 @@
       },
       {
         "cell": "rep1-slint-10000",
-        "sha256": "c3afcb483afb42cfd381001e86607895beaa02ca04cb2ecf07c7d217c49026b9",
+        "sha256": "975dc3e8cce8435c4adcf6d7f45a7531fbf4caced22b6225257580cb83eebe76",
         "identity": {
-          "pid": 1930234,
-          "start_ticks": 5656411,
-          "pgid": 1930234,
-          "sid": 1930234,
+          "pid": 1947986,
+          "start_ticks": 5724884,
+          "pgid": 1947986,
+          "sid": 1947986,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -511,9 +511,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -521,7 +521,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 7
+            "frame_delta": 9
           },
           {
             "name": "hidden",
@@ -533,12 +533,12 @@
       },
       {
         "cell": "rep2-gtk-1000",
-        "sha256": "cf08bb0550b71410fab4950c094fc9e83d92e3515dbce65c627626c575fca3ef",
+        "sha256": "2644864db79b993cb25a10cdd50f0ebff48a28c8d66797a5e7e214995d8eb436",
         "identity": {
-          "pid": 1930267,
-          "start_ticks": 5656782,
-          "pgid": 1930267,
-          "sid": 1930267,
+          "pid": 1948077,
+          "start_ticks": 5725239,
+          "pgid": 1948077,
+          "sid": 1948077,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -547,9 +547,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -569,12 +569,12 @@
       },
       {
         "cell": "rep2-gtk-10000",
-        "sha256": "c12a7b371409e0fbcd0d505ebb29a6bfd574849521ac5d70f17f9cc5f476ff85",
+        "sha256": "4d2d52f926c8f33799e6fc41965a01635fda2c2969ce083eeedd78a4a4d8cfa9",
         "identity": {
-          "pid": 1930328,
-          "start_ticks": 5657332,
-          "pgid": 1930328,
-          "sid": 1930328,
+          "pid": 1948212,
+          "start_ticks": 5725799,
+          "pgid": 1948212,
+          "sid": 1948212,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -583,9 +583,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -605,12 +605,12 @@
       },
       {
         "cell": "rep2-qt-1000",
-        "sha256": "adce73da14b63999f9bcc1ff7bc24b5625f283c8128c49f4a9eaecdeb561d0bd",
+        "sha256": "ad1557a85ccbc93241511e5b48e8cd2786b327061adb77550faa3dc8595929bb",
         "identity": {
-          "pid": 1930259,
-          "start_ticks": 5656600,
-          "pgid": 1930259,
-          "sid": 1930259,
+          "pid": 1948030,
+          "start_ticks": 5725066,
+          "pgid": 1948030,
+          "sid": 1948030,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -619,9 +619,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -641,12 +641,12 @@
       },
       {
         "cell": "rep2-qt-10000",
-        "sha256": "c91748976c151f83106ed78dd14a9ef4134f6c350040f53f47b3a97f35069125",
+        "sha256": "4f6da6624fa6da637d32c5be12e8c9ec700abc3bc5feb663b0ec32bb12e5ed2e",
         "identity": {
-          "pid": 1930320,
-          "start_ticks": 5657149,
-          "pgid": 1930320,
-          "sid": 1930320,
+          "pid": 1948156,
+          "start_ticks": 5725614,
+          "pgid": 1948156,
+          "sid": 1948156,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -655,9 +655,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -677,12 +677,12 @@
       },
       {
         "cell": "rep2-slint-1000",
-        "sha256": "a016f512f92d1dd37180b718f44c070f06a7fa1c1a4369ce0b35fe4897528b98",
+        "sha256": "179de348f2af738efaca0426ef4e3d9dcb3bf2d1879cfd8efd4d5ea86e91cc38",
         "identity": {
-          "pid": 1930295,
-          "start_ticks": 5656969,
-          "pgid": 1930295,
-          "sid": 1930295,
+          "pid": 1948120,
+          "start_ticks": 5725441,
+          "pgid": 1948120,
+          "sid": 1948120,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -691,9 +691,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -701,7 +701,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 8
+            "frame_delta": 10
           },
           {
             "name": "hidden",
@@ -713,12 +713,12 @@
       },
       {
         "cell": "rep2-slint-10000",
-        "sha256": "573cc9ce3277d0065c03627b7f75da3ffef5ab1b28327dae8cbbc75bf45b6b96",
+        "sha256": "7ce49d7dcf42eb3866cb80676bb35c27f88caa819ddd8c32b862f415e669a9df",
         "identity": {
-          "pid": 1930355,
-          "start_ticks": 5657531,
-          "pgid": 1930355,
-          "sid": 1930355,
+          "pid": 1948376,
+          "start_ticks": 5726013,
+          "pgid": 1948376,
+          "sid": 1948376,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -727,9 +727,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -749,12 +749,12 @@
       },
       {
         "cell": "rep3-gtk-1000",
-        "sha256": "5a5ce5c4da9239b4ef89bd64ed31e3def269f474f25f5470c564d10ffe36c24b",
+        "sha256": "51ad511d7994caaae39829de57377507e3d6aaabbd6ac73d30dea40323a44187",
         "identity": {
-          "pid": 1930404,
-          "start_ticks": 5657897,
-          "pgid": 1930404,
-          "sid": 1930404,
+          "pid": 1948521,
+          "start_ticks": 5726371,
+          "pgid": 1948521,
+          "sid": 1948521,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -763,9 +763,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -773,7 +773,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 10
+            "frame_delta": 11
           },
           {
             "name": "hidden",
@@ -785,12 +785,12 @@
       },
       {
         "cell": "rep3-gtk-10000",
-        "sha256": "ecba509a543a02a278bda0910a7a2a28c9066def5c05e25ceda191e9504eec2e",
+        "sha256": "7a53fca0f43e5bb783d3815efc5c037830c3a74d4221ce07b5b7f12969dd6a9d",
         "identity": {
-          "pid": 1930542,
-          "start_ticks": 5658472,
-          "pgid": 1930542,
-          "sid": 1930542,
+          "pid": 1948661,
+          "start_ticks": 5726946,
+          "pgid": 1948661,
+          "sid": 1948661,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -799,9 +799,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-gtk",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-gtk",
           "exe_device": 52,
-          "exe_inode": 27588782
+          "exe_inode": 27591592
         },
         "valid": true,
         "phases": [
@@ -821,12 +821,12 @@
       },
       {
         "cell": "rep3-qt-1000",
-        "sha256": "cd2efbe370a0fc55662f208bb22f6a757b679bc823641a6da1442695a76b2c60",
+        "sha256": "635fc03ccc017c8544740e3ce84b6db15b507bed31c843f4fb3b55ac084c9d24",
         "identity": {
-          "pid": 1930382,
-          "start_ticks": 5657715,
-          "pgid": 1930382,
-          "sid": 1930382,
+          "pid": 1948475,
+          "start_ticks": 5726199,
+          "pgid": 1948475,
+          "sid": 1948475,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -835,9 +835,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -857,12 +857,12 @@
       },
       {
         "cell": "rep3-qt-10000",
-        "sha256": "11acf08d7393766f270f23693d7387664adfbf29a36df3433c2c5c3bebe3101f",
+        "sha256": "eaf92eccaacf4904b497d44217feab16895bc11872d6bea225fe5cb129bde294",
         "identity": {
-          "pid": 1930457,
-          "start_ticks": 5658278,
-          "pgid": 1930457,
-          "sid": 1930457,
+          "pid": 1948638,
+          "start_ticks": 5726760,
+          "pgid": 1948638,
+          "sid": 1948638,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -871,9 +871,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-qt",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-qt",
           "exe_device": 52,
-          "exe_inode": 27588781
+          "exe_inode": 27591591
         },
         "valid": true,
         "phases": [
@@ -893,12 +893,12 @@
       },
       {
         "cell": "rep3-slint-1000",
-        "sha256": "f3e9643ab875df6cd6a6eb1deb01983beccb97dd8b8d00e93fcb7c2353ac2815",
+        "sha256": "586b830fd61ff5698e97740bc384eb52366b754f589824b5034e44e3899a2ec6",
         "identity": {
-          "pid": 1930431,
-          "start_ticks": 5658089,
-          "pgid": 1930431,
-          "sid": 1930431,
+          "pid": 1948572,
+          "start_ticks": 5726577,
+          "pgid": 1948572,
+          "sid": 1948572,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -907,9 +907,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -917,7 +917,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 7
+            "frame_delta": 9
           },
           {
             "name": "hidden",
@@ -929,12 +929,12 @@
       },
       {
         "cell": "rep3-slint-10000",
-        "sha256": "20279a526a08c3edd16c7097c55f096dabaeb29bc5506263223718c6778c1677",
+        "sha256": "8597f1d66b00e7b74b13458e93621e7539a87ca41f6aed7ac71f255c6924a665",
         "identity": {
-          "pid": 1930569,
-          "start_ticks": 5658671,
-          "pgid": 1930569,
-          "sid": 1930569,
+          "pid": 1948706,
+          "start_ticks": 5727161,
+          "pgid": 1948706,
+          "sid": 1948706,
           "namespaces": {
             "pid": "pid:[4026531836]",
             "user": "user:[4026531837]",
@@ -943,9 +943,9 @@
             "ipc": "ipc:[4026531839]",
             "uts": "uts:[4026531838]"
           },
-          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v4/bin/yonik-bench-slint",
+          "exe": "/home/myrs/projects/yonik/local/artifacts/ui-campaign-191-20261114-v5/bin/yonik-bench-slint",
           "exe_device": 52,
-          "exe_inode": 27588783
+          "exe_inode": 27591593
         },
         "valid": true,
         "phases": [
@@ -953,7 +953,7 @@
             "name": "visible",
             "requested_seconds": 0.15,
             "samples": 4,
-            "frame_delta": 5
+            "frame_delta": 8
           },
           {
             "name": "hidden",
