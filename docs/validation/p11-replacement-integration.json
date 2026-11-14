@@ -45,5 +45,12 @@
     "partial": 16,
     "deferred": 2,
     "denominator": 26
+  },
+  "port_feature": {
+    "head": "b3792c9abc13e100f2fbdd9435e2555362dd444c",
+    "merge": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
+    "review": "R1 188f726b CLEAN",
+    "prior_CI": "8 SUCCESS; two Python failures solely stale P11 source binding",
+    "fresh_merged_head_CI_required": true
   }
 }

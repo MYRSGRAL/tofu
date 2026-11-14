@@ -39,3 +39,14 @@ FullA4=false: live PID1 hooks и финальный source/package freeze ост
 Предлагаемый PLAN после принятия: 8 Ready / 16 Partial / 2 Android deferred, всего26.
 Исторические counts7/17/2 и более ранние срезы не переписаны. До CI/merge это
 условие принятия ветки, а не заявление о текущем accepted main.
+
+## Объединение с портами/протоколами
+
+Feature #210 `b3792c9` получила R1 `188f726b` CLEAN и восемь зелёных CI jobs;
+два Python jobs упали только на устаревшем P11 freshness binding. Вместо снятия
+gate или отдельного обхода включён exact merge `f90f5bb1` без remerge delta.
+Backend добавляет format5 save/native Unsupported и typed transport serialization;
+Main — transport fields и четыре закрытых RU/EN validation strings. P11
+replacement/error publication и существующий render/export сохраняются.
+Effective source bindings обновлены на combined source, старые updates сохранены.
+Это не новое исполнение historical binary. Финальный narrow recheck нужен до merge.

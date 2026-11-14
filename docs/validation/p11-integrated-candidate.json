@@ -489,18 +489,19 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
-      "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
-      "blob": "d69061a02d0f02c6b8ed9059c7635dceb077626a",
-      "scope": "P11: publish typed replacement failure in both actual callers; initialize has no allocated generation. Prior Stop window/A08/FR16 source changes preserved. Historical execution not rebound.",
-      "review": "R2 932b7107 CLEAN cc66e4a→eebb316 and exact unions7f7ee5f/964a873. Prior Stop R1 ba52d5f3, A08 R2 2438daab and LocalSocks R2 758868c1/R1 55bf18b6 CLEAN retained.",
-      "review_pending": false,
+      "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
+      "blob": "c165b3f411f60ca802d56e20bb34abb6ac89efec",
+      "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
+      "review": "R1 188f726b CLEAN port feature; R2 932b7107 CLEAN typed replacement and prior union. Root exact remerge-diff empty; final narrow P11 connections recheck pending.",
+      "review_pending": true,
       "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
     },
     "crates/yonik-desktop/qml/Main.qml": {
-      "source": "a73e12ed21c5acd7828426cf22d17d3d85565681",
-      "blob": "07173aad0da38aec95446226a0724fad9785dd8c",
-      "scope": "A08: только routing catalog correlation/display guard, safe request counter и labels/objectNames; P11 diagnostic/source rendering unchanged. Original producer evidence remains historical.",
-      "review": "R2 2438daab CLEAN A08 correlation/display scope; historical P11 producer rendering and execution binding preserved."
+      "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
+      "blob": "8f46cc93fc5ec1056fba32f67776d5ac01710e76",
+      "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
+      "review": "R1 188f726b CLEAN port feature; R2 932b7107 CLEAN typed replacement and prior union. Root exact remerge-diff empty; final narrow P11 connections recheck pending.",
+      "review_pending": true
     },
     "crates/yonik-desktop/src/desktop_schedule.rs": {
       "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
@@ -540,6 +541,22 @@
         "blob": "07173aad0da38aec95446226a0724fad9785dd8c",
         "scope": "A08: только routing catalog correlation/display guard, safe request counter и labels/objectNames; P11 diagnostic/source rendering unchanged. Original producer evidence remains historical.",
         "review": "Scoped self-review 03bdf96..a73e12e Main.qml diff; actual original-qrc RED/GREEN and query/mode/page/overflow checks passed, translation check passed. Root independent review pending."
+      }
+    },
+    {
+      "crates/yonik-desktop/src/backend.rs": {
+        "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
+        "blob": "d69061a02d0f02c6b8ed9059c7635dceb077626a",
+        "scope": "P11: publish typed replacement failure in both actual callers; initialize has no allocated generation. Prior Stop window/A08/FR16 source changes preserved. Historical execution not rebound.",
+        "review": "R2 932b7107 CLEAN cc66e4a→eebb316 and exact unions7f7ee5f/964a873. Prior Stop R1 ba52d5f3, A08 R2 2438daab and LocalSocks R2 758868c1/R1 55bf18b6 CLEAN retained.",
+        "review_pending": false,
+        "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
+      },
+      "crates/yonik-desktop/qml/Main.qml": {
+        "source": "a73e12ed21c5acd7828426cf22d17d3d85565681",
+        "blob": "07173aad0da38aec95446226a0724fad9785dd8c",
+        "scope": "A08: только routing catalog correlation/display guard, safe request counter и labels/objectNames; P11 diagnostic/source rendering unchanged. Original producer evidence remains historical.",
+        "review": "R2 2438daab CLEAN A08 correlation/display scope; historical P11 producer rendering and execution binding preserved."
       }
     }
   ],
