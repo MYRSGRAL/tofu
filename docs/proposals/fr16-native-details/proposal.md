@@ -50,7 +50,7 @@ version validation и test stdout не подменяют такой канал.
 ```rust
 // Типы не реализуют Debug/Serialize; поля закрыты.
 fn bind_native_details(root: &EventLog, scope: AppliedScope,
-    identity: VerifiedPinnedIdentity, phase: NativePhase) -> NativeDetailsSink;
+    engine: Engine, phase: NativePhase) -> NativeDetailsSink;
 fn classify_line(sink: &NativeDetailsSink, stream: NativeStream,
     bounded_line: &[u8]) -> Result<SafeNativeDetail, WithheldReason>;
 fn try_record_native(sink: &NativeDetailsSink, detail: SafeNativeDetail) -> RecordOutcome;
@@ -64,12 +64,12 @@ core bytes не могут задавать root, version, ID или конте�
 либо отказ до появления допустимого контекста. Для runtime phase version-only
 правило не разрешено: такая строка сама по себе не доказывает runtime событие.
 
-`VerifiedPinnedIdentity`: закрытый engine enum + source-lock revision + проверенная
-идентичность собранного artifact с patch set; строка stdout не удостоверяет binary.
-Для sing-box: 1.14.4 / c005f35300ce76427dc285481ec5695f5b179cd2;
-Xray: 26.10.31 / a4a3dff5b20c2faae567b742c172c7b95e75c083.
-Artifact/patch set также должны соответствовать retained build provenance;
-source commit без этой проверки недостаточен. Неизвестные identity/version → отказ.
+Исправление после Root review: **новый VerifiedPinnedIdentity authority gate не нужен**.
+В сигнатуре используется существующий выбранный
+`engine: Engine`; это ссылка на уже принятый pinned-core TCB и существующий binary
+selection/provenance binding, не создание нового источника authority. stdout никогда
+не удостоверяет identity. Version mismatch withholding относится к известной версии
+выбранного core, а не к самоавторизации входной строкой.
 
 `SafeNativeDetail`: schema=1, engine(enum), template_id(enum), phase(enum),
 stream(stdout/stderr enum), session/generation из sink. Никаких свободных String,
@@ -148,3 +148,10 @@ Drop tests проверяют отсутствие ожидания; producer/St
 разрешённый Root grammar/scope, положительная публикация и безопасные отказы
 через настоящий producer→UI/export. Одних fixtures, version banner или wrapper
 exit недостаточно. Rotation/host/P07 повторно не проверяются этим предложением.
+
+## Уточнение после Root review
+
+Version-only недостаточно. Следующий bounded результат — [runtime grammar](runtime-grammar.md)
+и [source excerpts](runtime-source.json). Он заменяет version-only направление и
+предложение нового identity gate выше; остальные privacy/bounds остаются. Ни capture,
+ни disk/UI реализация не разрешены этим документом.

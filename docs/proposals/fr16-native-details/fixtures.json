@@ -108,6 +108,104 @@
       "id": "page",
       "construction": "257 matching records",
       "expected": "at_most_256_partial_cursor_and_loss_counters"
+    },
+    {
+      "id": "sing-network-missing-v1-positive-retained",
+      "template": "sing-network-missing-v1",
+      "case": "positive-retained",
+      "expected": "accept_closed_template",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-secret-prefix",
+      "template": "sing-network-missing-v1",
+      "case": "secret-prefix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-secret-suffix",
+      "template": "sing-network-missing-v1",
+      "case": "secret-suffix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-control-in-body",
+      "template": "sing-network-missing-v1",
+      "case": "control-in-body",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-unknown-version",
+      "template": "sing-network-missing-v1",
+      "case": "unknown-version",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-oversize",
+      "template": "sing-network-missing-v1",
+      "case": "oversize",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-loss",
+      "template": "sing-network-missing-v1",
+      "case": "loss",
+      "expected": "count_drop_no_wait",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-positive-retained",
+      "template": "xray-local-dns-created-v1",
+      "case": "positive-retained",
+      "expected": "accept_closed_template",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-secret-prefix",
+      "template": "xray-local-dns-created-v1",
+      "case": "secret-prefix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-secret-suffix",
+      "template": "xray-local-dns-created-v1",
+      "case": "secret-suffix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-control-in-body",
+      "template": "xray-local-dns-created-v1",
+      "case": "control-in-body",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-unknown-version",
+      "template": "xray-local-dns-created-v1",
+      "case": "unknown-version",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-oversize",
+      "template": "xray-local-dns-created-v1",
+      "case": "oversize",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-loss",
+      "template": "xray-local-dns-created-v1",
+      "case": "loss",
+      "expected": "count_drop_no_wait",
+      "scope": "conditional grammar; current generated config emits no matching frame"
     }
   ],
   "sources": [
@@ -171,5 +269,52 @@
       "path": "docs/validation/full-pinned-builders-158/xray-logs/16-build-native-adapter-xray.stdout.log",
       "sha256": "827b679a8ba7e1c4cc0e7eeeced73768670505a723236e65f27b2242d8d1c47c"
     }
-  ]
+  ],
+  "runtime": {
+    "status": "source_safe_conditional_grammar_NOT_current_runtime_PASS",
+    "templates": [
+      {
+        "id": "sing-network-missing-v1",
+        "engine": "sing-box",
+        "version": "1.14.4",
+        "body": "missing default interface",
+        "prefix": "ERROR[ssss] network: ",
+        "source": "route/network.go:512",
+        "current_generated_config_emits": false,
+        "reason": "log.disabled=true; also requires interface monitor with absent default interface",
+        "grammar": "(?:ERROR|\\x1b\\[31mERROR\\x1b\\[0m)\\[[0-9]{4,10}\\] network: missing default interface\\n"
+      },
+      {
+        "id": "xray-local-dns-created-v1",
+        "engine": "xray",
+        "version": "26.10.31",
+        "body": "DNS: created localhost client",
+        "prefix": "YYYY/MM/DD hh:mm:ss.uuuuuu [Info] app/dns: ",
+        "source": "app/dns/nameserver_local.go:44",
+        "current_generated_config_emits": false,
+        "reason": "loglevel=none; requires local DNS construction while Info output enabled",
+        "grammar": "[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6} \\[Info\\] app/dns: DNS: created localhost client\\n"
+      }
+    ],
+    "retained": [
+      {
+        "engine": "sing-box",
+        "path": "/home/myrs/projects/yonik/local/evidence/pipeline-e5a27/sing.log",
+        "sha256": "6ea5efd779b176eff91b5fb8f057426b26c94c43b979f9c2db63cd22e1e6406c",
+        "line": 6,
+        "exact_frame": "\u001b[31mERROR\u001b[0m[0000] network: missing default interface\n",
+        "scope": "historical native test log; not current integrated producer/config witness; build identity not newly established"
+      },
+      {
+        "engine": "xray",
+        "path": "/home/myrs/projects/yonik/local/evidence/tun-e5a27/xray-final-tests.log",
+        "sha256": "08247cd72ae2957a3110448a6f26fe05a8645b09a1879d1027ccaa44eb8b15d6",
+        "line": 237,
+        "exact_frame": "2026/11/12 01:12:49.716889 [Info] app/dns: DNS: created localhost client\n",
+        "scope": "historical native test log; not current integrated producer/config witness; build identity not newly established"
+      }
+    ],
+    "source_excerpts": "runtime-source.json",
+    "new_identity_gate": false
+  }
 }

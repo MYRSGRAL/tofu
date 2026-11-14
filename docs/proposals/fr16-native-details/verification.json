@@ -1,0 +1,28 @@
+{
+  "status": "PASS_source_and_fixture_checks_only",
+  "parent_head": "8e8baf537406e7bc5efaf5ccaaf8867de20e2a9b",
+  "checks": [
+    "JSON parsing",
+    "retained archive SHA256 equals source locks",
+    "archive member SHA256 and numbered excerpts exact",
+    "retained historical log SHA256 and selected frame exact",
+    "two conditional full-frame grammar positives",
+    "secret prefix/suffix and body ESC negative for both templates",
+    "relative Markdown links exist",
+    "30 unique fixture IDs",
+    "git diff --check"
+  ],
+  "limits": [
+    "No producer/parser implementation tests",
+    "No engine execution/build/download",
+    "No current-config native emit proof",
+    "No integrated EventLog/UI/export proof",
+    "No FR16 PASS"
+  ],
+  "files": {
+    "fixtures.json": "bc0c821c35b01e0e3d67d0407d32cddff436d299ceea54255f5753cb4e8983df",
+    "proposal.md": "386ddf606745d0d9fa4b7f5655d2228eaecd48b7d66aa5d631dfc84fde6f0d40",
+    "runtime-source.json": "716f5619eadfa4639ea251acb697d2750309916c98b568e24579ffb4840eadaf",
+    "runtime-grammar.md": "9093375e35f1b8034f4d40835aeb2a5d70d800a42295994a045c5276351c575a"
+  }
+}
