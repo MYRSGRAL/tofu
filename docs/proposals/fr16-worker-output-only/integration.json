@@ -1,0 +1,362 @@
+{
+  "kind": "mechanical-accepted-main-union",
+  "scope": "Только ordinary merge accepted main + данный metadata artifact; carrier не изменён.",
+  "frozen_carrier": "e7f4aab6369d6ea618e5b6c74dcb1dc9ee3e5d30",
+  "accepted_main": "b25ed1184d917a4ba9465b000b4bec080cfcaa3e",
+  "merge_base": "e1970210190b7e89ab9ffd06a0a33203dec82d85",
+  "merge_commit": "8e963441a631724ed985fb9adc78c648b62623f1",
+  "parents": [
+    "e7f4aab6369d6ea618e5b6c74dcb1dc9ee3e5d30",
+    "b25ed1184d917a4ba9465b000b4bec080cfcaa3e"
+  ],
+  "current_tree": "dc8c1003bd40970a6ff3c1f7e751a10f91fb7fee",
+  "tree_scope": "Полное дерево merge commit до добавления integration.json: self-hash не включён. crates tree одинаков в final metadata commit.",
+  "current_crates_tree": "46afcbc91946550b41b7501b0551ef64c3a90952",
+  "union_exact": true,
+  "overlap_paths": [],
+  "carrier_paths": {
+    "crates/yonik-linux/src/helper/service.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3282d2592f7959bcf9c290de2daebd4b2872fe4b"
+    },
+    "crates/yonik-linux/src/lib.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "be212bf96c13bc2eba2276de0c4edce90740f89c"
+    },
+    "crates/yonik-linux/src/output_transport.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4e4c248caf1722494cf089f876a2dae03c958740"
+    },
+    "crates/yonik-linux/src/output_transport/carrier_tests.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "0a0ce5d62304fdcc5b77dabaf846dfedb30ec888"
+    },
+    "crates/yonik-linux/src/system_client.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5980a5519e19aa18f2d23b222935959c784ec0fb"
+    },
+    "crates/yonik-linux/src/system_client/output.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "be388bbd36dae3c1ee7574ad24e97530a40770ee"
+    },
+    "crates/yonik-linux/src/system_client/output/tests.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "bb83748a1f128bae99e4e52b696b58978c4ec41d"
+    },
+    "crates/yonik-linux/src/worker/output_transport.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "168d823eda5dd32074441c5bd6964610a3f4e0f6"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/.gitignore": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e8e0ffc005477bc70e2446251da106d39d1fef2e"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/README.md": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "c635740d2accb796d44cb561944d488ad7b60bc1"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/artifacts.sha256": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "45a47ebd21aa263a35f4bf9b73b12381db23f791"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/build.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "13b0ef7c58593a7740a71abb362b1c3d723cee9e"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/build.sh": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d853eea8eb07d9092331101abfa617716e0f013d"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/carrier-tests.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "bcf02174340a0143575de937412e3f5ef509a362"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/clean.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "87fd91230b4be5e819309e71862a7692053b4d3c"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/clippy-default.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3d00ceb4f88ae53f6a6ba8574c7b516ee0babc19"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/clippy-feature.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "667aec2306874d8e3d8be9bcd194dd3c8f0097c0"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/codec-tests.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1ad0ea0504ec0e8daf767036172137f6d3a79ad5"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/fmt.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/golden-tests.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "1fbbda1a44e08461d563cb827bc5f854b9c7c9f8"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/initial-compile-error.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4653054c644d616ca9e0fc039d060d6f762c5256"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/prepared-tests.log": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "3ddeed6095b2012ec9254a37392f3ed9b501c60f"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/source.sha256": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "76169d916e2ba35003d38bbc03a89821fd0156ba"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier-evidence/verification.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "27f8c355720c82b35b76b6eb3f35fc6e2369587c"
+    },
+    "docs/proposals/fr16-worker-output-only/carrier.md": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "78beae65bb369006aaec26601b95c4430a108f12"
+    },
+    "docs/proposals/fr16-worker-output-only/check-plan.md": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "620135dcd2a14cbcd17e13e453578b97b3dcd673"
+    },
+    "docs/proposals/fr16-worker-output-only/closed-boundary.patch": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9a6fe3d23d489eaa46f7893432d1f98c229576a4"
+    },
+    "docs/proposals/fr16-worker-output-only/manifest.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "817d177dd3063118495b3545e0ffb1bacac67463"
+    },
+    "docs/proposals/fr16-worker-output-only/proposal.md": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "7ac8159385610aca5e079dd06bb696335a0cee2f"
+    }
+  },
+  "upstream_path_count": 74,
+  "default_and_authority_blobs": {
+    "crates/yonik-linux/src/worker.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d4c6bb24ab4f8c2d2c4b5910c7e99cc969660da3"
+    },
+    "crates/yonik-linux/src/helper/systemd_worker.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b4bdc2fd8b8d2b0755242002fdba10c34ff8b154"
+    },
+    "crates/yonik-linux/src/helper/session_host.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2395e21858fc57c82d1e5fce8b3f56712d58d40f"
+    },
+    "crates/yonik-linux/src/helper/protection_host.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "20e0cbb8425ee388d5163fe4b80c786b123ae4f5"
+    },
+    "crates/yonik-linux/src/helper/run_authorization.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "c1d5a9f8d31390d13424b8f9d9f1e144c5af959d"
+    },
+    "crates/yonik-linux/src/worker/role_handoff.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "cc44fd5bcff03b586cc9fb75a1a04bb66be43032"
+    },
+    "crates/yonik-desktop/src/backend.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8f9d41384277888f98143e37bcc64a9899f9fc39"
+    },
+    "crates/yonik-linux/src/event_log.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "c50c9ec5bad2af2f0d5a5610131db0c5ada96a04"
+    },
+    "crates/yonik-linux/src/event_log/native_details.rs": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4b43c34e46d0d92737992a295c82f464839797d4"
+    },
+    "Cargo.toml": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "53c03efd57335299090b84521171f616683f0530"
+    },
+    "Cargo.lock": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "76d6c2f54917be94d6f93099b12c493f11bd7139"
+    },
+    "crates/yonik-linux/Cargo.toml": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f45e7b9485fca41219d4ddd835f9bbde18225f38"
+    }
+  },
+  "accepted_proof_bindings": {
+    "crates/yonik-linux/src/worker/output_transport/fixtures/abi260.sha256": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "514ed9cb442ad1cb573d69accb72372065e5bc93"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/baseline.rs.fixture": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "918f27f8fb72c3aba9645b88325081caa3305b08"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_lifetime.rs.fixture": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "386549d31700819501051a64c8a84b3ecfe5b204"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "bb01a6de86c8467ee324d28e9dd1f303209c1fda"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_resources.rs.fixture": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2fe8087dc604f253568135b23998d1006c66efba"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_roles.rs.fixture": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9da0fabb3d58482ea9b30a583ab906a5b8282e29"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/v1.bin": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "d554b68270778e698757e422c2a973cb9a6485d0"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/v2.bin": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "b007130c78bce126ce510424b1e6783935edb161"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/v3.bin": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "8ab96948ca7556c1a073747b4e351c79487b234c"
+    },
+    "crates/yonik-linux/src/worker/output_transport/fixtures/ynkrole1.bin": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "dc7f44f55af13a54d71848a5deccaa633f3b6d5d"
+    },
+    "docs/proposals/fr16-native-details/runtime-source.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "4738b7258f68721095134fcbb5b7d0e18fad3740"
+    },
+    "docs/proposals/fr16-native-details/verification.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "775b6c9708302c9a15a7546b1ebfc8084aba000a"
+    },
+    "docs/validation/p04a-mixed-red/binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "5451d20e2a553d85e4bb8d07cd30a4270d10c269"
+    },
+    "docs/validation/p04a-unadmitted/binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "51fe1f50b8fa95de1b76d12256fdfb50fe39f5ce"
+    },
+    "docs/validation/p05-p10-accepted-witness/actual-binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "77ac75ee06e1734b226cb567b294aa079da53621"
+    },
+    "docs/validation/p05-p10-accepted-witness/binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "9c01e601be8a5fc29f1b17642b1d909bef98e4ad"
+    },
+    "docs/validation/p05-p10-accepted-witness/criterion-join.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "55e3cec43ea0978e2dfa20137344f51425436ffa"
+    },
+    "docs/validation/p05-p10-accepted-witness/legacy-stop-binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "2b543f4701e13f7f712382333c7a1ad19e761c08"
+    },
+    "docs/validation/p07-concurrent-binding.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "de95be7bfedf0ac9cdfa40e5827bff47f8f4a537"
+    },
+    "docs/validation/p11-integrated-candidate.json": {
+      "mode": "100644",
+      "type": "blob",
+      "blob": "f79c8f01c76cbd7dfdd7787a453513402b04e63a"
+    }
+  },
+  "dependencies": {
+    "204": {
+      "head": "e1970210190b7e89ab9ffd06a0a33203dec82d85",
+      "accepted_merge": "3d8a4d316738dfce8f8fb3f38aa18a4f9b322be8"
+    },
+    "196": {
+      "head": "1c1786ce4d3df6654d21c235b6f65dd7ac2b6132",
+      "accepted_merge": "0896cf72f7622090a9bfd7918241eef1bf5e355f"
+    }
+  },
+  "checks": {
+    "exact_union_and_blobs": "PASS",
+    "cfg_default_feature_static_boundaries": "PASS",
+    "cargo_1_85_1_fmt_all_check": "PASS",
+    "git_diff_check": "PASS",
+    "new_rust_build": false,
+    "new_clippy": false,
+    "new_test_execution": false,
+    "prior_carrier_checks": {
+      "head": "e7f4aab6369d6ea618e5b6c74dcb1dc9ee3e5d30",
+      "focused_tests": 14,
+      "default_clippy": "PASS",
+      "test_support_clippy": "PASS",
+      "fmt": "PASS"
+    },
+    "limitation": "Предыдущие compile/test результаты относятся к frozen carrier source closure. Для нового union compilation не заявляется; review/CI выполняет root."
+  },
+  "new_runtime": false,
+  "new_production_wire": false,
+  "new_callers": false,
+  "new_authority": false,
+  "Runtime16": false,
+  "production_registration": false
+}

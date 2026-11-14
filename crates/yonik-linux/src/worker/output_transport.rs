@@ -1,77 +1,11 @@
-//! Только тестовая основа FR16: две фиксированные роли без metadata authority.
-//! Factory требует явно введённый Tokio runtime с I/O driver. Wire, EventLog
-//! binding и production caller остаются отдельным gate; ABI и протокол не меняются.
+//! Frozen #204 tests используют общий carrier, без production registration.
+use crate::output_transport::{OutputReaders, OutputWriters, ValidatedWriters, create};
 use rustix::{
-    fs::{FileType, OFlags, fcntl_getfl, fstat, fstatfs},
+    fs::{OFlags, fcntl_getfl},
     io::{FdFlags, fcntl_getfd},
 };
-use std::{io, os::fd::OwnedFd, process::Command};
-use tokio::net::unix::pipe::{Receiver, pipe};
-
-struct OutputReaders {
-    stdout: Receiver,
-    stderr: Receiver,
-}
-
-struct OutputWriters {
-    roles: Vec<OwnedFd>,
-}
-
-struct ValidatedWriters {
-    stdout: OwnedFd,
-    stderr: OwnedFd,
-}
-
-fn create() -> io::Result<(OutputReaders, OutputWriters)> {
-    let (stdout, stdout_reader) = pipe()?;
-    let (stderr, stderr_reader) = pipe()?;
-    Ok((
-        OutputReaders {
-            stdout: stdout_reader,
-            stderr: stderr_reader,
-        },
-        OutputWriters {
-            roles: vec![stdout.into_blocking_fd()?, stderr.into_blocking_fd()?],
-        },
-    ))
-}
-
-impl OutputWriters {
-    fn validate(self) -> io::Result<ValidatedWriters> {
-        let invalid = || {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "ожидались два разных blocking CLOEXEC FIFO writer",
-            )
-        };
-        let [stdout, stderr]: [OwnedFd; 2] = self.roles.try_into().map_err(|_| invalid())?;
-        let identity = |fd: &OwnedFd| -> io::Result<_> {
-            let stat = fstat(fd)?;
-            let flags = fcntl_getfl(fd)?;
-            // PIPEFS_MAGIC фиксирован ABI Linux; обычный named FIFO не является pipe.
-            if fstatfs(fd)?.f_type as u64 != 0x5049_5045
-                || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
-                || flags & OFlags::ACCMODE != OFlags::WRONLY
-                || flags.contains(OFlags::NONBLOCK)
-                || !fcntl_getfd(fd)?.contains(FdFlags::CLOEXEC)
-            {
-                return Err(invalid());
-            }
-            Ok((stat.st_dev, stat.st_ino))
-        };
-        if identity(&stdout)? == identity(&stderr)? {
-            return Err(invalid());
-        }
-        Ok(ValidatedWriters { stdout, stderr })
-    }
-}
-
-impl ValidatedWriters {
-    // Метод приватен даже внутри test-only модуля: не capability общего executor.
-    fn attach(self, command: &mut Command) {
-        command.stdout(self.stdout).stderr(self.stderr);
-    }
-}
+use std::io;
+use tokio::net::unix::pipe::pipe;
 
 #[cfg(test)]
 mod tests {
