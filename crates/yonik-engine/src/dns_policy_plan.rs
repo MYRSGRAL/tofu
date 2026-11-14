@@ -244,14 +244,20 @@ pub fn compile_plan(
         if !allowed.contains(ip) || prefix < if ip.is_ipv4() { 15 } else { 18 } {
             return Err(PlanError::Unsupported);
         }
-        if policy.private_networks.iter().any(|n| {
-            n.network.contains(ip)
-                || n.network
-                    .to_string()
-                    .split_once('/')
-                    .and_then(|(a, _)| a.parse().ok())
-                    .is_some_and(|a| p.contains(a))
-        }) {
+        if policy
+            .private_networks
+            .iter()
+            .map(|n| &n.network)
+            .chain(&policy.lan)
+            .any(|network| {
+                network.contains(ip)
+                    || network
+                        .to_string()
+                        .split_once('/')
+                        .and_then(|(a, _)| a.parse().ok())
+                        .is_some_and(|a| p.contains(a))
+            })
+        {
             return Err(PlanError::Mapping);
         }
     }

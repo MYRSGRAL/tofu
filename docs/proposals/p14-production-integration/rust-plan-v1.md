@@ -70,8 +70,11 @@ container depth 5, запрещает неизвестные поля, enum valu
 
 Fake требует lease и хотя бы один pool соответствующего enabled family;
 V1 pools ограничены 198.18.0.0/15 и fc00::/18 с более узким prefix,
-без exact duplicates и canonical spelling deviations. Real не принимает pools
-и mapping lease. Endpoint запрещает port=0, unspecified/multicast, IPv4-mapped
+без exact duplicates и canonical spelling deviations. Пересечения fake pools
+с уже переданными LAN/private snapshots отклоняются
+в обе стороны. Актуальные маршруты всё равно требуют отдельного witness при activation.
+Real не принимает pools и mapping lease. Endpoint запрещает port=0,
+unspecified/multicast, IPv4-mapped
 IPv6, scope/flowinfo. Platform selectors и reserved advanced constraints
 возвращают Unsupported даже в disabled rules; ничего не теряется молча.
 

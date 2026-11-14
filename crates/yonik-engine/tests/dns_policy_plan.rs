@@ -136,6 +136,50 @@ fn dns_axes_and_desired_binding_are_data() {
     assert_ne!(prev, bytes(&p, &d, &x));
 }
 #[test]
+fn fake_pools_reject_known_lan_overlap_in_both_directions() {
+    for (lan, pool) in [
+        ("198.18.0.0/15", "198.18.0.0/15"),
+        ("198.16.0.0/14", "198.18.0.0/15"),
+        ("198.18.0.0/16", "198.18.0.0/15"),
+        ("198.18.0.0/15", "198.18.0.0/16"),
+        ("fc00::/18", "fc00::/18"),
+        ("fc00::/7", "fc00::/18"),
+        ("fc00::/32", "fc00::/18"),
+        ("fc00::/18", "fc00::/32"),
+    ] {
+        let p = Policy {
+            lan: vec![lan.parse().unwrap()],
+            ..Policy::default()
+        };
+        let mut d = dns();
+        d.mode = NativeDnsMode::FakeIp;
+        d.require_mapping_lease = true;
+        d.ipv4 = !pool.contains(':');
+        d.ipv6 = !d.ipv4;
+        let mut x = desired();
+        x.fake_pools.push(pool.into());
+        assert_eq!(compile_plan(&p, &d, &x).unwrap_err(), PlanError::Mapping);
+    }
+    for (lan, pool) in [
+        ("198.20.0.0/16", "198.18.0.0/15"),
+        ("fc01::/32", "fc00::/18"),
+    ] {
+        let p = Policy {
+            lan: vec![lan.parse().unwrap()],
+            ..Policy::default()
+        };
+        let mut d = dns();
+        d.mode = NativeDnsMode::FakeIp;
+        d.require_mapping_lease = true;
+        d.ipv4 = !pool.contains(':');
+        d.ipv6 = !d.ipv4;
+        let mut x = desired();
+        x.fake_pools.push(pool.into());
+        assert!(compile_plan(&p, &d, &x).is_ok());
+    }
+}
+
+#[test]
 fn strict_negative_vectors() {
     let p = Policy::default();
     let mut d = dns();
