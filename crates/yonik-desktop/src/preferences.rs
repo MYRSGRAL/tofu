@@ -240,7 +240,7 @@ pub(crate) fn valid_proxy_fetch_dns(address: std::net::SocketAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fs, SaveOutcome, Store};
+    use super::{SaveOutcome, Store, fs};
     #[test]
     fn интервал_legacy_границы_и_proxy_dns() {
         let preferences = super::Preferences::default();
@@ -365,7 +365,7 @@ mod tests {
 
 #[cfg(test)]
 mod startup_tests {
-    use super::{fs, Preferences, SaveOutcome, Store};
+    use super::{Preferences, SaveOutcome, Store, fs};
     #[test]
     fn миграция_и_четыре_комбинации() {
         let root = std::env::temp_dir().join(format!("yonik-startup-prefs-{}", std::process::id()));
