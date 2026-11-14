@@ -372,6 +372,56 @@ impl ProductionPermit {
         transport_send(socket, roles, binding, worker_pid, worker_uid, deadline)
     }
 }
+/// Sender consumes отдельную RunRole; stamp возвращается owner для полного lifetime.
+pub(crate) fn handoff_verified_run(
+    run: crate::helper::native_bootstrap::RunRole,
+    socket: &OwnedFd,
+    roles: Roles,
+    binding: &Binding,
+    worker_pid: u32,
+    worker_uid: u32,
+    deadline: Instant,
+) -> Result<crate::helper::native_bootstrap::RuntimeScopeStamp, WorkerError> {
+    run.validate().map_err(|_| WorkerError::Peer)?;
+    let (nonce, session, generation, invocation, epoch, digest) =
+        run.context().map_err(|_| WorkerError::Peer)?;
+    if nonce != binding.nonce
+        || session != binding.session
+        || generation != binding.generation
+        || invocation != binding.invocation
+        || epoch != binding.epoch
+        || digest != binding.digest
+    {
+        return Err(WorkerError::Peer);
+    }
+    let stamp = run.into_guard();
+    transport_send(socket, roles, binding, worker_pid, worker_uid, deadline)?;
+    stamp.validate().map_err(|_| WorkerError::Peer)?;
+    Ok(stamp)
+}
+
+pub(crate) fn handoff_retained_run(
+    stamp: &crate::helper::native_bootstrap::RuntimeScopeStamp,
+    socket: &OwnedFd,
+    roles: Roles,
+    binding: &Binding,
+    pid: u32,
+    uid: u32,
+    deadline: Instant,
+) -> Result<(), WorkerError> {
+    stamp.validate().map_err(|_| WorkerError::Peer)?;
+    let (nonce, session, generation, invocation, epoch, digest) = stamp.context();
+    if nonce != binding.nonce
+        || session != binding.session
+        || generation != binding.generation
+        || invocation != binding.invocation
+        || epoch != binding.epoch
+        || digest != binding.digest
+    {
+        return Err(WorkerError::Peer);
+    }
+    transport_send(socket, roles, binding, pid, uid, deadline)
+}
 fn transport_send(
     socket: &OwnedFd,
     roles: Roles,

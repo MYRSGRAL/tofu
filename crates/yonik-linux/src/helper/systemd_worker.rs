@@ -453,6 +453,23 @@ impl WorkerMode {
     }
 }
 
+struct NativeRuntime {
+    stamp: super::native_bootstrap::RuntimeScopeStamp,
+    stop: Arc<AtomicBool>,
+    thread: Option<
+        std::thread::JoinHandle<std::result::Result<(), crate::attribution::broker::Unavailable>>,
+    >,
+    ready: std::sync::mpsc::Receiver<()>,
+    attached: bool,
+}
+impl Drop for NativeRuntime {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _result = thread.join();
+        }
+    }
+}
 /// Не Clone: один владелец в процессе. Отменённая future оставляет pending и
 /// blocking transfer внутри владельца; только recover снова разрешает запуск.
 pub struct SystemWorkerSupervisor {
@@ -465,6 +482,7 @@ pub struct SystemWorkerSupervisor {
     clean: bool,
     retained_copy: Option<Arc<WorkerPayload>>,
     fence: Box<dyn WorkerFence>,
+    native_runtime: Option<NativeRuntime>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
@@ -516,6 +534,7 @@ impl SystemWorkerSupervisor {
                 clean: false,
                 retained_copy: None,
                 fence: Box::new(SystemFence),
+                native_runtime: None,
             };
             supervisor.validate_contract().await?;
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
@@ -659,6 +678,162 @@ impl SystemWorkerSupervisor {
             return Err(WorkerSupervisorError::Protocol);
         }
         self.cleanup(cancel, deadline).await
+    }
+    /// Conditional native start. Отсутствующий immutable deployment закрывает admission.
+    pub(crate) async fn start_native(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        owner: &RunAuthority,
+        authorization: RunAuthorization,
+        queue: Arc<crate::managed_network::tun::BoundTun>,
+        journal: &crate::managed_network::Journal,
+        topology: crate::LinuxTopology,
+        epoch: u64,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        use super::native_bootstrap::{VerifiedPendingRun, verify_pending};
+        use crate::worker::role_handoff::{Binding, Roles};
+        let deadline = Instant::now() + DEADLINE;
+        self.begin(WorkerMode::Run, cancel, deadline).await?;
+        self.retained_copy = Some(Arc::clone(&payload));
+        let stream = bounded(cancel, deadline, async {
+            tokio::net::UnixStream::connect(WorkerMode::Run.channel())
+                .await
+                .map_err(unavailable)
+        })
+        .await?;
+        verify_socket(WorkerMode::Run)?;
+        let stream = stream.into_std().map_err(unavailable)?;
+        stream.set_nonblocking(false).map_err(unavailable)?;
+        let mut observation = self.inspect_anchor_bootstrap().await?;
+        observation.expires = deadline;
+        let pid = observation.pid;
+        let uid = observation.uid;
+        let invocation = observation.invocation;
+        let pending = VerifiedPendingRun::verify(
+            self,
+            owner,
+            authorization,
+            observation,
+            *payload.digest().as_bytes(),
+            epoch,
+            cancel,
+            deadline,
+        )
+        .await?;
+        let coverage = pending.receive(self, owner, &stream, cancel).await?;
+        let handoff = coverage.take_handoff()?;
+        let (helper, worker) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .map_err(unavailable)?;
+        let issued = verify_pending(coverage, owner, queue, journal, topology, helper)?;
+        let (nonce, session, generation, invocation_context, epoch, digest) =
+            issued.run.context()?;
+        let binding = Binding {
+            nonce,
+            session,
+            generation,
+            invocation: invocation_context,
+            epoch,
+            digest,
+            server_pid: std::process::id(),
+            server_start: bootstrap_start(std::process::id())?,
+        };
+        let server_pid = rustix::process::Pid::from_raw(std::process::id() as i32)
+            .ok_or(WorkerSupervisorError::Protocol)?;
+        let roles = Roles {
+            channel: worker,
+            server_pidfd: rustix::process::pidfd_open(
+                server_pid,
+                rustix::process::PidfdFlags::NONBLOCK,
+            )
+            .map_err(unavailable)?,
+            record: binding.record().map_err(unavailable)?,
+        };
+        let session = crate::attribution::native_session::Session::from_verified(issued.session)
+            .map_err(unavailable)?;
+        let (ready_tx, ready) = std::sync::mpsc::sync_channel(1);
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("yonik-native-broker".into())
+            .spawn(move || {
+                session.serve_with_ready(&thread_stop, || {
+                    ready_tx
+                        .send(())
+                        .map_err(|_| crate::attribution::broker::Unavailable::Cancelled)
+                })
+            })
+            .map_err(unavailable)?;
+        // Retain scope before blocking handoff: failed/late ACK cannot release custody.
+        let stamp = issued.run.into_guard();
+        self.native_runtime = Some(NativeRuntime {
+            stamp,
+            stop,
+            thread: Some(thread),
+            ready,
+            attached: false,
+        });
+        // Sender consumes a RunRole; validated role is converted to retained stamp above.
+        // Binding/roles remain exact; no authority is reconstructed from their bytes.
+        crate::worker::role_handoff::handoff_retained_run(
+            &self
+                .native_runtime
+                .as_ref()
+                .ok_or(WorkerSupervisorError::Protocol)?
+                .stamp,
+            &handoff,
+            roles,
+            &binding,
+            pid,
+            uid,
+            deadline.into_std(),
+        )
+        .map_err(unavailable)?;
+        let ack = payload
+            .send(&stream, WorkerMode::Run)
+            .map_err(unavailable)?;
+        if ack.status != WorkerStatus::Accepted || ack.pid != pid {
+            return Err(WorkerSupervisorError::Protocol);
+        }
+        let ticket = WorkerTicket { pid, invocation };
+        let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        if !ticket.matches(&state) {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.current = Some(WorkerTicket { pid, invocation });
+        self.pending = None;
+        Ok(ticket)
+    }
+    /// ATTACH ACK плюс текущая canonical invocation; network health проверяет owner.
+    pub(crate) async fn native_attached(&mut self, ticket: &WorkerTicket) -> Result<bool> {
+        if self.observe(ticket).await? != WorkerLiveness::Running {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        let runtime = self
+            .native_runtime
+            .as_mut()
+            .ok_or(WorkerSupervisorError::Stale)?;
+        runtime.stamp.validate()?;
+        if runtime
+            .thread
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        if !runtime.attached {
+            match runtime.ready.try_recv() {
+                Ok(()) => runtime.attached = true,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(_) => return Err(WorkerSupervisorError::Protocol),
+            }
+        }
+        Ok(runtime.attached)
     }
     pub async fn start(
         &mut self,
@@ -986,6 +1161,7 @@ impl SystemWorkerSupervisor {
                 self.current = None;
                 self.clean = true;
                 self.retained_copy = None;
+                self.native_runtime = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {
