@@ -707,3 +707,140 @@ class ControlledProfileTests(unittest.TestCase):
                 record["controlled_env"]["CARGO_TARGET_DIR"], env["CARGO_TARGET_DIR"]
             )
             self.assertNotIn("PRIVATE_UNRELATED_SECRET", record["controlled_env"])
+
+
+class CollectedReuseTests(ControllerTest):
+    def test_collected_reuse_never_builds_and_preserves_prior(self) -> None:
+        for name in c.tooling_hashes():
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture controller")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+        self.freeze()
+        prior = self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        c._freeze(self.repo, self.registry, "next", self.commit)
+        shutil.rmtree(self.task)
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            patch.object(c, "COLLECTED_REUSE_REVIEW", self.commit),
+        ):
+            result = c._collect(
+                self.repo, self.registry, "next", self.task, self.runner
+            )
+        self.assertEqual(result["collected_lineage"]["build_performed"], False)
+        self.assertEqual(result["commands"], [])
+        self.assertIn(".MTREE", result["payload"])
+        self.assertEqual(
+            c.sha(folder / "collected.json"), pins["collected.json"]["sha256"]
+        )
+        self.assertEqual(result["source"], prior["source"])
+
+    def test_collected_reuse_changed_input_rejected(self) -> None:
+        for name in c.tooling_hashes():
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture controller")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+        self.freeze()
+        self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        (folder / "yonik-desktop").write_bytes(b"tampered")
+        c._freeze(self.repo, self.registry, "next", self.commit)
+        shutil.rmtree(self.task)
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            self.assertRaises(c.NotReady),
+        ):
+            c._collect(self.repo, self.registry, "next", self.task, self.runner)
+
+    def test_collected_reuse_source_mismatch_rejected(self) -> None:
+        self.freeze()
+        context = self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        wrong = {**context, "source": {**context["source"], "commit": "b" * 40}}
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            self.assertRaisesRegex(c.NotReady, "source/tree"),
+        ):
+            c.reuse_collected(
+                self.repo, self.registry, "next", wrong, folder, self.repo
+            )
+
+
+class PackageMtreeTests(unittest.TestCase):
+    def test_mtree_matches_archive_metadata_and_escaped_paths(self) -> None:
+        import gzip
+
+        with tempfile.TemporaryDirectory() as folder:
+            package = Path(folder) / "package.tar"
+            c.write_package(
+                package, {"usr/share/test space#=\\é": (0o644, b"payload")}, b"info"
+            )
+            with tarfile.open(package) as archive:
+                self.assertIn(".MTREE", archive.getnames())
+                stream = archive.extractfile(".MTREE")
+                self.assertIsNotNone(stream)
+                text = gzip.decompress(stream.read()).decode("ascii")
+                self.assertNotIn("./.MTREE ", text)
+                self.assertIn(
+                    "./.PKGINFO type=file uid=0 gid=0 mode=644 time=0 size=4 sha256digest=",
+                    text,
+                )
+                self.assertIn(r"./usr/share/test\040space\043\075\134\303\251 ", text)
+                for member in archive:
+                    self.assertEqual((member.uid, member.gid, member.mtime), (0, 0, 0))
+
+    def test_builder_rejects_unsafe_and_reserved_names(self) -> None:
+        for name in (
+            "../escape",
+            "/absolute",
+            "usr//bad",
+            ".MTREE",
+            ".PKGINFO",
+            "usr/../bad",
+        ):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                with self.assertRaises(ValueError):
+                    c.write_package(
+                        Path(folder) / "package.tar", {name: (0o644, b"x")}, b"info"
+                    )
