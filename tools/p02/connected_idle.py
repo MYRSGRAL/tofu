@@ -76,6 +76,58 @@ def sample(pid: int) -> dict:
     }
 
 
+def terminate_process(process: subprocess.Popen, timeout: float = 5) -> None:
+    """Остановить и reap собственного child, включая игнорирование SIGTERM."""
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=timeout)
+
+
+def terminate_pidfd(descriptor: int, timeout: float = 5) -> None:
+    """Подтвердить exit точного engine, затем оставить reap его родителю."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        if select.select([descriptor], [], [], 0)[0]:
+            return
+        try:
+            signal.pidfd_send_signal(descriptor, sig)
+        except ProcessLookupError:
+            return
+        if select.select([descriptor], [], [], timeout)[0]:
+            return
+    raise TimeoutError("Owned engine did not exit after SIGKILL")
+
+
+def validate_group(current: list[dict], reference: list[dict]) -> None:
+    """Исключить подмену identity и неучтённого потомка в каждом sample."""
+    expected = {row["pid"]: row for row in reference}
+    actual = {row["pid"]: row for row in current}
+    if len(actual) != len(current) or set(actual) != set(expected):
+        raise RuntimeError("Product group membership changed")
+    for pid, row in actual.items():
+        before = expected[pid]
+        if (
+            row["starttime"] != before["starttime"]
+            or row["namespaces"] != before["namespaces"]
+            or set(row["descendants"]) != set(before["descendants"])
+            or not set(row["descendants"]).issubset(set(expected) - {pid})
+        ):
+            raise RuntimeError("Product identity/descendants changed or unaccounted")
+
+
+def require_gui_tls_refusal(state: dict, requested: bool) -> None:
+    """Принять только actual GUI TLS refusal до отправки HTTPS body."""
+    if (
+        state.get("status") != "Limited"
+        or (state.get("probe_result") or {}).get("kind") != "tls"
+        or requested
+    ):
+        raise RuntimeError("Actual GUI TLS-negative oracle failed")
+
+
 class Control:
     """Event-driven закрытый протокол, без периодического GUI polling."""
 
@@ -301,9 +353,16 @@ def gui(
             if not registered.startswith("REGISTERED "):
                 raise RuntimeError("actual SNI registration missing")
         finally:
+            cleanup_errors = []
             if "app" in locals() and app.poll() is None:
-                for pid in descendants(app.pid):
-                    owned_engine_handles.append(os.pidfd_open(pid))
+                try:
+                    for pid in descendants(app.pid):
+                        try:
+                            owned_engine_handles.append(os.pidfd_open(pid))
+                        except ProcessLookupError:
+                            continue
+                except OSError as error:
+                    cleanup_errors.append("Descendant discovery: " + str(error))
                 try:
                     control.send("quit")
                     control.state(lambda s: s.get("closed") is True, 10)
@@ -317,24 +376,26 @@ def gui(
                     (output / "cleanup-fallback.txt").write_text(str(error))
             channel.close()
             child.close()
-            control.events.close()
+            try:
+                control.events.close()
+            except OSError as error:
+                cleanup_errors.append("Event log close: " + str(error))
             for descriptor in owned_engine_handles:
-                # pidfd не допускает сигнал чужому процессу после повторного использования PID.
                 try:
-                    signal.pidfd_send_signal(descriptor, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                os.close(descriptor)
+                    terminate_pidfd(descriptor)
+                except (OSError, TimeoutError) as error:
+                    cleanup_errors.append(str(error))
+                finally:
+                    os.close(descriptor)
             for process in reversed(processes):
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                try:
+                    terminate_process(process)
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    cleanup_errors.append(str(error))
             for log in logs:
                 log.close()
+            if cleanup_errors:
+                raise RuntimeError("Incomplete owned cleanup: " + repr(cleanup_errors))
 
 
 def prepare(control: Control, core: str) -> None:
@@ -420,27 +481,34 @@ def idle(pids: list[int], seconds: int, output: Path, fixture: object) -> dict:
     """Внешний sampler: baseline и samples раз в 30 секунд, без proxy traffic."""
     fixture.requested.clear()
     rows = []
-    started = time.monotonic()
-    deadline = started + seconds
-    while True:
-        rows.append(
-            {
-                "elapsed_s": time.monotonic() - started,
-                "processes": [sample(pid) for pid in pids],
-            }
-        )
-        (output / "samples.json").write_text(json.dumps(rows, indent=2))
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        # Kernel waits on known product process exit, with explicit sample deadline.
-        descriptors = [os.pidfd_open(pid) for pid in pids]
-        try:
+    with ExitStack() as stack:
+        # Держим те же pidfd весь интервал; exit не скрывается повторным PID.
+        descriptors = []
+        for pid in pids:
+            descriptor = os.pidfd_open(pid)
+            stack.callback(os.close, descriptor)
+            descriptors.append(descriptor)
+        reference = [sample(pid) for pid in pids]
+        validate_group(reference, reference)
+        if select.select(descriptors, [], [], 0)[0]:
+            raise RuntimeError("Product exited during baseline")
+        started = time.monotonic()
+        deadline = started + seconds
+        rows.append({"elapsed_s": 0.0, "processes": reference})
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             if select.select(descriptors, [], [], min(30, remaining))[0]:
-                raise RuntimeError("product exited during idle")
-        finally:
-            for descriptor in descriptors:
-                os.close(descriptor)
+                raise RuntimeError("Product exited during idle")
+            processes = [sample(pid) for pid in pids]
+            validate_group(processes, reference)
+            if select.select(descriptors, [], [], 0)[0]:
+                raise RuntimeError("Product exited during sample")
+            rows.append(
+                {"elapsed_s": time.monotonic() - started, "processes": processes}
+            )
+            (output / "samples.json").write_text(json.dumps(rows, indent=2))
     if fixture.requested.is_set():
         raise RuntimeError("unexpected HTTPS fixture traffic during idle")
     before, after = rows[0]["processes"], rows[-1]["processes"]
@@ -536,8 +604,7 @@ def engine_only(
         if descendants(engine.pid):
             raise RuntimeError("unexpected engine descendants")
     finally:
-        engine.terminate()
-        engine.wait(timeout=10)
+        terminate_process(engine, timeout=10)
     with socket.socket() as rebound:
         rebound.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         rebound.bind(("127.0.0.1", socks))
@@ -603,6 +670,31 @@ def campaign(args: argparse.Namespace) -> None:
             ("xray", "xray-26.10.31"),
         ]:
             core_binary = args.engines / directory / core
+            # Это actual GUI health client с неверным CA, не curl control.
+            negative_out = args.output / (core + "-gui-tls-negative")
+            with gui(
+                args.binary,
+                args.observer,
+                args.engines,
+                negative_out,
+                peer_port,
+                health,
+                socks,
+                wrong_ca,
+            ) as (app, control, handles):
+                prepare(control, core)
+                with peer(peer_binary, "sing-box", root, peer_port):
+                    fixture.requested.clear()
+                    control.send("connect")
+                    denied = control.state(
+                        lambda state: state.get("status") in ("Connected", "Limited")
+                    )
+                    require_gui_tls_refusal(denied, fixture.requested.is_set())
+                    denied_pid, _ = capture(app, core_binary, negative_out, handles)
+                    (negative_out / "actual-gui-tls-negative.json").write_text(
+                        json.dumps(denied)
+                    )
+                    stop(control, denied_pid, socks)
             out = args.output / (core + "-oracle")
             with gui(
                 args.binary,
