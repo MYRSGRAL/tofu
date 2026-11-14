@@ -29,6 +29,9 @@ use std::{
 use yonik_application::ConfigDigest;
 use yonik_engine::{CompiledConfig, Engine};
 
+#[cfg(test)]
+mod output_transport;
+
 pub mod anchor_exchange;
 pub mod role_handoff;
 
