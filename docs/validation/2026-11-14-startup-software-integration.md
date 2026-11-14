@@ -1,8 +1,10 @@
 # Раздельный startup: software integration
 
 Реализован утверждённый root scope поверх принятого L1 (#208). Две независимые
-настройки изначально OFF. Это дополнительная startup-функция, а не объявление
-рекомендации новым обязательным критерием исходного FR-19.
+настройки изначально OFF. По уточнению root функция входит в полный Linux
+acceptance scope (`requirements.md:45`, `routing-and-tray.md:25`). Прежнее снятие
+optional workflow с critical path не отменяло требование. Исторические результаты
+FR-19/P11 этим уточнением не расширяются.
 
 ## Поведение и границы
 
@@ -61,7 +63,7 @@ shell или env execution. No-follow/owner/mode/size/content checks сохра�
 выдаётся за rollback и не разрешает автоматические действия. Config root должен
 существовать и принадлежать текущему пользователю без group/world write.
 
-## Проверки
+## Исторические проверки frozen cfb1664
 
 Rust 1.85.1, `--locked`, jobs=1, собственный transient root под flock и общий
 rust slot. До runtime сохранены исходники, ELF и hashes вне TTL. После последнего
@@ -105,3 +107,44 @@ System поддержку. Нужен узкий root review изменённо�
 Cleanup: после проверки отсутствия активных owned cwd/exe/fd refs `cargo clean`
 удалил 13962 файла / 7.7 GiB. Собственный transient root удалён; текущие ELF/source/
 logs retained в workspace без TTL. Чужие cache/build каталоги не очищались.
+
+## Correction после CI и R2 review
+
+Разрешённым ordinary merge включён PR213 exact head
+`0bb3e86e22d7bf6709c90453e9f8619b60a59ee4`. Port/domain/editor/typed P11 changes
+сохранены из root; не переопределялись в startup fix.
+
+CI Rust failure `health_target_settings_are_validated_without_disclosing_url`
+на cfb1664 происходил из-за короткого canary `hidden`: он совпадал с публичным
+JSON key `start_hidden`. Fixture теперь передаёт уникальное приватное значение;
+raw assertions на отсутствие домена, query key, реального query value и userinfo
+сохранены, проверка файла усилена. Defaults/admission не изменялись.
+
+R2: `SaveError::Conflict` отделён от I/O. Current preferences читаются и
+валидируются под common writer lock; только valid owned snapshot обновляет
+Store original и Actor preferences/startup values/revision. Текущие operational
+engine/port/probe inputs не переключаются read refresh. Нет автоматического write
+retry, XDG apply, Connect/rearm или rebinding target/owner. Unknown/invalid и
+symlink не становятся fresh snapshot; при mixed I/O original сохраняется.
+Следующий явный запрос использует актуальный revision и сохраняет чужие поля.
+
+Новые адресные проверки (Rust1.85.1 offline/locked/jobs1, frozen source и retained
+ELF до исполнения): privacy 1 PASS; Store conflict/mixed/foreign 3 PASS; Actor
+explicit retry/no-rearm 1 PASS; scoped preferences regression и catalog parity —
+17 PASS и catalog parity 1 PASS. Финальные source/ELF/logs находятся в
+`local/validation/startup-integrated/r2-correction/final-receipts/`. Desktop
+all-targets clippy `-D warnings`, rustfmt, Ruff, source catalog coverage (2 PASS)
+и translation tests (18 PASS) пройдены отдельно от исторического whole-runtime
+campaign. Старый XDG apply receipt инвалидируется при refresh; unknown/error
+не снимаются чтением. Добавлены только semantic diagnostic catalog entries и
+source catalog tests. Effective P11 ledger не редактируется: root выполнит union
+review/rebinding отдельно, без присвоения исторического ELF новому source.
+
+Новый whole-head runtime/physical/N5 proof не заявляется. Исторические runtime
+результаты выше остаются привязанными к cfb1664; correction использует только
+адресные тесты конкретных failure/review findings.
+
+Correction cleanup: после проверки отсутствия active owned refs сохранены
+source/ELF/logs `r2-correction/final-receipts`; own `cargo clean --offline` удалил
+4660 файлов / 2.3 GiB, transient `startup-r2-1108` удалён. Новых runtime campaign
+повторений не выполнялось.

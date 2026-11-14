@@ -18,7 +18,7 @@ use backend_startup::StartupObserver;
 pub use backend_startup::StartupPhase;
 #[path = "maintenance_job.rs"]
 mod maintenance_job;
-use crate::preferences::{Preferences, SaveOutcome, Store};
+use crate::preferences::{Preferences, SaveError, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
@@ -1875,24 +1875,47 @@ impl Actor {
     }
 
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        let outcome = self.preferences_store.save(&preferences).map_err(|error| {
-            let cause = match error.kind() {
-                std::io::ErrorKind::PermissionDenied => Some(Cause::PreferencesIoPermissionDenied),
-                std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
-                std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
-                std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
-                std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
-                _ => None,
-            };
-            if let Some(cause) = cause {
-                self.state.error_contexts.set_generation(
-                    Slot::Error,
-                    cause,
-                    Some(self.state.command_generation),
-                );
+        let outcome = match self.preferences_store.save(&preferences) {
+            Ok(outcome) => outcome,
+            Err(SaveError::Conflict(current)) => {
+                self.preferences = *current;
+                // Старый apply receipt не подтверждает перечитанную ревизию.
+                // Unknown/error не снимаются чтением без нового explicit apply.
+                if self.state.startup.xdg == "applied" {
+                    self.state.startup.xdg = "unchanged";
+                }
+                // Read refresh не переключает текущие engine/port/probe inputs,
+                // не перепривязывает target/owner и не повторяет запись/Connect.
+                self.state.language = self.preferences.language.clone();
+                self.state.subscription_interval_seconds =
+                    self.preferences.subscription_interval_seconds;
+                self.state.subscription_background = self.preferences.subscription_background;
+                self.state.proxy_fetch_dns = self.preferences.proxy_fetch_dns;
+                self.startup_view();
+                return Err(DesktopError("preferences_conflict"));
             }
-            DesktopError("preferences_write")
-        })?;
+            Err(SaveError::Io(error)) => {
+                self.state.preferences_warning |= self.preferences_store.blocked();
+                let cause = match error.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        Some(Cause::PreferencesIoPermissionDenied)
+                    }
+                    std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
+                    std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
+                    std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
+                    std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
+                    _ => None,
+                };
+                if let Some(cause) = cause {
+                    self.state.error_contexts.set_generation(
+                        Slot::Error,
+                        cause,
+                        Some(self.state.command_generation),
+                    );
+                }
+                return Err(DesktopError("preferences_write"));
+            }
+        };
         self.state.preferences_durability_warning =
             outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
@@ -3188,6 +3211,53 @@ mod settings_tests {
             .expect("команда настройки");
         actor.command(command).await.expect("сессия освобождена");
         assert_eq!(actor.state.port, 18889);
+        actor.state.startup.xdg_root = Some(directory.0.clone());
+        let control = super::Control {
+            generation: std::sync::atomic::AtomicU64::new(0),
+            priority: tokio::sync::watch::channel(super::Priority::default()).0,
+            tcp_priority: tokio::sync::watch::channel(0).0,
+            subscription_policy: tokio::sync::watch::channel(Default::default()).0,
+            subscription_override: std::sync::atomic::AtomicBool::new(false),
+            subscription_visible: tokio::sync::watch::channel(false).0,
+            closed: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        };
+        let attempt = actor.state.startup.attempt;
+        actor.state.startup.xdg = "applied";
+        let (mut external_store, _, _) = Store::open(&directory.0);
+        let (mut external, _) = external_store
+            .save_startup(0, true, false, None)
+            .expect("cooperating writer");
+        external.language = "en".into();
+        external_store
+            .save(&external)
+            .expect("mixed external prefs");
+        let published = fs::read(directory.0.join("preferences.json")).expect("published");
+        let conflict = actor
+            .startup_save("1".into(), "0".into(), Some((false, true)), &control, 0)
+            .await
+            .expect_err("stale writer");
+        assert_eq!(conflict.key(), "startup_conflict");
+        assert_eq!(actor.state.startup.revision, "1");
+        assert_eq!(actor.state.startup.xdg, "unchanged");
+        assert!(actor.state.startup.autostart_into_tray && !actor.state.startup.autoconnect);
+        assert_eq!(actor.preferences.language, "en");
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(actor.preferences.repository_identity.is_none());
+        assert!(actor.selected.is_none());
+        assert!(!actor.state.can_stop);
+        assert!(!directory.0.join("autostart").exists());
+        assert_eq!(
+            fs::read(directory.0.join("preferences.json")).expect("no auto retry"),
+            published
+        );
+        actor
+            .startup_save("2".into(), "1".into(), Some((false, true)), &control, 0)
+            .await
+            .expect("explicit retry");
+        assert_eq!(actor.state.startup.revision, "2");
+        assert!(!actor.state.startup.autostart_into_tray && actor.state.startup.autoconnect);
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(!actor.state.can_stop);
         actor.preferences_store.sync_directory =
             |_| Err(std::io::Error::other("инъекция dir fsync"));
         actor
@@ -3202,17 +3272,9 @@ mod settings_tests {
         assert!(actor.state.preferences_durability_warning);
         assert_eq!(Store::open(&directory.0).1.language, "en");
         actor.state.startup.xdg_root = Some(directory.0.clone());
-        let control = super::Control {
-            generation: std::sync::atomic::AtomicU64::new(0),
-            priority: tokio::sync::watch::channel(super::Priority::default()).0,
-            tcp_priority: tokio::sync::watch::channel(0).0,
-            subscription_policy: tokio::sync::watch::channel(Default::default()).0,
-            subscription_override: std::sync::atomic::AtomicBool::new(false),
-            subscription_visible: tokio::sync::watch::channel(false).0,
-            closed: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
-        };
+
         actor
-            .startup_save("1".into(), "0".into(), Some((true, true)), &control, 0)
+            .startup_save("3".into(), "2".into(), Some((true, true)), &control, 0)
             .await
             .expect("published");
         assert_eq!(actor.state.startup.save, "durability_unknown");

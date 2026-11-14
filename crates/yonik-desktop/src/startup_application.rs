@@ -243,7 +243,13 @@ impl Actor {
             .revision
             .checked_add(1)
             .ok_or(DesktopError("startup_conflict"))?;
-        self.save_preferences(next)?;
+        self.save_preferences(next).map_err(|error| {
+            if error.key() == "preferences_conflict" {
+                DesktopError("startup_conflict")
+            } else {
+                error
+            }
+        })?;
         self.startup_view();
         if self.state.preferences_durability_warning {
             self.state.startup.save = "durability_unknown";

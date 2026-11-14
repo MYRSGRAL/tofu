@@ -368,6 +368,7 @@ ApplicationWindow {
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
         const startupMessages = {
+            preferences_conflict: ["Настройки изменены другим writer. Показаны актуальные значения; проверьте их и повторите действие явно.", "Settings changed by another writer. Current values are shown; review them and explicitly retry."],
             startup_conflict: ["Настройки изменились. Проверьте актуальные значения и повторите действие.", "Settings changed. Review current values and retry."],
             startup_binding: ["Цель или владелец недоступны. При замене БД или владельца перезапустите приложение; выберите сохранённый профиль и подтвердите цель заново.", "Target or owner unavailable. If the database or owner changed, restart the application; select a saved profile and confirm the target again."],
             startup_timeout: ["Время ожидания startup истекло. Автоподключение не повторяется в этом запуске.", "Startup timed out. Autoconnect will not retry in this run."],

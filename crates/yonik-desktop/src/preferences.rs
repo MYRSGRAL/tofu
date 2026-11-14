@@ -65,6 +65,31 @@ pub(crate) enum SaveOutcome {
     PublishedDurabilityUnknown,
 }
 
+/// Conflict содержит только проверенный снимок, прочитанный под writer lock.
+/// Debug намеренно не раскрывает содержимое настроек/пути из I/O errors.
+pub(crate) enum SaveError {
+    Conflict(Box<Preferences>),
+    Io(std::io::Error),
+}
+impl std::fmt::Debug for SaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict(_) => f.write_str("PreferencesConflict"),
+            Self::Io(error) => f.debug_tuple("PreferencesIo").field(&error.kind()).finish(),
+        }
+    }
+}
+impl From<std::io::Error> for SaveError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+impl From<serde_json::Error> for SaveError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Io(error.into())
+    }
+}
+
 pub(crate) struct Store {
     path: PathBuf,
     original: Option<Vec<u8>>,
@@ -161,6 +186,30 @@ impl Store {
         }
         Ok(file)
     }
+    pub(crate) fn blocked(&self) -> bool {
+        self.blocked
+    }
+    /// Только под common lock. Не принимает отсутствие/повреждение за defaults.
+    fn conflict_locked(&mut self, current: Option<Vec<u8>>) -> SaveError {
+        let Some(bytes) = current else {
+            return SaveError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "настройки удалены извне",
+            ));
+        };
+        let settings = serde_json::from_slice::<Preferences>(&bytes)
+            .ok()
+            .filter(valid);
+        let Some(mut settings) = settings else {
+            self.blocked = true;
+            return SaveError::Io(std::io::Error::other(
+                "неизвестный исходник настроек сохранён",
+            ));
+        };
+        settings.version = 3;
+        self.original = Some(bytes);
+        SaveError::Conflict(Box::new(settings))
+    }
     /// CAS под общим writer lock, который удерживается до directory fsync.
     #[allow(dead_code)]
     pub fn save_startup(
@@ -169,14 +218,18 @@ impl Store {
         autostart_into_tray: bool,
         autoconnect: bool,
         target: Option<crate::startup_policy::Target>,
-    ) -> std::io::Result<(Preferences, SaveOutcome)> {
+    ) -> Result<(Preferences, SaveOutcome), SaveError> {
         let _lock = self.writer_lock()?;
         let mut settings = match &self.original {
             Some(bytes) => serde_json::from_slice::<Preferences>(bytes)?,
             None => Preferences::default(),
         };
-        if self.blocked || !valid(&settings) || settings.revision != expected_revision {
-            return Err(std::io::Error::other("конфликт startup-настроек"));
+        if self.blocked || !valid(&settings) {
+            return Err(std::io::Error::other("запись настроек заблокирована").into());
+        }
+        if settings.revision != expected_revision {
+            let current = self.read()?;
+            return Err(self.conflict_locked(current));
         }
         settings.version = 3;
         settings.revision = expected_revision
@@ -188,28 +241,28 @@ impl Store {
         let outcome = self.save_locked(&settings)?;
         Ok((settings, outcome))
     }
-    pub fn save(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
+    pub fn save(&mut self, settings: &Preferences) -> Result<SaveOutcome, SaveError> {
         let _lock = self.writer_lock()?;
         self.save_locked(settings)
     }
-    fn save_locked(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
+    fn save_locked(&mut self, settings: &Preferences) -> Result<SaveOutcome, SaveError> {
         let previous_revision = self
             .original
             .as_deref()
             .and_then(|bytes| serde_json::from_slice::<Preferences>(bytes).ok())
             .map_or(0, |settings| settings.revision);
-        if self.blocked
-            || !valid(settings)
-            || settings.revision < previous_revision
-            || self.read()? != self.original
-        {
-            return Err(std::io::Error::other(
-                "исходник настроек сохранён; запись заблокирована",
-            ));
+        if self.blocked || !valid(settings) {
+            return Err(
+                std::io::Error::other("исходник настроек сохранён; запись заблокирована").into(),
+            );
+        }
+        let current = self.read()?;
+        if settings.revision < previous_revision || current != self.original {
+            return Err(self.conflict_locked(current));
         }
         let bytes = serde_json::to_vec(settings)?;
         if bytes.len() > MAX_BYTES {
-            return Err(std::io::Error::other("лимит настроек"));
+            return Err(std::io::Error::other("лимит настроек").into());
         }
         let temp = self
             .path
@@ -222,15 +275,16 @@ impl Store {
         let result = (|| {
             file.write_all(&bytes)?;
             file.sync_all()?;
-            if self.read()? != self.original {
-                return Err(std::io::Error::other("настройки изменились извне"));
+            let current = self.read()?;
+            if current != self.original {
+                return Err(self.conflict_locked(current));
             }
             if self.original.is_none() {
                 fs::hard_link(&temp, &self.path)?;
             } else {
                 fs::rename(&temp, &self.path)?;
             }
-            Ok(())
+            Ok::<(), SaveError>(())
         })();
         if temp.exists() {
             if let Err(error) = fs::remove_file(temp) {
@@ -632,5 +686,92 @@ mod old_reader_tests {
             serde_json::from_value::<OldV2>(legacy).expect("v2").version,
             2
         );
+    }
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    use super::*;
+    #[test]
+    fn два_store_conflict_refresh_и_следующий_явный_cas() {
+        let root =
+            std::env::temp_dir().join(format!("yonik-prefs-conflict-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut first, p, _) = Store::open(&root);
+        first.save(&p).expect("seed");
+        let (mut stale, _, _) = Store::open(&root);
+        let (mut external, _) = first
+            .save_startup(0, true, false, None)
+            .expect("external CAS");
+        external.language = "en".into();
+        first.save(&external).expect("mixed external settings");
+        let published = fs::read(root.join("preferences.json")).expect("read");
+        let current = match stale.save_startup(0, false, true, None) {
+            Err(SaveError::Conflict(current)) => *current,
+            _ => panic!("ожидался typed conflict"),
+        };
+        assert_eq!(current.revision, 1);
+        assert!(current.autostart_into_tray && !current.autoconnect);
+        assert_eq!(current.language, "en");
+        assert_eq!(stale.original.as_ref(), Some(&published));
+        assert_eq!(
+            fs::read(root.join("preferences.json")).expect("no retry"),
+            published
+        );
+        let (updated, _) = stale
+            .save_startup(current.revision, false, true, current.autoconnect_target)
+            .expect("следующий явный CAS");
+        assert_eq!(updated.revision, 2);
+        assert_eq!(updated.language, "en");
+        assert!(!updated.autostart_into_tray && updated.autoconnect);
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+    #[test]
+    fn mixed_io_и_invalid_не_теряют_original_после_refresh() {
+        let root = std::env::temp_dir().join(format!("yonik-prefs-mixed-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut first, p, _) = Store::open(&root);
+        first.save(&p).expect("seed");
+        let (mut stale, _, _) = Store::open(&root);
+        first.save_startup(0, true, false, None).expect("external");
+        let current = match stale.save_startup(0, false, true, None) {
+            Err(SaveError::Conflict(current)) => *current,
+            _ => panic!("conflict"),
+        };
+        let original = stale.original.clone();
+        let temp = stale
+            .path
+            .with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&temp, b"foreign temp").expect("fixture");
+        assert!(matches!(stale.save(&current), Err(SaveError::Io(_))));
+        assert_eq!(stale.original, original);
+        assert_eq!(fs::read(&temp).expect("foreign preserved"), b"foreign temp");
+        fs::remove_file(temp).expect("fixture");
+        let invalid = br#"{"version":99,"private":"untouched"}"#;
+        fs::write(&stale.path, invalid).expect("fixture");
+        assert!(matches!(stale.save(&current), Err(SaveError::Io(_))));
+        assert!(stale.blocked());
+        assert_eq!(stale.original, original);
+        assert_eq!(fs::read(&stale.path).expect("invalid preserved"), invalid);
+        assert!(stale.save(&current).is_err());
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+    #[test]
+    fn symlink_не_становится_conflict_snapshot() {
+        let root =
+            std::env::temp_dir().join(format!("yonik-prefs-conflict-link-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, p, _) = Store::open(&root);
+        store.save(&p).expect("seed");
+        let original = store.original.clone();
+        fs::rename(&store.path, root.join("victim")).expect("fixture");
+        std::os::unix::fs::symlink(root.join("victim"), &store.path).expect("fixture");
+        assert!(matches!(store.save(&p), Err(SaveError::Io(_))));
+        assert_eq!(store.original, original);
+        assert_eq!(
+            fs::read(root.join("victim")).expect("victim"),
+            original.expect("seed")
+        );
+        fs::remove_dir_all(root).expect("fixture cleanup");
     }
 }

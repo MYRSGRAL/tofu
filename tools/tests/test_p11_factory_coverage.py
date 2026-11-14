@@ -66,6 +66,20 @@ class FactoryCoverage(unittest.TestCase):
         }
         dto_keys = dto_match_keys(source) - neutral
         self.assertEqual(dto_keys - keys, set())
+        # Startup вынесен в приватный модуль, но его operation errors остаются
+        # частью того же закрытого catalog/GUI контракта.
+        startup = (ROOT / "crates/yonik-desktop/src/startup_application.rs").read_text()
+        startup_keys = set(re.findall(r'DesktopError\("([a-z_]+)"\)', startup))
+        factories.update(startup_keys)
+        self.assertTrue(
+            {
+                "startup_conflict",
+                "startup_binding",
+                "startup_timeout",
+                "startup_admission",
+            }
+            <= startup_keys
+        )
         editor = (ROOT / "crates/yonik-desktop/src/editor.rs").read_text()
         editor_keys = set(re.findall(r'(?:Err\(|\|_\|\s*)"([a-z_]+)"', editor))
         self.assertEqual(editor_keys - keys, set())
@@ -80,6 +94,12 @@ class FactoryCoverage(unittest.TestCase):
         # Компактные записи domain/cidr и другие editor keys тоже обязательны.
         mapped.update(re.findall(r"\b([a-z_]+):\s*\[", error_text))
         self.assertEqual(factories - mapped, set())
+        for item in catalog["messages"]:
+            if item["message_key"].startswith("startup_"):
+                self.assertIn(json.dumps(item["ru"], ensure_ascii=False), error_text)
+                self.assertIn(json.dumps(item["en"], ensure_ascii=False), error_text)
+                self.assertEqual(item["stage"], "operation")
+                self.assertFalse(item["retryable"])
         entry = next(
             item for item in catalog["messages"] if item["message_key"] == "catalog"
         )
