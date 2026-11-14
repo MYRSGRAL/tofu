@@ -487,6 +487,7 @@ type NativeAdmission = Result<(
     [u8; 512],
 )>;
 struct NativeRuntime {
+    _permit: Arc<Permit>,
     task_start: u64,
     stamp: Arc<std::sync::Mutex<Option<super::native_bootstrap::RuntimeScopeStamp>>>,
     stop: Arc<AtomicBool>,
@@ -828,7 +829,7 @@ impl SystemWorkerSupervisor {
         )
         .map_err(unavailable)?;
         let leaf = self
-            .launch_lookup_leaf(owner, coverage.lookup_authorization(), cancel, deadline)
+            .launch_lookup_leaf(owner, &coverage, cancel, deadline)
             .await?;
         let coverage = coverage.revalidate(self, owner, cancel).await?;
         let issued = verify_pending(coverage, owner, queue, journal, topology, helper)?;
@@ -879,6 +880,7 @@ impl SystemWorkerSupervisor {
             .map_err(unavailable)?;
         let scope = Arc::new(std::sync::Mutex::new(None));
         self.native_runtime = Some(NativeRuntime {
+            _permit: Arc::clone(&self.permit),
             task_start,
             stamp: Arc::clone(&scope),
             stop,

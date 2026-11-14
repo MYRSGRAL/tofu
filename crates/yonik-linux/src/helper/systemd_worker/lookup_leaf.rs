@@ -250,6 +250,7 @@ fn leaf_empty(name: &str) -> Result<bool> {
 }
 
 pub(super) struct LeafPending {
+    _permit: Arc<Permit>,
     unit: String,
     uid: u32,
     gid: u32,
@@ -260,12 +261,13 @@ impl SystemWorkerSupervisor {
     pub(crate) async fn launch_lookup_leaf(
         &mut self,
         owner: &RunAuthority,
-        authorization: &RunAuthorization,
+        coverage: &crate::helper::native_bootstrap::VerifiedCoverage,
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<VerifiedLookupLeaf> {
+        let authorization = coverage.lookup_authorization();
         authorization.validate_owner(owner).map_err(unavailable)?;
-        if self.lookup_leaf.is_some() {
+        if self.lookup_leaf.is_some() || self.pending != Some(WorkerMode::Run) || self.clean {
             return Err(WorkerSupervisorError::Busy);
         }
         let (nonce, _, _) = authorization.challenge_context().map_err(unavailable)?;
@@ -281,6 +283,7 @@ impl SystemWorkerSupervisor {
         let image = installed_image()?;
         let image_stamp = image_stamp(&image)?;
         let image_sha256 = image_hash(&image)?;
+        coverage.verify_lookup_image(&image)?;
         let (helper, leaf) = rustix::net::socketpair(
             rustix::net::AddressFamily::UNIX,
             rustix::net::SocketType::SEQPACKET,
@@ -292,6 +295,7 @@ impl SystemWorkerSupervisor {
         rustix::net::sockopt::set_socket_passcred(&leaf, true).map_err(unavailable)?;
         let properties = transient_properties(uid, gid, &leaf);
         self.lookup_leaf = Some(LeafPending {
+            _permit: Arc::clone(&self.permit),
             unit: name.clone(),
             uid,
             gid,
@@ -559,6 +563,16 @@ mod tests {
         format!(
             "Uid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\nCapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapBnd:\t0\nCapAmb:\t0\nNoNewPrivs:\t1\n"
         )
+    }
+    #[test]
+    fn transient_name_is_closed_nonce_identity_without_caller_path() {
+        let name = leaf_unit([0xab; 32]);
+        assert_eq!(
+            name,
+            format!("yonik-native-lookup-{}.service", "ab".repeat(32))
+        );
+        assert!(!name.contains('/') && !name.contains(' '));
+        assert_ne!(name, leaf_unit([0xac; 32]));
     }
     #[test]
     fn caps_zero_exact_uid_gid_and_nnp_required() {
