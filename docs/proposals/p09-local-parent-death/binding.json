@@ -1,0 +1,55 @@
+{
+  "base_sha": "59ece58809b749804f1e4fc41eb83bb8be55b6e1",
+  "production_base_sha": "8ea826a04a745c8916e14a4329588c75f66b683e",
+  "finding_sha": "59ece58809b749804f1e4fc41eb83bb8be55b6e1",
+  "patch_sha256": "432646034693b379f08e99557096c4be97aee8a00437d8b6fcee027d06700d5d",
+  "files": {
+    "crates/yonik-nsfs/Cargo.toml": {
+      "before_sha256": "2d15e7f03f35d4be707bc2c2583d7cb0ccac24dc72784176d20fcd8e05d11c4f",
+      "after_sha256": "720731485eaac2a6cbb2e76d8e526f8fa87b8a0f0b8f4d8703ff6e8395b01069"
+    },
+    "crates/yonik-nsfs/src/lib.rs": {
+      "before_sha256": "aff0ef25bec3b2531008e28c3cdf13bde371a1ed5d932caf24e7df5fdf67d84a",
+      "after_sha256": "4b6b4f86cc3fd3a7e598d684d6a3701fa29696b8a4ea61d15bd4c777070f332b"
+    },
+    "crates/yonik-linux/src/host/binary.rs": {
+      "before_sha256": "06322331c8f42c6c275513b207241ba7d957d45760f49d48025ae683af569bed",
+      "after_sha256": "976068a5eb175b87c3c7389f9b49367ebdb37d1ce884a63bb3fcf4f06508acd2"
+    },
+    "crates/yonik-nsfs/src/local_parent_death.rs": {
+      "before_sha256": null,
+      "after_sha256": "709df60edc93f73a617591b0be4d985c46b9e17f93488a4e764098ee47e2a584"
+    }
+  },
+  "supersedes_patch_sha256": "b7b9c2d0f7bb08db43864fb9f206ae75ba33df5e1662316cb921b7020b13c8a2",
+  "correction_parent_sha": "58fd4bfac7a8b447830b4515e270d36ce777b110",
+  "review": "independentR1b649: P2 backend boundary and dependency assertions",
+  "supported_build": {
+    "target": "x86_64-unknown-linux-gnu",
+    "rustix_version": "1.1.6",
+    "required_dependency_cfg": "linux_raw",
+    "forbidden_dependency_cfg": [
+      "libc",
+      "miri",
+      "rustix_use_libc",
+      "rustix_no_linux_raw"
+    ],
+    "forbidden_rustix_features": [
+      "use-libc",
+      "rustc-dep-of-std"
+    ],
+    "receipt_required_before_execution": true,
+    "normal_getppid_no_errno_emulation_required": true
+  },
+  "reviewed_rustix_sources_sha256": {
+    "build.rs": "f7609b919173e7121493266d0f89db724a1e47bb105ebd05397f869639603eec",
+    "src/backend/linux_raw/conv.rs": "1bd94a915370530ef5883c16b984680c7dacb0100a660408716f4b86d0f5ea79",
+    "src/backend/linux_raw/process/syscalls.rs": "f2d930577d97dc9962f6f850d9b5c6fa058b3f15237d94e94543dbc7b33748eb",
+    "src/pid.rs": "31b5cb3f0bb0674a07beb67026a23520d061217b034f40ccaa53c06ddff58336",
+    "src/process/id.rs": "71d82dcce9d3cad4bf4cbfa343be688146829e8d111934e16b5766e066ead36a",
+    "src/process/prctl.rs": "493da650e869e098c34390c2e9b9be8dfd7cfdfdf0139bbdae1f86639c5d9e92",
+    "src/prctl.rs": "86c893026784a698532323a8f05acdab9452b686f62d98de0a7507988dfdf96a",
+    "src/backend/linux_raw/prctl/syscalls.rs": "a18b224307e0d27bda9b7b85c75cd6c7ddfe39f5ce52efb7bb0bf0585b757343",
+    "src/io/errno.rs": "d014b6a4a4d92cda1e75873a074226101b58bccb4b787985ab00517a3dd9b926"
+  }
+}

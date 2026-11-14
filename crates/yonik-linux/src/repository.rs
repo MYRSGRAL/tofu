@@ -265,7 +265,7 @@ impl EncryptedSubscriptionRepository {
         payload: Vec<u8>,
         backup: Option<PathBuf>,
     ) -> Result<SourceRecord> {
-        if !payload_is_v2(&payload) {
+        if payload_version(&payload) != Some(2) {
             return Err(RepositoryError::InvalidInput);
         }
         self.create_source_format(payload, true, backup).await
@@ -315,8 +315,7 @@ impl EncryptedSubscriptionRepository {
             )
             .map_err(storage)?;
             if v2 {
-                tx.execute_batch("PRAGMA user_version=4;")
-                    .map_err(storage)?;
+                preserve_format4(&tx).map_err(storage)?;
                 #[cfg(test)]
                 if db.fail_format4 {
                     return Err(RepositoryError::Storage);
@@ -390,7 +389,7 @@ impl EncryptedSubscriptionRepository {
             let metadata = encrypt(&db.key, &db.id, 3, id, 1, 1, b"{\"version\":1}")?;
             tx.execute("INSERT INTO snapshots(source_id,source_generation,revision,body,metadata,validators) VALUES (?1,1,1,?2,?3,NULL)", params![id, body, metadata]).map_err(storage)?;
             reconcile_checked(&tx, &db.key, &db.id, id, 1, 1, parsed, &|| cancel.check().map_err(|_| SnapshotCommitError::Cancelled)).map_err(compat_commit_error)?;
-            tx.execute_batch("PRAGMA user_version=4;").map_err(storage)?;
+            preserve_format4(&tx).map_err(storage)?;
             #[cfg(test)]
             if db.fail_format4 { return Err(RepositoryError::Storage); }
             #[cfg(test)]
@@ -429,7 +428,7 @@ impl EncryptedSubscriptionRepository {
                 let format: i64 = tx
                     .query_row("PRAGMA user_version", [], |r| r.get(0))
                     .map_err(storage)?;
-                if format != 4 {
+                if !(4..=5).contains(&format) {
                     return Err(RepositoryError::InvalidInput);
                 }
             }
@@ -478,7 +477,7 @@ impl EncryptedSubscriptionRepository {
                 let format: i64 = tx
                     .query_row("PRAGMA user_version", [], |r| r.get(0))
                     .map_err(storage)?;
-                if format != 4 {
+                if !(4..=5).contains(&format) {
                     return Err(RepositoryError::InvalidInput);
                 }
             }
@@ -784,7 +783,7 @@ impl Database {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(storage)?;
-        if version > 4 {
+        if version > 5 {
             return Err(RepositoryError::UnsupportedVersion);
         }
         if version < 0 {
@@ -1735,7 +1734,7 @@ mod tests {
         ));
         let connection = Connection::open(dir.database()).expect("тестовое соединение");
         connection
-            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=5;")
+            .execute_batch("PRAGMA journal_mode=DELETE; PRAGMA user_version=6;")
             .expect("будущая версия");
         drop(connection);
         let before = fs::read(dir.database()).expect("данные");
@@ -2428,7 +2427,7 @@ impl EncryptedSubscriptionRepository {
         }).await
     }
     pub async fn save_routing_draft(&self, expected: i64, payload: Vec<u8>) -> Result<i64> {
-        if payload_is_v2(&payload) {
+        if payload_version(&payload).is_some_and(|v| v != 1) {
             return Err(RepositoryError::InvalidInput);
         }
         self.save_routing_draft_format(expected, payload, false, None)
@@ -2442,6 +2441,18 @@ impl EncryptedSubscriptionRepository {
         backup: Option<PathBuf>,
     ) -> Result<i64> {
         if !payload_is_v2(&payload) {
+            return Err(RepositoryError::InvalidInput);
+        }
+        self.save_routing_draft_format(expected, payload, true, backup)
+            .await
+    }
+    pub async fn save_routing_draft_v3(
+        &self,
+        expected: i64,
+        payload: Vec<u8>,
+        backup: Option<PathBuf>,
+    ) -> Result<i64> {
+        if payload_version(&payload) != Some(3) {
             return Err(RepositoryError::InvalidInput);
         }
         self.save_routing_draft_format(expected, payload, true, backup)
@@ -2461,15 +2472,19 @@ impl EncryptedSubscriptionRepository {
             let revision = expected.checked_add(1).ok_or(RepositoryError::InvalidInput)?;
             let encrypted = encrypt(&db.key, &db.id, 8, 0, 0, revision, &payload)?;
             let tx = db.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
-            if v2 { backup::admit_format4(&tx, &db.key, &db.id, backup.as_deref())?; }
+            if payload_version(&payload) == Some(3) { backup::admit_format5(&tx, &db.key, &db.id, backup.as_deref())?; } else if v2 { backup::admit_format4(&tx, &db.key, &db.id, backup.as_deref())?; }
             let changed = if expected == 0 {
                 tx.execute("INSERT OR IGNORE INTO routing_draft(singleton,revision,payload) VALUES(1,?1,?2)", params![revision, encrypted]).map_err(storage)?
             } else {
                 tx.execute("UPDATE routing_draft SET revision=?1,payload=?2 WHERE singleton=1 AND revision=?3", params![revision, encrypted, expected]).map_err(storage)?
             };
             if changed != 1 { return Err(RepositoryError::Conflict); }
-            if v2 {
-                tx.execute_batch("PRAGMA user_version=4;").map_err(storage)?;
+            if payload_version(&payload) == Some(3) {
+                tx.execute_batch("PRAGMA user_version=5;").map_err(storage)?;
+                #[cfg(test)]
+                if db.fail_format4 { return Err(RepositoryError::Storage); }
+            } else if v2 {
+                preserve_format4(&tx).map_err(storage)?;
                 #[cfg(test)]
                 if db.fail_format4 { return Err(RepositoryError::Storage); }
             }
@@ -2480,13 +2495,27 @@ impl EncryptedSubscriptionRepository {
 }
 
 fn payload_is_v2(payload: &[u8]) -> bool {
+    payload_version(payload) == Some(2)
+}
+
+fn payload_version(payload: &[u8]) -> Option<u8> {
     #[derive(serde::Deserialize)]
     struct Version {
         version: u8,
     }
-    serde_json::from_slice::<Version>(payload).is_ok_and(|v| v.version == 2)
+    serde_json::from_slice::<Version>(payload)
+        .ok()
+        .map(|v| v.version)
 }
 
 #[cfg(test)]
 #[path = "repository/format4_tests.rs"]
 mod format4_tests;
+
+fn preserve_format4(tx: &Connection) -> rusqlite::Result<()> {
+    let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version < 4 {
+        tx.execute_batch("PRAGMA user_version=4;")?;
+    }
+    Ok(())
+}

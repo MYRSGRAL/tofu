@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "tested_base": "cc66e4a15009e77d92bf9215be53387e3c532ced",
+  "fix": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
+  "unit_passed": 118,
+  "unit_ignored": 1,
+  "mutant_expected_exit": 101,
+  "clippy_all_targets": "PASS",
+  "fmt": "PASS",
+  "source_pre_post_identical": true,
+  "artifacts": {
+    "source-pre.json": "b2c9a93cee03d07ee9271761dc64214e659cad56bae1a424ecda3bb3acd7eeb9",
+    "source.patch": "b9010de9ceeb1d1bdacb9cfaffbd89595f37cd9645ee31cdfdd0ee40caa19cbc",
+    "source.tar.gz": "0c47980291619a871cf41d95bb7f45c7dfe3a4a34f08d01a2efd4b19c1f5b077",
+    "desktop-tests": "cfa2c1d08e16072fd05aa11a6257af818765cbf308c95ef432d5c38f9d8a9976",
+    "binding-before-execute.json": "e344a05f77c697f28b9908b51b2b2383902078182a543767dec1349040e46ccc",
+    "green.stdout": "63115efab95ba65cc8819ad02df99fe6bce1dd3721f9df4ced148826e7a3ee52",
+    "mutant-red.stdout": "bdd2e4f73e53d4134c510b8861a0b87777bfb2ece95337b4a1ecf8adc19eca57",
+    "clippy.result.json": "8f0e0426bfa004512aa6496e4ba9501b895c29d45c166bd5b5ed72c2b7d6bab8",
+    "fmt.result.json": "fdf1e45b022a16d36c1b02ed73c155194b8cf2f1c769f82f297f19a8f0d14517",
+    "source-post.json": "b2c9a93cee03d07ee9271761dc64214e659cad56bae1a424ecda3bb3acd7eeb9",
+    "clean.result.json": "c3acf7f3bf088889b7bb642a6ef9b67b6fd1bed2e424e5553789f3ecaf43beb2"
+  },
+  "evidence_root": "/home/myrs/projects/yonik/local/orchestration/evidence/p11-replacement-typed-20261114",
+  "whole_merged_runtime": false,
+  "A4_main_integration": {
+    "head": "964a8739896fd7740d8a2d9f78407f58d6d76260",
+    "accepted_main": "c079e9dea02cd34376d7103dc765c0ab43c71802",
+    "stack_merge": "9337a518affd87255c747e6c2f9d81cf4f25d632",
+    "leaf": "5af224ddfe2ec9398bb7a3637d1a31f10239031d",
+    "review": "R2 932b7107 exact union CLEAN; A4 prior scoped reviews preserved",
+    "fullA4": false
+  },
+  "full_linux_acceptance": false,
+  "final_freshness_gate": {
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/home/myrs/projects/yonik/local/orchestration/evidence/p11-replacement-typed-20261114/final-port-freshness-gate.log",
+    "sha256": "f14752120ed42bb997751048f6d70d28a822192f350783e347f840d3899fb71c"
+  },
+  "original_P11_promotion": "conditional on exact final CI and merge, per R1 a8b6f83b/R2 932b7107; historical marker unchanged",
+  "proposed_PLAN_counts": {
+    "ready": 8,
+    "partial": 16,
+    "deferred": 2,
+    "denominator": 26
+  },
+  "port_feature": {
+    "head": "b3792c9abc13e100f2fbdd9435e2555362dd444c",
+    "merge": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
+    "review": "R1 188f726b CLEAN",
+    "prior_CI": "8 SUCCESS; two Python failures solely stale P11 source binding",
+    "fresh_merged_head_CI_required": true,
+    "final_P11_connections_review": "R2 824cd624 CLEAN fcc44e3"
+  }
+}

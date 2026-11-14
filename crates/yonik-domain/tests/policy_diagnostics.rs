@@ -7,6 +7,7 @@ fn rule(id: u64, paths: &[&str], nets: &[&str], domains: &[&str]) -> Rule {
         enabled: true,
         action: Action::Block,
         conditions: Conditions {
+            transport: Default::default(),
             platform_sources: vec![],
             executables: paths.iter().map(|v| v.to_string()).collect(),
             destinations: nets.iter().map(|v| v.parse().unwrap()).collect(),

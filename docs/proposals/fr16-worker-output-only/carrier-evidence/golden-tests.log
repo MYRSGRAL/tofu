@@ -1,0 +1,6 @@
+
+running 2 tests
+test worker::output_transport::golden_compat::ynkrole1_exact_static_vector ... ok
+test worker::output_transport::golden_compat::abi260_byte_exact_reference_and_existing_vectors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 605 filtered out; finished in 0.00s

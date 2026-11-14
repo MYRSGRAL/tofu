@@ -23,3 +23,6 @@ pub mod policy_diagnostics;
 
 mod resources;
 pub use resources::{ResourceConditions, ResourceRule};
+
+mod transport;
+pub use transport::{DestinationPorts, TransportConditions, TransportWitness};

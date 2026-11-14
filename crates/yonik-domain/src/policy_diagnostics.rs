@@ -154,7 +154,9 @@ pub fn diagnose(policy: &Policy, limits: Limits) -> Result<Report, InputError> {
                     continue;
                 }
                 // Разные CIDR могут совпасть на разных адресах одного DNS-ответа.
-                let shadowed = action.is_some()
+                let shadowed = (!conditions.transport.constrained()
+                    || conditions.transport == c.transport)
+                    && action.is_some()
                     && subset(&conditions.executables, &c.executables, |a, b| a == b)
                     && subset(&conditions.domains, &c.domains, domain_covers)
                     && subset(&conditions.destinations, &c.destinations, cidr_covers);
@@ -179,6 +181,7 @@ pub fn diagnose(policy: &Policy, limits: Limits) -> Result<Report, InputError> {
                 origin(rule.id),
                 Some(rule.action),
                 Conditions {
+                    transport: c.transport.clone(),
                     platform_sources: vec![],
                     executables: c.executables.clone(),
                     destinations: c.destinations.clone(),

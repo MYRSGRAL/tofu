@@ -1,0 +1,10 @@
+{
+  "base": "3247e6c32a5ed83ec5d812dfc1f70695d3f2b3b4",
+  "codec_review_only": "e1970210190b7e89ab9ffd06a0a33203dec82d85",
+  "local_socks_review_only": "1c1786ce4d3df6654d21c235b6f65dd7ac2b6132",
+  "patch_sha256": "816618caeaf1118d339393fa07b34ac66cf7595b0c8c89fb0e08f82e1a89e6e8",
+  "compiled": false,
+  "executed": false,
+  "applied": false,
+  "production_registered": false
+}

@@ -10,6 +10,9 @@ fn validate_inner(
     policy: &Policy,
     checkpoint: &dyn Fn() -> Result<(), PolicyCompileError>,
 ) -> Result<(), PolicyCompileError> {
+    if let Some(id) = policy.unsupported_transport() {
+        return Err(PolicyCompileError::UnsupportedTransport(id));
+    }
     if let Some(id) = policy.unsupported_selector() {
         return Err(PolicyCompileError::UnsupportedSelector(id));
     }

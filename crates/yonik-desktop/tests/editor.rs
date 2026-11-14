@@ -9,6 +9,7 @@ fn составной_dto_сохраняет_таблицу_истинности
     draft
         .put(
             RuleInput {
+                transport: None,
                 platform_sources: None,
                 id: 41,
                 enabled: true,
@@ -75,6 +76,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
             draft
                 .put(
                     RuleInput {
+                        transport: None,
                         platform_sources: None,
                         id,
                         enabled: true,
@@ -91,6 +93,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
         draft
             .put(
                 RuleInput {
+                    transport: None,
                     platform_sources: None,
                     id: count + 1,
                     enabled: true,
@@ -141,6 +144,7 @@ fn обновление_id_сохраняет_порядок_и_решения_�
 fn compound_roundtrip_and_invalid_input_preserve_draft() {
     let mut draft = Draft::default();
     let rule = RuleInput {
+        transport: None,
         platform_sources: None,
         id: 1,
         enabled: true,
@@ -163,6 +167,7 @@ fn compound_roundtrip_and_invalid_input_preserve_draft() {
 fn broad_confirmation_ids_and_limits() {
     let mut draft = Draft::default();
     let mut rule = RuleInput {
+        transport: None,
         platform_sources: None,
         id: 1,
         enabled: true,
@@ -240,6 +245,7 @@ fn bounded_diagnostics_keep_identity_and_disabled_semantics() {
         draft
             .put(
                 RuleInput {
+                    transport: None,
                     platform_sources: None,
                     id,
                     enabled: id != 3,
@@ -283,6 +289,7 @@ fn explanation_uses_evaluator_without_claiming_runtime_witness() {
     draft
         .put(
             RuleInput {
+                transport: None,
                 platform_sources: None,
                 id: 7,
                 enabled: true,
@@ -313,6 +320,7 @@ fn truncated_report_is_explicit_and_preserves_policy() {
         draft
             .put(
                 RuleInput {
+                    transport: None,
                     platform_sources: None,
                     id,
                     enabled: true,
@@ -361,7 +369,7 @@ fn p07_closed_v2_preserves_disabled_and_rejects_enabled_before_witness() {
     for invalid in [
         raw.replace("org.Example_app", "org.1app"),
         raw.replace("android_package", "future"),
-        raw.replace("\"version\":2", "\"version\":3"),
+        raw.replace("\"version\":2", "\"version\":4"),
         raw.replace("\"package\":", "\"extra\":true,\"package\":"),
     ] {
         assert!(Draft::parse(&invalid).is_err());
@@ -396,6 +404,7 @@ async fn p07_migration_cas_reopen() {
     draft
         .put(
             RuleInput {
+                transport: None,
                 id: 41,
                 enabled: false,
                 executables: vec![],
@@ -463,6 +472,7 @@ async fn p07_migration_cas_reopen() {
 fn p07_bounds_and_v2_required_field() {
     use yonik_engine::platform_source::PlatformSourceInput;
     let rule = RuleInput {
+        transport: None,
         id: 1,
         enabled: false,
         executables: vec![],
@@ -547,4 +557,32 @@ fn explain_использует_разрешённый_preset_и_p07_guard() {
     assert_eq!(result["status"], "unsupported");
     assert_eq!(result["reason"], "unsupported_selector");
     assert_eq!(result["rule_id"], 77);
+}
+
+#[test]
+fn транспорт_v3_редактор_roundtrip_и_отказ_активации() {
+    let raw = r#"{"version":3,"default_action":"proxy","rules":[{"id":1,"enabled":false,"executables":["/fixture/app"],"domains":["example.org"],"destinations":["192.0.2.0/24"],"action":"block","platform_sources":[],"transport":{"transport_protocols":["tcp"],"destination_ports":[[443,443]]}}]}"#;
+    let mut draft = Draft::parse(raw).unwrap();
+    let before: serde_json::Value = serde_json::from_str(&draft.json()).unwrap();
+    let mut rule = draft.rules[0].clone();
+    rule.domains = vec!["other.example".into()];
+    draft.put(rule, false).unwrap();
+    let wire = draft.system_policy().unwrap();
+    assert!(
+        wire.policy().user_rules[0]
+            .conditions
+            .transport
+            .constrained()
+    );
+    let after = Draft::parse(&draft.json()).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&after.json()).unwrap()["rules"][0]["transport"],
+        before["rules"][0]["transport"]
+    );
+    draft.rules[0].enabled = true;
+    assert!(matches!(
+        draft.system_policy(),
+        Err(yonik_engine::policy_input::PolicyInputError::UnsupportedTransport(1))
+    ));
+    assert!(Draft::parse(&raw.replace("\"version\":3", "\"version\":2")).is_err());
 }

@@ -1,0 +1,82 @@
+--- /dev/null
++++ b/crates/yonik-linux/src/worker/output_v1.rs
+@@ -0,0 +1,79 @@
++//! Предлагаемые закрытые проверки FR16. Модуль намеренно не зарегистрирован.
++use super::{WorkerError, WorkerMode, decode_bundle_header};
++use std::os::fd::OwnedFd;
++use rustix::{fs::{FileType, OFlags, fcntl_getfl, fstat, fstatfs}, io::{FdFlags, fcntl_getfd}};
++
++const OUTPUT_HEADER: usize = 112;
++const RESOURCE_RECORD: usize = 54;
++const MAX_RESOURCES: usize = 16;
++const PIPEFS_MAGIC: u64 = 0x5049_5045;
++
++// JSON передаёт только существующий prepared handle, без scope/output authority.
++#[derive(serde::Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(super) struct ApplyOutputRequest {
++    version: u32,
++    handle: [u8; 32],
++}
++impl ApplyOutputRequest {
++    pub(super) fn parse(json: &str) -> Result<crate::helper::PreparedHandle, WorkerError> {
++        if json.len() > 4096 || !json.trim_start().starts_with('{') {
++            return Err(WorkerError::Protocol);
++        }
++        let value: Self = serde_json::from_str(json).map_err(|_| WorkerError::Protocol)?;
++        if value.version != 1 {
++            return Err(WorkerError::Protocol);
++        }
++        crate::helper::PreparedHandle::try_from(value.handle.as_slice())
++            .map_err(|_| WorkerError::Protocol)
++    }
++}
++
++// Результат проверки не заменяет claim/auth и не разрешает запуск.
++pub(super) fn validate_header(bytes: &[u8], mode: WorkerMode, fd_count: usize) -> Result<(), WorkerError> {
++    if bytes.len() < OUTPUT_HEADER || bytes.get(..8) != Some(b"YNKWRK\0\x03") || mode != WorkerMode::Run {
++        return Err(WorkerError::Protocol);
++    }
++    let resources = usize::from(bytes[10]);
++    if resources > MAX_RESOURCES || bytes.len() != OUTPUT_HEADER + RESOURCE_RECORD * resources
++        || fd_count != 4 + resources || bytes[96..100] != [0, 2, 1, 2]
++        || bytes[100..112] != [0; 12] || bytes[11] != 0 {
++        return Err(WorkerError::Protocol);
++    }
++    // Внутренняя проверочная проекция; исходный wire остаётся V3, повторной отправки нет.
++    let mut checked = bytes[..96].to_vec();
++    if resources == 0 {
++        if checked[80..96] != [0; 16] { return Err(WorkerError::Protocol); }
++        checked.truncate(80);
++        checked[7] = 1;
++    } else {
++        checked[7] = 2;
++        checked.extend_from_slice(&bytes[112..]);
++    }
++    let (header, _, _) = decode_bundle_header(&checked)?;
++    if header.mode != WorkerMode::Run { return Err(WorkerError::Protocol); }
++    Ok(())
++}
++
++// Без Clone, доступа к отдельным ролям и общего attach(Command).
++pub(super) struct RunOutputWriters { _stdout: OwnedFd, _stderr: OwnedFd }
++impl RunOutputWriters {
++    pub(super) fn validate(fds: Vec<OwnedFd>) -> Result<Self, WorkerError> {
++        let [stdout, stderr]: [OwnedFd; 2] = fds.try_into().map_err(|_| WorkerError::Protocol)?;
++        let identity = |fd: &OwnedFd| -> Result<_, WorkerError> {
++            let stat = fstat(fd).map_err(|_| WorkerError::Io)?;
++            let fs = fstatfs(fd).map_err(|_| WorkerError::Io)?;
++            let flags = fcntl_getfl(fd).map_err(|_| WorkerError::Io)?;
++            let fd_flags = fcntl_getfd(fd).map_err(|_| WorkerError::Io)?;
++            if FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
++                || fs.f_type as u64 != PIPEFS_MAGIC
++                || flags & OFlags::ACCMODE != OFlags::WRONLY
++                || flags.contains(OFlags::NONBLOCK) || !fd_flags.contains(FdFlags::CLOEXEC) {
++                return Err(WorkerError::Protocol);
++            }
++            Ok((stat.st_dev, stat.st_ino))
++        };
++        if identity(&stdout)? == identity(&stderr)? { return Err(WorkerError::Protocol); }
++        Ok(Self { _stdout: stdout, _stderr: stderr })
++    }
++}
