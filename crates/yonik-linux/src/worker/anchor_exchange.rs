@@ -332,6 +332,13 @@ impl Challenge {
                 .lock()
                 .map_err(|_| WorkerError::Protocol)? = data_v4;
         }
+        if offer == b"YNKANC04" {
+            *observation
+                .custody
+                .handoff
+                .lock()
+                .map_err(|_| WorkerError::Protocol)? = Some(rx);
+        }
         Ok(observation)
     }
 }
@@ -398,18 +405,43 @@ pub struct NamespaceIdentity([(u64, u64); 3]);
 
 struct NamespaceCustody {
     fds: Mutex<Option<[OwnedFd; 2]>>,
-    expires: Instant,
+    expires: Mutex<Option<Instant>>,
     kernel: Mutex<Option<KernelObservation>>,
+    handoff: Mutex<Option<OwnedFd>>,
+    revoked: std::sync::atomic::AtomicBool,
     data_v4: Mutex<Option<[u8; 512]>>,
     bound_v4: Mutex<bool>,
 }
 pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
 impl NamespaceRevocation {
     pub(crate) fn revoke(&self) {
-        self.0.close();
+        self.0.deny();
     }
 }
 impl NamespaceCustody {
+    fn deny(&self) {
+        self.revoked
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.data_v4
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.handoff
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+    fn expired(&self) -> bool {
+        self.revoked.load(std::sync::atomic::Ordering::Acquire)
+            || self
+                .expires
+                .lock()
+                .map_or(true, |expiry| expiry.is_some_and(|e| Instant::now() >= e))
+    }
     fn close(&self) {
         // При poisoning возможен только отказ: извлекаем и закрываем custody.
         let mut fds = self
@@ -438,23 +470,13 @@ impl NamespaceObservation {
         }
         let custody = Arc::new(NamespaceCustody {
             fds: Mutex::new(Some(net_pid)),
-            expires,
+            expires: Mutex::new(Some(expires)),
             kernel: Mutex::new(None),
+            handoff: Mutex::new(None),
+            revoked: std::sync::atomic::AtomicBool::new(false),
             data_v4: Mutex::new(None),
             bound_v4: Mutex::new(false),
         });
-        let timer = Arc::downgrade(&custody);
-        // Не продлевает namespace custody: timer содержит только Weak, FD не dup.
-        // В production максимум одна fresh Run invocation у supervisor Permit.
-        std::thread::Builder::new()
-            .name("yonik-ns-lease".into())
-            .spawn(move || {
-                std::thread::sleep(expires.saturating_duration_since(Instant::now()));
-                if let Some(custody) = timer.upgrade() {
-                    custody.close()
-                }
-            })
-            .map_err(|_| WorkerError::Io)?;
         Ok(Self {
             custody,
             identities: NamespaceIdentity(identities),
@@ -489,6 +511,37 @@ impl NamespaceObservation {
         *observation.custody.kernel.lock().unwrap() = Some(report);
         observation
     }
+    pub(crate) fn take_handoff(&self) -> Result<OwnedFd, WorkerError> {
+        if self.custody.expired() {
+            return Err(WorkerError::Timeout);
+        }
+        self.custody
+            .handoff
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .take()
+            .ok_or(WorkerError::Protocol)
+    }
+    pub(crate) fn promote_runtime(
+        &self,
+        stamp: &crate::helper::native_bootstrap::RuntimeScopeStamp,
+    ) -> Result<(), WorkerError> {
+        stamp.validate_admission().map_err(|_| WorkerError::Peer)?;
+        if stamp.namespace_identity() != self.identity() {
+            return Err(WorkerError::Peer);
+        }
+        let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
+        let mut expiry = self
+            .custody
+            .expires
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        if fds.is_none() || expiry.is_none_or(|e| Instant::now() >= e) {
+            return Err(WorkerError::Timeout);
+        }
+        *expiry = None;
+        Ok(())
+    }
     pub(crate) fn bind_run(
         &self,
         nonce: [u8; 32],
@@ -497,7 +550,7 @@ impl NamespaceObservation {
         epoch: u64,
     ) -> Result<(), WorkerError> {
         let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
-        if fds.is_none() || Instant::now() >= self.custody.expires || epoch == 0 {
+        if fds.is_none() || self.custody.expired() || epoch == 0 {
             return Err(WorkerError::Timeout);
         }
         if let Some(data) = self
@@ -547,7 +600,14 @@ impl NamespaceObservation {
         &self.identities
     }
     pub fn retained_namespace_count(&self) -> usize {
-        if Instant::now() >= self.custody.expires {
+        if self
+            .custody
+            .revoked
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return 0;
+        }
+        if self.custody.expired() {
             self.custody.close()
         }
         self.custody
@@ -558,7 +618,7 @@ impl NamespaceObservation {
             .map_or(0, |fds| fds.len())
     }
     pub fn revoke(&self) {
-        self.custody.close()
+        self.custody.deny()
     }
 }
 impl Drop for NamespaceObservation {

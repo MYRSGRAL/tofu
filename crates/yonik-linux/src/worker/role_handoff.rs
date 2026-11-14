@@ -372,6 +372,32 @@ impl ProductionPermit {
         transport_send(socket, roles, binding, worker_pid, worker_uid, deadline)
     }
 }
+/// Consuming sender сохраняет owning stamp у supervisor до первой отправки.
+pub(crate) fn handoff_verified_run(
+    run: crate::helper::native_bootstrap::RunRole,
+    socket: &OwnedFd,
+    roles: Roles,
+    binding: &Binding,
+    pid: u32,
+    uid: u32,
+    deadline: Instant,
+    retain: impl FnOnce(crate::helper::native_bootstrap::RuntimeScopeStamp),
+) -> Result<(), WorkerError> {
+    run.validate().map_err(|_| WorkerError::Peer)?;
+    let (nonce, session, generation, invocation, epoch, digest) =
+        run.context().map_err(|_| WorkerError::Peer)?;
+    if nonce != binding.nonce
+        || session != binding.session
+        || generation != binding.generation
+        || invocation != binding.invocation
+        || epoch != binding.epoch
+        || digest != binding.digest
+    {
+        return Err(WorkerError::Peer);
+    }
+    retain(run.into_guard());
+    transport_send(socket, roles, binding, pid, uid, deadline)
+}
 fn transport_send(
     socket: &OwnedFd,
     roles: Roles,
