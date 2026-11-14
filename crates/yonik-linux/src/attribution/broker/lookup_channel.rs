@@ -150,7 +150,10 @@ pub(super) fn credentials(value: net::UCred, pid: u32, uid: u32) -> Result<(), U
     Ok(())
 }
 pub(super) fn fence(deadline: Instant) -> Result<(), Unavailable> {
-    if Instant::now() >= deadline {
+    fence_at(deadline, Instant::now())
+}
+pub(super) fn fence_at(deadline: Instant, now: Instant) -> Result<(), Unavailable> {
+    if now >= deadline {
         Err(Unavailable::Timeout)
     } else {
         Ok(())

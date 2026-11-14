@@ -156,9 +156,6 @@ impl CapturedBusPeer {
     pub(crate) fn start(&self) -> u64 {
         self.0.start
     }
-    pub(crate) fn nonce(&self) -> [u8; 32] {
-        self.0.nonce
-    }
     pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
         self.0.validate()
     }
@@ -344,10 +341,6 @@ impl FixturePeerProcess {
             }
         }
         self.verify_pidfd()
-    }
-    pub(crate) fn verified_uid(&self) -> Result<u32, AttributionFailure> {
-        self.verify_identity()?;
-        Ok(self.uid)
     }
     fn verify_pidfd(&self) -> Result<(), AttributionFailure> {
         use std::os::fd::AsRawFd;
