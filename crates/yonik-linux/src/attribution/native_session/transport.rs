@@ -761,6 +761,37 @@ pub(super) mod tests {
         }
     }
     #[test]
+    fn owned_ipc_ready_after_ack_runtime_survives_bootstrap_deadline() {
+        let (session, peer, _) = fixture();
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&cancel);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            session.serve_with_ready(&flag, || {
+                ready_tx.send(()).map_err(|_| Unavailable::Disconnected)
+            })
+        });
+        handshake(&peer, true);
+        ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        std::thread::sleep(Duration::from_nanos(wire::BOOTSTRAP_NS) + Duration::from_millis(30));
+        assert!(!thread.is_finished());
+        cancel.store(true, Ordering::Release);
+        assert_eq!(thread.join().unwrap(), Err(Unavailable::Cancelled));
+    }
+    #[test]
+    fn owned_ipc_missing_ack_never_signals_ready() {
+        let (session, peer, _) = fixture();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            session.serve_with_ready(&AtomicBool::new(false), || {
+                ready_tx.send(()).map_err(|_| Unavailable::Disconnected)
+            })
+        });
+        handshake(&peer, false);
+        assert_eq!(thread.join().unwrap(), Err(Unavailable::Timeout));
+        assert!(ready_rx.try_recv().is_err());
+    }
+    #[test]
     fn socket_ack_timeout_and_revoke() {
         let (session, peer, _metadata) = fixture();
         let thread = std::thread::spawn(move || session.serve(&AtomicBool::new(false)));

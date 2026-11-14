@@ -253,9 +253,9 @@ impl VerifiedInstalledProfile {
 mod tests {
     use super::*;
     fn metadata() -> serde_json::Value {
-        serde_json::json!({ "schema":1, "worker_sha256":[1;32].to_vec(),
-            "source_archive_sha256":[2;32].to_vec(),"policy_id":POLICY,
-            "policy_sha256":[3;32].to_vec(),"kernel_release":"6.18.1-test", 
+        serde_json::json!({ "schema":1, "worker_sha256":vec![1u8;32],
+            "source_archive_sha256":vec![2u8;32],"policy_id":POLICY,
+            "policy_sha256":vec![3u8;32],"kernel_release":"6.18.1-test",
             "kernel_machine":std::env::consts::ARCH,"kernel_abi":ABI })
     }
     #[test]
