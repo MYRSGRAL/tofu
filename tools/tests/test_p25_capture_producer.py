@@ -18,7 +18,10 @@ def test_missing_is_retained(tmp_path: Path) -> None:
         root.mkdir()
     (build / "release").mkdir()
     (build / "release/elf").write_bytes(b"fixture")
-    frozen = {"source": {"commit": "a" * 40, "tree": "b" * 40}, "archive_sha256": "c" * 64}
+    frozen = {
+        "source": {"commit": "a" * 40, "tree": "b" * 40},
+        "archive_sha256": "c" * 64,
+    }
     commands = [{"argv": ["slot", "cargo", "build"], "cwd": str(source), "exit": 0}]
     result = p.retain(source, build, retained, frozen, commands, ["elf"], "target")
     assert result["status"] == "MISSING"

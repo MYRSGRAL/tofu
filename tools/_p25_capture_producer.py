@@ -27,14 +27,16 @@ def _directory(path: Path) -> int:
         raise
 
 
-def _write(path: Path, value: dict) -> str:
+def _write(path: Path, value: dict, limit: int = MAX_METADATA) -> str:
     data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode()
-    require(len(data) <= MAX_METADATA, "Capture metadata превышает cap")
+    require(len(data) <= limit, "Capture metadata превышает cap")
     directory = _directory(path.parent)
     try:
         fd = os.open(
-            path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600, dir_fd=directory,
+            path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory,
         )
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
@@ -54,53 +56,120 @@ def retain(
     commands: list[dict],
     elfs: list[str],
     target: str,
+    final_profile: bool = False,
 ) -> dict:
     """Вызывать только после новых Rust builds под controller lock, до clean.
 
     Текущий profile не экспортирует CXX/query metadata. Отсутствие этих records
     нельзя заменять SDK inventory, командами recipe или diagnostic include chain.
     """
-    require(bool(commands) and all(row.get("exit") == 0 for row in commands),
-            "Нет успешных observed Rust commands")
-    require(all(row.get("cwd") == str(source) for row in commands), "Command cwd mismatch")
+    require(
+        bool(commands) and all(row.get("exit") == 0 for row in commands),
+        "Нет успешных observed Rust commands",
+    )
+    require(
+        all(row.get("cwd") == str(source) for row in commands), "Command cwd mismatch"
+    )
     require(bool(elfs) and len(elfs) == len(set(elfs)), "Неполный ELF whitelist")
-    require(not retained.is_relative_to(build.parent), "Retention внутри transient task")
-    sdk = build.parent / "capture-empty-sdk"
-    sdk.mkdir(mode=0o700)
+    require(
+        not retained.is_relative_to(build.parent), "Retention внутри transient task"
+    )
+    if final_profile:
+        sdk = build.parent / "capture-sdk"
+        sdk.mkdir(mode=0o700)
+    else:
+        sdk = build.parent / "capture-empty-sdk"
+    if not final_profile:
+        sdk.mkdir(mode=0o700)
     roots = {"source": source, "build": build, "sdk": sdk}
     files = []
     with ExitStack() as stack:
         reader = Reader(roots, stack)
         for index, name in enumerate(elfs):
-            _, checksum = reader._consume("build", "release/" + name, 512 * 1024 * 1024, False)
-            files.append({"id": f"elf-{index}", "root": "build", "path": "release/" + name,
-                          "kind": "elf", "sha256": checksum})
+            _, checksum = reader._consume(
+                "build", "release/" + name, 512 * 1024 * 1024, False
+            )
+            files.append(
+                {
+                    "id": f"elf-{index}",
+                    "root": "build",
+                    "path": "release/" + name,
+                    "kind": "elf",
+                    "sha256": checksum,
+                }
+            )
     record = {
         "schema": 1,
-        "source": {**frozen["source"], "archive_sha256": frozen["archive_sha256"], "tracked_inputs": []},
-        "profile": {"target": target, "commands": [row["argv"] for row in commands], "features": ["gui"]},
-        "files": files, "elfs": [row["id"] for row in files],
-        "qt_version": None, "units": [], "generated": [], "primary_refs": [],
+        "source": {
+            **frozen["source"],
+            "archive_sha256": frozen["archive_sha256"],
+            "tracked_inputs": [],
+        },
+        "profile": {
+            "target": target,
+            "commands": [row["argv"] for row in commands],
+            "features": ["gui"],
+        },
+        "files": files,
+        "elfs": [row["id"] for row in files],
+        "qt_version": None,
+        "units": [],
+        "generated": [],
+        "primary_refs": [],
     }
+    positive = None
+    if final_profile:
+        from _p25_final_profile import enrich
+
+        positive = enrich(roots, record, retained)
     pin = _write(build / "capture-record.json", record)
     report = capture(roots, "capture-record.json", pin)
-    require(report["status"] == "MISSING", "Текущий producer не доказывает CXX/Qt closure")
+    require(
+        report["status"] == "MISSING",
+        "Producer без source/legal join не может дать CAPTURED",
+    )
     _write(retained / "build-capture-record.json", record)
-    report_pin = _write(retained / "build-capture-report.json", report)
+    report_pin = _write(
+        retained / "build-capture-report.json", report, 32 * MAX_METADATA
+    )
     manifest = {
-        "schema": 1, "status": report["status"], "missing": report["missing"],
-        "producer_missing": ["cxx:invocations", "cxx:normalized-depfiles",
-                             "generated:paths-and-generation-records", "qt:observed-query-and-tool",
-                             "qt:header-source-primary-join"],
-        "source": record["source"], "observed_commands": commands,
-        "record_sha256": pin, "report_sha256": report_pin,
-        "elfs": files, "final_linux_acceptance": False,
-        "legal_status": "NOTPROVEN", "production_admission_gate": False,
-        "invocation": ["python3", "tools/p25_capture_build_closure.py",
-                       "--source-root", str(source), "--build-root", str(build),
-                       "--sdk-root", str(sdk), "--record", "capture-record.json",
-                       "--record-sha256", pin],
+        "schema": 1,
+        "status": report["status"],
+        "missing": report["missing"],
+        "producer_missing": [
+            "cxx:invocations",
+            "cxx:normalized-depfiles",
+            "generated:paths-and-generation-records",
+            "qt:observed-query-and-tool",
+            "qt:header-source-primary-join",
+        ],
+        "source": record["source"],
+        "observed_commands": commands,
+        "record_sha256": pin,
+        "report_sha256": report_pin,
+        "elfs": [row for row in files if row["kind"] == "elf"],
+        "final_linux_acceptance": False,
+        "legal_status": "NOTPROVEN",
+        "production_admission_gate": False,
+        "invocation": [
+            "python3",
+            "tools/p25_capture_build_closure.py",
+            "--source-root",
+            str(source),
+            "--build-root",
+            str(build),
+            "--sdk-root",
+            str(sdk),
+            "--record",
+            "capture-record.json",
+            "--record-sha256",
+            pin,
+        ],
     }
+    if positive is not None:
+        manifest["producer_missing"] = positive["producer_missing"]
+        manifest["positive_metadata"] = positive
+        manifest["final_profile"] = frozen["final_profile"]
     _write(retained / "build-capture-manifest.json", manifest)
     fd = _directory(retained)
     try:

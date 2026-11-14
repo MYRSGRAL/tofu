@@ -235,11 +235,57 @@ def tooling_hashes() -> dict[str, str]:
     }
 
 
-def _freeze(repo: Path, registry: Path, release: str, commit: str) -> dict:
+def final_capture_profile() -> dict:
+    from _p25_final_profile import PROFILE
+
+    names = (
+        "_p25_final_profile.py",
+        "p25_cxx_capture_wrapper.py",
+        "_p25_capture_producer.py",
+        "p25_capture_build_closure.py",
+    )
+    body = {
+        "spec": PROFILE,
+        "tooling_sha256": {name: sha(Path(__file__).parent / name) for name in names},
+    }
+    return {**body, "sha256": digest(json.dumps(body, sort_keys=True).encode())}
+
+
+def verify_final_profile(record: dict) -> bool:
+    if "final_profile" not in record:
+        return False
+    if record["release_id"] in (RUST_REUSE_TARGET, COLLECTED_REUSE_TARGET):
+        raise NotReady("Final instrumentation запрещён для historical reuse")
+    if record["final_profile"] != final_capture_profile():
+        raise NotReady("Final instrumentation profile/tooling hash mismatch")
+    return True
+
+
+def _freeze(
+    repo: Path,
+    registry: Path,
+    release: str,
+    commit: str,
+    final_profile: str | None = None,
+) -> dict:
     release_name(release)
     registry_path(registry)
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise NotReady("Root должен выбрать полный source SHA")
+    selected = None
+    if final_profile is not None:
+        if final_profile != "p25-final-cxx-v1" or release in (
+            RUST_REUSE_TARGET,
+            COLLECTED_REUSE_TARGET,
+        ):
+            raise NotReady("Неверный final profile/reuse")
+        selected = final_capture_profile()
+        for name, checksum in selected["tooling_sha256"].items():
+            if digest(git(repo, "show", commit + ":tools/" + name)) != checksum:
+                raise NotReady("Final source не содержит frozen capture tooling")
+        wrapper_entry = git(repo, "ls-tree", commit, "tools/p25_cxx_capture_wrapper.py")
+        if not wrapper_entry.startswith(b"100755 blob "):
+            raise NotReady("Frozen CXX wrapper должен быть executable")
     source = {
         "commit": git(repo, "rev-parse", commit + "^{commit}").decode().strip(),
         "tree": git(repo, "rev-parse", commit + "^{tree}").decode().strip(),
@@ -263,16 +309,20 @@ def _freeze(repo: Path, registry: Path, release: str, commit: str) -> dict:
             "recipe": RECIPE,
             "tooling_sha256": tooling_hashes(),
         }
+        if selected is not None:
+            record["final_profile"] = selected
         write_record(directory / "frozen.json", record)
         return record
     finally:
         os.close(fd)
 
 
-def freeze_release(release: str, commit: str) -> dict:
+def freeze_release(release: str, commit: str, final_profile: str | None = None) -> dict:
     """Root/CI выбирает SHA; архив всегда получается самим controller из Git."""
     repo = canonical_repo()
-    return _freeze(repo, repo / "local/release-controller", release, commit)
+    return _freeze(
+        repo, repo / "local/release-controller", release, commit, final_profile
+    )
 
 
 def core_metadata(root: Path) -> dict:
@@ -1075,6 +1125,7 @@ def _collect(
             raise NotReady("Release уже collected; перезапись запрещена")
         if record["tooling_sha256"] != tooling_hashes():
             raise NotReady("Controller tooling изменился после freeze")
+        final_profile = verify_final_profile(record)
         task.mkdir(mode=0o700)
         task_fd = os.open(task, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -1100,6 +1151,15 @@ def _collect(
                     elf_records = rust_lineage["elf"]
                 else:
                     capture_pending = True
+                    if final_profile:
+                        from _p25_final_profile import prepare
+
+                        for name, checksum in record["final_profile"][
+                            "tooling_sha256"
+                        ].items():
+                            if sha(input_path(root / "tools", name)) != checksum:
+                                raise NotReady("Snapshot capture tooling mismatch")
+                        prepare(root, task / "target", env)
                     command_start = len(runner.commands)
                     for command in RECIPE["rust_commands"]:
                         runner.run([SLOT, *command], root, env)
@@ -1116,6 +1176,7 @@ def _collect(
                         runner.commands[command_start:],
                         list(RUST),
                         RECIPE["target"],
+                        final_profile=final_profile,
                     )
                     capture_pending = False
                 cores = {}
@@ -1312,6 +1373,7 @@ def _verify(
                 or context.get("tooling_sha256") != tooling_hashes()
             ):
                 raise NotReady("Неверная controller recipe")
+            verify_final_profile(context)
             candidate_source = input_path(inputs, "source.tar")
             if sha(candidate_source) != context["archive_sha256"]:
                 raise NotReady("Candidate inputs не соответствуют frozen source")
@@ -1373,14 +1435,15 @@ def main() -> None:
     parser.add_argument("operation", choices=("freeze", "collect", "ingest-cores"))
     parser.add_argument("--release-id", required=True)
     parser.add_argument("--commit")
+    parser.add_argument("--final-profile", choices=("p25-final-cxx-v1",))
     args = parser.parse_args()
     try:
         if args.operation == "freeze":
             if not args.commit:
                 parser.error("freeze требует root-selected --commit")
-            result = freeze_release(args.release_id, args.commit)
+            result = freeze_release(args.release_id, args.commit, args.final_profile)
         else:
-            if args.commit:
+            if args.commit or args.final_profile:
                 parser.error("collect/ingest-cores не принимают source/records")
             if args.operation == "ingest-cores":
                 ingest_core_job(args.release_id)

@@ -261,7 +261,9 @@ class ControllerTest(unittest.TestCase):
                     (self.registry / "unit/build-capture-manifest.json").read_bytes()
                 )
                 self.assertEqual(manifest["status"], "MISSING")
-                self.assertIn("qt:observed-query-and-tool", manifest["producer_missing"])
+                self.assertIn(
+                    "qt:observed-query-and-tool", manifest["producer_missing"]
+                )
             return original(argv, cwd, env)
 
         self.runner.run = checked
@@ -269,12 +271,78 @@ class ControllerTest(unittest.TestCase):
 
     def test_retention_failure_preserves_target(self) -> None:
         self.freeze()
-        with patch.object(c, "retain_build_capture", side_effect=OSError("fixture retention")):
+        with patch.object(
+            c, "retain_build_capture", side_effect=OSError("fixture retention")
+        ):
             with self.assertRaises(OSError):
                 self.collect()
         self.assertTrue((self.task / "target").exists())
-        self.assertFalse(any(row["argv"][:3] == [c.SLOT, "cargo", "clean"]
-                             for row in self.runner.commands))
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+
+    def test_final_profile_freeze_and_hash_rejection(self) -> None:
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture tooling")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        original_recipe = json.dumps(c.RECIPE, sort_keys=True)
+        frozen = c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        self.assertTrue(c.verify_final_profile(frozen))
+        self.assertEqual(json.dumps(c.RECIPE, sort_keys=True), original_recipe)
+        self.assertIn("sha256", frozen["final_profile"])
+        frozen["final_profile"]["sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            c.verify_final_profile(frozen)
+        with self.assertRaises(ValueError):
+            c._freeze(
+                self.repo,
+                self.registry,
+                c.RUST_REUSE_TARGET,
+                commit,
+                "p25-final-cxx-v1",
+            )
+
+    def test_final_profile_cannot_be_added_to_old_source(self) -> None:
+        with self.assertRaises(subprocess.CalledProcessError):
+            c._freeze(self.repo, self.registry, "unit", self.commit, "p25-final-cxx-v1")
+        self.assertFalse((self.registry / "unit").exists())
+
+    def test_final_profile_invokes_only_selected_prepare_and_retain(self) -> None:
+        import _p25_final_profile as profile
+
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture final profile")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        events = []
+
+        def prepare(source: Path, build: Path, env: dict[str, str]) -> None:
+            events.append("prepare")
+            self.assertFalse((build / "release").exists())
+
+        def retain(*args, **kwargs) -> dict:
+            events.append("retain")
+            self.assertTrue((self.task / "target/release/yonik-desktop").exists())
+            self.assertTrue(kwargs["final_profile"])
+            return {"status": "MISSING", "positive_metadata": {"fixture": True}}
+
+        with (
+            patch.object(profile, "prepare", side_effect=prepare),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            result = self.collect()
+        self.assertEqual(events, ["prepare", "retain"])
+        self.assertEqual(result["final_profile"], c.final_capture_profile())
+        self.assertEqual(result["build_capture"]["status"], "MISSING")
 
     def test_uncollected_and_fabricated_context(self) -> None:
         self.freeze()
