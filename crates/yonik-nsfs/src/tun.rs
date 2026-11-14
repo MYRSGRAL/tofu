@@ -50,6 +50,18 @@ impl Queue {
     pub fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
         std::os::fd::AsFd::as_fd(&self.file)
     }
+    /// Только non-default fixture: два typed owner удерживают ту же kernel queue.
+    #[cfg(feature = "test-support")]
+    pub fn test_duplicate(&self) -> Result<Self> {
+        self.verify()?;
+        let duplicate = Self {
+            file: self.file.try_clone()?,
+            name: self.name.clone(),
+            framing: self.framing,
+        };
+        duplicate.verify()?;
+        Ok(duplicate)
+    }
     pub fn name(&self) -> &str {
         &self.name
     }
