@@ -143,8 +143,17 @@
     },
     {
       "id": "little-endian-generation",
-      "expected": "Protocol",
-      "permit_count": 0
+      "expected": "Binding",
+      "permit_count": 0,
+      "wire_patch": {
+        "offset": 88,
+        "hex": "0100000000000000"
+      },
+      "trusted_context": {
+        "generation": 1
+      },
+      "decoded_generation": 72057594037927936,
+      "precondition": "All other fields valid, canonical pending context current; endian intent is not detectable by framing."
     },
     {
       "id": "wrong-nonce",
@@ -222,9 +231,10 @@
       "permit_count": 0
     },
     {
-      "id": "missing-trusted-receipt",
+      "id": "no-receipt-and-no-sufficient-reviewed-combined-evidence",
       "expected": "EvidenceUnavailable",
-      "permit_count": 0
+      "permit_count": 0,
+      "precondition": "No sufficient evidence path is available; optional receipt absence alone is not a failure."
     },
     {
       "id": "worker-boolean-receipt",
@@ -259,27 +269,37 @@
     {
       "id": "clone3-rule-skip-with-full-count",
       "expected": "IncompleteApplication",
-      "permit_count": 0
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not."
     },
     {
       "id": "namespace-load-skip",
       "expected": "IncompleteApplication",
-      "permit_count": 0
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not."
     },
     {
       "id": "native-load-skip",
       "expected": "IncompleteApplication",
-      "permit_count": 0
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not."
     },
     {
       "id": "missing-operation",
       "expected": "IncompleteApplication",
-      "permit_count": 0
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not."
     },
     {
       "id": "receipt-other-invocation",
       "expected": "IncompleteApplication",
-      "permit_count": 0
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not."
     },
     {
       "id": "fixed16-reordered",

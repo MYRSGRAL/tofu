@@ -18,11 +18,12 @@ trusted installed systemd/libseccomp TCB. Не требуется новый who
 
 ## Выбор минимального discriminant
 
-Сравнивались: fixed16+old3; те же наблюдения с Seccomp_filters; trusted
-completion receipt от точки установки. Первые два дешевле, но не различают
-все разрешённые source-path skips. Поэтому предлагается третий путь только
-после отдельного разрешения. Сейчас ни один receipt не существует и verifier
-обязан вернуть EvidenceUnavailable, а не выпустить opaque proof.
+Рассматриваются две альтернативы: совокупность trusted exact profile,
+actual old3/New16, адресного unfiltered control при конкретной неоднозначности
+и обоснованного count inventory; либо trusted completion receipt от точки
+установки. Ни одна альтернатива пока не подтверждена actual evidence. Receipt
+не является обязательным расширением архитектуры. До доказательства полноты
+выбранной совокупности verifier возвращает EvidenceUnavailable, без opaque proof.
 
 | Наблюдение | Что различает при доказанных предпосылках | Чего не доказывает |
 | --- | --- | --- |
@@ -59,28 +60,37 @@ clone3 rule_add логируется, затем r перезаписывает�
 blocked architectures не является свидетельством реально установленного фильтра.
 Основание: source snapshot seccomp-util.c 1378–1515, 2016–2088 и bounded shipped
 bytes PR190. Ни success-return, ни отсутствие warning в журнале не receipt.
-Даже fixed16+old3 с ожидаемыми errno может совпасть при внешнем фильтре или
-capability/argument denial; universal paired matrix этого контракта не требуется.
+Этот пример опровергает только count alone. Он не исключает совокупность
+trusted profile + actual old3/New16 + адресный control + count inventory.
+Чтобы отвергнуть такую совокупность, нужно предъявить два конкретных сценария
+exact tuple с одинаковыми ВСЕМИ допустимыми наблюдениями, но различной полнотой
+политики. Общая ссылка на внешний filter/capability/argument denial такой парой
+не является. Требование universal paired matrix не вводится.
 
-## Требуемый источник completion receipt
+## Альтернативный completion receipt и решение по exact tuple
 
-Будущий trusted executor должен до exec immutable worker сохранить успешные
-результаты каждой ожидаемой операции native-only и namespace policy, включая
-clone3, argument-independent setns и unshare/clone MASKED_EQ known8
-`0x02000000,0x08000000,0x40000000,0x00020000,0x20000000,0x10000000,0x04000000,0x80`
-(OR `0x7e020080`), затем actual successful loads. Любой skip, неизвестная
-architecture/bit/implementation, missing operation или nonfatal error => отказ.
-Native-only исключает i386 и x32 по reviewed exact libseccomp semantics; native
-fixed16 не заменяет это доказательство. Success receipt не равен count summary.
+Первый путь требует анализа различимости каждой существенной ветви именно для
+поддержанного tuple: profile semantics/provenance и actual-used bytes, результаты
+наблюдений с единым pending binding, обоснованный count inventory и только
+необходимый адресный control. Новые controls и Runtime16 не разрешены этим
+документом. Ни count, ни errno, ни подпись profile отдельно proof не создают.
+Конкретный sufficient predicate выбирается отдельным root review; сейчас он не
+реализован и полнота наблюдений не объявлена доказанной.
 
-Receipt должен происходить из reviewed actual-used installation path, а не из
-worker bool, property, заявленного profile или новой подписи этих значений.
-Защищённая связь executor→pending invocation и custody receipt — отдельный
-обязательный review implementation. Если installed systemd этого не выпускает,
-поле receipt digest запрещено синтезировать из успешного запуска или journal.
-Bounded instrumentation/receipt proposal в installed executor — вариант нового
-user scope, не скрытая правка в этой ветке. Новые roundtrip в worker не нужны:
-receipt correlation helper делает по invocation в доверенном installation path.
+Если для этого пути установлена конкретная оставшаяся неразличимость, можно
+отдельно согласовать receipt. Тогда нужен определённый producer/callgraph
+actual-used installation path и защищённая передача record с invocation/task
+binding. Ссылка на «будущий trusted executor» или его digest этого не заменяет.
+Record должен подтверждать каждую необходимую rule/arch operation, включая
+clone3, unconditional setns, known8 mask rules и оба successful load; recorded
+skip/error не принимается. Нужны конкретный reviewed diff и user grant до
+instrumentation installed executor. Подпись worker bool/property не receipt.
+Сейчас такой producer отсутствует; это не причина автоматически отвергать
+первую альтернативу или синтезировать receipt из запуска/journal silence.
+
+Known8: `0x02000000,0x08000000,0x40000000,0x00020000,0x20000000,0x10000000,0x04000000,0x80`
+(OR `0x7e020080`). Native-only exclusion i386/x32 и полная namespace semantics
+остаются обязательными. Ни одна альтернатива не ослабляет этот результат.
 
 ## Bounded report и carrier
 
@@ -95,9 +105,12 @@ Legacy/v3 в состоянии expected-v4 => reject, fallback отсутств
 Report несёт полную challenge binding, epoch и verified task identity; digest
 profile привязывает immutable allowlist manifest exact kernel build/ABI/systemd/
 shared ELF/libseccomp/worker/unit hashes, provenance и actual-used binding.
-Receipt digest ссылается на удержанный trusted completion record этого же
-invocation/task, включая operation manifest; helper сверяет bytes и источник,
-не верит worker pointer/hash. Count fields диагностические, не admission shortcut.
+Slot receipt_digest остаётся optional reference в proposed layout: все нули
+при отсутствии receipt. Ненулевые bytes допустимы только как lookup key для
+удержанного authenticated record того же invocation/task; helper сверяет
+сам record и источник, не верит worker pointer/hash. Пустой slot сам по себе
+не является ошибкой при достаточном reviewed совокупном evidence первого пути.
+Count fields диагностические, не admission shortcut.
 Old3+fixed16 vector имеет фиксированный source-defined порядок; namespace order
 ровно из массива выше. Старые 3: unshare,setns,clone3. Следующие 16: interleaved
 unshare,clone-selector для каждой namespace. Errno bounded 1..4095, ожидаемые
@@ -112,8 +125,12 @@ caller raw-FD/env constructors. Поля task pid/start и server pid/start ра
 
 ## Consuming verifier (сигнатура только как proposal)
 
-`verify_pending_report(pending, owner_lease, report_frame, trusted_receipt,
+`verify_pending_report(pending, owner_lease, report_frame, retained_evidence_inputs,
 verified_transport, retained_net_pid, exact_bound_tun) -> Result<VerifiedTransaction, Error>`.
+retained_evidence_inputs удерживает exact profile и полученные по trusted
+каналам observations/control/count inputs; receipt может отсутствовать. Это не
+готовый permit, bool или caller-supplied predicate: verifier обязан проверить
+reviewed sufficient predicate для exact tuple либо вернуть EvidenceUnavailable.
 Все arguments кроме frame — закрытые owning types. Verifier потребляет pending
 один раз; bytes не создают VerifiedTransaction. Для helper — полный canonical
 unit/property/hash observation до/после await; issuer сопоставляет nonce/digest/
@@ -123,12 +140,17 @@ session/generation/invocation из challenge с YNKROLE1 и owner epoch. Nonce �
 Порядок отказов при одновременных проблемах (локальная диагностика, без утечки
 содержимого неаутентифицированному peer):
 
-1. Cancelled/Revoked, затем Expired (Instant >= existing challenge deadline).
+1. Cancelled/Revoked и уже известный stale owner/network/invocation canonical
+   pending context проверяются до framing, как в существующем bootstrap; затем
+   Expired (Instant >= existing challenge deadline). Wire-malformed не маскирует
+   уже известный отказ trusted context. Новые UI/error codes не вводятся.
 2. Transport: EOF, TRUNC/CTRUNC, размер, SCM/peer/FD custody; закрыть полученные FD.
 3. Protocol: version/reserved/closed integer bounds/vector length/duplicate frame.
 4. Binding: task/server PID/starttime, nonce/digest/session/generation/epoch/invocation.
 5. Profile: tuple/provenance/actual-used/property observations/known8/native semantics.
-6. EvidenceUnavailable или IncompleteApplication (missing receipt / recorded skip).
+6. EvidenceUnavailable при недостаточном полном evidence выбранного пути;
+   IncompleteApplication при достоверно recorded skip. Отсутствие optional receipt
+   не является самостоятельным отказом, если первый путь доказан достаточным.
 7. ObservationMismatch; затем Consumed при попытке повторного consume.
 
 Перед каждым await, после него и атомарно при consume/выдаче двух scoped ролей
@@ -150,22 +172,21 @@ fixtures; это test specification, не выполненные Rust tests. Н�
 не является runtime evidence. Для каждого reject: zero permit, revoke pending,
 закрыть received FD, не отправить payload; retained owner resources по stop rule.
 
-Стадии: (1) root review этого design и receipt feasibility; (2) после назначения
-scope pure parser/consuming-verifier unit fixtures и mutation check без production
-caller; (3) отдельно разрешённый trusted receipt producer и actual installed
-campaign fixed16+old3 с existing challenge/YNKROLE1, negative skip cases в
-изолированном test-only emitter; (4) review actual evidence и lifetime/cancellation;
-(5) отдельное разрешение kernel issuer, затем Backend factory/callers; (6) actual
-canonical Runtime/full monitor acceptance. Каждая стадия закрыта до предыдущей;
-compile/unit proof не перескакивает runtime gate.
+Стадии: (1) root review design и exact-tuple различимости совокупного evidence;
+(2) назначенные private parser/consuming-lifetime unit fixtures без production
+producer/callers; (3) отдельно разрешённая actual campaign, только необходимые
+controls и Runtime16 при отдельном user grant; receipt instrumentation только
+если её необходимость обоснована и producer/diff отдельно согласованы;
+(4) review actual evidence/lifetime/cancellation; (5) отдельный kernel issuer,
+затем Backend factory/callers; (6) actual canonical Runtime/full monitor acceptance.
+Compile/unit proof не перескакивает runtime gate.
 
-Root может принять layout, приоритет ошибок, lifecycle, test matrix и назначить
-последующий bounded implementation/review; root не может превратить compiled16
-или profile bool в evidence. Только user может расширить текущий grant:
-разрешить конкретную disposable installed-systemd campaign exact supported tuple
-с Runtime16+old3 pre-payload, bounded trusted executor receipt implementation и
-его invocation correlation; отдельно разрешить callers/factory. Нужны заранее
-reviewed executor diff, task/UID/unit inventory, stop/cleanup plan и список outputs.
-Existing compile grant разрешает проверку сборки source170, но не syscall execution,
-unit activation, cross-UID, VM или installed executor replacement. Здесь такие
-действия не выполнялись, pending user question не считается отвеченным.
+Root может назначить private parser/lifetime API и unit fixtures после design
+review. Compiled16/profile bool/синтетические inputs не становятся actual evidence.
+Только user может расширить текущий grant на конкретную Runtime16/installed
+campaign и новые controls; instrumentation executor требует собственного
+обоснованного diff/grant и не является обязательной частью первого пути.
+Callers/factory также остаются отдельным закрытым scope. Нужны заранее reviewed
+unit/task/UID inventory, stop/cleanup plan и outputs. Existing apply/compile grant
+не разрешает syscall execution, unit activation, cross-UID, VM или замену installed
+executor. Pending user question не считается отвеченным.

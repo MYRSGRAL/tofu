@@ -94,7 +94,7 @@
       "name": "receipt_digest",
       "offset": 184,
       "bytes": 32,
-      "encoding": "SHA256 retained trusted completion record"
+      "encoding": "optional reference: zero when absent; otherwise SHA256 lookup key for independently authenticated retained record, never authority alone"
     },
     {
       "name": "seccomp_mode",
@@ -132,5 +132,6 @@
       "bytes": 204,
       "encoding": "zero"
     }
-  ]
+  ],
+  "evidence_paths": "Exact-tuple reviewed combined evidence OR separately justified trusted receipt; neither implemented/authorized by this proposal."
 }
