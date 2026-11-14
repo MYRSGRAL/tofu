@@ -1,0 +1,178 @@
+{
+  "acceptance": false,
+  "kind": "retained-source-preflight-only",
+  "base": "1461774556459d2313fcb73fb6ac725df371fb4d",
+  "retained_integrity": true,
+  "binary_sha256": "c384650bef563e77b0f9e94a7a0d0c76ad101f1f8d4f15b623ac1f1f16981e94",
+  "archive_sha256": "0182bc1aab2dd0618b3392ab3ebf03c883fc22ac0b057903f738c22d40d0b628",
+  "checked_paths": 387,
+  "differences": [
+    {
+      "path": "crates/yonik-desktop/examples/p07_concurrent.rs",
+      "current": "e942b65579f7ff486a3a60d96ecaeb465aeb9f4c36051bb91944d7537db6ccde",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/examples/p07_gui.rs",
+      "current": "16b4813db789f8c024a584afef492bcceb26d84e2a3d5c608ab8f2abaa100c28",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/examples/p07_gui/bridge_impl.rs",
+      "current": "b2914f6aeda3a08e4b461977e2a1c554f63ec056f1794c851aaf80e2b262ccf5",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/examples/p07_hidden.rs",
+      "current": "85ca4121b36de59bc0728d1908a9471eb8121f9191165c1a4438c1ab5ccaa055",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/examples/p07_hidden/bridge_impl.rs",
+      "current": "931e9b006a2a631029335fdd8dc4d2e2fe0af7ac343388cceebe139e975b4f6c",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "current": "2cecdcdba1ebb031b5613f04d7181eaa32d05b30ee35100654c89e9f897ea949",
+      "archived": "d6b8f560dadbbec9d78f4afe34d55a6f2ed88ff99c502f876a9d823426c3a328"
+    },
+    {
+      "path": "crates/yonik-desktop/src/disk_host_acceptance.rs",
+      "current": "9000672872a98a73873f141f155d6837d49c42b64c9ed6351dc1865a7dfaf42b",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-desktop/src/presets.rs",
+      "current": "f3bfbe5ea5e72750340c1afde7c11b637fd44154139b2849c8610ae72b9b9ced",
+      "archived": "c739c80e5005c1444dabcd780ee9f99435b66df2cb0dd4db6a0e04ee037b4c33"
+    },
+    {
+      "path": "crates/yonik-engine/src/resource_bundle.rs",
+      "current": "bb77b37333045068b5c5c33d3851c356d80cac1c6acc86cbc76e5a5a80dd8031",
+      "archived": "19aa8f5726d5f8abf5183b614e2db19cc67597cebcdf2948c0859aa449d9bebe"
+    },
+    {
+      "path": "crates/yonik-engine/src/routing.rs",
+      "current": "ec5a29a7e10be7dab805b5eff04057adfd8e8022403b4eba8e094ec0dca9f58c",
+      "archived": "78fe05a4fa25e21c970024a68251d715c40faaec9df9e7b20da2dc0b38db4512"
+    },
+    {
+      "path": "crates/yonik-engine/src/source_selectors.rs",
+      "current": "164a79a64a8cd41c70900a7ac5469657ce7a2fb99195bf4b27a7e123684a910b",
+      "archived": "2ab588ccf1d305ef4899a35706879a616949e412730dcdea8f6cfec330658c8f"
+    },
+    {
+      "path": "crates/yonik-engine/tests/resource_bindings.rs",
+      "current": "1ba9adb8a573f6fb2e2e98892dd48dd457f994c797d298ecc22b33bcfefbbda2",
+      "archived": "0e37e02116a456a4b914b0fe973bd844dbebc3f2c78887a658a41e3f07b6de2b"
+    },
+    {
+      "path": "crates/yonik-linux/Cargo.toml",
+      "current": "c4e537b9a6e61ff189e11308441722d2bdf067a3a791681ef7dd4d6a52ffe2bd",
+      "archived": "c51bccb9d5e66a6045d396b4de46a1b1ea4ed97c3f608a1a3f551d827dcad654"
+    },
+    {
+      "path": "crates/yonik-linux/examples/p04a_mixed_red.rs",
+      "current": "bf063338458736f170cdd26c6d50ef3eb6d4ec2c44134e8a7cf7bcffaf147cc3",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/examples/p04a_unadmitted_data.rs",
+      "current": "7f68cfe68ccd20d3e7c8e30c4425b920f0269a1cca6a7e3f7128d2f03e57a383",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/examples/p04a_unadmitted_resource.rs",
+      "current": "4f1a89fbc0aca4a9fa75d4d6a5087df2051bbdd38aa1e33c2e4bf11eec18aa79",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/src/attribution.rs",
+      "current": "3c58fa569c86e3a4df4fb5a74c712a372457de19094a5e0e5c61f1f30152ae43",
+      "archived": "94cf2ed87fcbdc63cdb1ace280e4ddecb20df7ee5b11368599965429a65d0eff"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log.rs",
+      "current": "86c25e730726fd569ac7fcfc4b4de87af4c42c1dcd70a38fb3141d361029b10b",
+      "archived": "4a5e67a7fcb5402e29b6d410a477db6e1652a9936e2216be432bdb189cf5e8ca"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log/disk.rs",
+      "current": "e0b300f1a42862e70b1a74553b50f9463a2ecb2696fa67b034ec92dd8710dceb",
+      "archived": "8701a38becd60b0387cf390fab9bf80320d0ef9aaae0c05e39be69120c2d578a"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log/disk/acceptance.rs",
+      "current": "c4615ea4dd82238286c41d1ed55f94b3ca2020c07255f58175a9175118dd7455",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log/disk/test_support.rs",
+      "current": "0367deee74df159290c90becbe1d7d64b31b56067e9c658695e8f9deeb8771a8",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/native_owner.rs",
+      "current": "a655bbb0486a1c8fea822a29133f2806083a2b4d553900c5428c9bcca3cb9f3e",
+      "archived": "missing-or-ambiguous"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/protection_host.rs",
+      "current": "b3b3a26cb474d44344a9f1ed88b46e24c31e28ef6e007193211290502c5243e4",
+      "archived": "8b0319be568df599eae7ce447d20120a347d3f2b6ddfd4322e9416e74ff9d31a"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/run_authorization.rs",
+      "current": "482e20e24e5d5cb27974cde2b83d9246502fe73ff3879fcdd104c7c1a16b9ffa",
+      "archived": "cc1f6d563f7291d77e03013b47ba272a0b5717acd0f1a9cd13dcfc9599564003"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/session_host.rs",
+      "current": "17982f1bbc90ba908533248e94f058a7a57c70fb1ab6fc3deecd79a8fc74acaf",
+      "archived": "0f33d80ca176fed405bd4fe10c0c54729dcfd97aa98306e73ff90d0f593f5bf0"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/session_host_tests.rs",
+      "current": "39f75220b498547e56fa05008c368e7932783ca6d207f5f4be53812b157145da",
+      "archived": "0b12e8a6a0a44ce09a872191ba663388fcb35ea5fcc20ef6416d449c6bc3d71e"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/systemd_worker.rs",
+      "current": "f227312b2f552142057bfb907b0be992f430f956cd741dbf98754acedbf25999",
+      "archived": "378c05505d9c571cf7896688f3f7ca6790e848b6e84198df93e1c245102af578"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/systemd_worker_tests.rs",
+      "current": "c306c252e05780131f0038ff62295cadf4ae6e4a095c13fa9b3fb84b1702648b",
+      "archived": "e9ffc3de7bceeaf9af26dabd480c596417f816e0bf143c542cbf0fbb5945e9af"
+    },
+    {
+      "path": "crates/yonik-linux/src/managed_network/tun_custody.rs",
+      "current": "8134f80464e1e9b0483d2ef0792a586611b8eda4ca8fa8e8df78e1f36654a351",
+      "archived": "d463faa6bbb3ad20b5a7a27683ccd09721bf3dac6045cdabf3d2780af7415178"
+    },
+    {
+      "path": "crates/yonik-linux/src/network.rs",
+      "current": "59ab6f51ee513cbd9fb404772e43db5ac101553588a533f540f251548447e47d",
+      "archived": "62a4f21db88646b0e21972a133cee75ccd2556b03b6f03b521e5f9b82bc826d9"
+    },
+    {
+      "path": "crates/yonik-linux/src/worker/role_handoff.rs",
+      "current": "fc68f0296ef1b365eaffad240d2e87509a1630688f9c3f7f3a025c5bdee27f4d",
+      "archived": "562388b16d585c9db4077b166014e43f31bae4d29d6db004866a3aad077d1fdb"
+    },
+    {
+      "path": "crates/yonik-nsfs/Cargo.toml",
+      "current": "2d15e7f03f35d4be707bc2c2583d7cb0ccac24dc72784176d20fcd8e05d11c4f",
+      "archived": "55caa792310bd7dd95c93e56dfcc645dc4d856d625a5b3bba0f240a97dcd2c59"
+    },
+    {
+      "path": "crates/yonik-nsfs/src/tun.rs",
+      "current": "0fe875c86b08d75f84e4695a001b7e744f9c9094034b8b63fe49c4b88462aebc",
+      "archived": "6aed4f187cdf9b431c83a97f86c18fd6d616b8dd074e7965e82b5e58fced0a0c"
+    }
+  ],
+  "reuse_admitted": false,
+  "runtime_executed": false
+}
