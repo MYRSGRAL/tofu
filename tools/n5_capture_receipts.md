@@ -15,7 +15,8 @@
 
 - `rust-captured-only.json` — доверенный actual controller marker;
 - `build-capture-manifest.json`, `build-capture-record.json`, `build-capture-report.json`;
-- `frozen.json`, `source.tar`.
+- `frozen.json`, `source.tar`;
+- для `final_profile` обязательно также `build-cxx-observed.json` (отдельный pin).
 
 Не вычисляйте эти pins из полученного недоверенного bundle для создания доверия.
 Получите их по отдельному проверенному каналу controller evidence; source commit
@@ -23,8 +24,9 @@
 Политика свежести здесь — точное соответствие независимо выбранным pins/commit,
 не возраст файла и не автоматический выбор «последнего» build.
 
-Retained каталог должен содержать эти шесть файлов и `yonik-desktop`, `yonik-helper`,
-`yonik-worker`. Проверяется оригинальный Rust-only controller profile: frozen schema 2,
+Retained каталог должен содержать эти шесть файлов (семь для final-profile) и `yonik-desktop`, `yonik-helper`,
+`yonik-worker`. Поддерживаются исходный Rust-only profile и целевой `freeze --final-profile
+p25-final-cxx-v1` → `collect --rust-capture-only`: frozen schema 2,
 marker `RUST_CAPTURED_ONLY`, отсутствие lineage/reuse, точный текущий `RECIPE`,
 успешные observed commands, source/archive binding, точный whitelist и реальные ELF
 хеши. Идентичность путей и файлов проверяется до/после чтения и повторно после join.
@@ -32,12 +34,32 @@ marker `RUST_CAPTURED_ONLY`, отсутствие lineage/reuse, точный т
 archive до 512 MiB, общий бюджет чтения до 2 GiB. Архив не распаковывается:
 его соответствие commit утверждается доверенным frozen/controller evidence.
 
-Closure пересчитывается существующим `_capture` API через узкий retained reader.
+Closure проверяется существующим `_capture` API через узкий retained reader.
 Его исходный `MISSING` по CXX/Qt/depfiles сохраняется, а не превращается в CAPTURED.
-Отсутствующий или конфликтующий closure evidence отклоняется. Enriched final-profile,
-иные producers и non-Rust capture этим seam не поддерживаются и отклоняются.
+Отсутствующий или конфликтующий closure evidence отклоняется. Иные producers и non-Rust capture отклоняются.
 Старые absolute roots в capture report используются только для проверки согласованности
-record/invocation/cwd, никогда не читаются. Duplicate/unknown JSON fields и нарушение
+record/invocation/cwd, никогда не читаются.
+
+Для enriched capture проверяются точный `_p25_final_profile.PROFILE`, digest и
+закрытый набор tooling pins в frozen profile, config hash, observed argv через
+`compile_arguments`, compiler/query identity, unit/depfile bindings, normalized
+dependencies, source tracked whitelist и staged input origins. Список units, Qt
+metadata, producer_missing, positive counters и captured report должны совпадать.
+Unknown/duplicate fields отвергаются и внутри observed/config/Qt/generated metadata.
+Generated text из report и normalized dep/Qt records восстанавливаются в точные
+producer JSON bytes и сверяются с record SHA256, затем проходят `_capture`.
+
+Actual producer не сохраняет raw depfiles и полные SDK/source/tool bytes в retained
+каталоге. Утилита не имитирует их содержимое и не читает старые build roots. Их
+identity/observations остаются утверждением независимо pinned controller evidence;
+raw depfile hash сверяется как поле observed evidence, но сами raw bytes недоступны.
+Повторный capture честно возвращает `file:<id>` для отсутствующих bytes и
+`retained:raw-depfiles-unavailable`. Выходной report содержит `unavailable_input_bytes`,
+`capture_byte_replay` и `capture_profile`. Исходные legal missing conditions
+проверяются по сохранённым conditions и whitelist; full legal PASS для receipt не
+требуется. Generated provenance и Qt header/source legal join остаются MISSING.
+Это позволяет выдать receipt actual worker из enriched capture без повышения
+статуса source/legal evidence. Duplicate/unknown JSON fields и нарушение
 whitelist отклоняются; входные pin всегда обязательны.
 
 Фиксированные выходы:
@@ -56,8 +78,9 @@ frozen source archive; receipts трёх Rust ELF не заменяют это �
 
 CLI: `python tools/n5_capture_receipts.py --help`. Обязательны `--retained`,
 `--source-commit`, `--output` и по одному `--<имя-файла-с-точками-заменёнными-на-дефисы>-sha256`
-для каждого из шести pin (например `--rust-captured-only-json-sha256`,
-`--source-tar-sha256`). Ошибка возвращает код 2; успешная проекция — 0.
+для каждого из шести базовых pin (например `--rust-captured-only-json-sha256`,
+`--source-tar-sha256`). Для enriched capture также обязателен
+`--build-cxx-observed-json-sha256`; в исходном Rust-only profile он не допускается. Ошибка возвращает код 2; успешная проекция — 0.
 
 Проверка: `python -m unittest discover -s tools/tests -p test_n5_capture_receipts.py`
 и та же команда с `python -O`. Fixtures синтетические; real Rust build и доступ

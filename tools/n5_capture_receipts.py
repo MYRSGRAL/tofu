@@ -21,9 +21,13 @@ from n5_build_manifest import (
 from p25_capture_build_closure import (
     MAX_METADATA,
     _capture,
+    identity,
+    ids,
     object_fields,
     parse,
+    relative,
     require,
+    sequence,
     sha,
 )
 from release_controller import CONTROLLED_ENV, RECIPE, RUST, SLOT, elf_header
@@ -61,12 +65,24 @@ class RetainedReader:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.total = 0
+        self.virtual: dict[tuple[str, str], bytes] = {}
+        self.enriched_paths: set[tuple[str, str]] = set()
         self.seen: dict[str, str] = {}
         self.identities: dict[str, tuple[int, ...]] = {}
 
     def _consume(
         self, root: str, path: str, limit: int, content: bool
     ) -> tuple[bytes, str]:
+        if (root, path) in self.virtual:
+            raw = self.virtual[root, path]
+            require(len(raw) <= limit, "Virtual capture cap")
+            self.total += len(raw)
+            require(self.total <= 2 * 1024**3, "Total capture cap")
+            return (raw if content else b""), hashlib.sha256(raw).hexdigest()
+        if (root, path) in self.enriched_paths and not (
+            root == "build" and path in {"release/" + name for name in RUST}
+        ):
+            raise FileNotFoundError("Captured input bytes no longer retained")
         require(root == "build", "Rust-only capture не содержит иных roots")
         names = {"capture-record.json": "build-capture-record.json"}
         names.update({"release/" + name: name for name in RUST})
@@ -107,12 +123,544 @@ def exact(value: object, fields: set[str]) -> dict:
     return object_fields(value, fields, fields)
 
 
+def same(left: object, right: object) -> bool:
+    """JSON equality без Python-эквивалентности true == 1."""
+    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+
+
+def retained_json(value: dict) -> bytes:
+    """Точные байты JSON, которые пишет capture producer (_write)."""
+    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode()
+
+
+def final_capture(
+    reader: RetainedReader,
+    frozen: dict,
+    manifest: dict,
+    record: dict,
+    report: dict,
+    observed_pin: str,
+) -> dict:
+    """Узкий offline join enriched evidence; никаких build-time методов enrich/prepare."""
+    from _p25_final_profile import PROFILE, compile_arguments
+
+    profile = exact(frozen["final_profile"], {"spec", "tooling_sha256", "sha256"})
+    require(
+        json.dumps(profile["spec"], sort_keys=True)
+        == json.dumps(PROFILE, sort_keys=True),
+        "Final profile spec mismatch",
+    )
+    tooling = exact(
+        profile["tooling_sha256"],
+        {
+            "_p25_final_profile.py",
+            "p25_cxx_capture_wrapper.py",
+            "_p25_capture_producer.py",
+            "p25_capture_build_closure.py",
+        },
+    )
+    for pin in tooling.values():
+        sha(pin)
+    body = {"spec": profile["spec"], "tooling_sha256": tooling}
+    require(
+        profile["sha256"]
+        == hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest(),
+        "Final profile digest mismatch",
+    )
+    require(same(manifest["final_profile"], profile), "Manifest final profile conflict")
+    digest, raw = reader.read_file(
+        "build-cxx-observed.json", PROFILE["observed_metadata_cap"]
+    )
+    positive = exact(
+        manifest["positive_metadata"],
+        {
+            "producer_missing",
+            "compiled_units",
+            "observed_invocations",
+            "qt_version",
+            "observed_sha256",
+        },
+    )
+    require(
+        digest == sha(observed_pin) == positive["observed_sha256"],
+        "Observed independent pin mismatch",
+    )
+    observed = exact(
+        parse(raw),
+        {"schema", "records", "qt", "input_origins", "config", "config_sha256"},
+    )
+    require(
+        type(observed["schema"]) is int and observed["schema"] == 1, "Observed schema"
+    )
+    config = exact(observed["config"], {"schema", "source", "build", "sdk"})
+    require(
+        type(config["schema"]) is int
+        and config["schema"] == 1
+        and config["sdk"] == PROFILE["sdk_root"],
+        "Config profile mismatch",
+    )
+    require(
+        observed["config_sha256"] == hashlib.sha256(retained_json(config)).hexdigest(),
+        "Config hash mismatch",
+    )
+    roots = exact(report["roots"], {"source", "build", "sdk"})
+    require(
+        config["source"] == roots["source"] and config["build"] == roots["build"],
+        "Config roots mismatch",
+    )
+    for path in (*roots.values(), config["sdk"]):
+        require(
+            isinstance(path, str)
+            and Path(path).is_absolute()
+            and ".." not in Path(path).parts,
+            "Invalid captured root",
+        )
+    root_paths = [Path(path) for path in roots.values()]
+    require(
+        all(
+            not a.is_relative_to(b) and not b.is_relative_to(a)
+            for i, a in enumerate(root_paths)
+            for b in root_paths[:i]
+        ),
+        "Overlapping captured roots",
+    )
+    rows = sequence(record["files"])
+    by_id = {}
+    by_path = {}
+    for row in rows:
+        exact(row, {"id", "root", "path", "kind", "sha256"})
+        identity(row["id"])
+        relative(row["path"])
+        sha(row["sha256"])
+        require(
+            row["root"] in roots
+            and row["id"] not in by_id
+            and (row["root"], row["path"]) not in by_path,
+            "Input whitelist conflict",
+        )
+        by_id[row["id"]] = row
+        by_path[row["root"], row["path"]] = row
+    origins = observed["input_origins"]
+    require(isinstance(origins, dict) and len(origins) <= 4096, "Origins cap/schema")
+    for origin, staged in origins.items():
+        require(
+            isinstance(origin, str)
+            and Path(origin).is_absolute()
+            and ".." not in Path(origin).parts
+            and any(
+                Path(origin).is_relative_to(Path(base))
+                for base in (PROFILE["sdk_root"], PROFILE["registry_source_root"])
+            ),
+            "Input origin outside profile",
+        )
+        require(
+            staged == hashlib.sha256(origin.encode()).hexdigest()
+            and ("sdk", staged) in by_path,
+            "Staged input binding mismatch",
+        )
+    used = {row["id"] for row in rows if row["kind"] == "elf"}
+
+    def locate(path: str, cwd: str, kind: str | None = None) -> dict:
+        require(isinstance(path, str) and isinstance(cwd, str), "Input path type")
+        absolute = Path(
+            os.path.normpath(
+                path if Path(path).is_absolute() else str(Path(cwd) / path)
+            )
+        )
+        matches = [
+            (root, absolute.relative_to(Path(base)).as_posix())
+            for root, base in roots.items()
+            if absolute.is_relative_to(Path(base))
+        ]
+        if not matches:
+            require(str(absolute) in origins, "Input missing from origins")
+            matches = [("sdk", origins[str(absolute)])]
+        require(len(matches) == 1 and matches[0] in by_path, "Input outside whitelist")
+        row = by_path[matches[0]]
+        inferred = (
+            kind
+            or {"source": "source", "build": "generated", "sdk": "header"}[row["root"]]
+        )
+        require(
+            row["kind"] == inferred
+            or inferred == "header"
+            and row["kind"] == "sdk-unit",
+            "Input kind binding mismatch",
+        )
+        used.add(row["id"])
+        return row
+
+    records = sequence(observed["records"])
+    units = []
+    payloads = {}
+    dependency_rows = 0
+    for number, row in enumerate(records):
+        fields = {
+            "schema",
+            "config_sha256",
+            "argv",
+            "original_argv",
+            "cwd",
+            "compiler",
+            "exit",
+            "stdout_sha256",
+            "stderr_sha256",
+            "depfile",
+            "unit",
+            "compiler_id",
+        }
+        compiling = row.get("unit") is not None
+        exact(
+            row,
+            fields
+            | ({"raw_depfile_sha256", "normalized_depfile"} if compiling else set()),
+        )
+        require(
+            type(row["schema"]) is int
+            and row["schema"] == 1
+            and type(row["exit"]) is int
+            and row["exit"] == 0,
+            "Observed unsuccessful/schema",
+        )
+        require(
+            row["config_sha256"] == observed["config_sha256"],
+            "Observed config binding mismatch",
+        )
+        sha(row["stdout_sha256"])
+        sha(row["stderr_sha256"])
+        cwd = row["cwd"]
+        require(
+            isinstance(cwd, str)
+            and any(
+                Path(cwd).is_relative_to(Path(roots[key]))
+                for key in ("source", "build")
+            ),
+            "Observed cwd outside roots",
+        )
+        expected_argv = [
+            PROFILE["compiler"],
+            *compile_arguments(
+                row["original_argv"],
+                Path(roots["build"]) / "p25capture" / f"{number}.d",
+            ),
+        ]
+        require(row["argv"] == expected_argv, "Observed argv binding mismatch")
+        compiler = exact(row["compiler"], {"path", "sha256"})
+        tool = locate(compiler["path"], roots["sdk"], "tool")
+        require(
+            tool["id"] == row["compiler_id"]
+            and tool["sha256"] == sha(compiler["sha256"]),
+            "Compiler input binding mismatch",
+        )
+        if "-c" not in row["original_argv"]:
+            require(
+                row["unit"] is None and row["depfile"] is None, "Probe binding mismatch"
+            )
+            continue
+        args = [
+            arg
+            for arg in row["original_argv"]
+            if arg.endswith((".cpp", ".cxx", ".cc", ".C", ".c++"))
+        ]
+        require(
+            len(args) == 1
+            and row["unit"] == str(Path(cwd) / args[0])
+            and row["depfile"] == f"p25capture/{number}.d",
+            "Observed unit/dep binding mismatch",
+        )
+        unit = locate(row["unit"], cwd)
+        if unit["root"] == "sdk":
+            require(unit["kind"] == "sdk-unit", "External compile kind")
+        dep = exact(row["normalized_depfile"], {"schema", "unit", "dependencies"})
+        deps = ids(dep["dependencies"])
+        require(
+            type(dep["schema"]) is int
+            and dep["schema"] == 1
+            and dep["unit"] == unit["id"]
+            and unit["id"] in deps,
+            "Normalized dep binding mismatch",
+        )
+        sha(row["raw_depfile_sha256"])
+        dependency_rows += len(deps)
+        require(dependency_rows <= PROFILE["dependency_row_cap"], "Dependency cap")
+        for key in deps:
+            require(
+                key in by_id
+                and by_id[key]["kind"] in {"source", "generated", "header", "sdk-unit"},
+                "Dependency outside whitelist",
+            )
+            used.add(key)
+        dep_row = locate(
+            str(Path(roots["build"]) / f"p25capture/{number}-normalized.json"),
+            cwd,
+            "depfile",
+        )
+        payloads[dep_row["id"]] = retained_json(dep)
+        units.append(
+            {"file": unit["id"], "depfile": dep_row["id"], "argv": row["argv"]}
+        )
+    require(
+        record["units"] == units
+        and record["generated"] == []
+        and record["primary_refs"] == [],
+        "Compile/generated closure conflict",
+    )
+    qt = exact(
+        observed["qt"],
+        {"schema", "query_argv", "version", "exit", "tool", "stdout", "stderr_sha256"},
+    )
+    require(
+        type(qt["schema"]) is int
+        and qt["schema"] == 1
+        and type(qt["exit"]) is int
+        and qt["exit"] == 0
+        and qt["query_argv"] == PROFILE["qt_query"]
+        and isinstance(qt["version"], str)
+        and re.fullmatch(r"\d+\.\d+\.\d+", qt["version"]) is not None
+        and qt["stdout"].strip() == qt["version"],
+        "Qt observed binding mismatch",
+    )
+    sha(qt["stderr_sha256"])
+    tool = exact(qt["tool"], {"path", "sha256"})
+    query = locate(tool["path"], roots["sdk"], "tool")
+    require(query["sha256"] == sha(tool["sha256"]), "Qt tool binding mismatch")
+    qt_row = locate(
+        str(Path(roots["build"]) / "p25capture/qt-normalized.json"),
+        roots["build"],
+        "qt-version",
+    )
+    require(record["qt_version"] == qt_row["id"], "Qt record binding mismatch")
+    payloads[qt_row["id"]] = retained_json(
+        {
+            "schema": 1,
+            "version": qt["version"],
+            "sdk_files": [row["id"] for row in rows if row["root"] == "sdk"],
+            "query_argv": qt["query_argv"],
+            "query_tool": query["id"],
+            "exit": 0,
+        }
+    )
+    require(used == set(by_id), "Unobserved input whitelist entry")
+    require(
+        record["source"]["tracked_inputs"]
+        == [row["id"] for row in rows if row["root"] == "source"],
+        "Tracked input binding mismatch",
+    )
+    missing = ["qt:query-to-header-version-join"]
+    if not units:
+        missing.append("cxx:invocations")
+    for row in rows:
+        if row["kind"] == "generated":
+            missing.append(f"generation-provenance:{row['id']}")
+        if row["kind"] in ("header", "sdk-unit"):
+            missing.append(f"source-offer-primary-join:{row['id']}")
+    require(
+        positive
+        == {
+            "producer_missing": missing,
+            "compiled_units": len(units),
+            "observed_invocations": len(records),
+            "qt_version": qt["version"],
+            "observed_sha256": digest,
+        }
+        and manifest["producer_missing"] == missing,
+        "Positive metadata conflict",
+    )
+    require(
+        type(positive["compiled_units"]) is int
+        and type(positive["observed_invocations"]) is int,
+        "Positive counters schema",
+    )
+    require(
+        same(report["files"], [dict(row, verified=True) for row in rows]),
+        "Captured file identity conflict",
+    )
+    require(
+        same(
+            report["compile_units"],
+            [
+                dict(unit, normalized_depfile=records_dep)
+                for unit, records_dep in zip(
+                    units,
+                    [
+                        row["normalized_depfile"]
+                        for row in records
+                        if row["unit"] is not None
+                    ],
+                    strict=True,
+                )
+            ],
+        ),
+        "Captured deps conflict",
+    )
+    require(report["generated_sources"] == [], "Unexpected generation provenance")
+    for item in sequence(report["unbound_generated_sources"]):
+        exact(
+            item,
+            {
+                "file",
+                "text",
+                "generation_record",
+                "expressions",
+                "primary_refs",
+                "applicability",
+                "copyright_excerpt",
+            },
+        )
+        file = item["file"]
+        require(
+            file["id"] in by_id
+            and same(file, dict(by_id[file["id"]], verified=True))
+            and file["kind"] == "generated"
+            and item["generation_record"] is None
+            and isinstance(item["text"], str),
+            "Generated capture binding mismatch",
+        )
+        require(file["id"] not in payloads, "Duplicate generated capture")
+        payloads[file["id"]] = item["text"].encode()
+    require(
+        {item["file"]["id"] for item in report["unbound_generated_sources"]}
+        == {row["id"] for row in rows if row["kind"] == "generated"},
+        "Missing generated capture",
+    )
+    for key, raw in payloads.items():
+        require(
+            hashlib.sha256(raw).hexdigest() == by_id[key]["sha256"],
+            "Retained capture bytes mismatch",
+        )
+        reader.virtual[by_id[key]["root"], by_id[key]["path"]] = raw
+    reader.enriched_paths = {(row["root"], row["path"]) for row in rows}
+    replay = _capture(reader, "capture-record.json", manifest["record_sha256"])
+    # Недоступные SDK/source/tool bytes не переименовываются в verified bytes.
+    require(
+        same(report["unbound_generated_sources"], replay["unbound_generated_sources"]),
+        "Generated capture conditions mismatch",
+    )
+    require(
+        same(
+            report["qt_binding"],
+            {
+                "record": dict(qt_row, verified=True),
+                "metadata": parse(payloads[qt_row["id"]]),
+                "query_tool": dict(query, verified=True),
+            },
+        )
+        and report["qt_version"] == qt["version"],
+        "Captured Qt conflict",
+    )
+    header_ids = set()
+    for item in sequence(report["headers"]):
+        exact(
+            item,
+            {
+                "source_ref",
+                "file",
+                "expressions",
+                "primary_refs",
+                "applicability",
+                "copyright_excerpt",
+            },
+        )
+        file = item["file"]
+        require(
+            file["id"] in by_id
+            and same(file, dict(by_id[file["id"]], verified=True))
+            and file["kind"] in ("header", "sdk-unit")
+            and item["source_ref"] is None
+            and item["primary_refs"] == {}
+            and item["applicability"] == "NOTPROVEN",
+            "Header capture binding mismatch",
+        )
+        require(file["id"] not in header_ids, "Duplicate header")
+        header_ids.add(file["id"])
+        for key in ("expressions", "copyright_excerpt"):
+            require(
+                all(isinstance(value, str) for value in sequence(item[key])),
+                "Header text schema",
+            )
+    require(
+        header_ids
+        == {row["id"] for row in rows if row["kind"] in ("header", "sdk-unit")},
+        "Header whitelist mismatch",
+    )
+    require(
+        report["schema"] == 1
+        and type(report["schema"]) is int
+        and report["source"] == record["source"]
+        and report["record_sha256"] == manifest["record_sha256"]
+        and same(report["elf_profile_binding"], replay["elf_profile_binding"])
+        and report["binding_scope"] == replay["binding_scope"]
+        and report["legal_status"] == "NOTPROVEN"
+        and report["final_linux_acceptance"] is False
+        and report["production_admission_gate"] is False,
+        "Report closure conflict",
+    )
+    require(
+        report["status"] == manifest["status"] == "MISSING"
+        and report["missing"] == manifest["missing"]
+        and isinstance(report["missing"], list)
+        and report["missing"] == sorted(set(report["missing"]))
+        and bool(report["missing"])
+        and all(
+            isinstance(item, str) and len(item) <= 4096 for item in report["missing"]
+        ),
+        "Missing closure schema",
+    )
+    expected_missing = {"generatedrecord"}
+    if not units:
+        expected_missing.add("depfiles")
+    if not header_ids:
+        expected_missing.add("headeridentity")
+    covered = {
+        key
+        for row in records
+        if row["unit"] is not None
+        for key in row["normalized_depfile"]["dependencies"]
+    }
+    for item in [*report["headers"], *report["unbound_generated_sources"]]:
+        key = item["file"]["id"]
+        if item["file"]["kind"] in ("header", "sdk-unit"):
+            expected_missing.add(f"header_source:{key}")
+            if key not in covered:
+                expected_missing.add(f"header_depfile_coverage:{key}")
+        else:
+            expected_missing.add(f"generated_record:{key}")
+        tokens = {
+            token
+            for expression in item["expressions"]
+            for token in re.findall(r"[A-Za-z0-9_.+-]+", expression)
+        } - {"OR", "AND", "WITH"}
+        if not item["expressions"] or not tokens:
+            expected_missing.add(f"SPDX:{key}")
+        expected_missing.update(f"primary:{key}:{token}" for token in tokens)
+    require(
+        report["missing"] == sorted(expected_missing),
+        "Captured missing conditions conflict",
+    )
+    # Original report остаётся pinned evidence; replay честно добавляет unavailable files.
+    replay["missing"] = sorted(
+        set(replay["missing"])
+        | set(report["missing"])
+        | {"retained:raw-depfiles-unavailable"}
+    )
+    replay["status"] = "MISSING"
+    return replay
+
+
 def produce(
     retained: Path, pins: dict[str, str], source_commit: str
 ) -> tuple[dict, dict]:
     """Pins передаются из независимого доверенного канала, никогда из самого marker."""
-    require(set(pins) == {*METADATA, "source.tar"}, "Нужны все independent pins")
+    require(
+        set(pins)
+        in (
+            {*METADATA, "source.tar"},
+            {*METADATA, "source.tar", "build-cxx-observed.json"},
+        ),
+        "Нужны все independent pins",
+    )
     require(re.fullmatch(r"[0-9a-f]{40}", source_commit) is not None, "Неверный commit")
+    require(".." not in retained.parts, "Parent traversal in retained root")
     reader = RetainedReader(retained)
     values = {}
     for name in METADATA:
@@ -133,6 +681,13 @@ def produce(
         "recipe",
         "tooling_sha256",
     }
+    enriched = "final_profile" in frozen
+    if enriched:
+        fields.add("final_profile")
+    require(
+        ("build-cxx-observed.json" in pins) == enriched,
+        "Final observed independent pin required",
+    )
     exact(frozen, fields)
     require(
         type(frozen["schema"]) is int
@@ -210,7 +765,9 @@ def produce(
         },
     )
     require(
-        all(marker[key] == value for key, value in frozen.items() if key != "state"),
+        all(
+            same(marker[key], value) for key, value in frozen.items() if key != "state"
+        ),
         "Stale frozen marker",
     )
     require(
@@ -223,7 +780,8 @@ def produce(
     manifest = values["build-capture-manifest.json"]
     exact(
         manifest,
-        {
+        ({"positive_metadata", "final_profile"} if enriched else set())
+        | {
             "schema",
             "status",
             "missing",
@@ -239,17 +797,17 @@ def produce(
             "invocation",
         },
     )
-    require(marker["build_capture"] == manifest, "Capture marker conflict")
+    require(same(marker["build_capture"], manifest), "Capture marker conflict")
     require(
         manifest["record_sha256"] == pins["build-capture-record.json"]
         and manifest["report_sha256"] == pins["build-capture-report.json"],
         "Capture pins conflict",
     )
     record = values["build-capture-record.json"]
-    # Этот seam намеренно поддерживает только исходный Rust-only producer, без final-profile enrichment.
+    tracked = record["source"].get("tracked_inputs", []) if enriched else []
     require(
         record["source"]
-        == {**frozen["source"], "archive_sha256": archive, "tracked_inputs": []},
+        == {**frozen["source"], "archive_sha256": archive, "tracked_inputs": tracked},
         "Source binding отсутствует",
     )
     commands = [[SLOT, *command] for command in RECIPE["rust_commands"]]
@@ -258,12 +816,16 @@ def produce(
         == {"target": RECIPE["target"], "commands": commands, "features": ["gui"]},
         "Profile mismatch",
     )
-    for key, expected in {
-        "units": [],
-        "generated": [],
-        "primary_refs": [],
-        "qt_version": None,
-    }.items():
+    for key, expected in (
+        {}
+        if enriched
+        else {
+            "units": [],
+            "generated": [],
+            "primary_refs": [],
+            "qt_version": None,
+        }
+    ).items():
         require(record.get(key, "MISSING") == expected, "Неподдерживаемая closure")
     observed = manifest["observed_commands"]
     require(
@@ -293,20 +855,36 @@ def produce(
             "kind": "elf",
             "sha256": sha(row["sha256"]),
         }
-        for i, (name, row) in enumerate(zip(RUST, record["files"], strict=True))
+        for i, (name, row) in enumerate(
+            zip(
+                RUST,
+                [row for row in record["files"] if row["kind"] == "elf"],
+                strict=True,
+            )
+        )
     ]
     require(
-        record["files"] == expected_files and manifest["elfs"] == expected_files,
+        (enriched or record["files"] == expected_files)
+        and manifest["elfs"] == expected_files,
         "ELF whitelist conflict",
     )
-    replay = _capture(reader, "capture-record.json", pins["build-capture-record.json"])
     report = values["build-capture-report.json"]
+    replay = (
+        final_capture(
+            reader, frozen, manifest, record, report, pins["build-cxx-observed.json"]
+        )
+        if enriched
+        else _capture(reader, "capture-record.json", pins["build-capture-record.json"])
+    )
     require(
         set(report) == set(replay) | {"roots", "record_path"}, "Report schema mismatch"
     )
     require(
-        all(
-            report[key] == value for key, value in replay.items() if key != "read_bytes"
+        enriched
+        or all(
+            same(report[key], value)
+            for key, value in replay.items()
+            if key != "read_bytes"
         ),
         "Closure replay mismatch",
     )
@@ -315,9 +893,9 @@ def produce(
         manifest["schema"] == 1
         and type(manifest["schema"]) is int
         and manifest["status"] == replay["status"]
-        and manifest["missing"] == replay["missing"]
+        and (enriched or manifest["missing"] == replay["missing"])
         and manifest["source"] == record["source"]
-        and manifest["producer_missing"] == PRODUCER_MISSING
+        and (enriched or manifest["producer_missing"] == PRODUCER_MISSING)
         and manifest["final_linux_acceptance"] is False
         and manifest["production_admission_gate"] is False
         and manifest["legal_status"] == "NOTPROVEN",
@@ -392,6 +970,13 @@ def produce(
         "source_commit": source_commit,
         "source_archive_sha256": archive,
         "closure_status": replay["status"],
+        "capture_profile": "p25-final-cxx-v1" if enriched else "original-rust-only",
+        "unavailable_input_bytes": [
+            row["id"] for row in replay["files"] if not row["verified"]
+        ],
+        "capture_byte_replay": "retained-generated-and-normalized-metadata"
+        if enriched
+        else "retained-elf-only",
         "closure_missing": replay["missing"],
         "driver": "MISSING",
         "receipt_sha256": {
@@ -408,6 +993,7 @@ def emit(output: Path, receipts: dict, report: dict) -> None:
         == {*(role + ".receipt.json" for role in ROLES), "worker-build-receipt.json"},
         "Неверный набор outputs",
     )
+    require(".." not in output.parts, "Parent traversal in output")
     output = Path(os.path.abspath(output))
     workspace = Path.cwd()
     require(
@@ -466,15 +1052,21 @@ def main() -> int:
     parser.add_argument("--retained", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    for name in (*METADATA, "source.tar"):
+    for name in (*METADATA, "source.tar", "build-cxx-observed.json"):
         parser.add_argument(
-            "--" + name.replace(".", "-") + "-sha256", dest=name, required=True
+            "--" + name.replace(".", "-") + "-sha256",
+            dest=name,
+            required=name != "build-cxx-observed.json",
         )
     args = vars(parser.parse_args())
     try:
         receipts, report = produce(
             args["retained"],
-            {name: args[name] for name in (*METADATA, "source.tar")},
+            {
+                name: args[name]
+                for name in (*METADATA, "source.tar", "build-cxx-observed.json")
+                if args[name] is not None
+            },
             args["source_commit"],
         )
         emit(args["output"], receipts, report)
