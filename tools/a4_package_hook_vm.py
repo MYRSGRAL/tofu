@@ -375,34 +375,7 @@ class Driver:
         (seed / "meta-data").write_text(
             "instance-id: a4-package-hooks-" + self.nonce + "\n"
         )
-        bootcmd = [["mkdir", "-p", "/etc/systemd/system"]] + [
-            ["ln", "-s", "/dev/null", "/etc/systemd/system/" + unit] for unit in UNITS
-        ]
-        config = {
-            "disable_root": False,
-            "ssh_pwauth": False,
-            "package_update": False,
-            "package_upgrade": False,
-            "users": [
-                {
-                    "name": "root",
-                    "ssh_authorized_keys": [
-                        (self.task / "key.pub").read_text().strip()
-                    ],
-                }
-            ],
-            "bootcmd": bootcmd,
-            "runcmd": [
-                ["systemctl", "enable", "--now", "sshd.service"],
-                [
-                    "sh",
-                    "-c",
-                    "printf %s "
-                    + shlex.quote(self.nonce)
-                    + " > /run/a4-package-hooks-ready",
-                ],
-            ],
-        }
+        config = self.cloud_config((self.task / "key.pub").read_text().strip())
         (seed / "user-data").write_text("#cloud-config\n" + json.dumps(config) + "\n")
         self.run(
             [
@@ -476,6 +449,9 @@ class Driver:
                 time.sleep(5)
         else:
             raise TimeoutError("SSH readiness deadline240s")
+        self.prepare_guest(manifest)
+
+    def prepare_guest(self, manifest: dict) -> None:
         self.guest(
             "umask 077; mkdir /root/a4-package-hooks; mkdir /root/a4-package-hooks/input"
         )
@@ -531,6 +507,57 @@ class Driver:
         )
         self.scp(config, "/root/a4-package-hooks/pacman.conf")
 
+    def workload(self, manifest: dict) -> None:
+        for name in PHASES:
+            print(json.dumps({"event": "phase", "name": name}), flush=True)
+            try:
+                self.guest(
+                    "python /root/a4-package-hooks/guest.py " + name + " " + self.nonce,
+                    timeout=100,
+                )
+            except Exception:
+                self.unknown = True
+                try:
+                    self.guest(
+                        "python /root/a4-package-hooks/guest.py reconcile "
+                        + self.nonce,
+                        timeout=30,
+                    )
+                except Exception as error:
+                    self.record("reconcile-errors", {"error": str(error)})
+                raise
+
+    def success_result(self) -> dict:
+        return {
+            "five_phases": "PASS",
+            "live_package_hooks": True,
+            "final_linux_acceptance": False,
+            "factory": "CLOSED",
+        }
+
+    def cloud_config(self, public_key: str) -> dict:
+        bootcmd = [["mkdir", "-p", "/etc/systemd/system"]] + [
+            ["ln", "-s", "/dev/null", "/etc/systemd/system/" + unit] for unit in UNITS
+        ]
+        return {
+            "disable_root": False,
+            "ssh_pwauth": False,
+            "package_update": False,
+            "package_upgrade": False,
+            "users": [{"name": "root", "ssh_authorized_keys": [public_key]}],
+            "bootcmd": bootcmd,
+            "runcmd": [
+                ["systemctl", "enable", "--now", "sshd.service"],
+                [
+                    "sh",
+                    "-c",
+                    "printf %s "
+                    + shlex.quote(self.nonce)
+                    + " > /run/a4-package-hooks-ready",
+                ],
+            ],
+        }
+
     def execute(self) -> None:
         print(json.dumps({"event": "starting", "out": str(self.out)}), flush=True)
         fd = None
@@ -548,38 +575,10 @@ class Driver:
                 )
             )
             self.bootstrap(manifest)
-            for name in PHASES:
-                print(json.dumps({"event": "phase", "name": name}), flush=True)
-                try:
-                    self.guest(
-                        "python /root/a4-package-hooks/guest.py "
-                        + name
-                        + " "
-                        + self.nonce,
-                        timeout=100,
-                    )
-                except Exception:
-                    self.unknown = True
-                    try:
-                        self.guest(
-                            "python /root/a4-package-hooks/guest.py reconcile "
-                            + self.nonce,
-                            timeout=30,
-                        )
-                    except Exception as error:
-                        self.record("reconcile-errors", {"error": str(error)})
-                    raise
+            self.workload(manifest)
             self.failed = False
             (self.out / "result.json").write_text(
-                json.dumps(
-                    {
-                        "five_phases": "PASS",
-                        "live_package_hooks": True,
-                        "final_linux_acceptance": False,
-                        "factory": "CLOSED",
-                    }
-                )
-                + "\n"
+                json.dumps(self.success_result()) + "\n"
             )
         except Exception as error:
             (self.out / "failure.json").write_text(
@@ -607,6 +606,29 @@ class Driver:
             if fd is not None:
                 os.close(fd)
 
+    def collect_guest_evidence(self) -> None:
+        self.guest(
+            "tar -C /root/a4-package-hooks -cf /root/a4-hooks-evidence.tar evidence",
+            timeout=20,
+        )
+        args = [
+            "scp",
+            "-i",
+            str(self.task / "key"),
+            "-P",
+            str(self.port),
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "UserKnownHostsFile=" + str(self.task / "known_hosts"),
+            "root@127.0.0.1:/root/a4-hooks-evidence.tar",
+            str(self.out / "guest-evidence.tar"),
+        ]
+        self.run(args, timeout=30)
+
+    def keep_overlay(self) -> bool:
+        return self.failed
+
     def cleanup(self) -> None:
         self.cleaning = True
         if (self.task / "serial.log").exists():
@@ -615,24 +637,7 @@ class Driver:
             )
         if self.vm and self.vm.poll() is None:
             try:
-                self.guest(
-                    "tar -C /root/a4-package-hooks -cf /root/a4-hooks-evidence.tar evidence",
-                    timeout=20,
-                )
-                args = [
-                    "scp",
-                    "-i",
-                    str(self.task / "key"),
-                    "-P",
-                    str(self.port),
-                    "-o",
-                    "StrictHostKeyChecking=accept-new",
-                    "-o",
-                    "UserKnownHostsFile=" + str(self.task / "known_hosts"),
-                    "root@127.0.0.1:/root/a4-hooks-evidence.tar",
-                    str(self.out / "guest-evidence.tar"),
-                ]
-                self.run(args, timeout=30)
+                self.collect_guest_evidence()
             except Exception as error:
                 self.record("cleanup-errors", {"collect": str(error)})
             try:
@@ -652,7 +657,11 @@ class Driver:
                     self.vm.wait(timeout=10)
         if (self.task / "serial.log").exists():
             shutil.copy2(self.task / "serial.log", self.out / "serial.log")
-        if self.failed and self.vm is not None and (self.task / "disk.qcow2").exists():
+        if (
+            self.keep_overlay()
+            and self.vm is not None
+            and (self.task / "disk.qcow2").exists()
+        ):
             shutil.copy2(self.task / "disk.qcow2", self.out / "blocked-disk.qcow2")
         refs = references(self.task)
         image = CACHE / "Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2"
