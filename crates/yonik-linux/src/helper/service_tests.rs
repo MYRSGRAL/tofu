@@ -294,6 +294,14 @@ impl Fixture {
 #[tokio::test]
 async fn real_bus_prepare_apply_replay_and_unlock_action() {
     let f = Fixture::new().await;
+    let eligibility = f
+        .call("NativePrepareEligibilityV1", r#"{"version":1}"#)
+        .await
+        .unwrap();
+    assert_eq!(
+        eligibility,
+        serde_json::json!({"version":1,"can_prepare_attribution":false})
+    );
     let capabilities = f.call("Capabilities", r#"{"version":1}"#).await.unwrap();
     assert_eq!(capabilities["system_tun"], false);
     assert_eq!(capabilities["allow_lan"], false);
@@ -717,4 +725,27 @@ async fn output_dispatch_preserves_claim_owner_stale_authorization_and_replay_fe
     assert!(output_call(&f.peer, &request).await.is_err());
     assert_eq!(f.effects.load(Ordering::SeqCst), 1);
     f.shutdown().await;
+}
+
+#[tokio::test]
+async fn native_eligibility_default_host_is_data_only_and_honors_cancel() {
+    let mut host = Host {
+        effects: Arc::new(AtomicUsize::new(0)),
+        profile_prepares: Arc::new(AtomicUsize::new(0)),
+        generation: Arc::new(AtomicUsize::new(1)),
+    };
+    let (keep, cancel) = Cancellation::new();
+    assert!(
+        !host
+            .native_prepare_eligibility(cancel.clone())
+            .await
+            .unwrap()
+    );
+    drop(keep);
+    assert!(matches!(
+        host.native_prepare_eligibility(cancel).await,
+        Err(ServiceError::Cancelled)
+    ));
+    assert_eq!(host.effects.load(Ordering::SeqCst), 0);
+    assert_eq!(host.profile_prepares.load(Ordering::SeqCst), 0);
 }

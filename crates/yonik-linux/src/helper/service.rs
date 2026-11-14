@@ -25,7 +25,7 @@ pub const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
 pub const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
 pub const SERVICE_INTERFACE: &str = SERVICE_NAME;
 const MAX_WIRE_BYTES: usize = 64 * 1024;
-const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="ApplyOutputV1"><arg name="request" type="s" direction="in"/><arg name="output" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="BundleCapabilitiesV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="PrepareBundleV1"><arg name="request" type="s" direction="in"/><arg name="canonical" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
+const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="ApplyOutputV1"><arg name="request" type="s" direction="in"/><arg name="output" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="NativePrepareEligibilityV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="BundleCapabilitiesV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="PrepareBundleV1"><arg name="request" type="s" direction="in"/><arg name="canonical" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -130,6 +130,15 @@ pub struct BundleDigests {
 /// Единственный владелец привилегированных эффектов; dispatcher сериализует доступ.
 pub trait ProtectionHost: Send + 'static {
     type Artifact: PreparedArtifact;
+    fn native_prepare_eligibility(
+        &mut self,
+        cancel: Cancellation,
+    ) -> impl Future<Output = Result<bool, ServiceError>> + Send {
+        async move {
+            cancel.check().map_err(|_| ServiceError::Cancelled)?;
+            Ok(false)
+        }
+    }
     fn bundle_transport(&self) -> bool {
         false
     }
@@ -245,6 +254,7 @@ enum Request {
     Prepare(bool),
     PrepareProfile(Box<SystemProfileRequest>),
     PrepareBundle(Box<SystemBundleRequest>),
+    NativePrepareEligibility,
     BundleCapabilities,
     Apply(PreparedHandle),
     ApplyOutput(PreparedHandle, crate::output_transport::ValidatedWriters),
@@ -406,6 +416,9 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
                 "Unlock" => Ok(Request::Unlock),
                 "State" => Ok(Request::State),
                 "Capabilities" => Ok(Request::Capabilities),
+                "NativePrepareEligibilityV1" if header.unix_fds().unwrap_or(0) == 0 => {
+                    Ok(Request::NativePrepareEligibility)
+                }
                 "BundleCapabilitiesV1" if header.unix_fds().unwrap_or(0) == 0 => {
                     Ok(Request::BundleCapabilities)
                 }
@@ -531,6 +544,21 @@ async fn dispatch<H: ProtectionHost>(
         Request::Introspect => return Ok(INTROSPECTION.to_owned()),
         Request::Capabilities => {
             serde_json::json!({"version":1,"public_protection":true,"system_tun":false,"allow_lan":false})
+        }
+        Request::NativePrepareEligibility => {
+            cancel.check().map_err(|_| ServiceError::Cancelled)?;
+            let _presence = peers.track(&sender, uid)?;
+            let mut host = host.try_lock().map_err(|_| ServiceError::Busy)?;
+            let eligible = host.native_prepare_eligibility(cancel.clone()).await?;
+            cancel.check().map_err(|_| ServiceError::Cancelled)?;
+            if tokio::time::timeout(Duration::from_secs(1), broker.authorizer().uid(&sender))
+                .await
+                .map_err(|_| ServiceError::Unavailable)??
+                != uid
+            {
+                return Err(ServiceError::Unavailable);
+            }
+            serde_json::json!({"version":1,"can_prepare_attribution":eligible})
         }
         Request::BundleCapabilities => {
             let host = host.try_lock().map_err(|_| ServiceError::Busy)?;

@@ -166,6 +166,13 @@ async fn real_bus_contract_errors_cancellation_and_owner_fence() {
         client.state(deadline(), cancel.clone()).await.unwrap(),
         State::VerifiedRules
     );
+    assert!(
+        !client
+            .native_prepare_eligibility(deadline(), cancel.clone())
+            .await
+            .unwrap()
+            .can_prepare_attribution
+    );
     let caps = client
         .capabilities(deadline(), cancel.clone())
         .await
