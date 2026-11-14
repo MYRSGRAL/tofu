@@ -10,7 +10,7 @@ harness на `59ece58809b749804f1e4fc41eb83bb8be55b6e1` остаются неи�
 `59ece58809b749804f1e4fc41eb83bb8be55b6e1`, production inputs которого совпадают с
 accepted `8ea826a04a745c8916e14a4329588c75f66b683e`.
 SHA256 patch:
-`b7b9c2d0f7bb08db43864fb9f206ae75ba33df5e1662316cb921b7020b13c8a2`.
+`432646034693b379f08e99557096c4be97aee8a00437d8b6fcee027d06700d5d`.
 [Binding](binding.json) содержит before/after SHA256 каждого файла и exact base.
 Не применять поверх shared W2/W3 изменений без новой source/review сверки.
 
@@ -46,7 +46,11 @@ sealed execution path, в просмотренных pinned версиях не 
    flags, pointer, callback, generic syscall, ни выбор exec caller не передаёт.
    Единственный новый unsafe block — registration pre_exec в этой функции;
    `#[allow(unsafe_code)]` ограничен функцией, общий deny остаётся.
-3. Одна строка вызова в private `BinarySnapshot::command`, через Tokio
+3. Target guard в новом adapter отклоняет не Linux/x86_64/64-bit/GNU;
+   он намеренно не считается проверкой backend. Точный backend допускается
+   только по gate ниже. Пока module подключён без feature-gate, unsupported
+   Linux targets получат compile_error и для nsfs; автоматического обхода нет.
+4. Одна строка вызова в private `BinarySnapshot::command`, через Tokio
    `as_std_mut()`. Этот общий **локальный host** command builder покрывает
    version/config-check/run. `.command()` callers на базе находятся только в
    `host/{process,tests}.rs`; helper registry может создавать BinarySnapshot,
@@ -104,9 +108,21 @@ Linux semantics, не новый actual trace установленного kerne
 Errno→io::Error использует from_raw_os_error. Closure хранит только Copy PID;
 getppid сравнивается с Some(expected_parent); обе mismatch ветки возвращают
 фиксированный ESRCH. Ошибка prctl сохраняет числовой errno, без string allocation.
-Нет heap allocation/deallocation, formatting/logging, env, locks, async/await,
-Tokio runtime calls, panic/unwrap/assert, unwind, mutable global state или FD
-mutation внутри closure. Подготовка Command и регистрация closure допускают
+В собственном closure нет heap allocation/deallocation, formatting/logging,
+env, locks, async/await, Tokio runtime calls, panic/unwrap/assert, mutable global
+state или FD mutation. Но dependency chain **содержит** debug-пути panic:
+getppid → linux_raw `ret_c_int_infallible` → `try_decode_c_int(raw).unwrap()`
+при debug_assertions; далее `Pid::from_raw` имеет `debug_assert!(raw >= 0)`.
+Поэтому прежнее безусловное утверждение «нет panic/unwrap/assert» неверно.
+При штатном Linux getppid возвращает неотрицательный PID либо 0 (None), без errno;
+тогда обе проверки недостижимы, unwind/formatting из dependency не возникают.
+Это **предусловие**, а не runtime detection sandbox policy. Inherited seccomp
+ERRNO/USER_NOTIF emulation, tracer/emulator, подменяющий getppid return, выводит
+окружение за границу proof; release/debug_assertions=off это не исправляет.
+Getpid в parent также должен сохранять нормальную Linux семантику. Raw syscall
+для обхода wrappers не нужен и не предлагается. Prctl, в отличие от getppid,
+является fallible: обычные ошибки, включая EPERM/EINTR, возвращаются как errno
+и запрещают exec. Для неизвестной sandbox/getppid policy grant не действует. Подготовка Command и регистрация closure допускают
 allocation **в parent до fork**, не в child. При изменении rustix backend или
 версии wrappers этот proof нужно перепроверить; libc backend автоматически
 этим разбором не сертифицирован.
@@ -128,6 +144,51 @@ SIGKILL нельзя catch/block/ignore. Pdeath настройка сохран�
 exec path нужны для гарантии; behaviour core, меняющего credentials, rearming
 PDEATHSIG или daemonizing, не покрыт blanket proof. Это не общий descendant
 fence и не замена worker/cgroup architecture.
+
+## Exact target/backend gate для последующего grant
+
+Поддерживается только standard target **x86_64-unknown-linux-gnu**, LP64, pinned
+rustix1.1.6 с effective `linux_raw` backend и нормальной getpid/getppid семантикой.
+Android, x32/ILP32, другие targets/libc backend не разрешены. Архитектурный guard
+в patch отсекает часть unsupported targets, но **не видит cfg dependency**.
+Нельзя проверять `cfg(linux_raw)` в nsfs как доказательство того, что rustix
+выбрал этот backend; нельзя подменять это пользовательским certificate cfg.
+
+Это выбранный **exact-build verification + unsupported fail-closed contract**,
+а не обещание автоматического определения backend в adapter. До реализации gate
+и его успешного receipt никакой compiled candidate нельзя запускать/принимать.
+Gate выполняется после отдельного user grant, не в текущей задаче:
+
+1. Отдельный чистый target-dir; exact standard target, trusted Rust1.85.1,
+   pinned Cargo.lock и rustix source hashes из binding. Сохранить effective Cargo
+   config/env/argv, включая CARGO_ENCODED_RUSTFLAGS/RUSTFLAGS, target rustflags,
+   build.rustflags, wrappers. Запретить user cfg overrides, miri,
+   rustix_use_libc/rustix_no_linux_raw и rustc-dep-of-std. Не менять global config.
+2. Для **фактической сборки candidate**, а не отдельного probe, сохранить verbose
+   rustc invocations и build-script-executed JSON. Проверить resolved feature
+   graph target instance rustix1.1.6: нет use-libc/rustc-dep-of-std. Одних
+   Cargo.toml/default-features=false или cargo tree другого target недостаточно.
+3. Связать package-id/OUT_DIR/output build.rs с **тем самым** rustix compiler
+   invocation, target и linked rlib. Требовать generated `linux_raw` и
+   `linux_raw_dep`, отсутствие `libc`; actual rustc argv должен соответствовать
+   output. `linux_raw_dep` один не доказательство: он возможен и при libc.
+   Build.rs выбирает libc при use-libc, rustix_use_libc, unsupported ABI (включая
+   x32), отсутствии asm support и miri; ничего из этого gate не разрешает.
+4. Receipt связывает full source hashes, toolchain/target/config, effective
+   features/cfg/argv, build-script output, linked dependency и candidate ELF hash.
+   Не переиспользовать receipt от другого ELF или workspace unification.
+   При отсутствующем/неоднозначном receipt, libc selection или неизвестной
+   inherited seccomp policy — **отказ активации/исполнения**, не fallback, не
+   запуск без PDEATHSIG. Ручная сборка вне gate не получает approval этим proposal.
+   Автоматический executable verifier здесь не реализован: это отдельный
+   обязательный acceptance/pre-execution шаг root после grant.
+
+Проверки отклонения gate должны включать use-libc feature, --cfg rustix_use_libc,
+--cfg rustix_no_linux_raw, x32 и чужой/неполный receipt; никаких core executions
+для этих negative build configurations. Проверка policy окружения не вводит
+новый seccomp-query syscall: использовать только контролируемый известный launch
+profile, unknown означает unsupported. Adapter не обещает portable fail-safe
+при произвольной инъекции errno в infallible syscall.
 
 ## План проверки только после отдельного grant
 
@@ -165,8 +226,10 @@ fence и не замена worker/cgroup architecture.
 
 > Разрешаете отдельное unsafe-исключение только для одного
 > CommandExt::pre_exec installer в yonik-nsfs по proposal p09-local-parent-death,
-> patch SHA256 b7b9c2d0f7bb08db43864fb9f206ae75ba33df5e1662316cb921b7020b13c8a2
-> на базе 59ece58809b749804f1e4fc41eb83bb8be55b6e1: fixed SIGKILL через
+> patch SHA256 432646034693b379f08e99557096c4be97aee8a00437d8b6fcee027d06700d5d
+> на базе 59ece58809b749804f1e4fc41eb83bb8be55b6e1, только для
+> x86_64-unknown-linux-gnu/LP64, rustix linux_raw по exact-build receipt и
+> окружения со штатным getpid/getppid без errno emulation: fixed SIGKILL через
 > существующие safe rustix 1.1.6 wrappers, внутренний parent PID и getppid
 > до/после arming, process feature в существующей nsfs dependency и единственный
 > local sealed-command call site? После разрешения — отдельная реализация и
@@ -176,3 +239,12 @@ fence и не замена worker/cgroup architecture.
 
 Ранее согласованные nsfs/TUN/Runtime16 unsafe исключения этот installer **не
 покрывают**. Root сначала review; только затем отдельное решение пользователя.
+
+
+## Correction independentR1b649
+
+Оба P2 учтены: target guard не заменяет dependency backend receipt; dependency
+unwrap/assert явно перечислены с предусловием недостижимости. Предыдущий patch
+b7b9 superseded этим digest, но runtime finding refs59ece/58fd и их evidence
+сохранены без изменения. Algorithm/TGID/thread scope не расширен. Требуется
+узкий recheck новых границ proof до user grant; apply/compile/runtime отсутствуют.

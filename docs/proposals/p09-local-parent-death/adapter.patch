@@ -41,11 +41,20 @@ index b4b5fc60b867197bb6a6c64ed0b454364e3d685d..7fbbda5f36665e3d2e0ac7923d11e61f
  }
 diff --git a/crates/yonik-nsfs/src/local_parent_death.rs b/crates/yonik-nsfs/src/local_parent_death.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..89f4afa34e17fed45a0180cb02a8665dfaa6c659
+index 0000000000000000000000000000000000000000..25d68f994f2dfe280acc22ab56e03d907423ee69
 --- /dev/null
 +++ b/crates/yonik-nsfs/src/local_parent_death.rs
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,43 @@
 +//! Fixed SIGKILL при потере родителя локального sealed core; не worker API.
++// Target guard не доказывает backend: требуется отдельный exact-build receipt.
++#[cfg(not(all(
++    target_os = "linux",
++    target_arch = "x86_64",
++    target_pointer_width = "64",
++    target_env = "gnu"
++)))]
++compile_error!("local parent-death: требуется verified x86_64-unknown-linux-gnu/raw backend");
++
 +use rustix::process::{Signal, getpid, getppid, set_parent_process_death_signal};
 +use std::{io, os::unix::process::CommandExt, process::Command};
 +
@@ -56,7 +65,10 @@ index 0000000000000000000000000000000000000000..89f4afa34e17fed45a0180cb02a8665d
 +    let expected_parent = getpid();
 +    // SAFETY: после fork closure использует только getppid/prctl raw wrappers,
 +    // Copy PID и errno-only io::Error. Нет allocator, locks, logging, env,
-+    // panic/unwind или доступа к унаследованным library state/FD.
++    // доступа к унаследованным library state/FD. Proof условен: rustix 1.1.6
++    // linux_raw, LP64 и штатный getppid без errno emulation; dependency debug
++    // unwrap/assert существуют, но недостижимы при этом предусловии.
++    // Иной backend/ABI или неизвестная getppid sandbox policy не поддержаны.
 +    // SIGKILL фиксирован; несовпадение родителя/ошибка запрещают exec.
 +    unsafe {
 +        command.pre_exec(move || {
