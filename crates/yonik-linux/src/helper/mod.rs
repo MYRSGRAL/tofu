@@ -5,6 +5,7 @@
 //! Prepare/Apply нужна новая проверка непосредственно перед эффектами.
 
 pub mod fence;
+mod kernel_evidence;
 mod protection_host;
 mod session_network;
 pub use session_network::SessionNetworkPlan;
