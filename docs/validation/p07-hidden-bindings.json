@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "campaign": "focused passive P07 final; Rust binary unchanged across focused observer controls",
+  "source_base": "1d0b5a9ce316f4488de327ee7818b7fb280e73ad",
+  "exact_current_source_artifacts": true,
+  "rust_binary_source_members": [
+    "crates/yonik-desktop/examples/p07_hidden.rs",
+    "crates/yonik-desktop/examples/p07_hidden/bridge_impl.rs"
+  ],
+  "observer_source_member": "tools/p07_hidden_observer.cpp",
+  "source_archive_members": {
+    "crates/yonik-desktop/examples/p07_hidden.rs": "85ca4121b36de59bc0728d1908a9471eb8121f9191165c1a4438c1ab5ccaa055",
+    "crates/yonik-desktop/examples/p07_hidden/bridge_impl.rs": "931e9b006a2a631029335fdd8dc4d2e2fe0af7ac343388cceebe139e975b4f6c",
+    "tools/p07_hidden.py": "6ec21bce0844414731a9e3df9a6c3f0d49d2e062cc3c5dbc6207d2517f4b1468",
+    "tools/p07_hidden_observer.cpp": "20b07e2daa56e3207bd68e0d7c66b7e6faa98122be60f6ef95be884676fc597f"
+  },
+  "artifact_sha256": {
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final-source.tar.gz": "7020d9560f39e25236194003c09a20abfb5b4eff70de1b6a3fe831b45a7c8dae",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/p07_hidden": "1743142b9ba59aa9fefef25003751cfcca561b86b648f32d107c9224de4a4094",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/examples/p07_hidden.rs": "85ca4121b36de59bc0728d1908a9471eb8121f9191165c1a4438c1ab5ccaa055",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/examples/p07_hidden/bridge_impl.rs": "931e9b006a2a631029335fdd8dc4d2e2fe0af7ac343388cceebe139e975b4f6c",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/tools/p07_hidden.py": "6ec21bce0844414731a9e3df9a6c3f0d49d2e062cc3c5dbc6207d2517f4b1468",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/tools/p07_hidden_observer.cpp": "20b07e2daa56e3207bd68e0d7c66b7e6faa98122be60f6ef95be884676fc597f",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/src/application.cpp": "e3ac3a61c4ad6c657e8c55b2f0a14926295be804b9e96c29a6f00cb5ca79b770",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/src/bridge_impl.rs": "5084028a8db546260bc02a8ae28f79bff358245c613c338239b73ac64dd5ae82",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/src/bridge_pending.rs": "1bb6f1d19ed0d3126946be51fbaa404e36406e956ee877a21a699bdb3a155450",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/qml/Main.qml": "d6646815e76876b801ef2260ea628bd42de8421be998d4cc09618ab898f324bf",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-desktop/qml/LogsView.qml": "f2c9a36721777f104c46f3da641df0932435665846ebe3e8d83e50435ad6850f",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/tools/native_cancel_matrix.py": "326d63d87615a2fe2be220d71ee9f1293ba4c77b001ad91bdb03993726463023",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/observer/observer.so": "0aa7d0648b68168e6117db383880c0f5baa38e2307516258b732bc9de9ed2ff0",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/observer/p07_hidden_observer.cpp": "20b07e2daa56e3207bd68e0d7c66b7e6faa98122be60f6ef95be884676fc597f",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/observer/p07_hidden_observer.moc": "ed43e97130db5d04a2b4d8d186bae1cc28a481099992ccc9e772e3d6d47bf392",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/results.json": "4d20f73f47d035d40c70a7a74b23bbc490148b8e5af447457c3163ebcac39094",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/positive-0/qt.log": "cb8cbddb58b3dce506a168afd16713d716c781aa03e98245a2c9e8d49393ddef",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/positive-1/qt.log": "b3359523f4b974b896097a2c793eb6a9f7aa7dafe78da71669dde5e7fc85437b",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/positive-2/qt.log": "418569c2a03011cb073fa39292b29a6908e37c9b9cd9208a768a8238ffb27542",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/negative-notify-disconnected/qt.log": "29d2d159806dca059131dce489628a4cff9b154500100382b3d348967ea505fc",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/final/negative-frame-disconnected/qt.log": "727533731cef9168165d8d7ed9caad3d5ecc8c07cd593c5340c7596e838c90d8",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/build.log": "bdb2e7cd24289a4247c0002f72a3e295e335a2a29b951e59ce53ec8fcbb6e7d7",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/clippy.log": "d4863becc61732ae6ad7f10eaedd92d46700032a2e7b052969f15554c452ade2",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/default-check.log": "1444e8bf353cd38c368b662acd7ecfbb6d9906e96c6c2e4d586f7a18cd63d039",
+    "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/p07-hidden/cleanup.log": "8552d1fc0a4179e9c7b0ece507d4d7e9abb677f2b35e867cae85c3af16ee31d5"
+  },
+  "previous_campaigns": {
+    "gui": "p07-gui-bindings.json unchanged; source/binary distinct; 6 runtime runs \u043d\u0435 \u043f\u043e\u0432\u0442\u043e\u0440\u044f\u043b\u0438\u0441\u044c",
+    "component": "p07-concurrent-binding.json schema2 unchanged; archived 844b864 vs checked e942b655; binary not reassigned"
+  }
+}
