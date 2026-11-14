@@ -489,12 +489,12 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
-      "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
-      "blob": "c165b3f411f60ca802d56e20bb34abb6ac89efec",
-      "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
-      "review": "R2 824cd624 CLEAN combined P11/port source and bindings on fcc44e3; prior R1 188f726b CLEAN port feature and R2 932b7107 CLEAN typed replacement/A4 union. Historical runtime remains bound to original producer.",
-      "review_pending": false,
-      "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
+      "source": "37756cc6ce59234a34fc459e7deba6ed6c6ddbb1",
+      "blob": "ea8f42a0d545c7b6c25d3e66ace68e3d144f002e",
+      "scope": "Принятый P09 test-support lifecycle gate объединён с reviewed FR16 output; новые P11 causes и IDs отсутствуют. Historical executions не перепривязаны.",
+      "review": "Root exact backend delta 7d99126→37756cc equals accepted P09 test-support hooks only; reviewed FR16 union R1 f8c980d8 and P09 R1 6c7b0ad8 preserved. Independent combined integration recheck pending before merge.",
+      "review_pending": true,
+      "new_runtime_pass": false
     },
     "crates/yonik-desktop/qml/Main.qml": {
       "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
@@ -591,6 +591,33 @@
       "scope": "Обычный merge exact main41 A08 correlation + PR199 concrete subscription transport; historical executions не перепривязаны",
       "review": "R2 8de CLEAN frozen7b; этот merge ожидает narrow integration review и fresh CI; новый runtime PASS не заявлен",
       "review_pending": true
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
+      "blob": "c165b3f411f60ca802d56e20bb34abb6ac89efec",
+      "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
+      "review": "R2 824cd624 CLEAN combined P11/port source and bindings on fcc44e3; prior R1 188f726b CLEAN port feature and R2 932b7107 CLEAN typed replacement/A4 union. Historical runtime remains bound to original producer.",
+      "review_pending": false,
+      "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "e3f0add2635d9f8ce747ad4e8cd367fe32ccdc27",
+      "blob": "61e4901ca5a06aa8b6b871f5d07d41f9cdc4404f",
+      "scope": "P09 cancellation test-support only; exact original cancellation delta over preserved root P11/ports union. Historical execution remains bound to 8e138f7.",
+      "review": "Root: exact backend delta 0bb3e86→e3f0add is cfg(test-support) lifecycle gate only, P11 publication/context/render unchanged; original P09 R1 6c7b0ad8 scoped CLEAN. Historical runtime binding preserved.",
+      "review_pending": false,
+      "new_runtime_pass": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "11557271eb57ede0e9aa527278a2271fd6c1de6c",
+      "blob": "3dd9b2f8736e8f96318a07e18c63a3c480f4beee",
+      "scope": "FR16 default output carrier integration; P11 typed causes/publication/generation/render/export preserved. Historical execution not rebound.",
+      "review": "R1 f8c980d8 CLEAN exact 4bb1f1d ordinary root union and P11 links; prior R1 1c7a98b4 CLEAN complete carrier default software path.",
+      "review_pending": false,
+      "new_runtime_pass": false
     }
   ]
 }

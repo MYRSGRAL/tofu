@@ -614,10 +614,6 @@ impl SystemClient {
 /// Удобная граница по умолчанию для интерактивной авторизации.
 pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[cfg(any(test, feature = "test-support"))]
-#[allow(dead_code)] // Только staged carrier, без default caller.
-mod output;
+pub mod output;
 
-#[cfg(any(test, feature = "test-support"))]
-#[allow(unused_imports)] // Следующий caller требует отдельного разрешения.
-pub(crate) use output::PreparedOutput;
+pub use output::PreparedOutput;

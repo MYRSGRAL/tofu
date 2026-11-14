@@ -42,7 +42,10 @@ def check_raw(argv: list[str]) -> dict:
     return dict(cfg=sorted(cfg), features=sorted(features))
 
 
-def verify(evidence: Path) -> dict:
+def verify(evidence: Path, example: str = "local_socks_alternating") -> dict:
+    require(
+        example in {"local_socks_alternating", "p09_cancellation"}, "unknown example"
+    )
     freeze = json.loads((evidence / "freeze.json").read_text())
     revision = json.loads((evidence / "verifier-revision.json").read_text())
     own_path = str(Path(__file__).resolve())
@@ -152,7 +155,7 @@ def verify(evidence: Path) -> dict:
     executables = {}
     for name, dependencies in (
         (
-            "local_socks_alternating",
+            example,
             ("yonik_desktop", "yonik_linux", "yonik_nsfs", "rustix"),
         ),
         ("local_parent_death", ("yonik_nsfs", "rustix")),
@@ -241,7 +244,12 @@ def verify(evidence: Path) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("evidence", type=Path)
+    parser.add_argument(
+        "--example",
+        choices=("local_socks_alternating", "p09_cancellation"),
+        default="local_socks_alternating",
+    )
     args = parser.parse_args()
-    result = verify(args.evidence.resolve())
+    result = verify(args.evidence.resolve(), args.example)
     (args.evidence / "receipt.json").write_text(json.dumps(result, indent=2))
     print(result["status"])

@@ -316,3 +316,32 @@ fn fixed_golden_vectors() {
     );
     assert!(decode(v1).is_err() && decode(v2).is_err());
 }
+
+#[test]
+fn production_v3_decoder_matches_frozen_roles_and_rejects_mutations() {
+    for count in 0..=16 {
+        let bytes = fixture(count);
+        let legacy = crate::worker::decode_output_header(&bytes).expect("v3 production codec");
+        let (header, manifest, scope) = decode_bundle_header(&legacy).expect("shared resources");
+        assert_eq!(header.mode, WorkerMode::Run);
+        assert_eq!(manifest.len(), usize::from(count));
+        assert_eq!(scope.is_some(), count != 0);
+        for index in [7, 8, 11, 96, 97, 98, 99, 100, 111] {
+            let mut bad = bytes.clone();
+            bad[index] ^= 0x40;
+            assert!(
+                crate::worker::decode_output_header(&bad).is_err(),
+                "{count}/{index}"
+            );
+        }
+        for length in 0..bytes.len() {
+            assert!(crate::worker::decode_output_header(&bytes[..length]).is_err());
+        }
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(crate::worker::decode_output_header(&trailing).is_err());
+    }
+    let mut zero = fixture(0);
+    zero[80] = 1;
+    assert!(crate::worker::decode_output_header(&zero).is_err());
+}
