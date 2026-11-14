@@ -1,0 +1,1 @@
+{"task":"fr16-classifier-c111","cleanup":"removed own standalone build artifacts after commands exited; no Cargo target created","retained":"source/test/check evidence in workspace","remaining_bytes":0}

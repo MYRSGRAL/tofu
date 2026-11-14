@@ -1,0 +1,7 @@
+{
+  "base": "3247e6c32a5ed83ec5d812dfc1f70695d3f2b3b4",
+  "state": "RED: missing positive witness, not an engine failure",
+  "rust_positive_witness": false,
+  "matrix_positive_ss2022": false,
+  "existing_negative": "invalid_shadowsocks_2022_key_and_vmess_options_are_rejected"
+}

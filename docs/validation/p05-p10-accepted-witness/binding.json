@@ -1,0 +1,1033 @@
+{
+  "accepted": "8ea826a04a745c8916e14a4329588c75f66b683e",
+  "new_native_execution": false,
+  "new_build": false,
+  "proofs": {
+    "p05": {
+      "root": "/home/myrs/projects/yonik/local/validation/p05-native",
+      "manifest": "/home/myrs/projects/yonik/local/validation/p05-native/final-manifest.sha256",
+      "manifest_sha256": "e476ad39d3eb0d295c19550adcbb14227757fbebdd526d8a8595973e49b8fd2d",
+      "focused_source_entries": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "recorded_sha256": "5aa57960fe0146b99fde43e65166aa80c745bafd81951d9596e6954c8c470db6",
+          "accepted_sha256": "2cecdcdba1ebb031b5613f04d7181eaa32d05b30ee35100654c89e9f897ea949",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/backend.rs",
+          "recorded_sha256": "08cacd757061c7b5746bd48a61c1e7cf9b72bbaed04d636565eb04076c8d8f4b",
+          "accepted_sha256": "f0204db722d7b31ad4834539107b95412285016d448b6f618e7f8064cedd5e09",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_acceptance.rs",
+          "recorded_sha256": "7bfa421307fb44066c32b07dd3b12ae2b858ce47858a0e7ef50a65d9c5c67a91",
+          "accepted_sha256": "008e00e4fcf11117c753e5be51805d89b92edf57d3f82a37d1922aa612ad9cef",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_native.rs",
+          "recorded_sha256": "4ca4ac7b8c8401d669ca097eee2aed840005313a15af03f1d4ee34bec1a1c788",
+          "accepted_sha256": "4ca4ac7b8c8401d669ca097eee2aed840005313a15af03f1d4ee34bec1a1c788",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/support/p05_service.rs",
+          "recorded_sha256": "cbe6cd7e6b6b43e577168213931fc929fe86b00bdf6eef7c1a2fef4de9681baa",
+          "accepted_sha256": "cbe6cd7e6b6b43e577168213931fc929fe86b00bdf6eef7c1a2fef4de9681baa",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_native.py",
+          "recorded_sha256": "966019c0177f311681a3047923b9595b5c1802c49268c51512a2d42f8f65b2f0",
+          "accepted_sha256": "966019c0177f311681a3047923b9595b5c1802c49268c51512a2d42f8f65b2f0",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_guard.py",
+          "recorded_sha256": "1b3a901e4a9a93d538869b9d7fa4eb9544b65b0c0d6eeeab5632ac2f63d13095",
+          "accepted_sha256": "1b3a901e4a9a93d538869b9d7fa4eb9544b65b0c0d6eeeab5632ac2f63d13095",
+          "exact": true
+        }
+      ],
+      "retained_binaries": [
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/bin/p05_acceptance-dfa8affec6358aa8",
+          "expected_sha256": "18918e8508c40a99d94b5daf4a4bfc43c5a4584debbd232f565f17bb76136cee",
+          "match": true
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/bin/p05_native-377878a21a21e467",
+          "expected_sha256": "771aeea6e495823eccbd634dae53640a6cba9cf8dcc9d2bf8eb7e752699cfd04",
+          "match": true
+        }
+      ],
+      "historical_results": {
+        "sing-box": {
+          "host_cases": 30,
+          "service_cases": 32,
+          "elapsed_seconds": 134.01,
+          "system_lookups": 0,
+          "hidden_direct": 0,
+          "dns_positive_control": 1,
+          "direct_positive_control": 1
+        },
+        "xray": {
+          "host_cases": 30,
+          "service_cases": 32,
+          "elapsed_seconds": 77.65,
+          "system_lookups": 0,
+          "hidden_direct": 0,
+          "dns_positive_control": 1,
+          "direct_positive_control": 1
+        }
+      },
+      "metadata_and_logs": [
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/backend-and-callback.log",
+          "sha256": "c59f1ed776bd276e411823d4707090f73d5dc3ee6768ab2efb5f5daadaed31df"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/build.log",
+          "sha256": "3b51f437793d7cf8b9766e504c30dbdade96edb8c5399bd65e3655997de033c0"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/callback-final-manifest.sha256",
+          "sha256": "9c23d08a3453d47994612a36f6faab79acd61e94d11a0672d96a5ef84e57b415"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/clean.log",
+          "sha256": "eaec7b968ac1cef3e287aca69e0f7189776b13455d891b31b68db5f16148fc8f"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/cleanup-refs.json",
+          "sha256": "ef5948997cf39fae577fbb8332d6c44254bf112d3de6e40a8f5b81999c062d88"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/clippy.log",
+          "sha256": "904bedf8df75950331d5ec976bf1bc6178d8e84cfeaea209caff7bf5539166e4"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/counts.json",
+          "sha256": "9280997166736f926a919788871e0b92caaeed06fd32959495605bd606778104"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/drain-build.log",
+          "sha256": "5eb92c50f58e6643160895c07ff783df27c65a3fbd34134baadeeada62f77ab9"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/final-build.log",
+          "sha256": "d293ac82c89eda071c15db191f0f11388efde70d3de09eb928dfa697edcc9ddf"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/final-manifest.sha256",
+          "sha256": "e476ad39d3eb0d295c19550adcbb14227757fbebdd526d8a8595973e49b8fd2d"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/fmt.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/green-build.log",
+          "sha256": "3b5c1b243288e38d058598ac2d1ca95ba5e41c8eb29acac7f34fb1ca4ddfb04a"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/green-manifest.sha256",
+          "sha256": "8c50784c7336d8098282ca4cac383d7eb543e9325e90546a86b60aeb194d763b"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/green.log",
+          "sha256": "4bb422ac1d8653deb90143e8a749a9999195018f2b80c2cce53bda5ff72458bb"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/manifest.sha256",
+          "sha256": "1c7e64ad2629ebd8de6d8ac46a90c44d57733f19888e3c93833fe8fe2c402217"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/native-final-build.log",
+          "sha256": "8d33a59081093a6307d99d3ad3d1f5aa4950b55eb16eb951fbdb2425fcc6cb8c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/negative-exports.json",
+          "sha256": "4920be8aba1ca940f1ecc3b52002ab7ec239cc0ea4db0f5fa7fa4ab796a3b756"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/preserved-binaries.sha256",
+          "sha256": "58ee252a69c171a0152deb10ad6151fb81e3907eb3657be697b95393f6dd6721"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/red.log",
+          "sha256": "11304cc4f8ce002a3d875e2519c169ce16e0eb9fda9903958f0c81ad754708ab"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/results.json",
+          "sha256": "0a1d9c91391a87e7ced9f6189c2e79da20b970f7830d5ad3f70b6d4b04e51651"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/ruff.log",
+          "sha256": "afa20b27dacc9bf0aba3c1d265964c21e04ab42f6e39e2dd4769718ceded003a"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/runner.log",
+          "sha256": "006759a20cb579b6034fc81b9c1a51b7100c6f84ba8f017dad5f0358c8727a1d"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/sing-box.log",
+          "sha256": "75efd39675003c5a928176d06920faa9dc8d25a54d095fbf5f0ee6a3f35168d5"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p05-native/xray.log",
+          "sha256": "de6ea424909bda21f13c6d80affda6b726f794a65bf8f8c90fecd62367f4f71d"
+        }
+      ]
+    },
+    "windows": {
+      "root": "/home/myrs/projects/yonik/local/evidence/scheduler-windows",
+      "manifest": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-privatebus-manifest.json",
+      "manifest_sha256": "f9c0cf9edc9d812a4e636469a2d36af5b93a561230cb6e6fae0333975c17e7d4",
+      "focused_source_entries": [
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "recorded_sha256": "bd82cead98e383dc18a943fcd31bcd2358c9a3682df87df863700dc025103f62",
+          "accepted_sha256": "2cecdcdba1ebb031b5613f04d7181eaa32d05b30ee35100654c89e9f897ea949",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+          "recorded_sha256": "522bedd93c9aedce3d6fc04cdea5fe9130379bc6ec5c6b0a2d0eb968022b3dec",
+          "accepted_sha256": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/backend.rs",
+          "recorded_sha256": "bb9f9363728637c39fc83f0353cdeaad2047faf89dcc30c776ccf89eac76b4f0",
+          "accepted_sha256": "f0204db722d7b31ad4834539107b95412285016d448b6f618e7f8064cedd5e09",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p10_gate.rs",
+          "recorded_sha256": "9d2a897b3002670853c244bfe62ed9fa695afd73553856ea74ba64295e06750a",
+          "accepted_sha256": "9d2a897b3002670853c244bfe62ed9fa695afd73553856ea74ba64295e06750a",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/support/p10_e2e.rs",
+          "recorded_sha256": "44b56406bd99edeaf4a472f07f908180e93286e40600ece7c15354d1af83f0e3",
+          "accepted_sha256": "44b56406bd99edeaf4a472f07f908180e93286e40600ece7c15354d1af83f0e3",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/fetch.rs",
+          "recorded_sha256": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+          "accepted_sha256": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/policy_test_support.rs",
+          "recorded_sha256": "7ea60642126688283245e3ba092c2815af44605c1a1b716b752d1216642c5cf0",
+          "accepted_sha256": "7ea60642126688283245e3ba092c2815af44605c1a1b716b752d1216642c5cf0",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_policy.rs",
+          "recorded_sha256": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d",
+          "accepted_sha256": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_scheduler.rs",
+          "recorded_sha256": "b288f8b090b6f46587b44d7ddde95be60e826e07072739d1fcc129463822d19f",
+          "accepted_sha256": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_scheduler_tests.rs",
+          "recorded_sha256": "42feb6f1e719d128f6b39d33d9b39836feea45977f96c7d99243a627fb950614",
+          "accepted_sha256": "b68d67d9e609fddb7643347a4eaa7721dbe6b91bd62d86e5cdf87112d376bbf6",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-linux/src/subscriptions.rs",
+          "recorded_sha256": "b0565356561ee96e78935644ec31f3935c9519d3711a577c3c8863f163a39d43",
+          "accepted_sha256": "1b0586ec74f9a966711b7128f4627eac58512bdee7fde83e98020cf92d77978b",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_proxy.rs",
+          "recorded_sha256": "bca261db2499d3d040433cf6e585066b0ebf0f780ffc712910bdcb5de14fb804",
+          "accepted_sha256": "bca261db2499d3d040433cf6e585066b0ebf0f780ffc712910bdcb5de14fb804",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_proxy_dns.py",
+          "recorded_sha256": "ed3039e08c96ba3d62a1e4fd6628479fcf46740a380430c33afbffc59a2a9394",
+          "accepted_sha256": "ed3039e08c96ba3d62a1e4fd6628479fcf46740a380430c33afbffc59a2a9394",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_refresh_contract.rs",
+          "recorded_sha256": "789a16af39aed40941370b36a81d3e3cce165fb855d3ac74f188e21618b9cca9",
+          "accepted_sha256": "789a16af39aed40941370b36a81d3e3cce165fb855d3ac74f188e21618b9cca9",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_scheduler.rs",
+          "recorded_sha256": "e72146c657c5b753626e815682e7cf73a46ed86d7e7379bfd0113b1624053c14",
+          "accepted_sha256": "e72146c657c5b753626e815682e7cf73a46ed86d7e7379bfd0113b1624053c14",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscriptions.rs",
+          "recorded_sha256": "2339c90a69d8871e1b53c7044f95f086cce724eae044cafefc0a6d6080d4b12b",
+          "accepted_sha256": "2339c90a69d8871e1b53c7044f95f086cce724eae044cafefc0a6d6080d4b12b",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/Cargo.toml",
+          "recorded_sha256": "a853759bd0a1cecdb92ee6d26542d829c85cf7ddaa718aa3c074d43a99572dbf",
+          "accepted_sha256": "a853759bd0a1cecdb92ee6d26542d829c85cf7ddaa718aa3c074d43a99572dbf",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/src/lib.rs",
+          "recorded_sha256": "8655061ed8509a8491818489cb81d446ee2082f2a57fe9d238adb16f52fd41da",
+          "accepted_sha256": "4e6546a7e5e4c72b02c9760811ab19f1c1a3edd40d08680bd5b4a2c56e7c7004",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-subscription/src/scheduler.rs",
+          "recorded_sha256": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639",
+          "accepted_sha256": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/tests/update.rs",
+          "recorded_sha256": "f45a10f94255af8580daaa6fc1b972c00dd5758218b9839f75b32c95c9099e9e",
+          "accepted_sha256": "f45a10f94255af8580daaa6fc1b972c00dd5758218b9839f75b32c95c9099e9e",
+          "exact": true
+        }
+      ],
+      "retained_binaries": [
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/p10-gate",
+          "expected_sha256": "40a0c505c45463cf1847b7809c6cc8ab891ccb3818daf5325dce0b7f2c298505",
+          "exists": true,
+          "match": true
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/backend-test",
+          "expected_sha256": "c92af7c19c6678fdc6aaefa73de28b6e61a57ae2ca268102727329cf81577e4d",
+          "exists": true,
+          "match": true
+        }
+      ],
+      "metadata_and_logs": [
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/build85.log",
+          "sha256": "d1c8e8c8eea7b5bd331c0f64ecdd98e03fb180b8dc094afeeeadf4a0d2c351cc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/cleanup.log",
+          "sha256": "738590e9a1f295e000ed33164e7b5b6b0b7c0c5a12153ffd22f8e9239b6d6b6e"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/clippy85-final.log",
+          "sha256": "4f33bf49940903f51e45e86d234be0a129c7d67c4d13bf6faf3b802938b50bc7"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/clippy85.log",
+          "sha256": "39a216efd296b907ac9e45ab49ef396666f9d5558a5f9a06bd33d31697f94a0a"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/desktop-backend.log",
+          "sha256": "79c2cf3c568f5edbade1d7da842af76fb48e54ae42679ffd2b93104d26d6ecf1"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/desktop-unit-initial-failure.log",
+          "sha256": "150bcc781007e8ef8d21ebe9ed6afee27edbd32776fd275b588b85ae54cf6805"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/desktop-unit.log",
+          "sha256": "0efdb1c7d25ee94dc64d46d3400da14135d65f04da2838e6c1de306b7061f921"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/domain.log",
+          "sha256": "2c846f85d3cafa8f9dcc431a0dbc4a62a0c1141184ccb575a15122d06ec62ce6"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-build.log",
+          "sha256": "9abd7fab14f8e16f8866a254253cb915288865c9498115e93815fbc1c268a954"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-desktop-backend.log",
+          "sha256": "7b3b2f32707e33ee849d721be2a1638ed402045b53b3a1e6271ad1713e404c6f"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-desktop-manifest.json",
+          "sha256": "f01b9a9a22f332456f3c179fab10369fec71a62ad9b64b9310618bde3d339341"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-desktop-unit.log",
+          "sha256": "9024367273ce14920c287c113d2780e82a30cd2688fe8e6689ff8ee9dc13adfa"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-desktop.patch",
+          "sha256": "9b10f72350dc35157e3f93df319cc04ef53cb6fc2ab27bea54082f9b824ccbee"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-gate.log",
+          "sha256": "62b767578b96005224cde593654742e3cf565f59a82cfe468300f52e3b75853c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-privatebus-build.log",
+          "sha256": "af33b40db03c1ee9a9f5573255f7ab879fec525c7f9d28dbddf73458574698c3"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-privatebus-manifest.json",
+          "sha256": "f9c0cf9edc9d812a4e636469a2d36af5b93a561230cb6e6fae0333975c17e7d4"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-privatebus.log",
+          "sha256": "0aa9a075c757ff027d869bf31e45b793af8e58f92996b02dc46a89d0dd1a8925"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/final-privatebus.patch",
+          "sha256": "9b10f72350dc35157e3f93df319cc04ef53cb6fc2ab27bea54082f9b824ccbee"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/fmt-final.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/green-build.log",
+          "sha256": "c71a50e65a4b57ad993825f453654eee0e8c0ca8798f4b7ef390ed6d41f9eacc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/green-manifest.json",
+          "sha256": "79d2f6f6f2d138069027fe6b78f8842156e0f6fe617db3073a46a4ccf9086349"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/green.patch",
+          "sha256": "7bae1a25540a8821a3c3838da4205439a1f2191d72b67b722ecde5eb762f9d74"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/linux-runtime.log",
+          "sha256": "1a91b90d9f132482664125dea8df471aec938cffca23b50e17b1ac37d3a5f890"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/linux-unit.log",
+          "sha256": "58e059f1db0b434056a7cde17790a8cc40158c146019633b5f78bdb7bba1e1df"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/manual.log",
+          "sha256": "98da4b11309c6f5a249c53d3d7887ac996de9178020d36ed4cf6032a258afbe3"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/privatebus.log",
+          "sha256": "0aa9a075c757ff027d869bf31e45b793af8e58f92996b02dc46a89d0dd1a8925"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/qml-parse.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/queued-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-interval-build.log",
+          "sha256": "746645e034fa599fc4a397a6901ac6e10ea6f9644643c8cd1c5e48cecc2781ad"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-interval-manifest.json",
+          "sha256": "c6cd57d0169a0a3dd8fc7b7aaacfe9e85172ae61196d2ab9b797641951574e6b"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-interval.log",
+          "sha256": "b747ad6bbf53c15789e4dec54834f2d1f3f94227c14ad5d7a088c9536780fdaa"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-interval.patch",
+          "sha256": "f3807935ad5bbe287fc1cede1b80802a6549dd5b406b20204003428395b8621c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-manual-build.log",
+          "sha256": "342409dc35db82ab4f0d32b0c85941994c49e2474d588a1895ddd13f2bc4e4a1"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-manual-manifest.json",
+          "sha256": "39d2254c656adb2ea31c510ca36229567d767fb8a171841506ec7033efab2a77"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-manual.log",
+          "sha256": "e1440b610866995322c3dd203bcf1635e6c03b0776fb9ad772dcfcb083e093bd"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-manual.patch",
+          "sha256": "0d5a4507551e86208cc74d9ee8a35029ad571285126cc5ddafad31da6c25edf7"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-window-build.log",
+          "sha256": "6da0c36eb6b7a5d12224ea00fc4db53d725a0c37d7265c384f465ee14b79bcf9"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-window-manifest.json",
+          "sha256": "01286dcd8de4a463958fbfde24d8c583e1a3426c49cfd4efccdc4db0223afa8b"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-window.log",
+          "sha256": "2b4337708e83360bb5aac89a452684453740e6e223fb41350c192beae9775fec"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red-window.patch",
+          "sha256": "754d0e94c62caa32b840bea16cbdff6788396be43a4887c591de427f97a5b93e"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/red.log",
+          "sha256": "13ad347722000ec62d82d4ea5e3dd1dea9ffb328e9055a2f9c116a3f72c69606"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/refs.json",
+          "sha256": "1bccf45eb06a1fa4f0e3c94f9e7b904dd9923ce6bcf92c8a0231124d8ab992ad"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/resume.log",
+          "sha256": "75abb98fa3dadb38ac2a5f62062e2daab6308069fcbae5e30f3097a4eda147d4"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/evidence/scheduler-windows/verify.log",
+          "sha256": "4d9aa34ef6f1a14c8429031f110450e33d2a4baab7bbcf104ca9434159e1c7e4"
+        }
+      ]
+    },
+    "full": {
+      "root": "/home/myrs/projects/yonik/local/validation/p11-full-132",
+      "manifest": "/home/myrs/projects/yonik/local/validation/p11-full-132/source.sha256",
+      "manifest_sha256": "0ad6008b0129b7e1747640f79e4c0d99dd3f2c8dcbd529313e913e57b4d213f1",
+      "focused_source_entries": [
+        {
+          "path": "crates/yonik-desktop/examples/p11schedulerE2E.rs",
+          "recorded_sha256": "dea54fb45860e24fc86c66d2e1501cf0cf89df9d31b96be631de707b165d68e2",
+          "accepted_sha256": "dea54fb45860e24fc86c66d2e1501cf0cf89df9d31b96be631de707b165d68e2",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/examples/p11schedulerFullE2E.rs",
+          "recorded_sha256": "a332159fd6d004f9623b7e3dd8138a31e2191135ac77e8f1c66614dba43c1bc7",
+          "accepted_sha256": "a332159fd6d004f9623b7e3dd8138a31e2191135ac77e8f1c66614dba43c1bc7",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/src/backend.rs",
+          "recorded_sha256": "7f06032c71d1c1008f113c4e6433f30ed23602f55e6ac836c80c39bfb413bada",
+          "accepted_sha256": "2cecdcdba1ebb031b5613f04d7181eaa32d05b30ee35100654c89e9f897ea949",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+          "recorded_sha256": "68b156bf2401504ed604c01f57d17b85e3ae649d41dda93c6b2f02d08b012bf7",
+          "accepted_sha256": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/backend.rs",
+          "recorded_sha256": "39753d2470b784aba32c3e5a7f5cc09e1093a5ad7cda1a33e322877f4e2de91f",
+          "accepted_sha256": "f0204db722d7b31ad4834539107b95412285016d448b6f618e7f8064cedd5e09",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_acceptance.rs",
+          "recorded_sha256": "008e00e4fcf11117c753e5be51805d89b92edf57d3f82a37d1922aa612ad9cef",
+          "accepted_sha256": "008e00e4fcf11117c753e5be51805d89b92edf57d3f82a37d1922aa612ad9cef",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p05_native.rs",
+          "recorded_sha256": "4ca4ac7b8c8401d669ca097eee2aed840005313a15af03f1d4ee34bec1a1c788",
+          "accepted_sha256": "4ca4ac7b8c8401d669ca097eee2aed840005313a15af03f1d4ee34bec1a1c788",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/p10_gate.rs",
+          "recorded_sha256": "9d2a897b3002670853c244bfe62ed9fa695afd73553856ea74ba64295e06750a",
+          "accepted_sha256": "9d2a897b3002670853c244bfe62ed9fa695afd73553856ea74ba64295e06750a",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/support/p05_service.rs",
+          "recorded_sha256": "cbe6cd7e6b6b43e577168213931fc929fe86b00bdf6eef7c1a2fef4de9681baa",
+          "accepted_sha256": "cbe6cd7e6b6b43e577168213931fc929fe86b00bdf6eef7c1a2fef4de9681baa",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-desktop/tests/support/p10_e2e.rs",
+          "recorded_sha256": "44b56406bd99edeaf4a472f07f908180e93286e40600ece7c15354d1af83f0e3",
+          "accepted_sha256": "44b56406bd99edeaf4a472f07f908180e93286e40600ece7c15354d1af83f0e3",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/examples/subscription_snapshot_resource.rs",
+          "recorded_sha256": "142e08b0ae27540818224a503c066a980901714685ba0d322e8db02dd6856635",
+          "accepted_sha256": "142e08b0ae27540818224a503c066a980901714685ba0d322e8db02dd6856635",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/fetch.rs",
+          "recorded_sha256": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+          "accepted_sha256": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/policy_test_support.rs",
+          "recorded_sha256": "7ea60642126688283245e3ba092c2815af44605c1a1b716b752d1216642c5cf0",
+          "accepted_sha256": "7ea60642126688283245e3ba092c2815af44605c1a1b716b752d1216642c5cf0",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_cancellation_tests.rs",
+          "recorded_sha256": "5f35f6394f13e70ee6b17884f808542408bcacfcc1bc3f9dd6fdfc9467726d2a",
+          "accepted_sha256": "5f35f6394f13e70ee6b17884f808542408bcacfcc1bc3f9dd6fdfc9467726d2a",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_policy.rs",
+          "recorded_sha256": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d",
+          "accepted_sha256": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_scheduler.rs",
+          "recorded_sha256": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239",
+          "accepted_sha256": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscription_scheduler_tests.rs",
+          "recorded_sha256": "b68d67d9e609fddb7643347a4eaa7721dbe6b91bd62d86e5cdf87112d376bbf6",
+          "accepted_sha256": "b68d67d9e609fddb7643347a4eaa7721dbe6b91bd62d86e5cdf87112d376bbf6",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/src/subscriptions.rs",
+          "recorded_sha256": "69e84b9516d1d8b7766dcc81ab5c1c9d6875542b4cc962c827793125046e829c",
+          "accepted_sha256": "1b0586ec74f9a966711b7128f4627eac58512bdee7fde83e98020cf92d77978b",
+          "exact": false
+        },
+        {
+          "path": "crates/yonik-linux/tests/p05_acceptance.rs",
+          "recorded_sha256": "9e3e36c541c9e1bf7bc35a6d73425dd22740124e62349e23e0bbd079fcf751c1",
+          "accepted_sha256": "9e3e36c541c9e1bf7bc35a6d73425dd22740124e62349e23e0bbd079fcf751c1",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_proxy.rs",
+          "recorded_sha256": "bca261db2499d3d040433cf6e585066b0ebf0f780ffc712910bdcb5de14fb804",
+          "accepted_sha256": "bca261db2499d3d040433cf6e585066b0ebf0f780ffc712910bdcb5de14fb804",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_refresh_contract.rs",
+          "recorded_sha256": "789a16af39aed40941370b36a81d3e3cce165fb855d3ac74f188e21618b9cca9",
+          "accepted_sha256": "789a16af39aed40941370b36a81d3e3cce165fb855d3ac74f188e21618b9cca9",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscription_scheduler.rs",
+          "recorded_sha256": "e72146c657c5b753626e815682e7cf73a46ed86d7e7379bfd0113b1624053c14",
+          "accepted_sha256": "e72146c657c5b753626e815682e7cf73a46ed86d7e7379bfd0113b1624053c14",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-linux/tests/subscriptions.rs",
+          "recorded_sha256": "2339c90a69d8871e1b53c7044f95f086cce724eae044cafefc0a6d6080d4b12b",
+          "accepted_sha256": "2339c90a69d8871e1b53c7044f95f086cce724eae044cafefc0a6d6080d4b12b",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/Cargo.toml",
+          "recorded_sha256": "a853759bd0a1cecdb92ee6d26542d829c85cf7ddaa718aa3c074d43a99572dbf",
+          "accepted_sha256": "a853759bd0a1cecdb92ee6d26542d829c85cf7ddaa718aa3c074d43a99572dbf",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/src/lib.rs",
+          "recorded_sha256": "4e6546a7e5e4c72b02c9760811ab19f1c1a3edd40d08680bd5b4a2c56e7c7004",
+          "accepted_sha256": "4e6546a7e5e4c72b02c9760811ab19f1c1a3edd40d08680bd5b4a2c56e7c7004",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/src/scheduler.rs",
+          "recorded_sha256": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639",
+          "accepted_sha256": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/tests/cancellation.rs",
+          "recorded_sha256": "57f986f6cf244cf04a11c2d1d2acbd63120531a4d14fdb54ae9ec31fa6a57de3",
+          "accepted_sha256": "57f986f6cf244cf04a11c2d1d2acbd63120531a4d14fdb54ae9ec31fa6a57de3",
+          "exact": true
+        },
+        {
+          "path": "crates/yonik-subscription/tests/update.rs",
+          "recorded_sha256": "f45a10f94255af8580daaa6fc1b972c00dd5758218b9839f75b32c95c9099e9e",
+          "accepted_sha256": "f45a10f94255af8580daaa6fc1b972c00dd5758218b9839f75b32c95c9099e9e",
+          "exact": true
+        }
+      ],
+      "retained_binaries": [
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/p11schedulerFullE2E",
+          "expected_sha256": "b0c80021cd319f7952902d7e075a397bc8212d033429338e55b8a683a04e2350",
+          "match": true
+        }
+      ],
+      "dirty_overlay": "source.patch and untracked-source.rs: no whole-tree exact-source claim",
+      "metadata_and_logs": [
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/acceptance-closed.log",
+          "sha256": "810e9532fd51e2d5c0cf30fa88bb87e1ad3c0aa08043fcac1cae909ef85cd4f9"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/acceptance-final.log",
+          "sha256": "226fa89a6a040c1e9be7673cda8bbfa8656029e182f2af5bc51d542a7492697f"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/acceptance.log",
+          "sha256": "f249d1c200b89acbf77cd16978130cb2b5b37df4e9e588ee7c178a2c1442040f"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/binary.sha256",
+          "sha256": "6795fb78e2619cfa046c257da4c29b6d9e42ae9b72839b163d6d9a0ef102ab19"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/build-final.log",
+          "sha256": "65662b9eb66493323c52d08a0159c62f0f0072da684129ac8fae05d3ea9e2d6e"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/build.log",
+          "sha256": "748a7a642f1d3e62df4b309bc800237597f9bd1557df326f9a6c3ae2ed6d102c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/clean.log",
+          "sha256": "0e8dafb3795329d923874c103b6667928ac2f116b252a030ab91a0b77fb082cd"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/cleanup-refs.json",
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/clippy-final.log",
+          "sha256": "865e0b72b4a1ee76496e0d34ca0fc2bb7879e3928a610266c867bae94f5fdcbb"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/clippy.log",
+          "sha256": "5cfe7e6dede5e1dd747bb37b888a068c4e29b8e53bd28602c6f56a1fde05991b"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/fmt-check.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/fmt-final.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/fmt.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/python-factory.log",
+          "sha256": "0d5f19ead2bf9676d74342ac6c647b4bf2294bed713605930a76f4b7d5b1c878"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/python-v2.log",
+          "sha256": "0f7e4b97443e54aca647179972594d13bb587afcbf151fab8228148587ea844a"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/source.patch",
+          "sha256": "4896428604cbff7cb5543accf5d41571aeef52ba1d8afc996761aaf38e25b715"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/source.sha256",
+          "sha256": "0ad6008b0129b7e1747640f79e4c0d99dd3f2c8dcbd529313e913e57b4d213f1"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-full-132/tests-final.log",
+          "sha256": "ad7466375f722bc34771a68b8491da222999f696e5a8c5fb14b2895be49147fe"
+        }
+      ]
+    },
+    "fetch": {
+      "root": "/home/myrs/projects/yonik/local/validation/p11-fetch",
+      "manifest": "/home/myrs/projects/yonik/local/validation/p11-fetch/source-hashes.json",
+      "manifest_sha256": "cd7412a7ef12ce52beeae209205b910c46c90e30d94763b3eeb4d7023289a307",
+      "focused_source_entries": [
+        {
+          "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+          "recorded_sha256": "b5f6642a4344ed624f031f329e33610f7d24ec67baeccb816aa7a51179f4a48d",
+          "accepted_sha256": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b",
+          "exact": false
+        }
+      ],
+      "metadata_and_logs": [
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-interval-export.json",
+          "sha256": "e9c7c33a71add71b91ead7143d3dc44a7b3b3368c7444f515fea6e29492e2f19"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-interval-snapshot.json",
+          "sha256": "c48eaa5b181beee280b745f4325d0fcfa72001e77b969b34c1355e64bf57b6f3"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-scheduler-full.json",
+          "sha256": "f28fbea36eb61fc1cee3e655fec14e4cb4b1ebfd2585e60dc9aaad32ea9664d2"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-scheduler-snapshot.json",
+          "sha256": "adf642c466067ad537a723f443caffef170095cebd725822195094abef69d9ca"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-store-export.json",
+          "sha256": "5b343cc8bf782e924fadc5bfa5c62f3e45815aeed00150f54cc542c6246ad8b6"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/actual-store-snapshot.json",
+          "sha256": "156c146f802429311b330b8534f2575aac13a2057c4d95547957c796dffc0ce3"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/cleanup.log",
+          "sha256": "d20145d475b898b304cd1bdda94632a3c88315d9960da539185b107b6cca76b7"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/clippy-final.log",
+          "sha256": "5c28589d7c842ddb6463fcbf784112ea5af2d844218708a6b291278c37f38dd5"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/clippy.log",
+          "sha256": "466154f8a2f150a635e25b17c1281dc7786996a9695cc2fe98e340cbf6aa89b0"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-BlockedAddress-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-BlockedAddress-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-BodyTooLarge-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-BodyTooLarge-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Cancelled-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Cancelled-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Dns-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Dns-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HttpStatus-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HttpStatus-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidLimit-export.json",
+          "sha256": "517b1c65cedd445ce26c1bf2d0c141de2ef7dccfd19830f5691c03504dcbabe8"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidLimit-snapshot.json",
+          "sha256": "11413e2b20544615618ac114c3e94bc842276a360ec91479ed4a5a2c83adac1e"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRedirect-export.json",
+          "sha256": "d284547fccacb90a26719a7d42c0009433de22a38c83e95661477e6caaac7ba6"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRedirect-snapshot.json",
+          "sha256": "85d689d196f230a89a7537db9cc0a723538b0ef96987641beb183f455e41bbfb"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRejected-export.json",
+          "sha256": "8c07d5b9adf4b1374670941c142b1d6ff375f3b974303bf426e550d0f752cd7c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRejected-snapshot.json",
+          "sha256": "6c98b1e5d6e4dfb3c6cbf226201cbaabc995be971ab632161a0578b49b59b2c5"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRequired-export.json",
+          "sha256": "b820b8d9291885457fa168013e9cada6ee4d558b2b050c3a79372fedbb4ffc4c"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-HwidRequired-snapshot.json",
+          "sha256": "b4ad4a264870501e5193424302541b7dcf1a1f5b67f26532df8b4ce2677944b4"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidHwid-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidHwid-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidSource-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidSource-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidTimeout-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidTimeout-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidValidator-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-InvalidValidator-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-PeerMismatch-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-PeerMismatch-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-ProxyDnsRequired-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-ProxyDnsRequired-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Redirect-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Redirect-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Timeout-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Timeout-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Transport-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-Transport-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnexpectedNotModified-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnexpectedNotModified-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnsupportedEncoding-export.json",
+          "sha256": "610e20bee64f29be58351628ae9838fba21aff8cce60da74cc9912a7f9d2dfbc"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnsupportedEncoding-snapshot.json",
+          "sha256": "144a36710c667b3c557214de82a1f377265acb61553fc5ffaf0acc60194f0548"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnsupportedPeerVerification-export.json",
+          "sha256": "d96afed651f95112cb462e445136f017738c9d5ca2ec31cee0f826c3404ee2b2"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fetch-UnsupportedPeerVerification-snapshot.json",
+          "sha256": "73e6dfc93948832e5d344a8cc2688af0c7c9146a7862c39a00d556195b3cc450"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/fmt.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/green-final.log",
+          "sha256": "6e5d717949c5eed6e1e0fc771930101194384aa445beeedb1de220722c591110"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/green.log",
+          "sha256": "deb99a7db18c5214fcc388414b68d24b35bb3a625bcbd6c6d7c724d25a2bbaf3"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/python-actual.log",
+          "sha256": "27c99b0844f195416312a33b263e48303f082e4e775128218dfda3cdfe2b9faf"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/python-final.log",
+          "sha256": "c31208e301cec9b3e4f03471d86bc692a57c1f8d3c48a26ff0e2e5b74d795274"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/python.log",
+          "sha256": "40b57cf619d1ae7e55cd3a33daa43cac1948c25554af81589d20fc97589acc47"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/red-resumed.log",
+          "sha256": "46be55a228d40d528ec799cd5968690eea71c69e2517149f49455cd8ab4f821f"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/red-targeted.log",
+          "sha256": "d781fb14e6f7b57e96ccc14d6e2ca2286e4cfcef96fcef63afc8caf38759ef8e"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/red.log",
+          "sha256": "e0a92905780bab0fa7e2ebe59ab6e0052d57749205011ce3d24845b755803b82"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/source-hashes.json",
+          "sha256": "cd7412a7ef12ce52beeae209205b910c46c90e30d94763b3eeb4d7023289a307"
+        },
+        {
+          "path": "/home/myrs/projects/yonik/local/validation/p11-fetch/source.diff",
+          "sha256": "9f93f4c98adc632ef0247c5e791656564e1eb22b3b30b3bd5094df7175b1a30f"
+        }
+      ]
+    }
+  },
+  "api_evidence": {
+    "crates/yonik-desktop/src/backend.rs": "2cecdcdba1ebb031b5613f04d7181eaa32d05b30ee35100654c89e9f897ea949",
+    "crates/yonik-desktop/src/desktop_schedule.rs": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b",
+    "crates/yonik-linux/src/fetch.rs": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+    "crates/yonik-linux/src/subscription_scheduler.rs": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239",
+    "crates/yonik-desktop/tests/support/p10_e2e.rs": "44b56406bd99edeaf4a472f07f908180e93286e40600ece7c15354d1af83f0e3",
+    "crates/yonik-desktop/src/disk_host_acceptance.rs": "9000672872a98a73873f141f155d6837d49c42b64c9ed6351dc1865a7dfaf42b"
+  }
+}

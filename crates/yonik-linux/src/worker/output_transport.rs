@@ -2,7 +2,7 @@
 //! Factory требует явно введённый Tokio runtime с I/O driver. Wire, EventLog
 //! binding и production caller остаются отдельным gate; ABI и протокол не меняются.
 use rustix::{
-    fs::{FileType, OFlags, fcntl_getfl, fstat},
+    fs::{FileType, OFlags, fcntl_getfl, fstat, fstatfs},
     io::{FdFlags, fcntl_getfd},
 };
 use std::{io, os::fd::OwnedFd, process::Command};
@@ -48,7 +48,9 @@ impl OutputWriters {
         let identity = |fd: &OwnedFd| -> io::Result<_> {
             let stat = fstat(fd)?;
             let flags = fcntl_getfl(fd)?;
-            if FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+            // PIPEFS_MAGIC фиксирован ABI Linux; обычный named FIFO не является pipe.
+            if fstatfs(fd)?.f_type as u64 != 0x5049_5045
+                || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
                 || flags & OFlags::ACCMODE != OFlags::WRONLY
                 || flags.contains(OFlags::NONBLOCK)
                 || !fcntl_getfd(fd)?.contains(FdFlags::CLOEXEC)
@@ -179,3 +181,8 @@ mod tests {
         Ok(())
     }
 }
+
+mod compatibility;
+
+mod golden_compat;
+mod source_mutants;

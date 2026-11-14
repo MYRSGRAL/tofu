@@ -1,0 +1,32 @@
+{
+  "kind": "merge integration evidence, не runtime binding",
+  "merge": "3ef474ee56bdb4bb3324d015d6d6028311a040f1",
+  "parents": [
+    "36b838d42bb562d1f4988c5c79a3ffe52877a0e1",
+    "41e0e8cb92b266b8053edd241f0531662bda5298"
+  ],
+  "tree": "c35065e53ae97062a02cb84001b70ce9321f31ee",
+  "merge_blobs": {
+    "crates/yonik-desktop/src/backend.rs": "7f88e0b7818373fb717a3d4f66bad865a8b40ec0",
+    "docs/validation/p11-integrated-candidate.json": "f7b23ace9bd9a8d3982c56c20656221ca89cf69a"
+  },
+  "resolved_conflicts": [
+    "crates/yonik-desktop/src/backend.rs",
+    "docs/validation/p11-integrated-candidate.json"
+  ],
+  "resolution": "Оба HostConfig builders сохранены; incoming A08 catalog correlation/observer и QML entries сохранены, P11 histories обеих веток сохранены; текущий backend source update отдельный от старых executions.",
+  "delta_proof": "72 changed lines default main41→merged backend byte-identical списку +/- original base8ea→6e73 backend; только исходный PR199 override delta, без новых producer changes",
+  "historical_measured_source": "7b175e4b9e207b57eec55b75a8172b586ee2c3c5",
+  "historical_review": "Root сообщил R2 8de CLEAN frozen7b; не review merge",
+  "new_runtime_pass": false,
+  "checks": {
+    "rustfmt_1_85_1": true,
+    "pure_data_tests": 8,
+    "pure_data_failures": 0,
+    "pure_data_command": "python -B -m unittest tools.tests.test_p11_integrated_candidate tools.tests.test_a08_correlation_report tools.tests.test_a08_oracle",
+    "log": "/home/myrs/projects/yonik/local/evidence/pr199-integration-41/data-tests.log",
+    "log_sha256": "83a335e19cd4139cdbfd7872149f2711af8ed1b26b8a608ed2a179463951d28e",
+    "new_rust_build": false,
+    "compile_checks": "Отдельная Rust пересборка не выполнялась; fresh CI и narrow integration review ожидаются."
+  }
+}
