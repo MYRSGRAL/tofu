@@ -1,0 +1,6 @@
+{
+  "tools/a08_retained_binding.py": "78f0090514879f6d78f83a5ff94e0002d09f58c3974f3deab721ea32d194a3ce",
+  "tools/tests/test_a08_retained_binding.py": "e955da299a56eea22ac13abc18acd73c1d59e5eb9ac671259a4290a8e252e4e8",
+  "docs/evidence/a08/retained-preflight.json": "b208ab574acc3ef3097c72b4f0a371c94ce573efd5efe75349d655ba20793c78",
+  "docs/evidence/a08/gate-tests.log": "538a3be46615b313fcb28be8495f1232f803fe63ed48edb2747b2347301ad14e"
+}

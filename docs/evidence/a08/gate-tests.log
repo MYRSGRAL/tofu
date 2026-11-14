@@ -1,0 +1,6 @@
+test_content_missing_duplicate_and_symlink_are_distinguished (test_a08_retained_binding.BindingTests.test_content_missing_duplicate_and_symlink_are_distinguished) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
