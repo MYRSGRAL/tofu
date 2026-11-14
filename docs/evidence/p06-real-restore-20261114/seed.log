@@ -1,0 +1,11 @@
+{"closed_ack":true}
+{"metadata_matches":true,"original_matches":true,"revision":1,"source_count":1}
+{"passed":true,"stage":"seed"}
+{"closed":false,"error":null,"maintenance_ack":null,"pending":false,"ready":false,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":null,"pending":false,"ready":true,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":null,"pending":false,"ready":true,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":{"error":null,"phase":"draining","request_id":100},"pending":false,"ready":false,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":{"error":null,"phase":"complete","request_id":100},"pending":false,"ready":true,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":{"error":null,"phase":"complete","request_id":100},"pending":false,"ready":true,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":{"error":null,"phase":"complete","request_id":100},"pending":true,"ready":true,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":{"error":null,"phase":"complete","request_id":100},"pending":false,"ready":true,"revision":1,"sources_total":1,"total":1}

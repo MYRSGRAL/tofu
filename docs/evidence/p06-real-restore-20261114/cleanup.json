@@ -1,0 +1,11 @@
+{
+  "precheck": {
+    "own_uid": 1000,
+    "active_build_sessions_terminal": true,
+    "active_references": [],
+    "scope": "own UID cwd/exe/fd/maps; managed private runtime processes reaped"
+  },
+  "cargo_clean": "Removed 3974 files, 1.9GiB total",
+  "transient_root_removed": true,
+  "retained_binary_sha256": "a4873ff1ec5e892ef7051a85da63873546a08e1cddb9bd19eb9326f3240bb01f"
+}
