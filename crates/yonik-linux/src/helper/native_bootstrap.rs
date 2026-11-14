@@ -487,3 +487,5 @@ mod split_receive_tests {
         sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
     }
 }
+
+pub(crate) use super::service::BusPeerIdentity;

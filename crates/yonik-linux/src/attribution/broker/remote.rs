@@ -110,14 +110,18 @@ impl RemoteLookup {
             self.channel.shutdown();
         }
     }
-    pub(super) fn lookup(&mut self, flow: super::Flow) -> Lookup {
+    pub(in crate::attribution) fn lookup(&mut self, flow: super::Flow) -> Lookup {
         match self.lookup_and_project(flow, self.binding.epoch) {
             ProjectedLookup::Known(projection) => Lookup::KnownOwner(projection.into_parts().0),
             ProjectedLookup::Unknown => Lookup::UnknownFlow,
             ProjectedLookup::Unavailable(reason) => Lookup::MechanismUnavailable(reason),
         }
     }
-    pub(super) fn lookup_and_project(&mut self, flow: super::Flow, epoch: u64) -> ProjectedLookup {
+    pub(in crate::attribution) fn lookup_and_project(
+        &mut self,
+        flow: super::Flow,
+        epoch: u64,
+    ) -> ProjectedLookup {
         let result = self.exchange(flow, epoch);
         match result {
             Ok(value) => value,
