@@ -21,6 +21,11 @@ pub struct Session {
     overflow: Arc<AtomicBool>,
     closed: bool,
     stop_sent: bool,
+    core: Core,
+    logs: super::logs::Observer,
+    log_request: u64,
+    source_sha256: String,
+    capture_sha256: String,
 }
 impl Session {
     pub fn initialize(fixture: &VerifiedFixture, core: &Core) -> Result<Self> {
@@ -43,6 +48,14 @@ impl Session {
             overflow,
             closed: false,
             stop_sent: false,
+            core: match core {
+                Core::Xray => Core::Xray,
+                Core::SingBox => Core::SingBox,
+            },
+            logs: super::logs::Observer::default(),
+            log_request: 0,
+            source_sha256: fixture.source_sha256.clone(),
+            capture_sha256: fixture.capture_sha256.clone(),
         };
         session.wait(|v| v["ready"] == true)?;
         session.send(json!({"command":"set_engine","engine":core.name()}))?;
@@ -99,12 +112,16 @@ impl Session {
         }
         self.send(json!({"command":"connect"}))?;
         // Connected — только наблюдение публичного состояния, не attach ACK/coverage.
-        self.wait(|v| {
+        let snapshot = self.wait(|v| {
             matches!(
                 v["status"].as_str(),
                 Some("Connected" | "Failed" | "Unknown" | "CleanupError")
             )
-        })
+        })?;
+        if snapshot["status"] == "Connected" {
+            self.observe_logs("connected")?;
+        }
+        Ok(snapshot)
     }
     pub fn stop(&mut self) -> Result<Value> {
         if self.closed || self.stop_sent {
@@ -113,12 +130,66 @@ impl Session {
         self.stop_sent = true;
         self.send(json!({"command":"stop"}))?;
         // Unknown не превращается в Disconnected или повторный Apply.
-        self.wait(|v| {
+        let snapshot = self.wait(|v| {
             matches!(
                 v["status"].as_str(),
                 Some("Disconnected" | "Unknown" | "CleanupError")
             )
-        })
+        })?;
+        self.observe_logs("post-stop")?;
+        Ok(snapshot)
+    }
+    fn observe_logs(&mut self, phase: &str) -> Result<()> {
+        let dir = super::logs::directory()?;
+        let mut pages = Vec::new();
+        for source in ["all", "app", "engine"] {
+            self.log_request += 1;
+            let request = self.log_request.to_string();
+            self.send(
+                json!({"command":"logs_read","after":"0","source":source,"request_id":request}),
+            )?;
+            let snapshot = self.wait(|v| {
+                v["logs"]["request_id"] == request
+                    && matches!(
+                        v["logs"]["status"].as_str(),
+                        Some("ready" | "empty" | "busy" | "cancelled")
+                    )
+            })?;
+            let page = &snapshot["logs"];
+            let mut observation = self.logs.page(page, source, &request, &self.core)?;
+            let name = format!("fr16-{}-{phase}-{source}.txt", self.core.name());
+            self.log_request += 1;
+            let save_request = self.log_request.to_string();
+            self.send(json!({"command":"logs_save","page_request_id":request,
+                "destination":format!("/run/yonik-acceptance/data/{name}"),"request_id":save_request}))?;
+            let saved = self.wait(|v| {
+                v["logs"]["request_id"] == save_request
+                    && matches!(
+                        v["logs"]["status"].as_str(),
+                        Some(
+                            "saved" | "saved_durability_unknown" | "refused" | "busy" | "cancelled"
+                        )
+                    )
+            })?;
+            observation["save"] = super::logs::verify_save(
+                &dir,
+                &name,
+                &saved["logs"],
+                &save_request,
+                page["export"].as_str().ok_or("LOG_EXPORT")?.as_bytes(),
+            )?;
+            observation["source"] = json!(source);
+            pages.push(observation);
+        }
+        let artifact = json!({"schema":"N5_FR16_HOST_LOGS_V1","core":self.core.name(),"phase":phase,
+            "source_sha256":self.source_sha256,"capture_sha256":self.capture_sha256,
+            "pages":pages,"qml_ru_en":{"class":"UNAVAILABLE"},"clipboard":{"class":"UNAVAILABLE"},
+            "suppression":{"class":"SOURCE_INVARIANT"},"full_fr16":"NOT_PASS"});
+        super::logs::persist(
+            &dir,
+            &format!("fr16-{}-{phase}.json", self.core.name()),
+            &serde_json::to_vec(&artifact).map_err(|_| "LOG_ARTIFACT_JSON")?,
+        )
     }
     pub fn close(&mut self) -> Result<()> {
         self.host.shutdown();

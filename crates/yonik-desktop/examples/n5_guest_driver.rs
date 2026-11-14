@@ -4,6 +4,8 @@
 mod capture;
 #[path = "n5_guest_driver/hash.rs"]
 mod hash;
+#[path = "n5_guest_driver/logs.rs"]
+mod logs;
 #[path = "n5_guest_driver/observe.rs"]
 mod observe;
 #[path = "n5_guest_driver/protocol.rs"]
