@@ -118,16 +118,27 @@ impl Challenge {
     }
     /// Production DATA carrier: epoch задаёт owner, не ответ worker.
     pub(crate) fn exchange_v4_bound(
-        mut self, stream: &UnixStream, pid: u32, uid: u32,
-        deadline: Instant, epoch: u64,
+        mut self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+        deadline: Instant,
+        epoch: u64,
     ) -> Result<(NamespaceObservation, [u8; 512]), WorkerError> {
-        if epoch == 0 { return Err(WorkerError::Protocol); }
+        if epoch == 0 {
+            return Err(WorkerError::Protocol);
+        }
         self.deadline = self.deadline.min(deadline);
         self.bytes[..8].copy_from_slice(b"YNKCH004");
         self.bytes[112..120].copy_from_slice(&epoch.to_be_bytes());
         let observation = self.exchange_marker(stream, pid, uid, b"YNKANC04")?;
-        let data = observation.custody.data_v4.lock()
-            .map_err(|_| WorkerError::Protocol)?.as_ref().copied()
+        let data = observation
+            .custody
+            .data_v4
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .as_ref()
+            .copied()
             .ok_or(WorkerError::Protocol)?;
         Ok((observation, data))
     }
@@ -658,7 +669,8 @@ pub(crate) fn bootstrap(
     }
     let v2 = &marker == super::role_handoff::OFFER;
     let v3 = &marker == V3_OFFER;
-    if &marker != OFFER && !v2 && !v3 {
+    let v4 = &marker == b"YNKANC04";
+    if &marker != OFFER && !v2 && !v3 && !v4 {
         return Ok(None);
     }
     if mode != WorkerMode::Run {
@@ -689,7 +701,9 @@ pub(crate) fn bootstrap(
     }
     if msg.bytes != 8
         || &marker
-            != if v3 {
+            != if v4 {
+                b"YNKANC04"
+            } else if v3 {
                 V3_OFFER
             } else if v2 {
                 super::role_handoff::OFFER
@@ -714,9 +728,40 @@ pub(crate) fn bootstrap(
     if !extra.is_empty()
         || c.pid != peer.pid
         || !c.uid.is_root()
-        || &challenge[..8] != if v3 { b"YNKNS003" } else { b"YNKNS001" }
-        || challenge[112..] != [0; 16]
+        || &challenge[..8]
+            != if v4 {
+                b"YNKCH004"
+            } else if v3 {
+                b"YNKNS003"
+            } else {
+                b"YNKNS001"
+            }
+        || (!v4 && challenge[112..] != [0; 16])
     {
+        return Err(WorkerError::Peer);
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    ))]
+    let produced = if v4 {
+        let data = super::native_data::ProducedV4::produce(
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+        )?;
+        send(&socket, data.report()?, &[])?;
+        Some(data)
+    } else {
+        None
+    };
+    #[cfg(not(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    )))]
+    if v4 {
         return Err(WorkerError::Peer);
     }
     if v3 {
@@ -750,6 +795,21 @@ pub(crate) fn bootstrap(
     let (ack, extra, c) = receive(&socket, deadline)?;
     if ack != closed || !extra.is_empty() || c.pid != peer.pid || !c.uid.is_root() {
         return Err(WorkerError::Peer);
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    ))]
+    if let Some(produced) = produced {
+        return super::role_handoff::receive_v4_handoff(
+            &socket,
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+            produced,
+        )
+        .map(Some);
     }
     if v2 {
         return super::role_handoff::receive_run_handoff(
