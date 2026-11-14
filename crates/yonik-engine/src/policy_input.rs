@@ -17,6 +17,7 @@ const MAX_EXECUTABLE_BYTES: usize = 4096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyInputError {
     UnsupportedSelector(u64),
+    UnsupportedTransport(u64),
     Io,
     TooLarge,
     InvalidJson,
@@ -27,6 +28,7 @@ pub enum PolicyInputError {
 impl fmt::Display for PolicyInputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::UnsupportedTransport(_) => "Транспортные условия не поддержаны адаптером",
             Self::UnsupportedSelector(_) => "Неприменимый платформенный селектор",
             Self::Io => "Не удалось прочитать политику",
             Self::TooLarge => "Превышен размер входной политики",
@@ -94,6 +96,8 @@ fn enabled_by_default() -> bool {
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct InputConditions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transport: Option<crate::transport::TransportInput>,
     #[serde(default)]
     domain: Vec<String>,
     #[serde(default)]
@@ -137,16 +141,31 @@ pub fn read_policy(reader: impl Read) -> Result<Policy, PolicyInputError> {
     }
     let input: InputPolicy =
         serde_json::from_slice(&bytes).map_err(|_| PolicyInputError::InvalidJson)?;
-    if ![1, 2].contains(&input.version) {
+    if ![1, 2, 3].contains(&input.version) {
         return Err(PolicyInputError::InvalidPolicy);
     }
     for rule in input.user_rules.iter().chain(&input.preset_rules) {
-        if (input.version == 2) != rule.conditions.platform_sources.is_some() {
+        if input.version < 3 && rule.conditions.transport.is_some() {
+            return Err(PolicyInputError::InvalidPolicy);
+        }
+        if (input.version >= 2) != rule.conditions.platform_sources.is_some() {
             return Err(PolicyInputError::InvalidPolicy);
         }
     }
-    if input.version == 2 && bytes.len() > 262144 {
+    if input.version >= 2 && bytes.len() > 262144 {
         return Err(PolicyInputError::TooLarge);
+    }
+    if input
+        .user_rules
+        .iter()
+        .chain(&input.preset_rules)
+        .filter_map(|r| r.conditions.transport.as_ref())
+        .filter_map(|t| t.destination_ports.as_ref())
+        .map(Vec::len)
+        .sum::<usize>()
+        > 4096
+    {
+        return Err(PolicyInputError::Limit);
     }
     check_limits(&input)?;
     Ok(Policy {
@@ -187,7 +206,7 @@ fn check_limits(input: &InputPolicy) -> Result<(), PolicyInputError> {
     if input.user_rules.len() + input.preset_rules.len() > MAX_RULES {
         return Err(PolicyInputError::Limit);
     }
-    if input.version == 2 {
+    if input.version >= 2 {
         let rules: Vec<_> = input.user_rules.iter().chain(&input.preset_rules).collect();
         if rules.len() > 256 {
             return Err(PolicyInputError::Limit);
@@ -276,6 +295,13 @@ fn convert_rules(input: Vec<InputRule>) -> Result<Vec<Rule>, PolicyInputError> {
                 enabled: rule.enabled,
                 action: rule.action.into(),
                 conditions: Conditions {
+                    transport: conditions
+                        .transport
+                        .as_ref()
+                        .map(|v| v.typed())
+                        .transpose()
+                        .map_err(|_| PolicyInputError::InvalidPolicy)?
+                        .unwrap_or_default(),
                     platform_sources,
                     executables: conditions.executable_paths,
                     destinations: conditions
