@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import fcntl
+import gzip
 import hashlib
+import io
 import os
 import re
 import selectors
 import signal
 import stat
 import subprocess
+import tarfile
+import tempfile
 import time
+import tomllib
+import zlib
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -30,9 +36,10 @@ from p25_capture_build_closure import (
 PROFILE = {
     "id": "p25-final-cxx-v1",
     "compiler": "/usr/bin/g++",
-    "qt_query": ["/usr/bin/qtpaths6", "--qt-version"],
+    "qt_query": ["/usr/lib/qt6/bin/qtpaths", "--qt-version"],
     "sdk_root": "/usr",
     "registry_source_root": "/home/myrs/.cargo/registry/src",
+    "registry_unpacked_byte_cap": 64 * 1024 * 1024,
     "dependency_flags": ["-MD", "-MF"],
     "deadline_seconds": 300,
     "stream_cap": MAX_METADATA,
@@ -247,6 +254,202 @@ def _reserve(build: Path) -> int:
         os.close(fd)
 
 
+def _identity(path: Path) -> tuple[int, ...]:
+    info = path.lstat()
+    require(not stat.S_ISLNK(info.st_mode), "Registry symlink")
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _pax_fields(payload: bytes) -> None:
+    """Ограничиваем metadata до того, как tarfile начнёт её интерпретацию."""
+    position = 0
+    fields = 0
+    while position < len(payload):
+        space = payload.find(b" ", position, position + 21)
+        require(space > position, "TAR PAX length")
+        digits = payload[position:space]
+        require(digits.isdigit(), "TAR PAX length")
+        end = position + int(digits)
+        require(space + 1 < end <= len(payload), "TAR PAX bounds")
+        record = payload[space + 1 : end]
+        require(record.endswith(b"\n") and b"=" in record, "TAR PAX record")
+        key = record[:-1].split(b"=", 1)[0]
+        require(bool(key) and not key.startswith(b"GNU.sparse"), "TAR sparse PAX")
+        # Все допустимые файлы меньше предела обычного size header. Override
+        # изменил бы смещения tarfile относительно предварительного прохода.
+        require(key != b"size", "TAR PAX size override")
+        fields += 1
+        require(fields <= MAX_FILES, "TAR PAX field cap")
+        position = end
+
+
+@contextmanager
+def _registry_tar(
+    archive: bytes, *, gzip_encoded: bool = True
+) -> Iterator[tarfile.TarFile]:
+    """Bounded decoded stream, physical headers и строгий конец TAR; без extract."""
+    cap = (
+        min(MAX_FILE, PROFILE["registry_unpacked_byte_cap"])
+        if gzip_encoded
+        else MAX_FILE
+    )
+    require(len(archive) <= cap, "TAR compressed byte cap")
+    try:
+        with tempfile.TemporaryFile() as expanded, ExitStack() as stack:
+            source = io.BytesIO(archive)
+            decoded = (
+                stack.enter_context(gzip.GzipFile(fileobj=source))
+                if gzip_encoded
+                else source
+            )
+            size = 0
+            while chunk := decoded.read(min(65536, cap - size + 1)):
+                size += len(chunk)
+                require(size <= cap, "TAR decoded byte cap")
+                expanded.write(chunk)
+            require(size >= 1024 and size % 512 == 0, "TAR block bounds")
+            expanded.seek(0)
+            headers = 0
+            metadata_chain = 0
+            while True:
+                header = expanded.read(512)
+                require(len(header) == 512, "TAR missing end marker")
+                if header == bytes(512):
+                    require(expanded.read(512) == bytes(512), "TAR end marker")
+                    while tail := expanded.read(65536):
+                        require(not any(tail), "TAR trailing data")
+                    break
+                headers += 1
+                require(headers <= MAX_FILES * 4, "TAR physical header cap")
+                member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
+                require(member.type != tarfile.GNUTYPE_SPARSE, "TAR sparse header")
+                metadata = member.type in (b"x", b"g", b"X", b"L", b"K")
+                require(
+                    member.isreg() or metadata or member.size == 0,
+                    "TAR nonregular payload",
+                )
+                padded = (member.size + 511) // 512 * 512
+                require(
+                    member.size >= 0 and expanded.tell() + padded <= size,
+                    "TAR physical member bounds",
+                )
+                if metadata:
+                    metadata_chain += 1
+                    require(metadata_chain <= 8, "TAR metadata chain cap")
+                    require(member.size <= MAX_METADATA, "TAR metadata cap")
+                    payload = expanded.read(member.size)
+                    if member.type in (b"x", b"g", b"X"):
+                        _pax_fields(payload)
+                    expanded.seek(padded - member.size, os.SEEK_CUR)
+                else:
+                    metadata_chain = 0
+                    expanded.seek(padded, os.SEEK_CUR)
+            expanded.seek(0)
+            with tarfile.open(fileobj=expanded, mode="r:") as tar:
+                yield tar
+    except (tarfile.TarError, EOFError, zlib.error) as error:
+        raise ValueError("Некорректный TAR stream") from error
+
+
+@contextmanager
+def registry_package(source: Path, package: Path) -> Iterator[set[str]]:
+    """Один выбранный Cargo package: lock → archive → extracted bytes, без discovery."""
+    base = Path(PROFILE["registry_source_root"])
+    require(
+        package.is_absolute()
+        and ".." not in package.parts
+        and package.parent == base / "index.crates.io-1949cf8c6b5b557f",
+        "Registry cwd не exact canonical package",
+    )
+    with ExitStack() as stack:
+        reader = Reader(
+            {"source": source, "build": base, "sdk": base.parent / "cache"}, stack
+        )
+        identities: dict[Path, tuple[int, ...]] = {}
+
+        def remember(path: Path) -> None:
+            identities.setdefault(path, _identity(path))
+
+        def read(root: str, local: str, limit: int) -> bytes:
+            path = {"source": source, "build": base, "sdk": base.parent / "cache"}[
+                root
+            ] / local
+            for parent in (path, *path.parents):
+                remember(parent)
+                if parent in (source, base, base.parent / "cache"):
+                    break
+            return reader.read(root, local, limit)
+
+        lock = tomllib.loads(read("source", "Cargo.lock", MAX_METADATA).decode())
+        selected = [
+            item
+            for item in lock.get("package", [])
+            if item.get("source")
+            == "registry+https://github.com/rust-lang/crates.io-index"
+            and f"{item.get('name')}-{item.get('version')}" == package.name
+        ]
+        require(len(selected) == 1, "Registry package не выбран frozen Cargo.lock")
+        checksum = selected[0].get("checksum")
+        require(
+            isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum),
+            "Registry lock checksum",
+        )
+        local = package.relative_to(base).as_posix()
+        cap = min(MAX_FILE, PROFILE["registry_unpacked_byte_cap"])
+        archive = read("sdk", local + ".crate", cap)
+        require(
+            hashlib.sha256(archive).hexdigest() == checksum,
+            "Registry archive checksum mismatch",
+        )
+        members: set[str] = set()
+        total = 0
+        with _registry_tar(archive) as tar:
+            for index, member in enumerate(tar):
+                require(index < MAX_FILES, "Registry archive member cap")
+                parts = member.name.split("/")
+                require(
+                    parts[0] == package.name
+                    and ".." not in parts
+                    and not member.name.startswith("/"),
+                    "Registry archive path",
+                )
+                if member.isdir():
+                    continue
+                require(
+                    member.isfile()
+                    and not member.issparse()
+                    and 0 <= member.size <= cap,
+                    "Registry archive member type/cap",
+                )
+                name = relative("/".join(parts[1:]))
+                require(name not in members, "Registry duplicate member")
+                members.add(name)
+                total += member.size
+                require(total <= cap, "Registry expanded byte cap")
+                stream = tar.extractfile(member)
+                require(stream is not None, "Registry archive missing member")
+                with stream:
+                    expected = stream.read(member.size + 1)
+                require(
+                    read("build", local + "/" + name, MAX_FILE) == expected,
+                    "Registry extracted member mismatch",
+                )
+        require(bool(members), "Registry empty archive")
+        remember(package)
+        try:
+            yield members
+        finally:
+            for path, identity in identities.items():
+                require(_identity(path) == identity, "Registry input изменился")
+
+
 def compiler_capture(
     config: dict,
     argv: list[str],
@@ -258,13 +461,28 @@ def compiler_capture(
     number = _reserve(build)
     dep = build / "p25capture" / f"{number}.d"
     actual = compile_arguments(argv, dep)
-    require(
-        cwd.is_relative_to(Path(config["source"])) or cwd.is_relative_to(build),
-        "CXX cwd вне frozen roots",
-    )
-    with trusted_tool(PROFILE["compiler"]) as (fd, compiler):
-        command = [PROFILE["compiler"], *actual]
-        code, out, err = runner(fd, command, cwd, env)
+    with ExitStack() as stack:
+        if not (
+            cwd.is_relative_to(Path(config["source"])) or cwd.is_relative_to(build)
+        ):
+            members = stack.enter_context(registry_package(Path(config["source"]), cwd))
+            for arg in argv:
+                if not arg.endswith((".cpp", ".cxx", ".cc", ".C", ".c++")):
+                    continue
+                unit = Path(arg) if Path(arg).is_absolute() else cwd / arg
+                require(".." not in unit.parts, "Registry unit traversal")
+                require(
+                    unit.is_relative_to(build)
+                    or unit.is_relative_to(Path(config["source"]))
+                    or (
+                        unit.is_relative_to(cwd)
+                        and unit.relative_to(cwd).as_posix() in members
+                    ),
+                    "Registry unit вне выбранного package/frozen roots",
+                )
+        with trusted_tool(PROFILE["compiler"]) as (fd, compiler):
+            command = [PROFILE["compiler"], *actual]
+            code, out, err = runner(fd, command, cwd, env)
     row = {
         "schema": 1,
         "config_sha256": env.get("YONIK_P25_CONFIG_SHA256"),
@@ -384,6 +602,7 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
     with ExitStack() as stack:
         reader = Reader(roots, stack)
         external_readers: dict[str, Reader] = {}
+        registry_members: dict[Path, set[str]] = {}
 
         def stage(absolute: Path, kind: str) -> str:
             origin = str(absolute)
@@ -393,6 +612,18 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
             matches = [root for root in allowed if absolute.is_relative_to(root)]
             require(len(matches) == 1, f"Dependency вне fixed input roots: {absolute}")
             base = matches[0]
+            if base == Path(PROFILE["registry_source_root"]):
+                parts = absolute.relative_to(base).parts
+                require(len(parts) >= 3, "Registry input не package member")
+                package = base / parts[0] / parts[1]
+                if package not in registry_members:
+                    registry_members[package] = stack.enter_context(
+                        registry_package(roots["source"], package)
+                    )
+                require(
+                    "/".join(parts[2:]) in registry_members[package],
+                    "Registry input вне archive members",
+                )
             key = str(base)
             if key not in external_readers:
                 external_readers[key] = Reader(
@@ -625,6 +856,15 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
                     len(units) == 1 and row["unit"] == str(Path(row["cwd"]) / units[0]),
                     "Observed unit binding mismatch",
                 )
+            cwd = Path(row["cwd"])
+            if not (
+                cwd.is_relative_to(roots["source"])
+                or cwd.is_relative_to(roots["build"])
+            ):
+                if cwd not in registry_members:
+                    registry_members[cwd] = stack.enter_context(
+                        registry_package(roots["source"], cwd)
+                    )
             compiler_id = add(
                 row["compiler"]["path"], roots["sdk"], "tool", row["compiler"]["sha256"]
             )

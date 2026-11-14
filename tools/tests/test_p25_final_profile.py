@@ -12,6 +12,360 @@ import _p25_final_profile as p
 
 
 class FinalProfileTests(unittest.TestCase):
+    def _registry_fixture(self, root: Path) -> tuple[Path, Path]:
+        import hashlib
+        import io
+        import tarfile
+
+        source = root / "source"
+        source.mkdir(parents=True)
+        registry = root / "registry"
+        index = "index.crates.io-1949cf8c6b5b557f"
+        package = registry / "src" / index / "link-cplusplus-1.0.12"
+        (package / "src").mkdir(parents=True)
+        data = b"// fixture unit\n"
+        (package / "src/dummy.cc").write_bytes(data)
+        cache = registry / "cache" / index
+        cache.mkdir(parents=True)
+        archive = cache / (package.name + ".crate")
+        with tarfile.open(archive, "w:gz") as tar:
+            member = tarfile.TarInfo(package.name + "/src/dummy.cc")
+            member.size = len(data)
+            tar.addfile(member, io.BytesIO(data))
+        checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+        (source / "Cargo.lock").write_text(
+            'version = 4\n[[package]]\nname = "link-cplusplus"\n'
+            'version = "1.0.12"\n'
+            'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+            f'checksum = "{checksum}"\n'
+        )
+        return source, package
+
+    def test_registry_cwd_probe_and_source(self) -> None:
+        import json
+        from contextlib import contextmanager
+
+        root = Path(self.enterContext(TemporaryDirectory()))
+        source, package = self._registry_fixture(root)
+        build = root / "build"
+        (build / "p25capture").mkdir(parents=True)
+        probe = build / "probe.cc"
+        probe.write_text("// generated probe\n")
+
+        @contextmanager
+        def tool(alias: str):
+            yield 123, {"path": alias, "sha256": "a" * 64}
+
+        def runner(
+            fd: int, argv: list[str], cwd: Path, env: dict[str, str]
+        ) -> tuple[int, bytes, bytes]:
+            self.assertEqual(cwd, package)
+            if "-MF" in argv:
+                Path(argv[argv.index("-MF") + 1]).write_text("o: src/dummy.cc\n")
+            return 0, b"", b""
+
+        with (
+            patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])}),
+            patch.object(p, "trusted_tool", tool),
+        ):
+            config = {"source": str(source), "build": str(build)}
+            for argv in (["-E", str(probe)], ["-c", "src/dummy.cc"]):
+                p.compiler_capture(config, argv, package, {}, runner)
+        row = json.loads((build / "p25capture/1.json").read_bytes())
+        self.assertEqual(row["cwd"], str(package))
+        self.assertEqual(row["unit"], str(package / "src/dummy.cc"))
+
+    def test_registry_rejects_pax_expansion_and_hidden_tar_tail(self) -> None:
+        import gzip
+        import hashlib
+        import io
+        import re
+        import tarfile
+
+        for case in ("pax-expansion", "pax-metadata", "sparse", "tail", "no-end"):
+            with self.subTest(case=case), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, package = self._registry_fixture(root)
+                headers = (
+                    {"comment": "x" * 100_000}
+                    if case in ("pax-expansion", "pax-metadata")
+                    else {"GNU.sparse.unexpected": "1"}
+                    if case == "sparse"
+                    else {}
+                )
+                raw = io.BytesIO()
+                with tarfile.open(
+                    fileobj=raw,
+                    mode="w",
+                    format=tarfile.PAX_FORMAT,
+                    pax_headers=headers,
+                ) as archive:
+                    body = (package / "src/dummy.cc").read_bytes()
+                    member = tarfile.TarInfo(package.name + "/src/dummy.cc")
+                    member.size = len(body)
+                    archive.addfile(member, io.BytesIO(body))
+                data = raw.getvalue()
+                if case == "tail":
+                    # Валидный второй header скрыт после первого end marker.
+                    hidden = tarfile.TarInfo("../unsafe")
+                    data += hidden.tobuf() + bytes(1024)
+                elif case == "no-end":
+                    data = data[:1024]
+                cached = root / "registry/cache" / package.parent.name
+                path = cached / (package.name + ".crate")
+                path.write_bytes(gzip.compress(data))
+                lock = source / "Cargo.lock"
+                lock.write_text(
+                    re.sub(
+                        r'checksum = "[0-9a-f]{64}"',
+                        f'checksum = "{hashlib.sha256(path.read_bytes()).hexdigest()}"',
+                        lock.read_text(),
+                    )
+                )
+                with (
+                    patch.dict(
+                        p.PROFILE,
+                        {
+                            "registry_source_root": str(package.parents[1]),
+                            "registry_unpacked_byte_cap": (
+                                16_384 if case == "pax-expansion" else 262_144
+                            ),
+                        },
+                    ),
+                    patch.object(
+                        p, "MAX_METADATA", 1024 if case == "pax-metadata" else 1_048_576
+                    ),
+                    self.assertRaises(ValueError),
+                ):
+                    with p.registry_package(source, package):
+                        pass
+
+    def test_registry_tar_bounded_parser_accepts_pax_and_plain_source(self) -> None:
+        import gzip
+        import io
+        import tarfile
+
+        raw = io.BytesIO()
+        with tarfile.open(
+            fileobj=raw,
+            mode="w",
+            format=tarfile.PAX_FORMAT,
+            pax_headers={"comment": "обычные metadata"},
+        ) as archive:
+            member = tarfile.TarInfo("source/Cargo.lock")
+            member.size = 4
+            archive.addfile(member, io.BytesIO(b"lock"))
+        for compressed in (False, True):
+            with self.subTest(compressed=compressed):
+                data = gzip.compress(raw.getvalue()) if compressed else raw.getvalue()
+                with p._registry_tar(data, gzip_encoded=compressed) as archive:
+                    members = list(archive)
+                    self.assertEqual([m.name for m in members], ["source/Cargo.lock"])
+                    with archive.extractfile(members[0]) as stream:
+                        self.assertEqual(stream.read(), b"lock")
+
+    def test_registry_tar_caps_before_high_level_metadata_parser(self) -> None:
+        import gzip
+        from unittest.mock import Mock
+
+        parser = Mock(side_effect=AssertionError("High-level parser reached"))
+        with (
+            patch.dict(p.PROFILE, {"registry_unpacked_byte_cap": 4096}),
+            patch.object(p.tarfile, "open", parser),
+            self.assertRaisesRegex(ValueError, "decoded byte cap"),
+        ):
+            with p._registry_tar(gzip.compress(bytes(8192))):
+                pass
+        parser.assert_not_called()
+
+    def test_registry_tar_rejects_recursive_metadata_chain_before_parser(self) -> None:
+        import io
+        import tarfile
+        from unittest.mock import Mock
+
+        raw = io.BytesIO()
+        for _ in range(9):
+            header = tarfile.TarInfo("metadata")
+            header.type = tarfile.XHDTYPE
+            raw.write(header.tobuf())
+        raw.write(bytes(1024))
+        parser = Mock(side_effect=AssertionError("High-level parser reached"))
+        with (
+            patch.object(p.tarfile, "open", parser),
+            self.assertRaisesRegex(ValueError, "metadata chain cap"),
+        ):
+            with p._registry_tar(raw.getvalue(), gzip_encoded=False):
+                pass
+        parser.assert_not_called()
+
+    def test_registry_rejects_unselected_unit_before_compiler(self) -> None:
+        from unittest.mock import Mock
+
+        root = Path(self.enterContext(TemporaryDirectory()))
+        source, package = self._registry_fixture(root)
+        build = root / "build"
+        (build / "p25capture").mkdir(parents=True)
+        config = {"source": str(source), "build": str(build)}
+        runner = Mock()
+        with (
+            patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])}),
+            patch.object(p, "trusted_tool") as tool,
+        ):
+            for unit in (
+                str(package.with_name("other-1.0.0") / "src/dummy.cc"),
+                "src/../../other-1.0.0/dummy.cc",
+                "unarchived.cc",
+            ):
+                with self.subTest(unit=unit), self.assertRaises(ValueError):
+                    p.compiler_capture(config, ["-c", unit], package, {}, runner)
+            tool.assert_not_called()
+            runner.assert_not_called()
+
+    def test_registry_tar_rejects_offset_overrides_before_parser(self) -> None:
+        import gzip
+        import io
+        import tarfile
+        from unittest.mock import Mock
+
+        hidden = io.BytesIO()
+        for _ in range(400):
+            header = tarfile.TarInfo("metadata")
+            header.type = tarfile.XHDTYPE
+            hidden.write(header.tobuf())
+        hidden.write(bytes(1024))
+        body = hidden.getvalue()
+        for kind in ("pax-size", "directory", "link"):
+            with self.subTest(kind=kind):
+                raw = io.BytesIO()
+                header = tarfile.TarInfo("package/payload")
+                header.size = len(body)
+                if kind == "pax-size":
+                    pax = tarfile.TarInfo("metadata")
+                    pax.type = tarfile.XHDTYPE
+                    pax.size = 10
+                    raw.write(pax.tobuf())
+                    raw.write(b"10 size=0\n" + bytes(502))
+                else:
+                    header.type = (
+                        tarfile.DIRTYPE if kind == "directory" else tarfile.SYMTYPE
+                    )
+                raw.write(header.tobuf())
+                raw.write(body)
+                raw.write(bytes(1024))
+                parser = Mock(side_effect=AssertionError("High-level parser reached"))
+                with (
+                    patch.object(p.tarfile, "open", parser),
+                    self.assertRaisesRegex(
+                        ValueError, "size override|nonregular payload"
+                    ),
+                ):
+                    with p._registry_tar(gzip.compress(raw.getvalue())):
+                        pass
+                parser.assert_not_called()
+
+    def test_registry_rejects_untrusted_inputs_and_mutation(self) -> None:
+        for case in (
+            "unknown",
+            "prefix",
+            "traversal",
+            "symlink",
+            "checksum",
+            "member",
+            "mutation",
+            "lock-mutation",
+            "archive-mutation",
+        ):
+            with self.subTest(case=case), TemporaryDirectory() as temp:
+                root = Path(temp)
+                source, package = self._registry_fixture(root)
+                cwd = package
+                if case == "unknown":
+                    cwd = package.with_name("unknown-1.0.0")
+                elif case == "prefix":
+                    cwd = package.with_name(package.name + "-sibling")
+                elif case == "traversal":
+                    cwd = package / ".." / package.name
+                elif case == "symlink":
+                    original = package.with_name("original")
+                    package.rename(original)
+                    package.symlink_to(original, target_is_directory=True)
+                elif case == "checksum":
+                    archive = (
+                        root
+                        / "registry/cache"
+                        / package.parent.name
+                        / (package.name + ".crate")
+                    )
+                    archive.write_bytes(b"tampered archive")
+                elif case == "member":
+                    (package / "src/dummy.cc").write_bytes(b"tampered")
+                with patch.dict(
+                    p.PROFILE, {"registry_source_root": str(package.parents[1])}
+                ):
+                    with self.assertRaises((ValueError, OSError)):
+                        with p.registry_package(source, cwd):
+                            if case == "mutation":
+                                (package / "src/dummy.cc").write_bytes(b"changed")
+                            elif case == "lock-mutation":
+                                (source / "Cargo.lock").write_text("changed")
+                            elif case == "archive-mutation":
+                                archive = (
+                                    root
+                                    / "registry/cache"
+                                    / package.parent.name
+                                    / (package.name + ".crate")
+                                )
+                                archive.write_bytes(b"changed")
+
+    def test_fixed_arch_qt_query_argv_and_receipt(self) -> None:
+        import json
+        from contextlib import contextmanager
+        from unittest.mock import Mock
+
+        tmp_path = Path(self.enterContext(TemporaryDirectory()))
+        expected = ["/usr/lib/qt6/bin/qtpaths", "--qt-version"]
+        identity = {"path": expected[0], "sha256": "a" * 64}
+
+        @contextmanager
+        def fake_tool(alias: str):
+            self.assertEqual(alias, expected[0])
+            yield 123, identity
+
+        runner = Mock(return_value=(0, b"6.11.2\n", b""))
+        env = {"PATH": "/untrusted", "QT_HOST_BINS": "/untrusted"}
+        with patch.object(p, "trusted_tool", side_effect=fake_tool) as tool:
+            p.prepare(tmp_path, tmp_path / "build", env, runner=runner)
+        tool.assert_called_once_with(expected[0])
+        runner.assert_called_once_with(123, expected, tmp_path, env)
+        receipt = json.loads(
+            (tmp_path / "build/p25capture/qt-observed.json").read_bytes()
+        )
+        self.assertEqual(receipt["query_argv"], expected)
+        self.assertEqual(receipt["tool"], identity)
+
+    def test_missing_fixed_qt_tool_never_falls_back(self) -> None:
+        from unittest.mock import Mock
+
+        tmp_path = Path(self.enterContext(TemporaryDirectory()))
+        runner = Mock()
+        with patch.object(
+            p, "trusted_tool", side_effect=FileNotFoundError("fixed Qt tool")
+        ) as tool:
+            with self.assertRaises(FileNotFoundError):
+                p.prepare(tmp_path, tmp_path / "build", {}, runner=runner)
+        tool.assert_called_once_with("/usr/lib/qt6/bin/qtpaths")
+        runner.assert_not_called()
+        self.assertFalse((tmp_path / "build/p25capture/qt-observed.json").exists())
+
+    def test_qt_tool_rejects_other_aliases_before_filesystem_access(self) -> None:
+        with patch.object(p.Path, "resolve") as resolve:
+            for alias in ("qtpaths", "qtpaths6", "/usr/bin/qtpaths6"):
+                with self.subTest(alias=alias):
+                    with self.assertRaisesRegex(ValueError, "fixed tool"):
+                        with p.trusted_tool(alias):
+                            self.fail("Недоверенный Qt tool принят")
+            resolve.assert_not_called()
+
     def test_make_escaping(self) -> None:
         self.assertEqual(
             p.dependencies(
@@ -116,12 +470,13 @@ class FinalProfileTests(unittest.TestCase):
             runner=fake,
         )
         if case == "external-unit":
-            registry = tmp_path / "registry"
-            registry.mkdir()
-            external_unit = registry / "external.cpp"
-            external_unit.write_text("// SPDX-License-Identifier: MIT\n")
+            fixture_source, package = self._registry_fixture(tmp_path / "dependency")
+            (source / "Cargo.lock").write_bytes(
+                (fixture_source / "Cargo.lock").read_bytes()
+            )
+            external_unit = package / "src/dummy.cc"
             patches.enter_context(
-                patch.dict(p.PROFILE, {"registry_source_root": str(registry)})
+                patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])})
             )
             p.compiler_capture(
                 p.wrapper_config(env),
