@@ -208,6 +208,20 @@ impl Fixture {
             case: case.into(),
         }
     }
+    pub async fn replace_owner(&mut self) {
+        self._connection
+            .release_name("org.freedesktop.secrets")
+            .await
+            .unwrap();
+        let replacement = zbus::connection::Builder::address(self.address.as_str())
+            .unwrap()
+            .name("org.freedesktop.secrets")
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        self._connection = replacement;
+    }
     pub fn assert_readonly(&self) {
         let calls = self.calls.lock().unwrap();
         if self.case != "absent" {
