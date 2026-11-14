@@ -67,7 +67,9 @@ impl RunAuthority {
             revoked: Arc::new(RunRevocation::new()),
         })
     }
-    pub(super) fn from_bound(binding: super::protection_host::session_host::native_owner::OwnerBinding) -> Self {
+    pub(super) fn from_bound(
+        binding: super::protection_host::session_host::native_owner::OwnerBinding,
+    ) -> Self {
         let (session, generation, network_epoch) = binding.context();
         Self {
             owner_binding: Some(binding),

@@ -140,7 +140,10 @@ impl<A, Q, R> Drop for NativeOwnerState<A, Q, R> {
 
 // Нет constructor из caller данных: record создаётся только после async проверок.
 #[allow(dead_code)]
-struct VerifiedNativeNetworkCommit<A = SessionArtifact, Q = crate::managed_network::tun::BoundTun> {
+pub(super) struct VerifiedNativeNetworkCommit<
+    A = SessionArtifact,
+    Q = crate::managed_network::tun::BoundTun,
+> {
     artifact: Arc<A>,
     queue: Arc<Q>,
     stamp: crate::NetworkStamp,

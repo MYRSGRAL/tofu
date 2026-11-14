@@ -770,28 +770,23 @@ impl SystemWorkerSupervisor {
             })
             .map_err(unavailable)?;
         // Retain scope before blocking handoff: failed/late ACK cannot release custody.
-        let stamp = issued.run.into_guard();
-        self.native_runtime = Some(NativeRuntime {
-            stamp,
-            stop,
-            thread: Some(thread),
-            ready,
-            attached: false,
-        });
-        // Sender consumes a RunRole; validated role is converted to retained stamp above.
-        // Binding/roles remain exact; no authority is reconstructed from their bytes.
-        crate::worker::role_handoff::handoff_retained_run(
-            &self
-                .native_runtime
-                .as_ref()
-                .ok_or(WorkerSupervisorError::Protocol)?
-                .stamp,
+        crate::worker::role_handoff::handoff_verified_run(
+            issued.run,
             &handoff,
             roles,
             &binding,
             pid,
             uid,
             deadline.into_std(),
+            |stamp| {
+                self.native_runtime = Some(NativeRuntime {
+                    stamp,
+                    stop,
+                    thread: Some(thread),
+                    ready,
+                    attached: false,
+                });
+            },
         )
         .map_err(unavailable)?;
         let ack = payload
