@@ -236,17 +236,27 @@ impl Challenge {
         }
         drop(tx);
         send(&rx, &self.bytes, &[])?;
-        let data_v4 = if offer == b"YNKANC04" {
-            let (bytes, fds, credentials) = receive_sized::<512>(&rx, self.deadline)?;
-            if !fds.is_empty()
+        let (data_v4, executable) = if offer == b"YNKANC04" {
+            let (bytes, mut fds, credentials) = receive_sized::<512>(&rx, self.deadline)?;
+            let strict = &self.bytes[..8] == b"YNKCH004";
+            #[cfg(not(test))]
+            if !strict {
+                return Err(WorkerError::Protocol);
+            }
+            if fds.len() != usize::from(strict)
                 || credentials.pid.as_raw_pid() as u32 != pid
                 || credentials.uid.as_raw() != uid
             {
                 return Err(WorkerError::Peer);
             }
-            Some(bytes)
+            let executable = if strict {
+                Some(report_executable(fds.pop().ok_or(WorkerError::Protocol)?)?)
+            } else {
+                None
+            };
+            (Some(bytes), executable)
         } else {
-            None
+            (None, None)
         };
         let report = if offer == V3_OFFER {
             let (bytes, fds, credentials) = receive(&rx, self.deadline)?;
@@ -332,6 +342,11 @@ impl Challenge {
                 .lock()
                 .map_err(|_| WorkerError::Protocol)? = data_v4;
         }
+        *observation
+            .custody
+            .executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)? = executable;
         if offer == b"YNKANC04" {
             *observation
                 .custody
@@ -411,6 +426,8 @@ struct NamespaceCustody {
     revoked: std::sync::atomic::AtomicBool,
     data_v4: Mutex<Option<[u8; 512]>>,
     bound_v4: Mutex<bool>,
+    executable: Mutex<Option<File>>,
+    retained_executable: Mutex<Option<File>>,
 }
 pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
 /// Только lifetime FD: не предоставляет lookup/admission/use authority.
@@ -481,6 +498,8 @@ impl NamespaceObservation {
             revoked: std::sync::atomic::AtomicBool::new(false),
             data_v4: Mutex::new(None),
             bound_v4: Mutex::new(false),
+            executable: Mutex::new(None),
+            retained_executable: Mutex::new(None),
         });
         Ok(Self {
             custody,
@@ -515,6 +534,36 @@ impl NamespaceObservation {
         .unwrap();
         *observation.custody.kernel.lock().unwrap() = Some(report);
         observation
+    }
+    /// Одноразовый actual-image witness. Дополнительная owning копия живёт до terminal cleanup.
+    pub(crate) fn take_executable(&self) -> Result<File, WorkerError> {
+        if self.custody.expired() {
+            return Err(WorkerError::Timeout);
+        }
+        let mut slot = self
+            .custody
+            .executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        let mut retained = self
+            .custody
+            .retained_executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        if retained.is_some() {
+            return Err(WorkerError::Protocol);
+        }
+        let file = slot.take().ok_or(WorkerError::Protocol)?;
+        match file.try_clone() {
+            Ok(copy) => {
+                *retained = Some(copy);
+                Ok(file)
+            }
+            Err(_) => {
+                *slot = Some(file);
+                Err(WorkerError::Io)
+            }
+        }
     }
     pub(crate) fn retention(&self) -> NamespaceRetention {
         NamespaceRetention {
@@ -638,6 +687,21 @@ impl Drop for NamespaceObservation {
     fn drop(&mut self) {
         self.revoke()
     }
+}
+
+fn report_executable(fd: OwnedFd) -> Result<File, WorkerError> {
+    let flags = rustix::fs::fcntl_getfl(&fd).map_err(|_| WorkerError::Io)?;
+    let descriptor = rustix::io::fcntl_getfd(&fd).map_err(|_| WorkerError::Io)?;
+    let stat = rustix::fs::fstat(&fd).map_err(|_| WorkerError::Io)?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile
+        || flags.intersects(
+            rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::RDWR | rustix::fs::OFlags::PATH,
+        )
+        || !descriptor.contains(rustix::io::FdFlags::CLOEXEC)
+    {
+        return Err(WorkerError::Protocol);
+    }
+    Ok(File::from(fd))
 }
 
 fn timeout(socket: &OwnedFd, deadline: Instant) -> Result<(), WorkerError> {
@@ -824,7 +888,8 @@ pub(crate) fn bootstrap(
             peer.pid.as_raw_pid() as u32,
             deadline,
         )?;
-        send(&socket, data.report()?, &[])?;
+        let executable = File::open("/proc/self/exe").map_err(|_| WorkerError::Io)?;
+        send(&socket, data.report()?, &[executable.as_fd()])?;
         Some(data)
     } else {
         None
