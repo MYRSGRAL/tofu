@@ -64,6 +64,8 @@ pub struct HostConfig {
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
     #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
+    #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
     #[cfg(feature = "test-support")]
     scheduler_owner_seed: Option<u64>,
@@ -83,12 +85,23 @@ impl HostConfig {
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
+            catalog_observer: None,
+            #[cfg(feature = "test-support")]
             scheduler_capacity: None,
             #[cfg(feature = "test-support")]
             scheduler_owner_seed: None,
             #[cfg(feature = "test-support")]
             scheduler_interval: None,
         }
+    }
+    /// Только наблюдение реального producer в отдельном test-support стенде.
+    #[cfg(feature = "test-support")]
+    pub fn with_catalog_observer(
+        mut self,
+        observer: yonik_linux::applications::CatalogObserver,
+    ) -> Self {
+        self.catalog_observer = Some(observer);
+        self
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
     #[cfg(feature = "test-support")]
@@ -1458,6 +1471,8 @@ async fn open(
 }
 
 struct Actor {
+    #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     presets: Option<Arc<presets::Controller>>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
@@ -2417,8 +2432,16 @@ impl Actor {
                 query,
                 offset,
             } => {
+                #[cfg(feature = "test-support")]
+                let observer = self.catalog_observer.clone();
                 self.state.routing_catalog = tokio::task::spawn_blocking(move || {
-                    crate::editor::catalog(processes, &query, offset)
+                    crate::editor::catalog(
+                        processes,
+                        &query,
+                        offset,
+                        #[cfg(feature = "test-support")]
+                        observer,
+                    )
                 })
                 .await
                 .map_err(|_| {
@@ -2946,6 +2969,8 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            #[cfg(feature = "test-support")]
+            catalog_observer: None,
             presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
                 .ok()
                 .map(Arc::new),
@@ -3873,6 +3898,8 @@ async fn run(
     let (event_log, disk_log) =
         yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
+        #[cfg(feature = "test-support")]
+        catalog_observer: config.catalog_observer.clone(),
         presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
             .ok()
             .map(Arc::new),
@@ -5166,6 +5193,8 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                #[cfg(feature = "test-support")]
+                catalog_observer: None,
                 presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
