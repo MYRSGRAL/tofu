@@ -1,0 +1,134 @@
+   Compiling yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/crates/yonik-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.35s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/yonik_engine-f2ab6873b3a00a32)
+
+running 5 tests
+test presets::tests::installing_preset_preserves_private_lan_and_user_priority ... ok
+test private_dns::tests::static_route_is_bounded_and_does_not_grant_capability ... ok
+test policy_wire::tests::closed_object_roundtrip ... ok
+test policy_wire::tests::active_rules_and_selectors ... ok
+test policy_wire::p07_tests::typed_v2_wire_and_activation_guard ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/yonik_compile-78f661a4b9b6d8c3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/attribution_tun.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/attribution_tun-da284ac7527d5b94)
+
+running 2 tests
+test p07_system_compilers_refuse_unsupported_even_with_matching_executable ... ok
+test executable_conditions_are_scoped_to_tun_and_keep_destination_and_or_values ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/cli-f19c452b213b5386)
+
+running 3 tests
+test default_output_is_metadata_and_sensitive_export_requires_flag ... ok
+test partial_native_and_bad_arguments_are_rejected_without_secrets ... ok
+test system_tun_cli_requires_complete_typed_settings_and_keeps_summary_safe ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/compiler.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/compiler-7c86b485d9c7df8e)
+
+running 11 tests
+test grpc_and_xhttp_have_engine_specific_capabilities ... ok
+test invalid_shadowsocks_2022_key_and_vmess_options_are_rejected ... ok
+test mapped_ipv4_and_localhost_dot_cannot_create_self_proxy ... ok
+test recursive_listener_and_public_xray_plaintext_are_rejected ... ok
+test tls_websocket_preserves_host_path_alpn_and_fingerprint ... ok
+test reality_validates_key_short_id_and_transport ... ok
+test vless_is_loopback_only_and_has_no_direct_fallback ... ok
+test six_protocols_and_credentials_survive_compilation ... ok
+test unsafe_unknown_and_inapplicable_options_never_silently_disappear ... ok
+test json_grpc_defaults_authority_and_blocking_options ... ok
+test json_reality_spider_path_preserves_query_and_defaults ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/dns_contract.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/dns_contract-05ae423d5373e8d3)
+
+running 3 tests
+test unsupported_dns_semantics_never_produce_a_config ... ok
+test private_zones_and_full_family_cidrs_are_not_dropped ... ok
+test external_dns_is_explicit_and_does_not_enable_native_resolver ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/external_rules.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/external_rules-3239369888f450ad)
+
+running 4 tests
+test pinned_native_150k ... ignored, Требует закреплённые локальные ядра
+test bounded_native_artifacts ... ok
+test refusal_preserves_destination_before_any_write ... ok
+test mandatory_150k_stream ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests/native_dns_modes.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/native_dns_modes-02c20b1ee2e1d075)
+
+running 5 tests
+test live_dns_and_fake_mapping ... ignored, явный изолированный native gate
+test live_ipv6_family_gates ... ignored, явный изолированный IPv6 native gate
+test reject_recursive_upstream_bootstrap_and_routing_before_activation ... ok
+test explicit_family_and_guarantee_gates ... ok
+test generate_native_modes ... ok
+
+test result: ok. 3 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy_input.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/policy_input-305cf47449233fdb)
+
+running 7 tests
+test ids_are_unique_in_each_group_including_disabled_rules ... ok
+test p07_closed_input_retains_sources ... ok
+test defaults_and_normalization ... ok
+test rejects_malformed_unknown_duplicate_and_missing_fields ... ok
+test rejects_invalid_semantics ... ok
+test read_is_bounded_and_errors_never_include_input ... ok
+test aggregate_rule_and_selector_limits ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/resource_bindings.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/resource_bindings-7dce50713550f9bf)
+
+running 6 tests
+test metadata_format_and_manifest_bounds_refuse ... ok
+test index_suffix_boundaries_and_ipv6 ... ok
+test single_evaluator_preserves_or_groups_and_app_and_priority ... ok
+test native_resources_preserve_unsupported_gates_and_small_config ... ok
+test unadmitted_mixed_data_and_cancellation_do_not_relax_admission ... ok
+test unadmitted_data_rejects_invalid_path_and_actual_four_mib_output ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running tests/routing.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/routing-40296ff79a521d2a)
+
+running 5 tests
+test unproven_native_combinations_are_errors_not_semantic_changes ... ok
+test probe_cannot_bypass_known_protected_destinations ... ok
+test p07_both_compilers_refuse_before_routes ... ok
+test ip_only_has_domain_rejection_and_private_protection_first ... ok
+test native_policy_keeps_order_and_authenticated_probe_override ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/system_tun.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/deps/system_tun-70b25678fe57bd70)
+
+running 3 tests
+test malformed_runtime_settings_are_rejected_before_configuration ... ok
+test system_policy_preserves_authenticated_probe_and_rejects_unproven_domain_input ... ok
+test system_inbound_retains_profile_and_never_enables_automatic_network_control ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples/import_compile_resource.rs (/var/tmp/codex-myrs/transient/p04a-mixed-red-186/target/debug/examples/import_compile_resource-915519327e4190b7)
+
+running 1 test
+test tests::control_rule_set_is_explicitly_refused ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

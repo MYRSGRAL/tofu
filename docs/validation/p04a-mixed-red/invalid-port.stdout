@@ -1,0 +1,3 @@
+VALID xray component=0 compile_bound_policy+seal_bundle
+VALID xray component=1 compile_bound_policy+seal_bundle
+VALID xray source digest/count, policy digest, complete bindings, membership/miss, sealed bytes+digest+readonly

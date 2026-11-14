@@ -1,0 +1,49 @@
+{
+  "source_review": "R2 0d0908fe on PR186 8ccd0c464c559c2aae27947c75be47ccd3c36cfa",
+  "decision": "approve minimal unadmitted compile data and cooperative cancellation implementation",
+  "scope_files": [
+    "crates/yonik-engine/src/resource_bundle.rs",
+    "crates/yonik-engine/src/routing.rs",
+    "crates/yonik-engine/src/source_selectors.rs",
+    "related tests/P04 benchmarks"
+  ],
+  "unadmitted_artifact": {
+    "type": "UnadmittedCompiledData",
+    "private_fields": [
+      "owned bounded bytes",
+      "resource manifest",
+      "revision",
+      "identity"
+    ],
+    "sensitive_writer_allowed": true,
+    "compiled_config_getter_allowed": false,
+    "conversion_to_CompiledResourceBundle_allowed": false,
+    "existing_seal_bundle_acceptance_allowed": false
+  },
+  "compile_only": {
+    "flow_receipt_required": false,
+    "N5_runtime_proof_required": false,
+    "fake_platform_capability_allowed": false,
+    "structural_and_resource_validation_required": true,
+    "codec_AND_config_validation_both_backends_required": true
+  },
+  "cancellation": {
+    "new_entry": "compile_bound_data_cancellable",
+    "error": "BoundCompileError::Cancelled | Policy(PolicyCompileError)",
+    "legacy_cancellable_sibling_allowed": true,
+    "legacy_facade_same_signature_and_admission_gates": true,
+    "sticky_per_call": true,
+    "checkpoint_validation_emission_serialization_final": true,
+    "partial_result_return_allowed": false,
+    "host_commit_recheck_still_required": true
+  },
+  "limits": {
+    "output_bytes": 4194304,
+    "UI_and_wire_limits": "unchanged"
+  },
+  "activation_api_changes_allowed": false,
+  "production_Go_patch_changes_allowed": false,
+  "test_only_pinned_codec_fixtures_allowed": true,
+  "runtime16_allowed": false,
+  "namespace_or_owner_authority_mint_allowed": false
+}

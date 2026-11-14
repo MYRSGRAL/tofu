@@ -1,0 +1,14 @@
+VALID xray component=0 compile_bound_policy+seal_bundle
+VALID xray component=1 compile_bound_policy+seal_bundle
+VALID xray source digest/count, policy digest, complete bindings, membership/miss, sealed bytes+digest+readonly
+RED xray app=false mode=Names error=Unsupported(RequiredRealResolution)
+RED xray app=false mode=IpOnly error=Unsupported(DomainsInIpOnly)
+RED xray app=true mode=Names error=Unsupported(ProcessAttribution)
+RED xray app=true mode=IpOnly error=Unsupported(ProcessAttribution)
+VALID sing-box component=0 compile_bound_policy+seal_bundle
+VALID sing-box component=1 compile_bound_policy+seal_bundle
+VALID sing-box source digest/count, policy digest, complete bindings, membership/miss, sealed bytes+digest+readonly
+RED sing-box app=false mode=Names error=Unsupported(RequiredRealResolution)
+RED sing-box app=false mode=IpOnly error=Unsupported(DomainsInIpOnly)
+RED sing-box app=true mode=Names error=Unsupported(ProcessAttribution)
+RED sing-box app=true mode=IpOnly error=Unsupported(ProcessAttribution)

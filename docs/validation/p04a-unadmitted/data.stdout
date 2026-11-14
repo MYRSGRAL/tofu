@@ -1,0 +1,10 @@
+VALID xray component=0 compile_bound_policy+seal_bundle
+VALID xray component=1 compile_bound_policy+seal_bundle
+VALID xray reordered sealed payloads rejected by original ordered digest sequence
+VALID xray source digest/count, policy digest, complete bindings, membership/miss, sealed bytes+digest+readonly
+GREEN xray mixed compile-only artifact; activation не выполнялась
+VALID sing-box component=0 compile_bound_policy+seal_bundle
+VALID sing-box component=1 compile_bound_policy+seal_bundle
+VALID sing-box reordered sealed payloads rejected by original ordered digest sequence
+VALID sing-box source digest/count, policy digest, complete bindings, membership/miss, sealed bytes+digest+readonly
+GREEN sing-box mixed compile-only artifact; activation не выполнялась
