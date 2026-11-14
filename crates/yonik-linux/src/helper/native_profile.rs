@@ -228,7 +228,23 @@ fn verify_actual_image(
     }
     let actual: [u8; 32] = digest.finalize().into();
     static_deadline(deadline)?;
-    if stamp(image)? != before || actual != installed.deployment.worker_sha256 {
+    verify_actual_image_facts(
+        &stamp(&installed.image)?,
+        &before,
+        &stamp(image)?,
+        installed.deployment.worker_sha256,
+        actual,
+    )
+}
+/// Только сравнение DATA после actual file IO. Не constructor профиля/permit.
+fn verify_actual_image_facts(
+    expected: &FileStamp,
+    before: &FileStamp,
+    after: &FileStamp,
+    expected_digest: [u8; 32],
+    actual_digest: [u8; 32],
+) -> Result<()> {
+    if before != expected || after != before || actual_digest != expected_digest {
         return Err(Error::Stale);
     }
     Ok(())
@@ -546,5 +562,38 @@ mod kernel_note_tests {
         zero[16..].fill(0);
         assert!(kernel_build_id(&zero).is_err());
         assert!(kernel_build_id(&vec![0; 65537]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod actual_image_binding_tests {
+    use super::*;
+    fn stamp(ino: u64) -> FileStamp {
+        FileStamp {
+            dev: 1,
+            ino,
+            len: 4,
+            mtime: 2,
+            mtime_ns: 3,
+            ctime: 4,
+            ctime_ns: 5,
+        }
+    }
+    #[test]
+    fn pure_actual_image_facts_reject_substitute_inode_content_and_read_race() {
+        let expected = stamp(10);
+        let before = stamp(10);
+        let after = stamp(10);
+        assert_eq!(
+            verify_actual_image_facts(&expected, &before, &after, [1; 32], [1; 32]),
+            Ok(())
+        );
+        assert!(
+            verify_actual_image_facts(&expected, &stamp(11), &stamp(11), [1; 32], [1; 32]).is_err()
+        );
+        assert!(verify_actual_image_facts(&expected, &before, &after, [1; 32], [2; 32]).is_err());
+        let mut changed = stamp(10);
+        changed.ctime_ns += 1;
+        assert!(verify_actual_image_facts(&expected, &before, &changed, [1; 32], [1; 32]).is_err());
     }
 }
