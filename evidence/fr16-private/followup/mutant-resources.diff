@@ -1,0 +1,11 @@
+--- unmodified-source
++++ resources
+@@ -99,7 +99,7 @@
+         legacy[7] = 1;
+     } else {
+         legacy[7] = 2;
+-        legacy.extend_from_slice(&bytes[112..]);
++        legacy.truncate(80); legacy[7] = 1; legacy[10] = 0;
+     }
+     let (header, _, _) = decode_bundle_header(&legacy)?;
+     if header.mode != WorkerMode::Run {
