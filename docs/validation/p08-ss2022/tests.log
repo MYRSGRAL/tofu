@@ -1,0 +1,69 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling syn v3.0.9
+   Compiling synstructure v0.14.0
+   Compiling zerofrom-derive v0.1.8
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.4
+   Compiling zerovec-derive v0.11.7
+   Compiling zerovec v0.11.9
+   Compiling displaydoc v0.2.7
+   Compiling tinystr v0.8.5
+   Compiling litemap v0.8.3
+   Compiling writeable v0.6.4
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling smallvec v1.16.5
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling utf_types v1.0.0
+   Compiling serde_core v1.0.229
+   Compiling utf8_iter v1.1.0
+   Compiling idna_adapter v1.2.1
+   Compiling zmij v1.0.23
+   Compiling idna v1.1.0
+   Compiling libc v0.2.191
+   Compiling serde v1.0.229
+   Compiling percent-encoding v2.3.2
+   Compiling serde_json v1.0.154
+   Compiling form_urlencoded v1.2.2
+   Compiling serde_derive v1.0.229
+   Compiling rustix v1.1.6
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling url v2.5.8
+   Compiling bitflags v2.13.2
+   Compiling base64 v0.23.1
+   Compiling cfg-if v1.0.5
+   Compiling linux-raw-sys v0.12.1
+   Compiling getrandom v0.2.17
+   Compiling yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-d678f6bb-0c343630a019887b/crates/yonik-import)
+   Compiling yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-d678f6bb-0c343630a019887b/crates/yonik-domain)
+   Compiling yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-d678f6bb-0c343630a019887b/crates/yonik-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.57s
+     Running tests/compiler.rs (/var/tmp/codex-myrs/transient/yonik-p08-ss2022/target/debug/deps/compiler-7c86b485d9c7df8e)
+
+running 12 tests
+test recursive_listener_and_public_xray_plaintext_are_rejected ... ok
+test mapped_ipv4_and_localhost_dot_cannot_create_self_proxy ... ok
+test grpc_and_xhttp_have_engine_specific_capabilities ... ok
+test shadowsocks_2022_preserves_exact_method_and_key ... ok
+test invalid_shadowsocks_2022_key_and_vmess_options_are_rejected ... ok
+test tls_websocket_preserves_host_path_alpn_and_fingerprint ... ok
+test reality_validates_key_short_id_and_transport ... ok
+test unsafe_unknown_and_inapplicable_options_never_silently_disappear ... ok
+test six_protocols_and_credentials_survive_compilation ... ok
+test vless_is_loopback_only_and_has_no_direct_fallback ... ok
+test json_grpc_defaults_authority_and_blocking_options ... ok
+test json_reality_spider_path_preserves_query_and_defaults ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
