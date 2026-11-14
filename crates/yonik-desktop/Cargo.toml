@@ -88,3 +88,7 @@ required-features = ["gui", "test-support"]
 name = "p11schedulerImportE2E"
 path = "examples/p11schedulerImportE2E.rs"
 required-features = ["gui", "test-support"]
+
+[[example]]
+name = "p09_cancellation"
+required-features = ["test-support"]

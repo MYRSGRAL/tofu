@@ -600,6 +600,15 @@
       "review": "R2 824cd624 CLEAN combined P11/port source and bindings on fcc44e3; prior R1 188f726b CLEAN port feature and R2 932b7107 CLEAN typed replacement/A4 union. Historical runtime remains bound to original producer.",
       "review_pending": false,
       "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "e3f0add2635d9f8ce747ad4e8cd367fe32ccdc27",
+      "blob": "61e4901ca5a06aa8b6b871f5d07d41f9cdc4404f",
+      "scope": "P09 cancellation test-support only; exact original cancellation delta over preserved root P11/ports union. Historical execution remains bound to 8e138f7.",
+      "review": "Root: exact backend delta 0bb3e86→e3f0add is cfg(test-support) lifecycle gate only, P11 publication/context/render unchanged; original P09 R1 6c7b0ad8 scoped CLEAN. Historical runtime binding preserved.",
+      "review_pending": false,
+      "new_runtime_pass": false
     }
   ]
 }
