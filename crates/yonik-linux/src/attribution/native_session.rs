@@ -114,6 +114,9 @@ impl Session {
         self.close();
     }
     fn header(&self, frame: &[u8]) -> Result<Header, Malformed> {
+        if let Some(scope) = &self.scope {
+            scope.validate().map_err(|_| Malformed)?;
+        }
         let header = Header::decode(frame, 0)?;
         if header.epoch != self.epoch || header.digest != self.digest || frame[64..96] != self.nonce
         {
@@ -122,6 +125,9 @@ impl Session {
         Ok(header)
     }
     fn frame(&self, kind: Kind) -> Result<Vec<u8>, Malformed> {
+        if let Some(scope) = &self.scope {
+            scope.validate().map_err(|_| Malformed)?;
+        }
         let mut bytes = vec![0; kind.fixed_bytes().ok_or(Malformed)?];
         Header {
             kind,

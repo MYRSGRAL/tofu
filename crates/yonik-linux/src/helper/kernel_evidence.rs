@@ -949,3 +949,91 @@ pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> R
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod fixed_coverage_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+    use yonik_nsfs::fixed_self_fence::{PROFILE_DIGEST, PROGRAM_SHA256};
+    fn fixture() -> (Expected, [u8; 512]) {
+        let mut observations = [1; 19];
+        observations[2] = 38;
+        let expected = Expected {
+            nonce: [1; 32],
+            digest: [2; 32],
+            session: [3; 16],
+            generation: 4,
+            invocation: [5; 16],
+            epoch: 6,
+            task_pid: 7,
+            task_start: 8,
+            server_pid: 9,
+            server_start: 10,
+            profile: PROFILE_DIGEST,
+            observations,
+        };
+        let mut frame = encode_data_v4(
+            &expected,
+            &RuntimeData {
+                vector: observations,
+            },
+            DiagnosticCounts {
+                baseline: Some(4),
+                current: Some(5),
+            },
+        )
+        .unwrap();
+        seal(&mut frame);
+        (expected, frame)
+    }
+    fn seal(frame: &mut [u8; 512]) {
+        frame[184..216].fill(0);
+        let mut hash = Sha256::new();
+        hash.update(b"yonik/fixed-self-fence/v2/local-delta1/receipt\0");
+        hash.update(PROGRAM_SHA256);
+        hash.update(PROFILE_DIGEST);
+        hash.update(*frame);
+        frame[184..216].copy_from_slice(&hash.finalize());
+    }
+    #[test]
+    fn pure_fixed_coverage_accepts_exact_complete_report_data() {
+        let (expected, frame) = fixture();
+        assert_eq!(verify_fixed_report(&frame, &expected), Ok(()));
+    }
+    #[test]
+    fn pure_fixed_coverage_rejects_absent_and_forged_reference() {
+        let (expected, mut frame) = fixture();
+        frame[184..216].fill(0);
+        assert_eq!(
+            verify_fixed_report(&frame, &expected),
+            Err(Error::EvidenceUnavailable)
+        );
+        frame[184..216].fill(1);
+        assert_eq!(verify_fixed_report(&frame, &expected), Err(Error::Binding));
+    }
+    #[test]
+    fn pure_fixed_coverage_rejects_delta_overflow_wrong_vector_and_binding() {
+        for (baseline, current) in [(0u32, 0u32), (4, 6), (u32::MAX, 0)] {
+            let (expected, mut frame) = fixture();
+            frame[220..224].copy_from_slice(&baseline.to_be_bytes());
+            frame[224..228].copy_from_slice(&current.to_be_bytes());
+            seal(&mut frame);
+            assert_eq!(
+                verify_fixed_report(&frame, &expected),
+                Err(Error::IncompleteApplication)
+            );
+        }
+        let (mut expected, mut frame) = fixture();
+        expected.observations[0] = 2;
+        frame[232..236].copy_from_slice(&2u32.to_be_bytes());
+        seal(&mut frame);
+        assert_eq!(
+            verify_fixed_report(&frame, &expected),
+            Err(Error::ObservationMismatch)
+        );
+        let (expected, mut frame) = fixture();
+        frame[8] ^= 1;
+        seal(&mut frame);
+        assert_eq!(verify_fixed_report(&frame, &expected), Err(Error::Binding));
+    }
+}
