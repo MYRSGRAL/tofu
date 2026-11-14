@@ -25,6 +25,15 @@ def fresh(blobs: dict[str, str], root: Path = ROOT) -> bool:
     )
 
 
+def checked_blobs(ledger: dict) -> dict[str, str]:
+    blobs = dict(ledger["source_blobs"])
+    for path, update in ledger.get("reviewed_source_updates", {}).items():
+        if path not in blobs or not update["scope"] or not update["review"]:
+            raise ValueError("Обновление source требует исходной привязки и review")
+        blobs[path] = update["blob"]
+    return blobs
+
+
 def producer_log(evidence: dict[str, str], root: Path = ROOT) -> bytes:
     binding = json.loads((root / evidence["binding"]).read_text())
     if binding["source_head"] != evidence["source"]:
@@ -42,7 +51,7 @@ class IntegratedCandidate(unittest.TestCase):
     def test_exact_source_and_working_tree_freshness(self) -> None:
         source = self.ledger["source"]
         self.assertEqual(source, "6f45329b2e0a9b1659232fd4558d75308a6bc6c7")
-        self.assertTrue(fresh(self.ledger["source_blobs"]))
+        self.assertTrue(fresh(checked_blobs(self.ledger)))
         if git("rev-parse", "--is-shallow-repository") == "true":
             return  # CI проверяет file hashes; ancestry требует полной истории.
         for path, blob in self.ledger["source_blobs"].items():
@@ -62,9 +71,30 @@ class IntegratedCandidate(unittest.TestCase):
                 cwd=ROOT,
                 check=True,
             )
-        damaged = dict(self.ledger["source_blobs"])
+        for path, update in self.ledger.get("reviewed_source_updates", {}).items():
+            self.assertEqual(
+                git("rev-parse", f"{update['source']}:{path}"), update["blob"]
+            )
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", update["source"], "HEAD"],
+                cwd=ROOT,
+                check=True,
+            )
+        damaged = checked_blobs(self.ledger)
         damaged[next(iter(damaged))] = "0" * 40
         self.assertFalse(fresh(damaged), "Устаревшее evidence должно отклоняться")
+
+    def test_reviewed_source_update_does_not_rebind_old_execution(self) -> None:
+        checked = checked_blobs(self.ledger)
+        self.assertNotEqual(checked, self.ledger["source_blobs"])
+        self.assertFalse(fresh(self.ledger["source_blobs"]))
+        for path in self.ledger["reviewed_source_updates"]:
+            damaged = json.loads(json.dumps(self.ledger))
+            damaged["reviewed_source_updates"][path]["blob"] = "0" * 40
+            self.assertFalse(fresh(checked_blobs(damaged)))
+            damaged["reviewed_source_updates"][path]["review"] = ""
+            with self.assertRaises(ValueError):
+                checked_blobs(damaged)
 
     def test_original_12_plus_import_startup_exactly_once(self) -> None:
         original = self.ledger["original_inventory"]
