@@ -294,6 +294,7 @@ impl Fixture {
             native_admission: None,
             native_custody: None,
             lookup_leaf: None,
+            peer_verifier: None,
             native_lookup_transfer: None,
             native_remote: None,
             connection: bus.connect().await,

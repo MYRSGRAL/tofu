@@ -26,6 +26,7 @@ pub(crate) struct VerifiedLookupLeaf {
 }
 /// Наблюдение preparation: тип не принимается runtime Run/Session factory.
 pub(crate) struct VerifiedPeerVerifier {
+    reused: bool,
     channel: OwnedFd,
     lease: PeerVerifierLease,
 }
@@ -35,6 +36,9 @@ struct PeerObservation {
 }
 pub(crate) struct PeerVerifierLease(Arc<PeerObservation>);
 impl VerifiedPeerVerifier {
+    pub(crate) fn is_reused(&self) -> bool {
+        self.reused
+    }
     pub(crate) fn into_parts(self) -> (OwnedFd, PeerVerifierLease) {
         (self.channel, self.lease)
     }
@@ -305,6 +309,24 @@ pub(super) struct LeafPending {
     _guard: RunRevocationGuard,
     identity: Option<Arc<LeafIdentity>>,
 }
+pub(super) struct PeerPending {
+    _permit: Arc<Permit>,
+    captured: Arc<crate::attribution::CapturedBusScope>,
+    source: crate::helper::native_bootstrap::VerifiedStaticInstalledImage,
+    unit: String,
+    uid: u32,
+    gid: u32,
+    observation: Option<Arc<PeerObservation>>,
+    channel: Option<OwnedFd>,
+}
+struct ClosedLeafInput {
+    name: String,
+    uid: u32,
+    gid: u32,
+    image: File,
+    image_stamp: ImageStamp,
+    image_sha256: [u8; 32],
+}
 impl SystemWorkerSupervisor {
     pub(crate) async fn launch_lookup_leaf(
         &mut self,
@@ -332,6 +354,221 @@ impl SystemWorkerSupervisor {
         let image_stamp = image_stamp(&image)?;
         let image_sha256 = image_hash(&image)?;
         coverage.verify_lookup_image(&image)?;
+        self.lookup_leaf = Some(LeafPending {
+            _permit: Arc::clone(&self.permit),
+            unit: name.clone(),
+            uid,
+            gid,
+            _guard: authorization.guard(),
+            identity: None,
+        });
+        let mut foreign = false;
+        let result = self
+            .launch_fixed_leaf(
+                ClosedLeafInput {
+                    name,
+                    uid,
+                    gid,
+                    image,
+                    image_stamp,
+                    image_sha256,
+                },
+                || authorization.validate_owner(owner).map_err(unavailable),
+                &mut foreign,
+                cancel,
+                deadline,
+            )
+            .await;
+        if foreign {
+            self.lookup_leaf = None;
+        }
+        let (channel, identity) = result?;
+        self.lookup_leaf
+            .as_mut()
+            .ok_or(WorkerSupervisorError::Stale)?
+            .identity = Some(Arc::clone(&identity));
+        Ok(VerifiedLookupLeaf {
+            channel,
+            lease: LookupLeafLease(identity),
+        })
+    }
+    pub(crate) async fn launch_peer_verifier(
+        &mut self,
+        peer: &crate::attribution::CapturedBusPeer,
+        source: &crate::helper::native_bootstrap::VerifiedStaticInstalledImage,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<VerifiedPeerVerifier> {
+        // Static contract и authorized bus capture предшествуют любому PID1 эффекту.
+        source.validate()?;
+        peer.validate().map_err(unavailable)?;
+        if Instant::now() >= deadline {
+            return Err(WorkerSupervisorError::Timeout);
+        }
+        let captured = peer.retained_scope();
+        if let Some(pending) = self.peer_verifier.as_ref() {
+            if let Some(scope) = pending.observation.as_ref() {
+                if pending.captured.same_peer(&captured)
+                    && pending.source.same_source(source)
+                    && !scope.revoked.load(Ordering::Acquire)
+                    && Arc::strong_count(scope) > 1
+                {
+                    pending.captured.validate().map_err(unavailable)?;
+                    pending.source.validate()?;
+                    scope.identity.validate()?;
+                    let channel = rustix::io::dup(
+                        pending
+                            .channel
+                            .as_ref()
+                            .ok_or(WorkerSupervisorError::Stale)?,
+                    )
+                    .map_err(unavailable)?;
+                    return Ok(VerifiedPeerVerifier {
+                        channel,
+                        lease: PeerVerifierLease(Arc::clone(scope)),
+                        reused: true,
+                    });
+                }
+                if Arc::strong_count(scope) > 1 {
+                    return Err(WorkerSupervisorError::Busy);
+                }
+            }
+            self.retire_peer_verifier_if_unused(cancel, deadline)
+                .await?;
+        }
+        if !self.clean
+            || self.pending.is_some()
+            || self.lookup_leaf.is_some()
+            || self.native_runtime.is_some()
+        {
+            return Err(WorkerSupervisorError::Busy);
+        }
+        let deadline = deadline.min(Instant::from_std(source.deadline()));
+        if Instant::now() >= deadline {
+            return Err(WorkerSupervisorError::Timeout);
+        }
+        let uid = peer.uid();
+        if uid == 0 {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
+        let gid = primary_gid(uid)?;
+        let image = installed_image()?;
+        source.verify_image(&image)?;
+        let image_stamp = image_stamp(&image)?;
+        let image_sha256 = image_hash(&image)?;
+        let mut nonce = [0; 32];
+        getrandom::getrandom(&mut nonce).map_err(unavailable)?;
+        let name = leaf_unit(nonce);
+        self.peer_verifier = Some(PeerPending {
+            _permit: Arc::clone(&self.permit),
+            captured,
+            source: source.clone(),
+            unit: name.clone(),
+            uid,
+            gid,
+            observation: None,
+            channel: None,
+        });
+        let mut foreign = false;
+        let result = self
+            .launch_fixed_leaf(
+                ClosedLeafInput {
+                    name,
+                    uid,
+                    gid,
+                    image,
+                    image_stamp,
+                    image_sha256,
+                },
+                || {
+                    peer.validate().map_err(unavailable)?;
+                    source.validate()
+                },
+                &mut foreign,
+                cancel,
+                deadline,
+            )
+            .await;
+        if foreign {
+            self.peer_verifier = None;
+        }
+        let (channel, identity) = result?;
+        source.verify_image(&identity.image)?;
+        peer.validate().map_err(unavailable)?;
+        if Instant::now() >= deadline {
+            return Err(WorkerSupervisorError::Timeout);
+        }
+        let observer = Arc::new(PeerObservation {
+            identity,
+            revoked: AtomicBool::new(false),
+        });
+        let pending = self
+            .peer_verifier
+            .as_mut()
+            .ok_or(WorkerSupervisorError::Stale)?;
+        pending.channel = Some(rustix::io::dup(&channel).map_err(unavailable)?);
+        pending.observation = Some(Arc::clone(&observer));
+        Ok(VerifiedPeerVerifier {
+            channel,
+            lease: PeerVerifierLease(observer),
+            reused: false,
+        })
+    }
+    pub(crate) async fn retire_peer_verifier_if_unused(
+        &mut self,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        if self.native_runtime.is_some()
+            || self
+                .peer_verifier
+                .as_ref()
+                .and_then(|p| p.observation.as_ref())
+                .is_some_and(|scope| Arc::strong_count(scope) > 1)
+        {
+            return Err(WorkerSupervisorError::Busy);
+        }
+        self.stop_peer_verifier(cancel, deadline).await
+    }
+    pub(super) async fn stop_peer_verifier(
+        &mut self,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        let Some(pending) = self.peer_verifier.as_ref() else {
+            return Ok(());
+        };
+        if let Some(scope) = pending.observation.as_ref() {
+            scope.revoked.store(true, Ordering::Release);
+        }
+        let name = pending.unit.clone();
+        let uid = pending.uid;
+        let gid = pending.gid;
+        let identity = pending
+            .observation
+            .as_ref()
+            .map(|p| Arc::clone(&p.identity));
+        self.stop_fixed_leaf(&name, uid, gid, identity.as_deref(), cancel, deadline)
+            .await?;
+        self.peer_verifier = None;
+        Ok(())
+    }
+    async fn launch_fixed_leaf(
+        &self,
+        input: ClosedLeafInput,
+        revalidate: impl Fn() -> Result<()>,
+        foreign_unit: &mut bool,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<(OwnedFd, Arc<LeafIdentity>)> {
+        let ClosedLeafInput {
+            name,
+            uid,
+            gid,
+            image,
+            image_stamp,
+            image_sha256,
+        } = input;
         let (helper, leaf) = rustix::net::socketpair(
             rustix::net::AddressFamily::UNIX,
             rustix::net::SocketType::SEQPACKET,
@@ -342,16 +579,7 @@ impl SystemWorkerSupervisor {
         rustix::net::sockopt::set_socket_passcred(&helper, true).map_err(unavailable)?;
         rustix::net::sockopt::set_socket_passcred(&leaf, true).map_err(unavailable)?;
         let properties = transient_properties(uid, gid, &leaf);
-        self.lookup_leaf = Some(LeafPending {
-            _permit: Arc::clone(&self.permit),
-            unit: name.clone(),
-            uid,
-            gid,
-            _guard: authorization.guard(),
-            identity: None,
-        });
         let auxiliary: Vec<(&str, Vec<(&str, zbus::zvariant::Value<'_>)>)> = Vec::new();
-        let mut foreign_unit = false;
         let launch=bounded(cancel, deadline, async {
             let result=self.connection
                 .call_method(
@@ -362,17 +590,14 @@ impl SystemWorkerSupervisor {
                     &(&name, "fail", properties, auxiliary),
                 )
                 .await;
-            if matches!(&result,Err(zbus::Error::MethodError(name,_,_)) if name.as_str()=="org.freedesktop.systemd1.UnitExists") {foreign_unit=true;}
+            if matches!(&result,Err(zbus::Error::MethodError(name,_,_)) if name.as_str()=="org.freedesktop.systemd1.UnitExists") {*foreign_unit=true;}
             result.map_err(unavailable)?;
             Ok(())
         }).await;
-        if foreign_unit {
-            self.lookup_leaf = None;
-        }
         launch?;
         drop(leaf);
         loop {
-            authorization.validate_owner(owner).map_err(unavailable)?;
+            revalidate()?;
             let unit = bounded(cancel, deadline, self.properties(&name, UNIT_IFACE)).await?;
             let service = bounded(cancel, deadline, self.properties(&name, SERVICE_IFACE)).await?;
             let pid = number32(&service, "MainPID")?;
@@ -413,15 +638,11 @@ impl SystemWorkerSupervisor {
                 {
                     return Err(WorkerSupervisorError::Stale);
                 }
-                authorization.validate_owner(owner).map_err(unavailable)?;
-                self.lookup_leaf
-                    .as_mut()
-                    .ok_or(WorkerSupervisorError::Stale)?
-                    .identity = Some(Arc::clone(&identity));
-                return Ok(VerifiedLookupLeaf {
-                    channel: helper,
-                    lease: LookupLeafLease(identity),
-                });
+                revalidate()?;
+                if Instant::now() >= deadline {
+                    return Err(WorkerSupervisorError::Timeout);
+                }
+                return Ok((helper, identity));
             }
             bounded(cancel, deadline, async {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -444,27 +665,45 @@ impl SystemWorkerSupervisor {
             .ok_or(WorkerSupervisorError::Stale)?
             .unit
             .clone();
+        let pending = self
+            .lookup_leaf
+            .as_ref()
+            .ok_or(WorkerSupervisorError::Stale)?;
+        let uid = pending.uid;
+        let gid = pending.gid;
+        let identity = pending.identity.as_ref().map(Arc::clone);
+        self.stop_fixed_leaf(&name, uid, gid, identity.as_deref(), cancel, deadline)
+            .await?;
+        self.lookup_leaf = None;
+        Ok(())
+    }
+    #[allow(clippy::too_many_arguments)] // Только закрытые owning state, не caller unit API.
+    async fn stop_fixed_leaf(
+        &self,
+        name: &str,
+        uid: u32,
+        gid: u32,
+        identity: Option<&LeafIdentity>,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
         // Ожидаемый fixed cgroup — единственный terminal fence. Неизвестность хранит guard.
         match bounded(cancel, deadline, self.properties(&name, UNIT_IFACE)).await {
             Ok(unit) => {
                 let service =
                     bounded(cancel, deadline, self.properties(&name, SERVICE_IFACE)).await?;
-                let pending = self
-                    .lookup_leaf
-                    .as_ref()
-                    .ok_or(WorkerSupervisorError::Stale)?;
                 validate_properties(
                     &unit,
                     &service,
-                    pending.uid,
-                    pending.gid,
+                    uid,
+                    gid,
                     &name,
                     matches!(
                         string(&unit, "ActiveState")?.as_str(),
                         "inactive" | "failed"
                     ) && leaf_empty(&name)?,
                 )?;
-                if let Some(identity) = pending.identity.as_ref() {
+                if let Some(identity) = identity {
                     let invocation = array(&unit, "InvocationID")?;
                     if invocation != identity.invocation {
                         return Err(WorkerSupervisorError::Stale);
@@ -480,7 +719,6 @@ impl SystemWorkerSupervisor {
         }
         loop {
             if leaf_empty(&name)? {
-                self.lookup_leaf = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {
