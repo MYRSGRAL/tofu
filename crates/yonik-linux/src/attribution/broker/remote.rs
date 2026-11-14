@@ -1,6 +1,6 @@
 //! Root Session → canonical app-UID leaf. Нет local root lookup fallback.
 use super::lookup_channel::{Channel, credentials, fence};
-use super::lookup_codec::{self as wire, FRAME, HELLO, HELLO_ACK, REPLY, RESULT};
+use super::lookup_codec::{self as wire, FRAME, HELLO, HELLO_ACK, REPLY};
 use super::{
     DEADLINE, Lookup, LookupBinding, OwnerSnapshot, ProjectedLookup, Unavailable,
     ValidatedProjection,
@@ -89,6 +89,12 @@ impl RemoteLookup {
             _image: image,
         })
     }
+    pub(crate) fn validate_scope(&self, scope: &RuntimeScopeStamp) -> Result<(), Unavailable> {
+        if !self.scope.same_scope(scope) {
+            return Err(Unavailable::Authority);
+        }
+        self.validate()
+    }
     fn validate(&self) -> Result<(), Unavailable> {
         if self.revoked {
             return Err(Unavailable::Revoked);
@@ -133,55 +139,35 @@ impl RemoteLookup {
             .send(&self.binding.request(self.next, flow)?, &[], deadline)?;
         let packet = self.channel.receive(REPLY, Some(deadline))?;
         credentials(packet.credentials, self.lease.pid(), self.lease.uid())?;
-        self.binding
-            .validate(&packet.bytes, RESULT, self.next, REPLY)?;
         self.validate()?;
-        let status = packet.bytes[9];
-        let reason = u16::from_be_bytes([packet.bytes[10], packet.bytes[11]]);
-        if status != 1 {
-            if !packet.rights.is_empty() || packet.bytes[148..].iter().any(|b| *b != 0) {
-                return Err(Unavailable::Malformed);
+        let value = match wire::decode_result(
+            &self.binding,
+            &packet.bytes,
+            self.next,
+            packet.rights.len(),
+        )? {
+            wire::ResultData::Unknown => {
+                fence(deadline)?;
+                return Ok(ProjectedLookup::Unknown);
             }
-            fence(deadline)?;
-            return match (status, reason) {
-                (0, 0) => Ok(ProjectedLookup::Unknown),
-                (2, code) => Ok(ProjectedLookup::Unavailable(wire::reason_value(code)?)),
-                _ => Err(Unavailable::Malformed),
-            };
-        }
-        if reason != 0 || packet.rights.len() != 2 || packet.bytes[218..256].iter().any(|b| *b != 0)
-        {
-            return Err(Unavailable::Malformed);
-        }
-        let pid = wire::u32_at(&packet.bytes, 148)?;
-        let task_id = wire::u32_at(&packet.bytes, 152)?;
-        let start = wire::u64_at(&packet.bytes, 156)?;
-        let task_start = wire::u64_at(&packet.bytes, 164)?;
-        let socket_inode = wire::u64_at(&packet.bytes, 172)?;
-        let socket_fd = wire::u32_at(&packet.bytes, 180)?;
-        let cookie = wire::u64_at(&packet.bytes, 184)?;
-        let executable = (
-            wire::u64_at(&packet.bytes, 192)?,
-            wire::u64_at(&packet.bytes, 200)?,
-        );
-        let nanos = wire::u64_at(&packet.bytes, 208)?;
-        let length = u16::from_be_bytes([packet.bytes[216], packet.bytes[217]]) as usize;
-        if pid == 0
-            || task_id == 0
-            || start == 0
-            || task_start == 0
-            || socket_inode == 0
-            || executable.1 == 0
-            || nanos == 0
-            || nanos > DEADLINE.as_nanos() as u64
-            || length > super::super::native_wire::MAX_PATH
-            || packet.bytes[256 + length..].iter().any(|b| *b != 0)
-        {
-            return Err(Unavailable::Malformed);
-        }
-        let path = super::super::native_wire::executable_path(&packet.bytes[256..256 + length])
-            .map_err(|_| Unavailable::Malformed)?
-            .to_owned();
+            wire::ResultData::Unavailable(reason) => {
+                fence(deadline)?;
+                return Ok(ProjectedLookup::Unavailable(reason));
+            }
+            wire::ResultData::Known(value) => value,
+        };
+        let wire::KnownData {
+            pid,
+            task_id,
+            start,
+            task_start,
+            socket_inode,
+            socket_fd,
+            cookie,
+            executable,
+            nanos,
+            path,
+        } = value;
         let mut rights = packet.rights.into_iter();
         let pidfd = rights.next().ok_or(Unavailable::Malformed)?;
         let executable_fd = File::from(rights.next().ok_or(Unavailable::Malformed)?);

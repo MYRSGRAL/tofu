@@ -1,7 +1,7 @@
 //! Fixed worker --lookup: только scoped kernel lookup под app UID/caps0.
 use super::lookup_channel::{Channel, credentials, fence};
 use super::lookup_codec::{self as wire, FRAME, HELLO_ACK, LOOKUP, REVOKE};
-use super::{Broker, DEADLINE, LookupBinding, ProjectedLookup, TrustedContext, Unavailable};
+use super::{Broker, DEADLINE, LookupBinding, ProjectedLookup, Unavailable};
 use std::{
     fs::File,
     os::fd::AsFd,
@@ -80,27 +80,19 @@ pub(super) fn run() -> Result<(), Unavailable> {
                 if ttl.is_zero() {
                     return Err(Unavailable::Timeout);
                 }
-                let mut response = wire::result_header(&binding, id, 1, 0)?;
-                for (offset, value) in [
-                    (148, owner.pid),
-                    (152, owner.task_id),
-                    (180, owner.socket_fd),
-                ] {
-                    response[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
-                }
-                for (offset, value) in [
-                    (156, owner.start_time),
-                    (164, owner.task_start),
-                    (172, owner.socket_inode),
-                    (184, owner.cookie),
-                    (192, owner.executable.0),
-                    (200, owner.executable.1),
-                    (208, ttl.as_nanos() as u64),
-                ] {
-                    response[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
-                }
-                response[216..218].copy_from_slice(&(path.len() as u16).to_be_bytes());
-                response[256..256 + path.len()].copy_from_slice(path.as_bytes());
+                let value = wire::KnownData {
+                    pid: owner.pid,
+                    task_id: owner.task_id,
+                    start: owner.start_time,
+                    task_start: owner.task_start,
+                    socket_inode: owner.socket_inode,
+                    socket_fd: owner.socket_fd,
+                    cookie: owner.cookie,
+                    executable: owner.executable,
+                    nanos: ttl.as_nanos() as u64,
+                    path,
+                };
+                let response = wire::known_frame(&binding, id, &value)?;
                 (response, Some(owner))
             }
         };

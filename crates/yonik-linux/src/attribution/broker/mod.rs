@@ -245,7 +245,6 @@ impl BrokerLookupView {
 
 /// Не Deserialize: worker PID и UID никогда не берутся из запроса.
 pub struct TrustedContext {
-    scope: Option<crate::helper::native_bootstrap::RuntimeScopeStamp>,
     worker: Process,
     lookup_view: BrokerLookupView,
     target_uid: u32,
@@ -255,39 +254,8 @@ pub struct TrustedContext {
     revoked: bool,
     cancelled: Arc<AtomicBool>,
 }
-pub(crate) struct VerifiedLookupScope {
-    context: TrustedContext,
-}
-impl VerifiedLookupScope {
-    pub(crate) fn verify(
-        scope: crate::helper::native_bootstrap::RuntimeScopeStamp,
-    ) -> Result<Self, Unavailable> {
-        scope.validate().map_err(|_| Unavailable::Authority)?;
-        let (worker_pid, worker_uid, owner) = scope.lookup_binding();
-        let view = BrokerLookupView::capture()?;
-        if view.namespaces[0] != owner.namespace() {
-            return Err(Unavailable::Coverage);
-        }
-        let (nonce, _, _, _, epoch, digest) = scope.context();
-        let context = TrustedContext {
-            worker: Process::capture(worker_pid, worker_uid)?,
-            lookup_view: view,
-            target_uid: owner.owner_uid(),
-            epoch,
-            nonce,
-            digest,
-            revoked: false,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            scope: Some(scope),
-        };
-        Ok(Self { context })
-    }
-}
 impl TrustedContext {
     fn validate_scope(&self) -> Result<(), Unavailable> {
-        if let Some(scope) = &self.scope {
-            scope.validate().map_err(|_| Unavailable::Revoked)?;
-        }
         self.lookup_view.validate()
     }
 
@@ -303,7 +271,6 @@ impl TrustedContext {
             return Err(Unavailable::Authority);
         }
         Ok(Self {
-            scope: None,
             worker: Process::capture(worker_pid, worker_uid).map_err(|e| {
                 if e == Unavailable::Coverage {
                     Unavailable::WorkerViewUnavailable
@@ -387,36 +354,30 @@ impl Broker {
             epoch: binding.epoch,
             nonce: binding.nonce,
             digest: binding.digest,
-            scope: None,
             revoked: false,
             cancelled: Arc::new(AtomicBool::new(false)),
         };
         Self::build(context, false)
     }
 
-    pub(crate) fn from_verified(scope: VerifiedLookupScope) -> Result<Self, Unavailable> {
-        Self::build(scope.context, false)
-    }
     pub fn new(context: TrustedContext) -> Result<Self, Unavailable> {
         Self::build(context, true)
     }
     fn build(context: TrustedContext, legacy: bool) -> Result<Self, Unavailable> {
-        if rustix::process::getuid().as_raw() != context.target_uid
-            || rustix::process::geteuid().as_raw() != context.target_uid
-        {
-            return Err(Unavailable::Authority);
-        }
         let status = bounded("/proc/self/status")?;
-        for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"] {
-            if status
-                .lines()
-                .find_map(|l| l.strip_prefix(field))
-                .and_then(|v| u64::from_str_radix(v.trim(), 16).ok())
-                != Some(0)
-            {
-                return Err(Unavailable::Authority);
-            }
-        }
+        let caps = ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"].map(|field| {
+            let mut values = status.lines().filter_map(|line| line.strip_prefix(field));
+            let value = values
+                .next()
+                .and_then(|v| u64::from_str_radix(v.trim(), 16).ok());
+            if values.next().is_some() { None } else { value }
+        });
+        validate_lookup_credentials(
+            rustix::process::getuid().as_raw(),
+            rustix::process::geteuid().as_raw(),
+            context.target_uid,
+            caps,
+        )?;
         rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
             .map_err(|_| Unavailable::Authority)?;
         context.worker.validate()?;
@@ -722,4 +683,43 @@ pub(in crate::attribution) use kernel::report_cold_witnesses;
 /// Только fixed worker --lookup entry. Не принимает FD/path/UID/command от caller.
 pub fn serve_lookup() -> Result<(), Unavailable> {
     lookup_leaf::run()
+}
+
+fn validate_lookup_credentials(
+    uid: u32,
+    euid: u32,
+    target: u32,
+    caps: [Option<u64>; 4],
+) -> Result<(), Unavailable> {
+    if target == 0 || uid != target || euid != target || caps != [Some(0); 4] {
+        return Err(Unavailable::Authority);
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod lookup_identity_tests {
+    use super::*;
+    #[test]
+    fn pure_lookup_identity_accepts_only_actual_app_uid_with_all_caps_zero() {
+        assert_eq!(
+            validate_lookup_credentials(1000, 1000, 1000, [Some(0); 4]),
+            Ok(())
+        );
+        for (uid, euid, target) in [(0, 0, 1000), (1000, 0, 1000), (1000, 1000, 2000), (0, 0, 0)] {
+            assert_eq!(
+                validate_lookup_credentials(uid, euid, target, [Some(0); 4]),
+                Err(Unavailable::Authority)
+            );
+        }
+        for index in 0..4 {
+            for value in [None, Some(1), Some(1 << 12)] {
+                let mut caps = [Some(0); 4];
+                caps[index] = value;
+                assert_eq!(
+                    validate_lookup_credentials(1000, 1000, 1000, caps),
+                    Err(Unavailable::Authority)
+                );
+            }
+        }
+    }
 }

@@ -1,6 +1,8 @@
 //! Custody и переходы frozen ABI. Caller FD и окружение не создают authority.
+#[cfg(test)]
+use super::broker::Broker;
 use super::{
-    broker::{Broker, Lookup, Unavailable},
+    broker::{Lookup, Unavailable},
     native_wire::{self as wire, Header, Kind, Malformed, Sequence},
 };
 use crate::managed_network::tun::BoundTun;
@@ -33,6 +35,7 @@ pub struct Session {
 struct Roles {
     tun: TunRole,
     worker: OwnedFd,
+    #[cfg(test)]
     broker: Option<Broker>,
     remote: Option<super::broker::RemoteLookup>,
 }
@@ -73,6 +76,7 @@ impl Session {
     ) -> Result<Self, Unavailable> {
         let (scope, queue, worker) = role.into_parts();
         scope.validate().map_err(|_| Unavailable::Authority)?;
+        remote.validate_scope(&scope)?;
 
         let (nonce, session, generation, invocation, epoch, digest) = scope.context();
         Ok(Self {
@@ -87,6 +91,7 @@ impl Session {
             roles: Some(Roles {
                 tun: TunRole::Bound(queue),
                 worker,
+                #[cfg(test)]
                 broker: None,
                 remote: Some(remote),
             }),
@@ -110,6 +115,7 @@ impl Session {
             if let Some(remote) = roles.remote.as_mut() {
                 remote.revoke();
             }
+            #[cfg(test)]
             if let Some(broker) = roles.broker.as_mut() {
                 broker.revoke();
             }
@@ -222,6 +228,11 @@ impl Session {
         let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
             remote.lookup(flow)
         } else {
+            #[cfg(not(test))]
+            {
+                Lookup::MechanismUnavailable(Unavailable::Authority)
+            }
+            #[cfg(test)]
             match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
                 Some(broker) => broker.lookup(flow),
                 None => Lookup::MechanismUnavailable(Unavailable::Authority),
@@ -247,6 +258,11 @@ impl Session {
             let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
                 remote.lookup_and_project(flow, self.epoch)
             } else {
+                #[cfg(not(test))]
+                {
+                    super::broker::ProjectedLookup::Unavailable(Unavailable::Authority)
+                }
+                #[cfg(test)]
                 match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
                     Some(broker) => broker.lookup_and_project(flow, self.epoch),
                     None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
