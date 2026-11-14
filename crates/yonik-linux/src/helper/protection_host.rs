@@ -86,6 +86,7 @@ struct Backend {
     watch: NetworkWatch,
     seed: u64,
     epoch: u64,
+    native_owner: session_host::native_owner::NativeOwnerState,
     bindings: Option<NetworkStamp>,
     supervisor: Option<super::SystemWorkerSupervisor>,
     worker_uncertain: bool,
@@ -169,6 +170,7 @@ impl SystemProtectionHost {
                 watch,
                 seed,
                 epoch: 1,
+                native_owner: session_host::native_owner::NativeOwnerState::fresh(),
                 bindings: None,
                 supervisor: None,
                 worker_uncertain: false,
@@ -316,7 +318,11 @@ impl Backend {
         NftExecutor::open(owner).map_err(unavailable)
     }
     fn invalidate(&mut self) -> Result<(), ServiceError> {
-        self.epoch = self.epoch.checked_add(1).ok_or(ServiceError::Unavailable)?;
+        self.native_owner.revoke();
+        self.epoch = self.epoch.checked_add(1).ok_or_else(|| {
+            self.native_owner.close();
+            ServiceError::Unavailable
+        })?;
         Ok(())
     }
     fn ensure_owner(&mut self, uid: u32) -> Result<Ownership, ServiceError> {

@@ -14,6 +14,7 @@ fn actor_fixture() -> super::super::SystemProtectionHost {
             watch: monitor.watch(),
             seed: 1,
             epoch: 1,
+            native_owner: super::native_owner::NativeOwnerState::fresh(),
             bindings: None,
             supervisor: None,
             worker_uncertain: false,
@@ -263,6 +264,7 @@ async fn actual_backend_rejects_hostname_without_opening_journal_registry_or_wor
         watch: monitor.watch(),
         seed: 1,
         epoch: 1,
+        native_owner: super::native_owner::NativeOwnerState::fresh(),
         bindings: None,
         supervisor: None,
         worker_uncertain: false,
@@ -909,4 +911,16 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
     drop(backend);
     std::fs::remove_file(path.join("journal.json")).unwrap();
     std::fs::remove_dir(path).unwrap();
+}
+
+#[tokio::test]
+async fn native_epoch_overflow_permanently_closes_reservation() {
+    let host = actor_fixture();
+    let mut backend = host.backend.lock().unwrap();
+    assert!(backend.native_owner.reserve().is_ok());
+    backend.epoch = u64::MAX;
+    assert!(backend.invalidate().is_err());
+    assert!(backend.native_owner.reserve().is_err());
+    assert!(backend.invalidate().is_err());
+    assert!(backend.native_owner.reserve().is_err());
 }
