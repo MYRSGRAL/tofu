@@ -92,6 +92,7 @@ impl VerifiedPendingRun {
             guard,
         })
     }
+    /// Совместимый async вход: blocking task владеет pending guard и сокетом.
     pub(crate) async fn receive(
         self,
         supervisor: &SystemWorkerSupervisor,
@@ -102,9 +103,23 @@ impl VerifiedPendingRun {
         self.authorization
             .validate_owner(owner)
             .map_err(|_| Error::Untrusted)?;
-        if Deadline::now() >= self.deadline {
-            return Err(Error::Stale);
-        }
+        let stream = stream.try_clone().map_err(|_| Error::Unavailable)?;
+        let (pending, custody, frame) =
+            tokio::task::spawn_blocking(move || self.receive_blocking(stream))
+                .await
+                .map_err(|_| Error::Unavailable)??;
+        pending
+            .finish_receive(supervisor, owner, custody, frame, cancel)
+            .await
+    }
+
+    /// Только authenticated challenge exchange; supervisor и owner сюда не заимствуются.
+    /// Pending возвращается вместе с guard: отменённый join не оставляет authority.
+    pub(crate) fn receive_blocking(
+        self,
+        stream: UnixStream,
+    ) -> Result<(Self, NamespaceObservation, [u8; 512])> {
+        validate_receive_admission(&self.authorization, self.deadline)?;
         let challenge = Challenge::for_authorization(
             &self.authorization,
             self.expected.digest,
@@ -113,13 +128,31 @@ impl VerifiedPendingRun {
         .map_err(|_| Error::Protocol)?;
         let (custody, frame) = challenge
             .exchange_v4_bound(
-                stream,
+                &stream,
                 self.expected.task_pid,
                 self.profile.observation().native_uid(),
                 self.deadline.into_std(),
                 self.expected.epoch,
             )
             .map_err(|_| Error::Protocol)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        Ok((self, custody, frame))
+    }
+
+    /// После blocking await заново проверяются canonical/profile/owner facts.
+    pub(crate) async fn finish_receive(
+        self,
+        supervisor: &SystemWorkerSupervisor,
+        owner: &RunAuthority,
+        custody: NamespaceObservation,
+        frame: [u8; 512],
+        cancel: &mut Cancellation,
+    ) -> Result<VerifiedCoverage> {
+        cancel.check().map_err(|_| Error::Cancelled)?;
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| Error::Untrusted)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
         let profile = self
             .profile
             .revalidate(supervisor, cancel, self.deadline)
@@ -314,5 +347,47 @@ impl RuntimeScopeStamp {
 impl RuntimeScopeStamp {
     pub(crate) fn owns_observation(&self, observation: &NamespaceObservation) -> bool {
         self.inner.custody.same_custody(observation)
+    }
+}
+
+fn validate_receive_admission(authorization: &RunAuthorization, deadline: Deadline) -> Result<()> {
+    authorization.validate().map_err(|_| Error::Untrusted)?;
+    if Deadline::now() >= deadline {
+        return Err(Error::Stale);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod split_receive_tests {
+    use super::*;
+    #[test]
+    fn pure_receive_admission_accepts_live_token_and_rejects_expiry() {
+        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
+        let token = owner.authorize([2; 32]).unwrap();
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now() + std::time::Duration::from_secs(1)),
+            Ok(())
+        );
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now()),
+            Err(Error::Stale)
+        );
+    }
+    #[test]
+    fn pure_receive_admission_revocation_precedes_deadline() {
+        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
+        let token = owner.authorize([2; 32]).unwrap();
+        owner.revoke();
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now()),
+            Err(Error::Untrusted)
+        );
+    }
+    #[test]
+    fn pure_pending_transfer_owns_sendable_guard() {
+        fn sendable<T: Send + 'static>() {}
+        sendable::<VerifiedPendingRun>();
+        sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
     }
 }
