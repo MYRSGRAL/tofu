@@ -218,7 +218,7 @@ impl PeerAttestation {
             binding,
             id: 0,
         };
-        let observation_deadline = deadline.min(Instant::now() + DEADLINE);
+        let observation_deadline = initial_observation_deadline(deadline, Instant::now());
         let snapshot = Arc::new(protocol.observe(observation_deadline, &lease)?);
         if snapshot.view != inspector.view {
             return Err(AttributionFailure::NativeMechanismUnverified);
@@ -279,7 +279,7 @@ impl PeerAttestation {
         fence(deadline).map_err(native)
     }
     pub(in crate::attribution) fn view(&self) -> [(u64, u64); 3] {
-        self.snapshot.view
+        self.snapshot.namespace_view()
     }
     pub(in crate::attribution) fn append_identity(&self, hash: &mut sha2::Sha256) {
         use sha2::Digest;
@@ -419,5 +419,42 @@ pub(super) fn serve(
                 channel.send(&reply, &[], deadline)?;
             }
         }
+    }
+}
+
+fn initial_observation_deadline(admission: Instant, began: Instant) -> Instant {
+    admission.min(began + DEADLINE)
+}
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    #[test]
+    fn pure_initial_attestation_finalization_never_uses_five_second_admission_budget() {
+        let began = Instant::now();
+        let admission = began + std::time::Duration::from_secs(5);
+        let observation = initial_observation_deadline(admission, began);
+        assert_eq!(observation, began + DEADLINE);
+        let after_readonly_retain = began + DEADLINE + std::time::Duration::from_millis(1);
+        assert_eq!(
+            super::super::lookup_channel::fence_at(observation, after_readonly_retain),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(
+            super::super::lookup_channel::fence_at(admission, after_readonly_retain),
+            Ok(())
+        );
+        assert_eq!(
+            super::super::lookup_channel::fence_at(observation, observation),
+            Err(Unavailable::Timeout)
+        );
+        assert_eq!(
+            super::super::lookup_channel::fence_at(
+                observation,
+                observation - std::time::Duration::from_nanos(1)
+            ),
+            Ok(())
+        );
+        let short = began + std::time::Duration::from_millis(1);
+        assert_eq!(initial_observation_deadline(short, began), short);
     }
 }
