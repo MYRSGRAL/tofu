@@ -21,7 +21,7 @@ use crate::{
     worker::WorkerPayload,
 };
 #[path = "native_owner.rs"]
-pub(super) mod native_owner;
+pub(in crate::helper) mod native_owner;
 use sha2::Digest;
 use std::{
     fs::File,

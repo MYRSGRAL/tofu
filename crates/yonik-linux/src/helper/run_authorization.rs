@@ -40,7 +40,7 @@ impl RunRevocation {
 // Producer подключается W4 после проверки реального owner/network context.
 #[allow(dead_code)]
 pub(crate) struct RunAuthority {
-    owner_binding: Option<super::session_host::native_owner::OwnerBinding>,
+    owner_binding: Option<super::protection_host::session_host::native_owner::OwnerBinding>,
     session: [u8; 16],
     generation: u64,
     network_epoch: u64,
@@ -67,7 +67,7 @@ impl RunAuthority {
             revoked: Arc::new(RunRevocation::new()),
         })
     }
-    pub(super) fn from_bound(binding: super::session_host::native_owner::OwnerBinding) -> Self {
+    pub(super) fn from_bound(binding: super::protection_host::session_host::native_owner::OwnerBinding) -> Self {
         let (session, generation, network_epoch) = binding.context();
         Self {
             owner_binding: Some(binding),
