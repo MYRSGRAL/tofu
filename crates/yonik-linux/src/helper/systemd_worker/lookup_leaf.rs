@@ -791,6 +791,25 @@ fn transient_properties(
         ),
         ("StandardOutput", Value::from("null")),
         ("StandardError", Value::from("null")),
+        ("ProtectSystem", Value::from("no")),
+        ("ProtectHome", Value::from("no")),
+        ("PrivateTmp", Value::from(false)),
+        ("PrivateMounts", Value::from(false)),
+        ("PrivateNetwork", Value::from(false)),
+        ("PrivateUsers", Value::from(false)),
+        ("PrivatePIDs", Value::from(false)),
+        ("PrivateDevices", Value::from(false)),
+        ("ReadOnlyPaths", Value::from(Vec::<&str>::new())),
+        ("ReadWritePaths", Value::from(Vec::<&str>::new())),
+        ("InaccessiblePaths", Value::from(Vec::<&str>::new())),
+        (
+            "BindPaths",
+            Value::from(Vec::<(&str, &str, bool, u64)>::new()),
+        ),
+        (
+            "BindReadOnlyPaths",
+            Value::from(Vec::<(&str, &str, bool, u64)>::new()),
+        ),
         ("CapabilityBoundingSet", Value::from(0u64)),
         ("AmbientCapabilities", Value::from(0u64)),
         ("NoNewPrivileges", Value::from(true)),
@@ -829,6 +848,38 @@ fn validate_properties(
         || string(service, "Type")? != "exec"
     {
         return Err(WorkerSupervisorError::Untrusted);
+    }
+    if string(service, "ProtectSystem")? != "no" || string(service, "ProtectHome")? != "no" {
+        return Err(WorkerSupervisorError::Untrusted);
+    }
+    for name in [
+        "PrivateTmp",
+        "PrivateMounts",
+        "PrivateNetwork",
+        "PrivateUsers",
+        "PrivatePIDs",
+        "PrivateDevices",
+    ] {
+        if boolean(service, name)? {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
+    }
+    for name in ["ReadOnlyPaths", "ReadWritePaths", "InaccessiblePaths"] {
+        if !strings(service, name)?.is_empty() {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
+    }
+    for name in ["BindPaths", "BindReadOnlyPaths"] {
+        let paths: zbus::zvariant::Array<'_> = service
+            .get(name)
+            .ok_or(WorkerSupervisorError::Untrusted)?
+            .try_clone()
+            .map_err(unavailable)?
+            .try_into()
+            .map_err(unavailable)?;
+        if !paths.is_empty() {
+            return Err(WorkerSupervisorError::Untrusted);
+        }
     }
     let exec: ExecCommands = service
         .get("ExecStart")
