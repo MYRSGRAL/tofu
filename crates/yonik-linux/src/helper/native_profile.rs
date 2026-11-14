@@ -70,7 +70,7 @@ fn fixed_file(directory: &File, name: &str) -> Result<File> {
     immutable(&f)?;
     Ok(f)
 }
-fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
+fn hash(file: &File, limit: u64, elf: bool, deadline: std::time::Instant) -> Result<[u8; 32]> {
     let before = stamp(file)?;
     if before.len == 0 || before.len > limit {
         return Err(Error::Untrusted);
@@ -80,6 +80,7 @@ fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
     let mut digest = Sha256::new();
     let mut total = 0u64;
     loop {
+        static_deadline(deadline)?;
         let n = reader.read(&mut buf).map_err(|_| Error::Unavailable)?;
         if n == 0 {
             break;
@@ -96,6 +97,7 @@ fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
     if total != before.len || stamp(file)? != before {
         return Err(Error::Stale);
     }
+    static_deadline(deadline)?;
     Ok(digest.finalize().into())
 }
 fn parse(file: &File) -> Result<Deployment> {
@@ -144,19 +146,23 @@ struct InstalledContract {
     deployment: Deployment,
 }
 impl InstalledContract {
-    fn verify() -> Result<Self> {
+    fn verify(deadline: std::time::Instant) -> Result<Self> {
+        static_deadline(deadline)?;
         verify_installed()?;
         let directory = child(&child(&child(&root()?, "usr")?, "lib")?, "yonik")?;
         let metadata = fixed_file(&directory, "native-profile-v1.json")?;
         let deployment = parse(&metadata)?;
+        if deployment.policy_sha256 != yonik_nsfs::fixed_self_fence::PROFILE_DIGEST {
+            return Err(Error::Untrusted);
+        }
         let image = fixed_file(&directory, "yonik-worker")?;
         if image.metadata().map_err(|_| Error::Unavailable)?.mode() & 0o111 == 0
-            || hash(&image, MAX_ELF, true)? != deployment.worker_sha256
+            || hash(&image, MAX_ELF, true, deadline)? != deployment.worker_sha256
         {
             return Err(Error::Untrusted);
         }
         let source = fixed_file(&directory, "native-source-v1.tar")?;
-        if hash(&source, MAX_SOURCE, false)? != deployment.source_archive_sha256 {
+        if hash(&source, MAX_SOURCE, false, deadline)? != deployment.source_archive_sha256 {
             return Err(Error::Untrusted);
         }
         let kernel = child(&child(&root()?, "sys")?, "kernel")?;
@@ -175,6 +181,7 @@ impl InstalledContract {
         if release != format!("{}\n", deployment.kernel_release) {
             return Err(Error::Untrusted);
         }
+        static_deadline(deadline)?;
         Ok(Self {
             _metadata: metadata,
             _source: source,
@@ -190,6 +197,7 @@ impl ExecutableIdentity {
     fn verify(
         observation: &BootstrapUnitObservation,
         installed: &InstalledContract,
+        deadline: std::time::Instant,
     ) -> Result<Self> {
         observation.validate_identity()?;
         // Единственная намеренная proc magic-link: actual exe canonical pidfd/start.
@@ -198,7 +206,7 @@ impl ExecutableIdentity {
             .map_err(|_| Error::Unavailable)?;
         immutable(&actual)?;
         if stamp(&actual)? != stamp(&installed.image)?
-            || hash(&actual, MAX_ELF, true)? != installed.deployment.worker_sha256
+            || hash(&actual, MAX_ELF, true, deadline)? != installed.deployment.worker_sha256
         {
             return Err(Error::Untrusted);
         }
@@ -224,8 +232,8 @@ impl VerifiedInstalledProfile {
         supervisor
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
-        let installed = InstalledContract::verify()?;
-        let executable = ExecutableIdentity::verify(&observation, &installed)?;
+        let installed = InstalledContract::verify(deadline.into_std())?;
+        let executable = ExecutableIdentity::verify(&observation, &installed, deadline.into_std())?;
         supervisor
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
@@ -334,6 +342,18 @@ fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
     }
     found.ok_or(Error::Unavailable)
 }
+fn static_deadline(deadline: std::time::Instant) -> Result<()> {
+    if std::time::Instant::now() >= deadline {
+        return Err(Error::Timeout);
+    }
+    Ok(())
+}
+/// Static contract data для Prepare. Никакой Session/permit/Ready не выдаётся.
+pub(super) fn verify_static_preflight(deadline: std::time::Instant) -> Result<()> {
+    let _installed = InstalledContract::verify(deadline)?;
+    static_deadline(deadline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

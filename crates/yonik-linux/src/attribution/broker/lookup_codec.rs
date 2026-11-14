@@ -169,110 +169,6 @@ fn validate_flow(flow: Flow) -> Result<(), Unavailable> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn binding() -> LookupBinding {
-        LookupBinding {
-            target_uid: 1000,
-            epoch: 1,
-            nonce: [1; 32],
-            digest: [2; 32],
-            generation: 3,
-            invocation: [4; 16],
-            server_pid: 5,
-            server_start: 6,
-            network: (7, 8),
-        }
-    }
-    fn flow() -> Flow {
-        Flow {
-            family: 2,
-            protocol: 6,
-            local_port: 1234,
-            remote_port: 443,
-            local: [0; 16],
-            remote: [0; 16],
-            cookie: Some(9),
-        }
-    }
-    #[test]
-    fn pure_lookup_codec_roundtrip_preserves_tcp_udp_ports_cookie_and_scope() {
-        let binding = binding();
-        let hello = binding.encode(HELLO, 0).unwrap();
-        assert!(LookupBinding::decode_hello(&hello).unwrap() == binding);
-        for family in [2, 10] {
-            for protocol in [6, 17] {
-                let value = Flow {
-                    family,
-                    protocol,
-                    ..flow()
-                };
-                let bytes = binding.request(1, value).unwrap();
-                assert_eq!(binding.flow(&bytes, 1).unwrap(), value);
-            }
-        }
-    }
-    #[test]
-    fn pure_lookup_codec_rejects_every_binding_byte_reserved_and_wrong_request_id() {
-        let binding = binding();
-        let request = binding.request(1, flow()).unwrap();
-        for index in (0..9).chain(12..148) {
-            let mut bad = request;
-            bad[index] ^= 1;
-            assert!(binding.flow(&bad, 1).is_err(), "{index}");
-        }
-        for index in [9, 10, 11, 151, 196, 255] {
-            let mut bad = request;
-            bad[index] = 1;
-            assert!(binding.flow(&bad, 1).is_err());
-        }
-        assert!(binding.flow(&request, 2).is_err());
-        assert!(binding.flow(&request[..255], 1).is_err());
-    }
-    #[test]
-    fn pure_lookup_codec_rejects_zero_ports_protocol_and_ipv4_tail() {
-        let binding = binding();
-        for value in [
-            Flow {
-                local_port: 0,
-                ..flow()
-            },
-            Flow {
-                remote_port: 0,
-                ..flow()
-            },
-            Flow {
-                protocol: 1,
-                ..flow()
-            },
-            Flow {
-                local: [1; 16],
-                ..flow()
-            },
-        ] {
-            assert!(binding.request(1, value).is_err());
-        }
-    }
-
-    #[test]
-    fn pure_lookup_control_rejects_every_reserved_tail_byte() {
-        let binding = binding();
-        for kind in [HELLO_ACK, REVOKE] {
-            let bytes = binding.encode(kind, 0).unwrap();
-            assert!(binding.validate(&bytes, kind, 0, FRAME).is_ok());
-            for index in 148..FRAME {
-                let mut invalid = bytes;
-                invalid[index] = 1;
-                assert!(matches!(
-                    binding.validate(&invalid, kind, 0, FRAME),
-                    Err(Unavailable::Malformed)
-                ));
-            }
-        }
-    }
-}
-
 pub(super) fn result_header(
     binding: &LookupBinding,
     id: u64,
@@ -546,6 +442,110 @@ mod result_tests {
             let mut bad = bytes;
             bad[offset..offset + size].fill(0);
             assert!(decode_result(&binding, &bad, 1, 2).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn binding() -> LookupBinding {
+        LookupBinding {
+            target_uid: 1000,
+            epoch: 1,
+            nonce: [1; 32],
+            digest: [2; 32],
+            generation: 3,
+            invocation: [4; 16],
+            server_pid: 5,
+            server_start: 6,
+            network: (7, 8),
+        }
+    }
+    fn flow() -> Flow {
+        Flow {
+            family: 2,
+            protocol: 6,
+            local_port: 1234,
+            remote_port: 443,
+            local: [0; 16],
+            remote: [0; 16],
+            cookie: Some(9),
+        }
+    }
+    #[test]
+    fn pure_lookup_codec_roundtrip_preserves_tcp_udp_ports_cookie_and_scope() {
+        let binding = binding();
+        let hello = binding.encode(HELLO, 0).unwrap();
+        assert!(LookupBinding::decode_hello(&hello).unwrap() == binding);
+        for family in [2, 10] {
+            for protocol in [6, 17] {
+                let value = Flow {
+                    family,
+                    protocol,
+                    ..flow()
+                };
+                let bytes = binding.request(1, value).unwrap();
+                assert_eq!(binding.flow(&bytes, 1).unwrap(), value);
+            }
+        }
+    }
+    #[test]
+    fn pure_lookup_codec_rejects_every_binding_byte_reserved_and_wrong_request_id() {
+        let binding = binding();
+        let request = binding.request(1, flow()).unwrap();
+        for index in (0..9).chain(12..148) {
+            let mut bad = request;
+            bad[index] ^= 1;
+            assert!(binding.flow(&bad, 1).is_err(), "{index}");
+        }
+        for index in [9, 10, 11, 151, 196, 255] {
+            let mut bad = request;
+            bad[index] = 1;
+            assert!(binding.flow(&bad, 1).is_err());
+        }
+        assert!(binding.flow(&request, 2).is_err());
+        assert!(binding.flow(&request[..255], 1).is_err());
+    }
+    #[test]
+    fn pure_lookup_codec_rejects_zero_ports_protocol_and_ipv4_tail() {
+        let binding = binding();
+        for value in [
+            Flow {
+                local_port: 0,
+                ..flow()
+            },
+            Flow {
+                remote_port: 0,
+                ..flow()
+            },
+            Flow {
+                protocol: 1,
+                ..flow()
+            },
+            Flow {
+                local: [1; 16],
+                ..flow()
+            },
+        ] {
+            assert!(binding.request(1, value).is_err());
+        }
+    }
+
+    #[test]
+    fn pure_lookup_control_rejects_every_reserved_tail_byte() {
+        let binding = binding();
+        for kind in [HELLO_ACK, REVOKE] {
+            let bytes = binding.encode(kind, 0).unwrap();
+            assert!(binding.validate(&bytes, kind, 0, FRAME).is_ok());
+            for index in 148..FRAME {
+                let mut invalid = bytes;
+                invalid[index] = 1;
+                assert!(matches!(
+                    binding.validate(&invalid, kind, 0, FRAME),
+                    Err(Unavailable::Malformed)
+                ));
+            }
         }
     }
 }

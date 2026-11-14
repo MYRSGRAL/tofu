@@ -9,6 +9,9 @@ use std::{
 };
 
 pub(super) fn run() -> Result<(), Unavailable> {
+    // До HELLO: same-UID ptrace_scope=0 не должен позволить изменить leaf.
+    rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+        .map_err(|_| Unavailable::Authority)?;
     let socket = rustix::io::fcntl_dupfd_cloexec(std::io::stdin().as_fd(), 3)
         .map_err(|_| Unavailable::Authority)?;
     let channel = Channel::new(socket)?;

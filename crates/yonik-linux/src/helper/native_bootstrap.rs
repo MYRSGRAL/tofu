@@ -440,6 +440,12 @@ impl VerifiedCoverage {
     }
 }
 
+/// Только static installed contract. Actor удерживает FIFO/operation lease;
+/// inline file IO не создаёт detached task и не выдаёт apply authority.
+pub(crate) fn verify_preflight(deadline: std::time::Instant) -> Result<()> {
+    super::native_profile::verify_static_preflight(deadline)
+}
+
 #[cfg(test)]
 mod split_receive_tests {
     use super::*;
