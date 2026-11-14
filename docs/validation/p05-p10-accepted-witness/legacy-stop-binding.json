@@ -1,0 +1,132 @@
+{
+  "source": "f0a1d13fb69facfb84bda5f68ba37db6cff92380",
+  "red_source": "9e86b160192a8a295e6d48d4af6a673243ead8fe",
+  "prior_measured_source": "7b175e4b9e207b57eec55b75a8172b586ee2c3c5",
+  "evidence_root": "/home/myrs/projects/yonik/local/evidence/pr199-legacy-window-v1",
+  "source_files": 396,
+  "prepost_and_commit_archive_hashes_exact": true,
+  "artifact_hashes": {
+    "red2-source.json": "d2598dd73e6eadd8601a12399c966ecb3d8d2793719438d2a8629894afe628d9",
+    "red2-source.tar.gz": "372c58bb2d237f7816b9efc4356fb73ccb4f416a5a1ddc63301704df54d37bcf",
+    "red2-elf": "401da010332a99dd89e7efe50bb79fdf0cfd719494acfd5d0f0bb849299b5a77",
+    "green3-source.json": "54df901fc8262d01d0dc6c85fc7d20e454be479a1c2391477cd94f9cf257542e",
+    "green3-source.tar.gz": "da7a74c84d9c0ececd3409bfe1832cf425e76c3950b6afe99e212cb2b82ccb5d",
+    "green3-elf": "3536bcfea41aad722bf8f5f79f47c22a6d4cf20a76d44408a4f552a85a48471c",
+    "commands.json": "d571e58fe1a90bf09f4d3fe410feae4b93f8818300ce07e982c79b794b10730a",
+    "red2-build.log": "d59cdbc1bc7ef0060f23605d70d1dc56052773aedefcf63d3108e0c3a7131ef1",
+    "green3-build.log": "01c678ca9a064a8dd829bde396b198badf030da9fc99b72246c8baf553dc3ff1",
+    "final-unit.log": "f8e5ace9b1f5eca3d1f567260d70b86ba09aef74563044d88f9fbd17f574c60f",
+    "clippy.log": "a3acd41cb22fb6f2821c9b6ac824f5cc1d179609862ab3de25e5da4af8185156",
+    "default-check.log": "25f6331de57c5f3857a8956542555c02ee8f92c047ba9c21f3bc9d312d88bb04",
+    "cleanup.log": "0a9182b20ce8c2b04676678d8b8575b451508e20ad96ce7e9d7001a57b22dfd3",
+    "red-xray-2/raw-test.log": "0aad95b91ad308d44a9c7f951a649baf5d2e8e6192801caa79bff37e6546c9f3",
+    "red-xray-2/cleanup.json": "9f70485dcb0a458b38cd20fcb9141a51300ee195e4f9856fd0a06b16a57800d5",
+    "red-xray-2/trace.jsonl": "c4ef4dd3ad363efac9434dc115f7bbaaf8177f8fe394214524a44cd9482f0255",
+    "green-xray-2/raw-test.log": "65af9b7970005cf5679cc903fc658354201dfe7f8916c01784d5d55380562a7b",
+    "green-xray-2/cleanup.json": "9f70485dcb0a458b38cd20fcb9141a51300ee195e4f9856fd0a06b16a57800d5",
+    "green-xray-2/trace.jsonl": "31c17813062d3fd020b25a8d9ad53f7660a7a4737a78eb29ad430aefa3daff23",
+    "green-sing-box-1/raw-test.log": "200585531c132526643482393edef482f332937be34faa92668bc1c7e5c30d2a",
+    "green-sing-box-1/cleanup.json": "9f70485dcb0a458b38cd20fcb9141a51300ee195e4f9856fd0a06b16a57800d5",
+    "green-sing-box-1/trace.jsonl": "ec76ca868e03afad30c557b5aadacb551233f4cb6d7f61287ca35f6a8a2e0edd",
+    "negative-overflow/raw-test.log": "60d015ae55a86ace5c14b0c60508ef19d26d2d79537eb62761f56171f6703e21",
+    "negative-overflow/cleanup.json": "9f70485dcb0a458b38cd20fcb9141a51300ee195e4f9856fd0a06b16a57800d5",
+    "negative-overflow/trace.jsonl": "3962fc2a61aaa153e5fc570974c057116015c832ad72cc488a7436e0fffad9ec",
+    "green-xray-2/result.json": "5df28402a329b9670a45f7c1f454175597b7f05848cc1f7e80d33d70835c6ed0",
+    "green-sing-box-1/result.json": "6245c0f5e7be1c591fbcd67cfc512cc073ec75fcc161e035016a4da1a85d001b",
+    "red-xray-2/failure.json": "1c05718ffefc62cd3d1988f0d226b67cdfbd8f9b1d91512889420bdb1d6b8b46",
+    "negative-overflow/failure.json": "1c05718ffefc62cd3d1988f0d226b67cdfbd8f9b1d91512889420bdb1d6b8b46"
+  },
+  "core_pins": {
+    "xray": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+    "sing-box": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a"
+  },
+  "private_ss_runtime_manifest": {
+    "path": "/home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1/runtime-inputs.json",
+    "sha256": "edd58dbc826b36cee1ecefb55e8243f522ad8ef8b5a2568137f27db69dd65940"
+  },
+  "actual": {
+    "xray": {
+      "result": {
+        "valid": true,
+        "normal_host_private_ss": true,
+        "fixture_counts": {
+          "origin_requests": 5,
+          "socks_requests": 0,
+          "held_started": true,
+          "held_closed": true,
+          "second_requests": 1
+        },
+        "native_engine": true,
+        "legacy_local_socks": true,
+        "engine": "xray",
+        "hardware_power": null,
+        "all_owned_reaped": true
+      },
+      "trace_rows": 26,
+      "old_new_actual_lease_generations": [
+        1,
+        2
+      ],
+      "matching_stop_ack": true,
+      "window_nonextension": true,
+      "second_due_source_overdue_unchanged_reopen": true,
+      "stale_publication_absent": true
+    },
+    "sing-box": {
+      "result": {
+        "valid": true,
+        "normal_host_private_ss": true,
+        "fixture_counts": {
+          "origin_requests": 5,
+          "socks_requests": 0,
+          "held_started": true,
+          "held_closed": true,
+          "second_requests": 1
+        },
+        "native_engine": true,
+        "legacy_local_socks": true,
+        "engine": "sing-box",
+        "hardware_power": null,
+        "all_owned_reaped": true
+      },
+      "trace_rows": 26,
+      "old_new_actual_lease_generations": [
+        1,
+        2
+      ],
+      "matching_stop_ack": true,
+      "window_nonextension": true,
+      "second_due_source_overdue_unchanged_reopen": true,
+      "stale_publication_absent": true
+    }
+  },
+  "negative": {
+    "actual_stop_red": "Null deadline после matching ACK; assertion failure на old behavior, socket closed; old trace наблюдения lease/window впоследствии уточнены отдельно",
+    "overflow_capacity_one": "observed FAIL, cleanup 4/4; assertions/timeout не ослаблены"
+  },
+  "attempts": {
+    "red-xray-1": "fixture invalid due<recorded, не target RED",
+    "green-xray-1": "Stop deadline GREEN; timeout observer до actual watch publication; не scenario PASS"
+  },
+  "checks": {
+    "unit_passed": 115,
+    "unit_ignored": 1,
+    "unit_failed": 0,
+    "actual_green": 2,
+    "clippy_all_targets": true,
+    "default_feature_check": true,
+    "rustfmt": true,
+    "ruff": true
+  },
+  "cleanup": {
+    "cargo_clean": "4752 files / 2.3GiB",
+    "transient_root_absent": true,
+    "all_runtime_sessions_terminal": true,
+    "all_own_build_sessions_terminal": true
+  },
+  "scope": "actual legacy LocalSocks/default DesktopFetch; no override, ephemeral key, N5/NativeRunning/worker/TUN/physical/energy/global P05P10 claim",
+  "socks_requests_counter": "inherited runner fixture field 0 не измеряет native SOCKS и не трактуется как число core requests; native_socks_count=null",
+  "native_socks_count": null,
+  "hardware_power": null,
+  "background_noise": "P01/P02/другие workers не опрашивались/не менялись. Unit/clippy builds пересекались с runtime; elapsed не performance acceptance."
+}
