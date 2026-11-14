@@ -1,6 +1,7 @@
 """Синтетические offline capture; никаких compiler/ELF execution."""
 
 import hashlib
+import io
 import json
 import os
 import struct
@@ -375,6 +376,43 @@ class CaptureReceiptTests(unittest.TestCase):
             "build-cxx-observed.json",
             lambda value: value["records"][0]["argv"].append("-DOTHER"),
         )
+
+    def test_final_profile_scalar_record_uses_cli_validation_error(self) -> None:
+        original = {
+            path: path.read_bytes()
+            for path in self.retained.iterdir()
+            if path.is_file()
+        }
+        pins = dict(self.pins)
+        for invalid in (None, 0, False, "scalar", []):
+            with self.subTest(invalid=invalid):
+                for path, raw in original.items():
+                    path.write_bytes(raw)
+                self.pins = dict(pins)
+                self.final_negative(
+                    "build-cxx-observed.json",
+                    lambda value: value["records"].__setitem__(0, invalid),
+                )
+                argv = [
+                    "n5_capture_receipts.py",
+                    "--retained",
+                    str(self.retained),
+                    "--source-commit",
+                    self.commit,
+                    "--output",
+                    str(self.root / "must-not-exist"),
+                ]
+                for name, checksum in self.pins.items():
+                    argv.extend(["--" + name.replace(".", "-") + "-sha256", checksum])
+                with (
+                    patch.object(sys, "argv", argv),
+                    patch.object(sys, "stderr", io.StringIO()) as stderr,
+                ):
+                    with self.assertRaises(SystemExit) as failure:
+                        seam.main()
+                self.assertEqual(failure.exception.code, 2)
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertFalse((self.root / "must-not-exist").exists())
 
     def test_final_profile_tampered_deps_negative(self) -> None:
         self.final_negative(

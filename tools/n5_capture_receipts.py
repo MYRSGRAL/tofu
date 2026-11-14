@@ -309,6 +309,7 @@ def final_capture(
             "unit",
             "compiler_id",
         }
+        require(isinstance(row, dict), "Observed record должен быть object")
         compiling = row.get("unit") is not None
         exact(
             row,
