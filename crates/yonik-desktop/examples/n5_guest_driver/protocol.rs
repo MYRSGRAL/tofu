@@ -1,8 +1,7 @@
 //! Замкнутый вход runner: никакого argv/config/env executor.
-#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Core {
     Xray,
@@ -16,7 +15,7 @@ impl Core {
         }
     }
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Case {
     Positive,
@@ -29,7 +28,7 @@ pub enum Case {
     HostLoss,
     UnknownStop,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Start,
@@ -40,7 +39,7 @@ pub enum Action {
     Stop,
     Cleanup,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub schema: u8,
@@ -58,17 +57,6 @@ pub fn decode(bytes: &[u8], previous: u64) -> Result<Request, &'static str> {
         return Err("REQUEST_BINDING");
     }
     Ok(request)
-}
-// None означает отсутствие наблюдения, а не нулевой счётчик событий.
-#[derive(Debug, Default, Serialize)]
-pub struct InternalObservations {
-    pub apply_sends: Option<u8>,
-    pub admitted: Option<u8>,
-    pub role_sends: Option<u8>,
-    pub ack: Option<u8>,
-    pub coverage: Option<u32>,
-    pub owned_child_reaped: Option<bool>,
-    pub network_restored: Option<bool>,
 }
 #[cfg(test)]
 mod tests {
@@ -95,13 +83,76 @@ mod tests {
             assert!(decode(value.as_bytes(), 0).is_err());
         }
     }
+}
+
+pub fn strict_json(bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
+    use serde::{
+        de::{Error, MapAccess, SeqAccess, Visitor},
+        Deserializer,
+    };
+    use serde_json::Value;
+    struct Unique(Value);
+    impl<'de> Deserialize<'de> for Unique {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = Unique;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("bounded unique JSON")
+                }
+                fn visit_bool<E: Error>(self, v: bool) -> Result<Unique, E> {
+                    Ok(Unique(Value::Bool(v)))
+                }
+                fn visit_u64<E: Error>(self, v: u64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_i64<E: Error>(self, v: i64) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_f64<E: Error>(self, _: f64) -> Result<Unique, E> {
+                    Err(E::custom("integer required"))
+                }
+                fn visit_str<E: Error>(self, v: &str) -> Result<Unique, E> {
+                    Ok(Unique(v.into()))
+                }
+                fn visit_unit<E: Error>(self) -> Result<Unique, E> {
+                    Ok(Unique(Value::Null))
+                }
+                fn visit_none<E: Error>(self) -> Result<Unique, E> {
+                    Ok(Unique(Value::Null))
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Unique, A::Error> {
+                    let mut values = Vec::new();
+                    while let Some(Unique(v)) = a.next_element()? {
+                        values.push(v);
+                    }
+                    Ok(Unique(values.into()))
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Unique, A::Error> {
+                    let mut values = serde_json::Map::new();
+                    while let Some((k, Unique(v))) = a.next_entry::<String, Unique>()? {
+                        if values.insert(k, v).is_some() {
+                            return Err(A::Error::custom("duplicate key"));
+                        }
+                    }
+                    Ok(Unique(Value::Object(values)))
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+    serde_json::from_slice::<Unique>(bytes)
+        .map(|v| v.0)
+        .map_err(|_| "JSON_PROTOCOL")
+}
+
+#[cfg(test)]
+mod unique_tests {
+    use super::*;
     #[test]
-    fn missing_observations_are_null_not_zero() {
-        let value = serde_json::to_value(InternalObservations::default()).unwrap();
-        assert!(value
-            .as_object()
-            .unwrap()
-            .values()
-            .all(serde_json::Value::is_null));
+    fn nested_duplicate_and_float_are_not_sealed_data() {
+        assert!(strict_json(br#"{"a":{"x":1,"x":2}}"#).is_err());
+        assert!(strict_json(br#"{"a":1.0}"#).is_err());
+        assert!(strict_json(br#"{"a":1} garbage"#).is_err());
     }
 }

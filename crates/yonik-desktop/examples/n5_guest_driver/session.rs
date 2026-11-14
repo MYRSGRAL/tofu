@@ -1,9 +1,7 @@
 //! Реальные normal Host команды. Вход остаётся недостижим до sealed grant binding.
-#![allow(dead_code)]
-use super::protocol::{Core, InternalObservations};
+use super::{protocol::Core, sealed::VerifiedFixture};
 use serde_json::{json, Value};
 use std::{
-    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -16,16 +14,6 @@ type Result<T> = std::result::Result<T, &'static str>;
 const WAIT: Duration = Duration::from_secs(20);
 const MAX_SNAPSHOT: usize = 65536;
 
-// Конструктор намеренно отсутствует. IPC-запрос и переменные окружения не grant.
-// Будущий verifier должен связать USER grant, source и sealed fixture вне этого API.
-pub struct VerifiedFixture {
-    data: PathBuf,
-    engines: PathBuf,
-    source: i64,
-    profile: i64,
-    core: Core,
-}
-
 pub struct Session {
     host: DesktopHost,
     snapshots: mpsc::Receiver<String>,
@@ -34,16 +22,19 @@ pub struct Session {
     stop_sent: bool,
 }
 impl Session {
-    pub fn initialize(fixture: VerifiedFixture) -> Result<Self> {
+    pub fn initialize(fixture: &VerifiedFixture, core: &Core) -> Result<Self> {
         let (tx, snapshots) = mpsc::sync_channel(64);
         let overflow = Arc::new(AtomicBool::new(false));
         let failed = overflow.clone();
         // Default key loader, backend, SystemSession. Не ephemeral key/override.
-        let host = DesktopHost::start(HostConfig::new(fixture.data, fixture.engines), move |v| {
-            if v.len() > MAX_SNAPSHOT || tx.try_send(v).is_err() {
-                failed.store(true, Ordering::Release);
-            }
-        })
+        let host = DesktopHost::start(
+            HostConfig::new(fixture.data(), fixture.engines()),
+            move |v| {
+                if v.len() > MAX_SNAPSHOT || tx.try_send(v).is_err() {
+                    failed.store(true, Ordering::Release);
+                }
+            },
+        )
         .map_err(|_| "HOST_START")?;
         let mut session = Self {
             host,
@@ -53,21 +44,21 @@ impl Session {
             stop_sent: false,
         };
         session.wait(|v| v["ready"] == true)?;
-        session.send(json!({"command":"set_engine","engine":fixture.core.name()}))?;
-        session.wait(|v| v["engine"] == fixture.core.name())?;
-        session.send(json!({"command":"select_source","id":fixture.source}))?;
-        let page = session.wait(|v| v["source_id"] == fixture.source)?;
+        session.send(json!({"command":"set_engine","engine":core.name()}))?;
+        session.wait(|v| v["engine"] == core.name())?;
+        session.send(json!({"command":"select_source","id":fixture.controls().source_id}))?;
+        let page = session.wait(|v| v["source_id"] == fixture.controls().source_id)?;
         let revision = page["revision"].as_i64().ok_or("MISSING_REVISION")?;
         if !page["profiles"].as_array().is_some_and(|profiles| {
             profiles
                 .iter()
-                .any(|v| v["id"].as_i64() == Some(fixture.profile))
+                .any(|v| v["id"].as_i64() == Some(fixture.controls().profile_id))
         }) {
             return Err("MISSING_FIXTURE_PROFILE");
         }
         session
-            .send(json!({"command":"select_profile","id":fixture.profile,"revision":revision}))?;
-        session.wait(|v| v["selected_profile"].as_i64() == Some(fixture.profile))?;
+            .send(json!({"command":"select_profile","id":fixture.controls().profile_id,"revision":revision}))?;
+        session.wait(|v| v["selected_profile"].as_i64() == Some(fixture.controls().profile_id))?;
         session.send(json!({"command":"set_connection_mode","mode":"system"}))?;
         let snapshot = session.wait(|v| v["connection_mode"] == "system")?;
         require_attribution(&snapshot)?;
@@ -135,10 +126,6 @@ impl Session {
         }
         self.closed = true;
         Ok(())
-    }
-    pub fn internal_observations(&self) -> InternalObservations {
-        // Нет публичного источника canonical child/network/coverage receipt.
-        InternalObservations::default()
     }
 }
 impl Drop for Session {
