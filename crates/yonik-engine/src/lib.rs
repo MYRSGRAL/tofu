@@ -355,3 +355,5 @@ pub mod resource_bundle;
 pub mod resource_index;
 
 pub mod transport;
+
+pub mod dns_policy_plan;
