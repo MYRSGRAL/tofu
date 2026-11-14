@@ -90,7 +90,7 @@ struct Process {
     pidfd: OwnedFd,
     namespaces: [(u64, u64); 3],
 }
-fn bounded(path: &str) -> Result<String, Unavailable> {
+pub(crate) fn bounded(path: &str) -> Result<String, Unavailable> {
     let mut text = String::new();
     fs::File::open(path)
         .map_err(|_| Unavailable::Coverage)?

@@ -447,6 +447,13 @@ pub(crate) fn verify_preflight(deadline: std::time::Instant) -> Result<()> {
     super::native_profile::verify_static_preflight(deadline)
 }
 
+pub(crate) use super::native_profile::VerifiedStaticInstalledImage;
+pub(crate) fn load_static_preflight(
+    deadline: std::time::Instant,
+) -> Result<VerifiedStaticInstalledImage> {
+    super::native_profile::load_static_image(deadline)
+}
+
 #[cfg(test)]
 mod split_receive_tests {
     use super::*;

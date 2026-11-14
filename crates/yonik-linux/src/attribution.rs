@@ -56,6 +56,99 @@ pub fn probe_process(pid: u32) -> Result<(), AttributionFailure> {
     Ok(())
 }
 
+/// Initial bus credential capture, не attested PeerProcess и не native authority.
+pub(crate) struct CapturedBusPeer(std::sync::Arc<CapturedBusScope>);
+pub(crate) struct CapturedBusScope {
+    bus: crate::helper::service::BusPeerIdentity,
+    pidfd: std::os::fd::OwnedFd,
+    pid: u32,
+    uid: u32,
+    start: u64,
+    nonce: [u8; 32],
+}
+impl CapturedBusScope {
+    pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
+        if !self.bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        let info = broker::bounded(&format!(
+            "/proc/self/fdinfo/{}",
+            std::os::fd::AsRawFd::as_raw_fd(&self.pidfd)
+        ))
+        .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        if info.lines().find_map(|line| {
+            line.strip_prefix("Pid:")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+        }) != Some(self.pid)
+            || start_time(self.pid)? != self.start
+            || fs::metadata(format!("/proc/{}", self.pid))
+                .map_err(|_| AttributionFailure::ProcUnavailable)?
+                .uid()
+                != self.uid
+        {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        if !self.bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        Ok(())
+    }
+    pub(crate) fn same_peer(&self, other: &Self) -> bool {
+        self.pid == other.pid
+            && self.uid == other.uid
+            && self.start == other.start
+            && self.bus.same_owner(&other.bus)
+    }
+}
+impl CapturedBusPeer {
+    pub(crate) fn capture(
+        bus: crate::helper::service::BusPeerIdentity,
+    ) -> Result<Self, AttributionFailure> {
+        if !bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        let pid = bus.pid();
+        let uid = bus.uid();
+        let start = start_time(pid)?;
+        let id = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .ok_or(AttributionFailure::ProcessChanged)?;
+        let pidfd = rustix::process::pidfd_open(id, rustix::process::PidfdFlags::NONBLOCK)
+            .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        let mut nonce = [0; 32];
+        getrandom::getrandom(&mut nonce).map_err(|_| AttributionFailure::ProcUnavailable)?;
+        let scope = CapturedBusScope {
+            bus,
+            pidfd,
+            pid,
+            uid,
+            start,
+            nonce,
+        };
+        scope.validate()?;
+        Ok(Self(std::sync::Arc::new(scope)))
+    }
+    pub(crate) fn uid(&self) -> u32 {
+        self.0.uid
+    }
+    pub(crate) fn pid(&self) -> u32 {
+        self.0.pid
+    }
+    pub(crate) fn start(&self) -> u64 {
+        self.0.start
+    }
+    pub(crate) fn nonce(&self) -> [u8; 32] {
+        self.0.nonce
+    }
+    pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
+        self.0.validate()
+    }
+    pub(crate) fn retained_scope(&self) -> std::sync::Arc<CapturedBusScope> {
+        std::sync::Arc::clone(&self.0)
+    }
+}
+
 /// Идентичность поступает только от canonical bus daemon после авторизации.
 pub(crate) struct PeerProcess {
     pid: u32,
