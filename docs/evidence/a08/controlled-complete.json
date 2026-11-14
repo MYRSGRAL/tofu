@@ -1,0 +1,22 @@
+{
+  "controlled_checks": "passed",
+  "a08_complete": false,
+  "boundary": "private Xvfb/software, user/PID/mount/net namespace; own host UID only",
+  "catalog_incomplete": false,
+  "hidden_new_admissions": 0,
+  "hidden_new_reads": 0,
+  "hidden_finishing_release": 1,
+  "producer_tokens": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "proc_syscalls": {
+    "other": 58,
+    "exe": 38,
+    "metadata_fd_unresolved": 1,
+    "stat": 32
+  },
+  "remaining": "Reopen shows late process catalog while new checkbox defaults to desktop; no session/provenance rejection. Physical Linux deferred."
+}

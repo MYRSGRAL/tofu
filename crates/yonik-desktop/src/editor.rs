@@ -357,6 +357,7 @@ pub fn catalog(
     processes: bool,
     query: &str,
     offset: usize,
+    #[cfg(feature = "test-support")] observer: Option<yonik_linux::applications::CatalogObserver>,
 ) -> Result<serde_json::Value, &'static str> {
     use yonik_linux::applications::{Catalog, Limits};
     if query.len() > 256 || offset > 4096 {
@@ -379,6 +380,8 @@ pub fn catalog(
     }
     let catalog = Catalog::new(roots, "/proc".into(), "ru".into(), Limits::default())
         .map_err(|_| "catalog")?;
+    #[cfg(feature = "test-support")]
+    let catalog = catalog.with_observer(observer);
     let (items, incomplete) = if processes {
         let snapshot = catalog.process_snapshot().map_err(|_| "catalog")?;
         (snapshot.items.into_iter().map(|p| serde_json::json!({"name":p.name,"pid":p.pid,"executable":p.exe.and_then(|p| p.to_str().map(str::to_owned)), "unsupported":""})).collect::<Vec<_>>(), snapshot.incomplete)

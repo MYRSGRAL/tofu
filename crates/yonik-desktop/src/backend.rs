@@ -64,6 +64,8 @@ pub struct HostConfig {
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
     #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
+    #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
     #[cfg(feature = "test-support")]
     scheduler_owner_seed: Option<u64>,
@@ -83,12 +85,23 @@ impl HostConfig {
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
+            catalog_observer: None,
+            #[cfg(feature = "test-support")]
             scheduler_capacity: None,
             #[cfg(feature = "test-support")]
             scheduler_owner_seed: None,
             #[cfg(feature = "test-support")]
             scheduler_interval: None,
         }
+    }
+    /// Только наблюдение реального producer в отдельном test-support стенде.
+    #[cfg(feature = "test-support")]
+    pub fn with_catalog_observer(
+        mut self,
+        observer: yonik_linux::applications::CatalogObserver,
+    ) -> Self {
+        self.catalog_observer = Some(observer);
+        self
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
     #[cfg(feature = "test-support")]
@@ -269,6 +282,8 @@ enum Command {
         target: String,
     },
     RoutingCatalog {
+        #[serde(default)]
+        request_id: u64,
         processes: bool,
         query: String,
         offset: usize,
@@ -1457,7 +1472,51 @@ async fn open(
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
+fn catalog_response(request_id: u64, mut page: serde_json::Value) -> serde_json::Value {
+    if request_id != 0 {
+        page["request_id"] = request_id.into();
+    }
+    page
+}
+
+#[cfg(test)]
+mod catalog_correlation_tests {
+    #[test]
+    fn legacy_shape_and_positive_reply_identity() {
+        let page = serde_json::json!({"items":[],"offset":0,"total":0,"incomplete":false});
+        assert_eq!(super::catalog_response(0, page.clone()), page);
+        let reply = super::catalog_response(9_007_199_254_740_991, page.clone());
+        assert_eq!(reply["request_id"], 9_007_199_254_740_991_u64);
+        let mut restored = reply;
+        restored
+            .as_object_mut()
+            .expect("catalog object")
+            .remove("request_id");
+        assert_eq!(restored, page);
+    }
+    #[test]
+    fn missing_id_remains_legacy_and_invalid_ids_are_rejected() {
+        let legacy = r#"{"command":"routing_catalog","processes":false,"query":"","offset":0}"#;
+        assert!(matches!(
+            serde_json::from_str::<super::Command>(legacy),
+            Ok(super::Command::RoutingCatalog { request_id: 0, .. })
+        ));
+        for id in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("text"),
+            serde_json::Value::Null,
+        ] {
+            let mut input: serde_json::Value = serde_json::from_str(legacy).expect("legacy JSON");
+            input["request_id"] = id;
+            assert!(serde_json::from_value::<super::Command>(input).is_err());
+        }
+    }
+}
+
 struct Actor {
+    #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     presets: Option<Arc<presets::Controller>>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
@@ -2413,12 +2472,22 @@ impl Actor {
                 result.map(|_| ())
             }
             Command::RoutingCatalog {
+                request_id,
                 processes,
                 query,
                 offset,
             } => {
+                #[cfg(feature = "test-support")]
+                let observer = self.catalog_observer.clone();
                 self.state.routing_catalog = tokio::task::spawn_blocking(move || {
-                    crate::editor::catalog(processes, &query, offset)
+                    crate::editor::catalog(
+                        processes,
+                        &query,
+                        offset,
+                        #[cfg(feature = "test-support")]
+                        observer,
+                    )
+                    .map(|page| catalog_response(request_id, page))
                 })
                 .await
                 .map_err(|_| {
@@ -2946,6 +3015,8 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            #[cfg(feature = "test-support")]
+            catalog_observer: None,
             presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
                 .ok()
                 .map(Arc::new),
@@ -3873,6 +3944,8 @@ async fn run(
     let (event_log, disk_log) =
         yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
+        #[cfg(feature = "test-support")]
+        catalog_observer: config.catalog_observer.clone(),
         presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
             .ok()
             .map(Arc::new),
@@ -5166,6 +5239,8 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                #[cfg(feature = "test-support")]
+                catalog_observer: None,
                 presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
