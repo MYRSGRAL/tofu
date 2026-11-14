@@ -69,6 +69,8 @@ pub struct HostConfig {
     scheduler_owner_seed: Option<u64>,
     #[cfg(feature = "test-support")]
     scheduler_interval: Option<Duration>,
+    #[cfg(feature = "test-support")]
+    test_subscription_fetch: Option<Arc<yonik_linux::FetchHost>>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -88,7 +90,15 @@ impl HostConfig {
             scheduler_owner_seed: None,
             #[cfg(feature = "test-support")]
             scheduler_interval: None,
+            #[cfg(feature = "test-support")]
+            test_subscription_fetch: None,
         }
+    }
+    /// Concrete socket transport отдельного subscription fixture; не native authority.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_subscription_fetch(mut self, fetch: Arc<yonik_linux::FetchHost>) -> Self {
+        self.test_subscription_fetch = Some(fetch);
+        self
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
     #[cfg(feature = "test-support")]
@@ -3342,18 +3352,39 @@ struct DesktopFetch {
     proxy_fetch_dns: Option<SocketAddr>,
     current: watch::Receiver<ProxyLease>,
     proxy_used: AtomicBool,
+    #[cfg(feature = "test-support")]
+    test_fetch: Option<Arc<yonik_linux::FetchHost>>,
 }
 impl DesktopFetch {
     fn new(current: &watch::Sender<ProxyLease>, proxy_fetch_dns: Option<SocketAddr>) -> Arc<Self> {
+        Self::subscription(
+            current,
+            proxy_fetch_dns,
+            #[cfg(feature = "test-support")]
+            None,
+        )
+    }
+    fn subscription(
+        current: &watch::Sender<ProxyLease>,
+        proxy_fetch_dns: Option<SocketAddr>,
+        #[cfg(feature = "test-support")] test_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             lease: *current.borrow(),
             proxy_fetch_dns,
             current: current.subscribe(),
             proxy_used: AtomicBool::new(false),
+            #[cfg(feature = "test-support")]
+            test_fetch,
         })
     }
     fn stale(&self) -> bool {
-        self.proxy_used.load(Ordering::Acquire) && *self.current.borrow() != self.lease
+        let revoked = *self.current.borrow() != self.lease;
+        // Stop уведомляет тот же watch даже при None→None: fixture не теряет revoke.
+        #[cfg(feature = "test-support")]
+        let revoked =
+            revoked || (self.test_fetch.is_some() && self.current.has_changed().unwrap_or(true));
+        self.proxy_used.load(Ordering::Acquire) && revoked
     }
 }
 impl yonik_linux::SubscriptionFetch for DesktopFetch {
@@ -3372,6 +3403,23 @@ impl yonik_linux::SubscriptionFetch for DesktopFetch {
         >,
     > {
         Box::pin(async move {
+            #[cfg(feature = "test-support")]
+            if let Some(host) = &self.test_fetch {
+                if route == FetchRoute::Proxy {
+                    self.proxy_used.store(true, Ordering::Release);
+                }
+                if self.stale() {
+                    return Err(FetchError::Cancelled);
+                }
+                let mut current = self.current.clone();
+                return tokio::select! {
+                    biased;
+                    _ = current.changed() => Err(FetchError::Cancelled),
+                    result = host.fetch(source, route, validators, cancel) => {
+                        if self.stale() { Err(FetchError::Cancelled) } else { result }
+                    }
+                };
+            }
             let mut host = yonik_linux::FetchHost::new(Duration::from_secs(30))?;
             if route == FetchRoute::Direct {
                 return host.fetch(source, route, validators, cancel).await;
@@ -4019,7 +4067,12 @@ async fn run(
     }
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
-    let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+    let mut schedule_host = DesktopFetch::subscription(
+        &proxy_session,
+        actor.preferences.proxy_fetch_dns,
+        #[cfg(feature = "test-support")]
+        config.test_subscription_fetch.clone(),
+    );
     let mut maintenance_controller = maintenance::Controller::default();
     loop {
         let interval = Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
@@ -4097,7 +4150,12 @@ async fn run(
                 actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
             }
-            schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+            schedule_host = DesktopFetch::subscription(
+                &proxy_session,
+                actor.preferences.proxy_fetch_dns,
+                #[cfg(feature = "test-support")]
+                config.test_subscription_fetch.clone(),
+            );
         }
         let allowed = !quitting
             && local_task.is_none()
@@ -4267,7 +4325,7 @@ async fn run(
             } => {
                 // На границе окна сначала closing ACK в начале следующей итерации.
                 if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
-                    schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+                    schedule_host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone());
                     let host = &schedule_host;
                     scheduled.open_window(origin.elapsed());
                     let policy = scheduled.policy();
@@ -4807,7 +4865,7 @@ async fn run(
                             match actor.source_command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -4820,7 +4878,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
                         else {
                             match actor.source_command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -4874,7 +4932,7 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
-                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
