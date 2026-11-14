@@ -250,7 +250,7 @@ pub(crate) fn verify_pending(
     stamp
         .inner
         .custody
-        .promote_run()
+        .promote_runtime(&stamp)
         .map_err(|_| Error::UnitProofGap)?;
     stamp.validate()?;
     let run = RunRole {
