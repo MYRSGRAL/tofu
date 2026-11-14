@@ -83,16 +83,11 @@ fn протоколы_границы_и_пробелы_в_native_json() {
                 );
                 assert_eq!(rule["outboundTag"], "block");
             } else {
-                assert_eq!(rule["mode"], "and");
                 assert_eq!(rule["action"], "reject");
-                let predicate = &rule["rules"][1];
-                assert_eq!(predicate["port"], json!([1, 443, 65535]));
-                assert_eq!(predicate["port_range"], json!(["80:90"]));
-                assert_eq!(
-                    predicate.get("network"),
-                    protocols.map(|p| json!(p)).as_ref()
-                );
-                assert!(rule["rules"][0].get("action").is_none());
+                assert_eq!(rule["port"], json!([1, 443, 65535]));
+                assert_eq!(rule["port_range"], json!(["80:90"]));
+                assert_eq!(rule.get("network"), protocols.map(|p| json!(p)).as_ref());
+                assert!(rule.get("rules").is_none());
             }
             assert_eq!(
                 compile(engine, &p, PolicyMode::IpOnly, true).unwrap_err(),

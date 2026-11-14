@@ -127,7 +127,11 @@ pub(crate) fn apply_local(
     let outbound = destination
         .as_object_mut()
         .and_then(|o| o.remove("outbound"));
-    *rule = json!({"type":"logical", "mode":"and", "rules":[destination, predicate]});
+    *rule = if destination.as_object().is_some_and(|o| o.is_empty()) {
+        predicate
+    } else {
+        json!({"type":"logical", "mode":"and", "rules":[destination, predicate]})
+    };
     if let Some(action) = action {
         rule["action"] = action;
     }
@@ -140,6 +144,25 @@ pub(crate) fn apply_local(
 mod lowering_tests {
     use super::apply_local;
     use serde_json::json;
+    #[test]
+    fn transport_only_не_создаёт_пустой_destination() {
+        let transport = yonik_domain::TransportConditions::parse(Some(&["udp"]), None).unwrap();
+        for (action, outbound) in [
+            ("route", Some("direct")),
+            ("route", Some("proxy")),
+            ("reject", None),
+        ] {
+            let mut rule = json!({"action":action});
+            if let Some(outbound) = outbound {
+                rule["outbound"] = json!(outbound);
+            }
+            apply_local(crate::Engine::SingBox, &mut rule, &transport);
+            assert_eq!(rule["network"], json!(["udp"]));
+            assert_eq!(rule["action"], action);
+            assert_eq!(rule.get("outbound"), outbound.map(|o| json!(o)).as_ref());
+            assert!(rule.get("rules").is_none());
+        }
+    }
     #[test]
     fn transport_охватывает_resource_or_и_сохраняет_inbound_action() {
         let destination = json!({"type":"logical","mode":"and","inbound":["local"],
