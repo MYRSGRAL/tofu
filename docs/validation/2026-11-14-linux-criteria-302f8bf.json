@@ -1,0 +1,3015 @@
+{
+  "schema_version": 1,
+  "base": "d74e61884385cd20f659112182142b05cacb958e",
+  "accepted_main": "302f8bf1d618e054083430925d168d4f022d6748",
+  "previous_delta_head": "77131bfb9e6f64334f7d999ee4f9abb1f241cc9a",
+  "plan_counts": {
+    "denominator": 26,
+    "ready": 3,
+    "partial": 21,
+    "deferred": 2
+  },
+  "policy": "Никаких полных повышений: компонент не закрывает все conjuncts исходной строки. Historical original_row сохраняется без переоценки тела feature.",
+  "inputs": [
+    {
+      "path": "docs/specs/requirements.md",
+      "blob": "8b73d927ff802c635f37e488f960854813a9236c"
+    },
+    {
+      "path": "docs/specs/performance.md",
+      "blob": "a7a73d44774720078d38cb23f6385ee0b6d2484b"
+    },
+    {
+      "path": "docs/specs/data-and-contracts.md",
+      "blob": "b4f82cd9cb540602476ac750607af4e8eca03b19"
+    },
+    {
+      "path": "docs/specs/validation-and-roadmap.md",
+      "blob": "c265c49b240c23396d728c4ff04178ea57ca2cc9"
+    },
+    {
+      "path": "docs/specs/README.md",
+      "blob": "3c630f0aa329c44bb8eb35f79945c2ac15ebb709"
+    },
+    {
+      "path": "docs/validation/2026-11-11-linux-acceptance-index.md",
+      "blob": "9a2328d19fef00aec5116f3107125f994c68785e"
+    },
+    {
+      "path": "docs/validation/2026-11-14-linux-accepted-delta.md",
+      "blob": "5429fb9f2ce15b763784589149fef6eba77feaf4"
+    }
+  ],
+  "criteria": [
+    {
+      "index_line": 74,
+      "original_row": "| P01 | **Требования и архитектурные контракты**. Зафиксированы FR, сетевые инварианты, границы компонентов, Android-риски и бюджеты. Evidence: [требования](../specs/requirements.md), [приёмка](../specs/validation-and-roadmap.md). Реализация gates считается отдельно. | proven | [Срез/контракт](../specs/requirements.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 75,
+      "original_row": "| P02 | **Переносимая библиотека: Android compile-check**. Общая Rust-часть компилируется для `aarch64-linux-android` без Linux-адаптеров; проверка включена в CI. Evidence: [snapshots](2026-11-09-subscription-snapshots.md), [workflow](../../.github/workflows/check.yml). Это не Android-приложение. | proven | [Срез/контракт](../../.github/workflows/check.yml); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 76,
+      "original_row": "| P03 | **Технический Android-host / G-ANDROID**. Оба engine через FFI, TUN FD/protect, TCP/UDP, stop/revoke, lifecycle и package callbacks; закреплённые wrappers. Остаток — runtime-host и измеренные результаты. [Контракт](../specs/platforms.md). | needsuser | [Срез/контракт](../specs/platforms.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 77,
+      "original_row": "| P04 | **Импорт URI/JSON/Base64 и ручной ввод**. Есть ограниченный parser, сохранение исходника и review. Остаются все требуемые варианты ввода и табличные/property/fuzz-проверки размеров, вложенности, IDNA/IP и неизвестных опций. [Evidence](2026-11-09-subscription-import.md), [тесты](../../crates/yonik-import/tests). | partial | [Срез/контракт](2026-11-10-import-matrix.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 78,
+      "original_row": "| P05 | **Подписки, обновления и идентичность профилей**. CAS, rename/delete, отмена, HWID и последний snapshot реализованы. Завершить proxy-загрузку без скрытого DIRECT и полную матрицу изменения credentials/пустого/частичного ответа. Плановые обновления — P10. [Snapshots](2026-11-09-subscription-snapshots.md), [identity](2026-11-09-profile-identities.md). | partial | [Срез/контракт](2026-11-10-refresh-contract.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 79,
+      "original_row": "| P06 | **Зашифрованное хранение, миграции и восстановление**. SQLite/Secret Service, миграции и CAS есть. Остаток — полная приёмка backup/recovery, сбоя транзакции, повреждения snapshot и закрытого keyring. Сохранить legacy data/key domains. [Код](../../crates/yonik-linux/src/repository.rs), [identity](2026-11-09-profile-identities.md). | partial | [Срез/контракт](2026-11-11-maintenance-main-integration.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 80,
+      "original_row": "| P07 | **Общая модель политик и семантика представлений**. Доменная модель и приоритеты протестированы. Завершить полную матрицу AND/OR, стабильных ID, неподдерживаемых селекторов и сохранения семантики при преобразованиях; GUI редакторов — P20. [Код](../../crates/yonik-domain/src/policy.rs), [evidence](2026-11-09-policy-routing.md). | partial | [Срез/контракт](2026-11-11-editor-policy-diagnostics.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 81,
+      "original_row": "| P08 | **Capabilities и компиляторы обоих ядер**. Есть config-check закреплённых ядер и явные отказы для части опций. Закрыть весь заявленный набор профилей/правил, включая ограничения смешанного DNS, без игнорирования параметров. [Evidence](2026-11-09-engine-compiler.md), [routing](../../crates/yonik-engine/src/routing.rs). | partial | [Срез/контракт](2026-11-10-policy-and.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 82,
+      "original_row": "| P09 | **Lifecycle сессии и PreparedPlan**. Reducer и поколения реализованы. Завершить host-интеграцию: конкурирующие Connect, отмена Validate/Apply, поздние события, повтор Stop, потеря host и подтверждённый cleanup. [Тесты](../../crates/yonik-application/tests/session.rs), [evidence](2026-11-09-prepared-plan.md). | partial | [Срез/контракт](2026-11-11-system-session-client.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 83,
+      "original_row": "| P10 | **Scheduler фоновых обновлений**. Переносимая bounded модель с передаваемым временем, backoff, отменой и stale-защитой влита PR #44. [Evidence](2026-11-10-subscription-scheduler.md). Нужны исполнение через SubscriptionService, подключение UI/политик сети и питания, фоновые окна и полная приёмка. [Приёмка](../specs/validation-and-roadmap.md). | partial | [Срез/контракт](2026-11-11-scheduler-windows.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 84,
+      "original_row": "| P11 | **Ошибки и переводы RU/EN**. Есть безопасная диагностика и переводы экранов. Завершить общий набор message-key, автоматическую проверку полноты обоих языков и отсутствие credentials/управляющих последовательностей в экспорте. [Контракты](../specs/data-and-contracts.md), [GUI](2026-11-09-native-desktop.md). | partial | [Срез/контракт](2026-11-11-p11-visible.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 85,
+      "original_row": "| P12 | **Privileged helper и владение ресурсами**. Авторизация, [реестр](../specs/helper-trusted-registry.md), [одноразовые artifacts](../specs/helper-prepared-requests.md) и [бюджет](../specs/helper-memory-budget.md) существуют. [Nftables executor](../specs/helper-nftables-executor.md) и [правила блокировки](../specs/helper-public-block.md) влиты PR #32/#33 с зелёным CI. [Durable policy schema v2/recovery](../specs/helper-policy-recovery.md) проверены на шести SIGKILL-границах. [IPC v1, авторизованный Apply/Unlock и cgroup fence](../specs/helper-service.md) реализованы и локально проверены с actual nft; сервис ещё не установлен. [Persistent TUN executor](../specs/helper-owned-tun.md) локально проверен, но ещё не связан с session. [Адреса/маршруты и compiler](../specs/helper-tun-configuration.md) проверены в namespace. [RPDB executor](../specs/helper-tun-rpdb.md) проверен с mark bypass и cleanup. [Установленные worker units/cgroups](2026-11-10-installed-worker.md) проверены в VM с реальными ядрами. Нужны системный клиент/GUI, live topology reconciliation (LAN пока unsupported), worker/service wiring и восстановление всей сессии после crash. [Авторизация](2026-11-09-helper-authorization.md), [journal](2026-11-09-network-resource-journal.md). | partial | [Срез/контракт](2026-11-11-production-acceptance-frozen-config.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 86,
+      "original_row": "| P13 | **Системный TUN обоих ядер / G-LINUX**. Namespace TCP/UDP/IPv4/IPv6 пробы и persistent single-queue TUN для обоих ядер проверены; [owned TUN](2026-11-10-owned-tun.md). Системный compiler и TUN→VLESS→echo проверены также через установленные systemd workers в одноразовой VM; sing-box требует pinned external-configuration adapter. Подключить helper/host к реальной политике, минимальным правам, исключению транспорта и stop/crash cleanup, пройти Linux-матрицу. [Evidence](2026-11-09-tun-traffic.md). | partial | [Срез/контракт](2026-11-11-production-acceptance-frozen-config.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 87,
+      "original_row": "| P14 | **DNS/Fake DNS / G-DNS**. Есть модели, выявленные gaps и native pinning/provenance-патчи. Завершить единый fail-closed контракт D-01…D-07, поколения/TTL, оба ядра, Fake DNS on/off и IPv4/IPv6. [Native DNS](2026-11-09-native-dns-contracts.md), [pinning](2026-11-09-resolution-pin.md). | partial | [Срез/контракт](2026-11-11-dns-pinned-lease-blocker.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 88,
+      "original_row": "| P15 | **Атрибуция приложений / G-APP**. Проверены отдельные executable-path пробы. Нужны реальная TUN-маршрутизация обоих ядер, одновременные приложения, составные правила, A-01…A-08, упаковки/ограничения и стоимость P-06. [Evidence](2026-11-09-process-routing.md). | partial | [Срез/контракт](2026-11-11-g-app.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 89,
+      "original_row": "| P16 | **Приватные VPN, LAN и изменения сети**. Read-only наблюдение topology/resolver реализовано. Нужны verified binding WG, split DNS, Apply и сохранение защиты при смене VPN/сети/sleep, затем корректное восстановление. [Наблюдение](2026-11-09-network-observation.md), [topology](2026-11-09-network-topology.md), [resolver](2026-11-09-resolver-host.md). | partial | [Срез/контракт](2026-11-11-production-config-private-matrix.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 90,
+      "original_row": "| P17 | **ru-direct и комплексная Linux-приёмка**. Policy-модель есть. Нужны обновляемые согласованные snapshots с rollback, реальные приоритеты и матрица двух ядер/Fake DNS, включая IPv6, MTU и сбои. [Evidence](2026-11-09-policy-routing.md), [матрицы](../specs/validation-and-roadmap.md). | partial | [Срез/контракт](2026-11-10-preset-snapshots.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 91,
+      "original_row": "| P18 | **Последние согласованные UI-правки и HWID**. yonik, узкое окно, card+gear, центральная кнопка; нет избранного, footer-кнопок/текста, бейджа и чекбокса анимации. Opt-in HWID стабилен и зашифрован. Установлена `85b2a8e`: по 142 GUI-действия в двух размерах, 6 health-сценариев, review без findings. [UI evidence](2026-11-09-home-cleanup.md), [HWID](2026-11-09-hwid-ui.md). Общая продуктовая приёмка — P19/P23. | proven | [Срез/контракт](2026-11-09-home-cleanup.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 92,
+      "original_row": "| P19 | **Продуктовые экраны и системное подключение**. Local SOCKS GUI есть. Нужны системная сессия, постоянные preferences, recovery, управление версиями и полная проверка пользовательских путей. [Текущий host](2026-11-09-native-desktop.md), [контракт](../specs/ui-backend-contract.md). | partial | [Срез/контракт](2026-11-11-system-controller-main-merge.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 93,
+      "original_row": "| P20 | **Два редактора правил и каталог приложений**. Редакторы, каталог и диагностика реализованы частично. Полный критерий: простой/расширенный GUI, каталог приложений, атомарный actual Apply одного поколения и A-04/A-07/A-08 без потери семантики. | partial | [Срез/контракт](2026-11-11-editor-policy-diagnostics.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 94,
+      "original_row": "| P21 | **Трей и desktop lifecycle**. Базовые команды и single instance есть. Пройти T-01…T-04 на KDE, restart Plasma, отсутствие трея, ошибки cleanup, закрытие окна и «Выйти и отключиться». [Evidence](2026-11-09-native-desktop.md), [приёмка](../specs/validation-and-roadmap.md). | partial | [Срез/контракт](2026-11-11-fr19-cleanup-negative.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 95,
+      "original_row": "| P22 | **Пакетные проверки серверов и диагностика**. Есть HTTPS, три TCP-пробы и bounded API до 10 000 целей. Нужны пакетный GUI, endpoint/ошибки/ограничения и полная привязка результатов к поколению сети. [TCP series](2026-11-09-tcp-series.md), [batch](2026-11-09-tcp-batch.md). | partial | [Срез/контракт](2026-11-10-batch-gui/acceptance.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 96,
+      "original_row": "| P23 | **Выбор toolkit, G-UI и G-POWER**. Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../../bench/ui/README.md), [бюджеты](../specs/performance.md). Физические G-UI/G-POWER пока отложены пользователем, без waiver/PASS; исходный критерий сохранён. Экран блокировки и питание без согласования не менять. | partial | [Срез/контракт](../../bench/ui/README.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 97,
+      "original_row": "| P24 | **Arch-поставка, обновления и откат**. Есть пользовательский launcher. Нужны PKGBUILD, проверенные helper/ядра, безопасные обновления/rollback и install/uninstall на CachyOS/Arch. [Launcher](../../tools/install_desktop.py), [платформы](../specs/platforms.md). | partial | [Срез/контракт](2026-11-10-arch-package.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 98,
+      "original_row": "| P25 | **Открытая Linux-поставка и release-приёмка**. GPL и README RU/EN есть. Нужны notices/SPDX и аудит условий зависимостей, пользовательские инструкции, зелёные проверки, evidence всех FR и явные ограничения. Релиз/публикация выполняются только в разрешённом объёме. [Лицензия](../../LICENSE), [приёмка](../specs/validation-and-roadmap.md). | partial | [Срез/контракт](2026-11-11-linux-curated-licenses.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 99,
+      "original_row": "| P26 | **Android-приложение и поставка**. После P03: нативный UI/VpnService, встроенный WG, оба worker, protect/revoke/lifecycle/UID/package, полная матрица и измерения на физическом телефоне. [Платформы](../specs/platforms.md), [этап 6](../specs/validation-and-roadmap.md). | needsuser | [Срез/контракт](../specs/platforms.md); закрыть весь критерий слева на integrated source. |",
+      "promotion": false
+    },
+    {
+      "index_line": 107,
+      "original_row": "| [FR-01](../specs/requirements.md#L15) — Только Linux в первой реализации — Работа на CachyOS/Arch, KDE Plasma, Wayland; остальные окружения расширяют матрицу отдельно | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 108,
+      "original_row": "| [FR-02](../specs/requirements.md#L16) — Xray-core и sing-box — Оба доступны для подходящего профиля; несовместимость параметров объясняется до подключения | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 109,
+      "original_row": "| [FR-03](../specs/requirements.md#L17) — TUN — TCP и UDP, управляемые IPv4/IPv6, корректное отключение и восстановление сети | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 110,
+      "original_row": "| [FR-04](../specs/requirements.md#L18) — Приятный UI в духе INCY — Отдельное обсуждение визуального решения; архитектура не привязана к выбранному GUI | [UI](2026-11-09-home-cleanup.md); проверенный срез домашнего экрана и cleanup, полная физическая UI-приёмка не установлена | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 111,
+      "original_row": "| [FR-05](../specs/requirements.md#L19) — Русский и английский — Все собственные экраны, ошибки, подсказки и уведомления имеют переводы | [locale](2026-11-11-p11-visible.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 112,
+      "original_row": "| [FR-06](../specs/requirements.md#L20) — Подписки по ссылке — Добавление, ручное/плановое обновление, сохранение рабочего состояния при ошибке | [refresh](2026-11-10-refresh-contract.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 113,
+      "original_row": "| [FR-07](../specs/requirements.md#L21) — JSON, Base64 и ручной ввод — Импорт из текста/файла, распознавание формата, проверка ошибок без потери исходника | [import](2026-11-10-import-matrix.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 114,
+      "original_row": "| [FR-08](../specs/requirements.md#L22) — Fake DNS как в Clash Verge — Единая настройка Fake DNS/Fake-IP с реализацией через возможности выбранного ядра | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 115,
+      "original_row": "| [FR-09](../specs/requirements.md#L23) — TCP-проверка хоста — Время установления TCP-соединения до адреса и порта сервера, отдельно от проверки туннеля | [TCP latency](2026-11-09-tcp-series.md); проверенный срез TCP-connect series, полное покрытие требования не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 116,
+      "original_row": "| [FR-10](../specs/requirements.md#L24) — Проверка через выбранный сервер — HTTPS-запрос через конкретный outbound; настраиваемый URL и стартовый адрес по умолчанию | [HTTPS probe](2026-11-09-native-desktop.md); проверенный срез HTTPS через outbound, полное покрытие требования не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 117,
+      "original_row": "| [FR-11](../specs/requirements.md#L25) — Раздельная маршрутизация — Домены, суффиксы доменов, IP и подсети; действия «напрямую», «через прокси», «блокировать» | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 118,
+      "original_row": "| [FR-12](../specs/requirements.md#L26) — Подтягивание ru-direct — Обновляемый источник, включаемый пресет и сохранение пользовательских исключений | [storage](2026-11-11-maintenance-main-integration.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 119,
+      "original_row": "| [FR-13](../specs/requirements.md#L27) — Работа локальной сети — Доступ к локальным адресам, внутренним именам и обнаружению устройств | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 120,
+      "original_row": "| [FR-14](../specs/requirements.md#L28) — Совместимость с существующим VPN — На Linux доступ к приватным сетям через WireGuard/другой уже настроенный VPN при активном TUN | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 121,
+      "original_row": "| [FR-15](../specs/requirements.md#L29) — Пресеты — Возможность сочетать ru-direct, LAN и совместимость с приватным VPN, видеть итоговые приоритеты | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 122,
+      "original_row": "| [FR-16](../specs/requirements.md#L30) — Логи — Раздельные события приложения/ядра, фильтрация, ограничение размера и безопасный экспорт | [logs](2026-11-11-fr16-completion.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 123,
+      "original_row": "| [FR-17](../specs/requirements.md#L31) — Перенос на Android — Общая логика, модель данных, компиляция правил и тесты используются повторно; ОС-операции заменяются адаптерами | [Android compile-only](2026-11-09-subscription-snapshots.md#L51); проверены переносимые части сборки, Android runtime/SQLite/keystore не реализованы; Android отложен | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 124,
+      "original_row": "| [FR-18](../specs/requirements.md#L32) — Малый расход ресурсов и батареи; обязательные тесты оптимизации — Воспроизводимые CPU/PSS/энерго- и нагрузочные проверки, длительный трей, отсутствие утечек и регрессии при включении правил приложений | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 125,
+      "original_row": "| [FR-19](../specs/requirements.md#L33) — Полноценная работа в трее Linux — Закрытие окна сохраняет сессию; подключение, сервер, состояние, открытие настроек и полный выход доступны через трей; восстановление после перезапуска Plasma | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 126,
+      "original_row": "| [FR-20](../specs/requirements.md#L34) — Маршрутизация отдельных приложений и процессов — Выбор приложения/запущенной программы, проверенные правила исполняемого файла, DIRECT/proxy/block; приоритет с доменами/IP и ограничения идентификации показаны явно | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 127,
+      "original_row": "| [FR-21](../specs/requirements.md#L35) — Простой и расширенный режимы маршрутизации — Простые карточки и упорядоченные составные правила редактируют одну политику; переключение не меняет поведение и не теряет данные | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 128,
+      "original_row": "| [FR-22](../specs/requirements.md#L36) — Название yonik и открытый исходный код — Единое имя в продукте/документации; выбранная открытая лицензия, доступные собственные исходники, сборочные инструкции и тесты при открытой поставке | [licenses](2026-11-11-linux-curated-licenses.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 133,
+      "original_row": "| [G-LINUX](../specs/validation-and-roadmap.md#L11) — Нативный TUN обоих ядер, минимальные права, владение сетью — Отдельный воспроизводимый запуск каждого ядра; TCP/UDP, DNS, stop/crash cleanup; перечень нужных capability | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 134,
+      "original_row": "| [G-DNS](../specs/validation-and-roadmap.md#L12) — Fake DNS, общий порядок домен/CIDR, ru-direct, split DNS приватного VPN — Трасса запросов и маршрутов для обоих ядер; совпадение решений D-01…D-07 ниже; ни fake-IP, ни внутренняя зона не попадают в публичный путь | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 135,
+      "original_row": "| [G-APP](../specs/validation-and-roadmap.md#L13) — Атрибуция приложений/процессов в Linux TUN двух ядер — A-01…A-08, реальные TCP/UDP/IPv4/IPv6-маршруты и права, одинаковое общее подмножество правил; стоимость определения владельца измерена | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 136,
+      "original_row": "| [G-ANDROID](../specs/validation-and-roadmap.md#L14) — FFI, native-исполнители, TUN FD, protect и атрибуция приложений — Маленький технический host без продуктового UI: каждый engine передаёт TCP/UDP, останавливается, переживает revoke; package callbacks проверены отдельно от исключения приложения из TUN | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | needsuser | Отложено; отдельное разрешение пользователя, P03/P26. |",
+      "promotion": false
+    },
+    {
+      "index_line": 137,
+      "original_row": "| [G-UI](../specs/validation-and-roadmap.md#L15) — Выбранный toolkit на KDE Wayland — Кириллица/EN, ввод, clipboard, дробный масштаб, keyboard, T-01…T-04, два режима редактора и отсутствие постоянных redraw в фоне | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | missing; physical postponed/unproven по решению пользователя | После возобновления физических проверок сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 138,
+      "original_row": "| [G-POWER](../specs/validation-and-roadmap.md#L16) — Стоимость controller, tray-host, платформы и process attribution — Отчёт по baseline и P-01…P-08 из performance.md; оптимизация не меняет правильность маршрута | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | missing; physical postponed/unproven по решению пользователя | После возобновления физических проверок сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 139,
+      "original_row": "| [D-01](../specs/validation-and-roadmap.md#L43) — Личное доменное правило «прокси», ответ входит в старший приватный CIDR — Приватный VPN либо блокировка при его отсутствии; ранний fake-IP не закрепляет публичный proxy | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 140,
+      "original_row": "| [D-02](../specs/validation-and-roadmap.md#L44) — Личное доменное правило «прокси», совпадающий младший ru-direct CIDR — Личное правило выигрывает; реальное разрешение нужно только для ещё не решённых старших условий | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 141,
+      "original_row": "| [D-03](../specs/validation-and-roadmap.md#L45) — Доменное назначение разрешается в несколько публичных A/AAAA, подходящих под разные CIDR-правила — Побеждает первое правило, которому соответствует хотя бы один адрес; порядок A/AAAA не влияет на действие. Контрольный вход с уже выбранным реальным IP проверяет только этот IP | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 142,
+      "original_row": "| [D-04](../specs/validation-and-roadmap.md#L46) — Ответ смешивает приватный и публичный адрес либо два приватных VPN — `DNS_POLICY_AMBIGUOUS`, соединение не отправлено ни по одному случайному пути | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 143,
+      "original_row": "| [D-05](../specs/validation-and-roadmap.md#L47) — Необходимый lookup завершился timeout/SERVFAIL либо неполный ответ не исключает старшее условие — `DNS_POLICY_UNRESOLVED`, нет fallback к DIRECT, младшему правилу или системному DNS; отдельный контроль NODATA одного семейства | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 144,
+      "original_row": "| [D-06](../specs/validation-and-roadmap.md#L48) — Внутренняя зона, VPN отключён; публичный resolver мог бы ответить — Имя не отправляется публичному resolver, соединение блокируется; после возврата VPN работает его DNS | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 145,
+      "original_row": "| [D-07](../specs/validation-and-roadmap.md#L49) — Ответ/сеть изменились после TTL, сменился engine-generation либо приложение использует старый fake-IP — Старое решение не переиспользуется как актуальное; повторная классификация не обходит приватную защиту; неизвестный mapping даёт отказ | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 146,
+      "original_row": "| [T-01](../specs/validation-and-roadmap.md#L86) — Закрыть окно при активной сессии, открыть из трея и повторным запуском — Подключение живёт, controller один; возвращается актуальное состояние без повторного Connect | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 147,
+      "original_row": "| [T-02](../specs/validation-and-roadmap.md#L87) — Подключить, выбрать другой сервер, отключить, затем «Выйти и отключиться» через меню — Те же команды и ошибки, что в окне; подтверждённая очистка перед нормальным выходом; ошибка очистки не исчезает вместе с меню | [production](2026-11-11-production-acceptance-frozen-config.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 148,
+      "original_row": "| [T-03](../specs/validation-and-roadmap.md#L88) — Перезапуск Plasma/службы трея и запуск без работающего трея — Значок восстанавливается без перезапуска VPN; без трея сохраняется доступное окно управления | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 149,
+      "original_row": "| [T-04](../specs/validation-and-roadmap.md#L89) — Трей в простое, состояния восстановления/ошибки, RU/EN, масштаб Wayland — Статусы читаемы, секретов нет; нет фоновой анимации/опроса скорости, память и CPU включены в P-01…P-03 | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 150,
+      "original_row": "| [A-01](../specs/validation-and-roadmap.md#L95) — Две обычные программы одновременно: proxy, DIRECT и block по проверенным executable — Каждый новый поток получает ожидаемый путь; одинаковый результат на обоих ядрах; второе основное ядро не запускается | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 151,
+      "original_row": "| [A-02](../specs/validation-and-roadmap.md#L96) — Браузер/программа с дочерним сетевым процессом; отдельные fixtures AppImage/Flatpak/Wine — Идентифицирован фактический владелец; baseline обычных приложений работает, неизвестный охват упаковки показан без ложного обещания наследования | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 152,
+      "original_row": "| [A-03](../specs/validation-and-roadmap.md#L97) — TCP и UDP, IPv4/IPv6, короткие соединения, системный DNS и локальный proxy inbound — Нет ложного сопоставления соседнему приложению; resolver не выдаётся за программу-инициатор DNS; неподдерживаемый режим отмечен явно | [dns](2026-11-11-dns-pinned-lease-blocker.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 153,
+      "original_row": "| [A-04](../specs/validation-and-roadmap.md#L98) — Приложение + домен/CIDR + порт, конфликт с ru-direct и приватной сетью — И/ИЛИ и порядок совпадают с моделью; старшие приватные исключения сохраняются; ложный источник не запускает ненужный lookup для этого правила | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 154,
+      "original_row": "| [A-05](../specs/validation-and-roadmap.md#L99) — Неизвестный владелец отдельного потока, затем полная потеря возможности attribution — Для потока показано применение обычных правил/default; отсутствие механизма целиком блокирует активацию новой политики с process-правилами | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 155,
+      "original_row": "| [A-06](../specs/validation-and-roadmap.md#L100) — Одинаковые имена разных executable, новый PID после перезапуска, PID занят другой программой — Точный путь не смешивается с basename; PID из выбора не становится вечным правилом; смена сопоставления инвалидирует PreparedPlan | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 156,
+      "original_row": "| [A-07](../specs/validation-and-roadmap.md#L101) — Простой → расширенный → простой; составное правило, изменение порядка, ошибка Apply — Семантика и ID сохраняются; скрытые сложные правила видны и действуют; неудача Apply оставляет прежнее поколение; старые потоки не выдаются за мигрировавшие | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 157,
+      "original_row": "| [A-08](../specs/validation-and-roadmap.md#L102) — Неизвестный платформенный селектор, ограниченный каталог, открытие/закрытие выбора процессов — Нет тихого удаления условий или запуска Exec; чужие аргументы/секреты не читаются; скрытый экран не сканирует процессы; отказ объясним | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | partial | Сохранить полный witness ожидания на обоих ядрах/применимых осях, с exact source и cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 162,
+      "original_row": "| [P-01](../specs/performance.md#L94) — 15 минут в трее без подключения, затем тот же интервал с открытым статичным окном — CPU time, PSS, wakeups, redraw; скрытое окно не создаёт кадры и не обновляет статистику | [tray](2026-11-11-fr19-cleanup-negative.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 163,
+      "original_row": "| [P-02](../specs/performance.md#L95) — Connected-idle в трее: короткий 15-минутный прогон и 8-часовой энергетический — Надбавка всей группы процессов к engine-only, отдельная память трея, отсутствие второго engine и необязательных probe-запросов | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 164,
+      "original_row": "| [P-03](../specs/performance.md#L96) — 100 циклов открыть/закрыть окно, открыть правила, переключить простой/расширенный режим — p95 реакции, освобождение моделей/подписок, стабилизация памяти после прогрева, отсутствие дублирующихся обработчиков и изменения политики | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 165,
+      "original_row": "| [P-04](../specs/performance.md#L97) — Импорт и компиляция контрольного набора, затем нагрузка в 10 раз больше; 10/100/1 000 app-rules — Время и пиковая память, размер engine-конфига, работа отмены, отсутствие квадратичных сравнений и неконтролируемого разрастания правил | [editor](2026-11-11-editor-policy-diagnostics.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 166,
+      "original_row": "| [P-05](../specs/performance.md#L98) — 100 циклов подключения/отключения и переключения ядер на стенде — FD, threads, процессы, PSS/private dirty и принадлежащие сетевые ресурсы возвращаются к устойчивому диапазону; нет нарастающих остатков | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 167,
+      "original_row": "| [P-06](../specs/performance.md#L99) — Короткие и долгие TCP/UDP-соединения при правилах приложений on/off, обычная и десятикратная интенсивность новых потоков — Throughput, p50/p95/p99 задержки, CPU, память и стоимость attribution на поток; доля нераспознанных соединений и правильность маршрута не ухудшаются ради скорости | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 168,
+      "original_row": "| [P-07](../specs/performance.md#L100) — Ручные проверки серверов, импорт и интенсивные логи одновременно; затем Stop/Cancel — Очереди и кэши ограничены, управление остаётся отзывчивым, отмена освобождает сокеты/временные runtimes, скрытый UI не обрабатывает каждую строку | [import](2026-11-10-import-matrix.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 169,
+      "original_row": "| [P-08](../specs/performance.md#L101) — Длительный стендовый прогон со сном, сменой сети и переподключением приватного WG — Память и фоновые задачи не накапливаются, каталог процессов не сканируется в простое, результаты переподключений и энергопотребление воспроизводимы | [app](2026-11-11-g-app.md); только связанный компонент, полное покрытие не установлено | missing | Физический host, полный протокол и baseline; сохранить метрики всех осей. |",
+      "promotion": false
+    },
+    {
+      "index_line": 183,
+      "original_row": "| [L001 · 3. Предложенный базовый набор удобств:44](../specs/requirements.md#L44) — Поиск и сортировка серверов, подключение одним действием; избранное в UI не требуется. Трей вынесен в обязательное FR-19. | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 184,
+      "original_row": "| [L002 · 3. Предложенный базовый набор удобств:45](../specs/requirements.md#L45) — Автозапуск приложения и автоподключение как две отдельные настройки, первоначально выключенные. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 185,
+      "original_row": "| [L003 · 3. Предложенный базовый набор удобств:46](../specs/requirements.md#L46) — Показ текущего сервера, режима, состояния и краткой причины сбоя. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 186,
+      "original_row": "| [L004 · 3. Предложенный базовый набор удобств:47](../specs/requirements.md#L47) — Восстановление после сна и смены сети с ограниченными повторными попытками. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 187,
+      "original_row": "| [L005 · 3. Предложенный базовый набор удобств:48](../specs/requirements.md#L48) — Время последнего обновления подписки, трафик/срок действия, если источник предоставляет эти данные. | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 188,
+      "original_row": "| [L006 · 3. Предложенный базовый набор удобств:49](../specs/requirements.md#L49) — Резервная копия настроек и диагностический экспорт; секреты включаются только в отдельную явно выбранную защищённую копию. | [logs](2026-11-11-fr16-completion.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 189,
+      "original_row": "| [L007 · 3. Предложенный базовый набор удобств:50](../specs/requirements.md#L50) — Локальный SOCKS/HTTP-прокси как дополнительный режим Linux. Общесистемный прокси зависит от окружения и не равнозначен TUN. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 190,
+      "original_row": "| [L008 · 3. Предложенный базовый набор удобств:51](../specs/requirements.md#L51) — Проверка маршрута: почему конкретный домен/IP пошёл напрямую, в прокси либо в приватную сеть. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 191,
+      "original_row": "| [L009 · 5. Переносимость функций:81](../specs/requirements.md#L81) — Импорт, профили, правила, RU/EN — Полный объём — Общая логика и данные | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 192,
+      "original_row": "| [L010 · 5. Переносимость функций:82](../specs/requirements.md#L82) — Правила по приложениям/процессам — Desktop-каталог и проверенные executable/process-селекторы — Package identity и платформенная атрибуция; Linux PID/пути не переносимы | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 193,
+      "original_row": "| [L011 · 5. Переносимость функций:83](../specs/requirements.md#L83) — Простой/расширенный редактор — Одна модель политики, два представления — Та же модель с доступными мобильными селекторами | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 194,
+      "original_row": "| [L012 · 5. Переносимость функций:84](../specs/requirements.md#L84) — Выбор Xray/sing-box — Процессы — Нативные библиотеки в изолированных исполнителях | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 195,
+      "original_row": "| [L013 · 5. Переносимость функций:85](../specs/requirements.md#L85) — TUN и Fake DNS — Адаптер Linux — VpnService и платформенные callbacks | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 196,
+      "original_row": "| [L014 · 5. Переносимость функций:86](../specs/requirements.md#L86) — Проверки серверов — По запросу/политике — Те же семантика и результаты, более строгий бюджет фона | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 197,
+      "original_row": "| [L015 · 5. Переносимость функций:87](../specs/requirements.md#L87) — LAN и внутренний DNS — Исключения захвата и split DNS — Маршруты VpnService и маршрутизация DNS внутри приложения | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 198,
+      "original_row": "| [L016 · 5. Переносимость функций:88](../specs/requirements.md#L88) — Соседство с отдельным VPN — Приватные сети существующего VPN — Не поддерживается двумя VpnService в одном профиле | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 199,
+      "original_row": "| [L017 · 5. Переносимость функций:89](../specs/requirements.md#L89) — Доступ к WG-сетям — Внешний WG — Предлагается встроенный WG-профиль выбранного ядра | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 200,
+      "original_row": "| [L018 · 5. Переносимость функций:90](../specs/requirements.md#L90) — Трей/автозапуск — Desktop-интеграция — Уведомление, действие подключения, системный always-on | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 205,
+      "original_row": "| [L019 · 2. Тесты общей библиотеки:24](../specs/validation-and-roadmap.md#L24) — Табличные тесты URI/JSON/Base64 на валидных, повреждённых, больших и неоднозначных данных. | [import](2026-11-10-import-matrix.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 206,
+      "original_row": "| [L020 · 2. Тесты общей библиотеки:25](../specs/validation-and-roadmap.md#L25) — Property/fuzz-тесты декодирования, вложенности, IDNA, IPv4/IPv6, префиксов, размеров и неизвестных параметров. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 207,
+      "original_row": "| [L021 · 2. Тесты общей библиотеки:26](../specs/validation-and-roadmap.md#L26) — Дедупликация и обновление подписки: переименование, удаление, смена credentials, пустой ответ, частичный импорт. | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 208,
+      "original_row": "| [L022 · 2. Тесты общей библиотеки:27](../specs/validation-and-roadmap.md#L27) — Детерминированные состояния: отмена Connect, два Connect, Stop во время Validate/Apply, позднее событие старого поколения, повтор Stop, потеря host. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 209,
+      "original_row": "| [L023 · 2. Тесты общей библиотеки:28](../specs/validation-and-roadmap.md#L28) — Порядок правил и их перенос в оба engine-конфига: ручное правило выше ru-direct, исключения приватной сети, конфликт суффикса и CIDR. | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 210,
+      "original_row": "| [L024 · 2. Тесты общей библиотеки:29](../specs/validation-and-roadmap.md#L29) — Ошибки и переводы: все собственные message-key присутствуют в RU/EN; параметры не раскрывают credentials. | [locale](2026-11-11-p11-visible.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 211,
+      "original_row": "| [L025 · 2. Тесты общей библиотеки:30](../specs/validation-and-roadmap.md#L30) — Миграции/backup: прерывание транзакции, старая версия схемы, повреждённый snapshot, закрытое хранилище секретов. | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 212,
+      "original_row": "| [L026 · 2. Тесты общей библиотеки:31](../specs/validation-and-roadmap.md#L31) — Scheduler с подставными часами: backoff, отмена, metered/battery saver, скрытый UI, отсутствие неограниченных очередей. | [scheduler](2026-11-11-scheduler-windows.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 213,
+      "original_row": "| [L027 · 2. Тесты общей библиотеки:32](../specs/validation-and-roadmap.md#L32) — Редактор правил: И между группами/ИЛИ внутри группы, порядок, составные правила в простом режиме, переход между режимами без потери данных, явное отклонение неподдерживаемого селектора. | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 214,
+      "original_row": "| [L028 · 2. Тесты общей библиотеки:33](../specs/validation-and-roadmap.md#L33) — Каталог приложений: дубликаты имён, смена executable mapping, переиспользование PID, отмена/пагинация, отсутствие argv/environment в модели и диагностике. | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 215,
+      "original_row": "| [L029 · 3. Linux: обязательная интеграционная матрица:59](../specs/validation-and-roadmap.md#L59) — TUN без внешнего VPN — TCP/UDP идут по правилам, собственный transport не зацикливается | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 216,
+      "original_row": "| [L030 · 3. Linux: обязательная интеграционная матрица:60](../specs/validation-and-roadmap.md#L60) — WireGuard запущен до клиента — Приватные CIDR и внутренний DNS доступны через WG | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 217,
+      "original_row": "| [L031 · 3. Linux: обязательная интеграционная матрица:61](../specs/validation-and-roadmap.md#L61) — WireGuard включён после клиента — Исключения обновлены по событию, без полного restart всех подписок | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 218,
+      "original_row": "| [L032 · 3. Linux: обязательная интеграционная матрица:62](../specs/validation-and-roadmap.md#L62) — WireGuard выключен при активном клиенте — Сохранённые приватные назначения блокируются, не уходят в публичный proxy | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 219,
+      "original_row": "| [L033 · 3. Linux: обязательная интеграционная матрица:63](../specs/validation-and-roadmap.md#L63) — WireGuard включён повторно — Его маршруты/внутренний DNS восстанавливаются | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 220,
+      "original_row": "| [L034 · 3. Linux: обязательная интеграционная матрица:64](../specs/validation-and-roadmap.md#L64) — Остановка нашего клиента — Удалены только собственные ресурсы; работающий WG и LAN сохранены | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 221,
+      "original_row": "| [L035 · 3. Linux: обязательная интеграционная матрица:65](../specs/validation-and-roadmap.md#L65) — Сбой ядра и восстановление при отсутствующем WG — Приватные CIDR и DNS-зоны защищены между попытками; helper сохраняет владение защитой | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 222,
+      "original_row": "| [L036 · 3. Linux: обязательная интеграционная матрица:66](../specs/validation-and-roadmap.md#L66) — Повторы исчерпаны / явное отключение при сохранённом пресете — Оба пути проходят полную очистку; после неё нет собственных постоянных правил, статус отражает причину остановки | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 223,
+      "original_row": "| [L037 · 3. Linux: обязательная интеграционная матрица:67](../specs/validation-and-roadmap.md#L67) — Ошибка удаления маршрута/правила/DNS или недоступный helper — Статус «Ошибка очистки», остатки перечислены; успешное отключение и полная защита не заявляются | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 224,
+      "original_row": "| [L038 · 3. Linux: обязательная интеграционная матрица:68](../specs/validation-and-roadmap.md#L68) — Смена Wi-Fi/Ethernet — Пересчитан physical egress, результаты старого ping помечены устаревшими | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 225,
+      "original_row": "| [L039 · 3. Linux: обязательная интеграционная матрица:69](../specs/validation-and-roadmap.md#L69) — Сон/пробуждение — Нет старого TUN/процесса-дубликата, восстановление ограничено политикой | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 226,
+      "original_row": "| [L040 · 3. Linux: обязательная интеграционная матрица:70](../specs/validation-and-roadmap.md#L70) — Сбой ядра/controller/helper — Проверяемая остановка/восстановление, понятный статус, без бесконечного restart | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 227,
+      "original_row": "| [L041 · 3. Linux: обязательная интеграционная матрица:71](../specs/validation-and-roadmap.md#L71) — Fake-IP перед сменой ядра — Старый mapping не трактуется новым движком как действительный | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 228,
+      "original_row": "| [L042 · 3. Linux: обязательная интеграционная матрица:72](../specs/validation-and-roadmap.md#L72) — ru-direct обновился с ошибкой — Работает предыдущий snapshot, личные правила сохранены | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 229,
+      "original_row": "| [L043 · 3. Linux: обязательная интеграционная матрица:73](../specs/validation-and-roadmap.md#L73) — Смешанный IPv4/IPv6 — Нет неоговорённого обхода TUN по IPv6 | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 230,
+      "original_row": "| [L044 · 3. Linux: обязательная интеграционная матрица:74](../specs/validation-and-roadmap.md#L74) — Низкий MTU, большие TCP/UDP — Нет скрытого зависания больших пакетов | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 231,
+      "original_row": "| [L045 · 3. Linux: обязательная интеграционная матрица:75](../specs/validation-and-roadmap.md#L75) — LAN и обнаружение — Роутер/NAS/SSH и mDNS работают в пределах заявленного пресета | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 232,
+      "original_row": "| [L046 · 3. Linux: обязательная интеграционная матрица:76](../specs/validation-and-roadmap.md#L76) — Личный домен конфликтует с ru-direct — Побеждает личное правило, виден источник решения | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 233,
+      "original_row": "| [L047 · 3. Linux: обязательная интеграционная матрица:77](../specs/validation-and-roadmap.md#L77) — Неизвестный native JSON — Активация остановлена с конкретным полем, исходник сохранён | [import](2026-11-10-import-matrix.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 234,
+      "original_row": "| [L048 · 3. Linux: обязательная интеграционная матрица:78](../specs/validation-and-roadmap.md#L78) — Два входа в приложение — Один controller и одна основная сессия | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 235,
+      "original_row": "| [L049 · 4. Проверки задержки:108](../specs/validation-and-roadmap.md#L108) — TCP до работающего адреса при неверных credentials показывает достижимость TCP, но HTTPS-through-proxy — ошибку туннеля. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 236,
+      "original_row": "| [L050 · 4. Проверки задержки:109](../specs/validation-and-roadmap.md#L109) — UDP-only профиль получает «TCP неприменим», при этом HTTPS-through-proxy может работать. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 237,
+      "original_row": "| [L051 · 4. Проверки задержки:110](../specs/validation-and-roadmap.md#L110) — Тестовый домен, попавший в ru-direct, всё равно проверяется через выбранный outbound. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 238,
+      "original_row": "| [L052 · 4. Проверки задержки:111](../specs/validation-and-roadmap.md#L111) — Сервер A не измеряется через текущий сервер B или переменные системного proxy. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 239,
+      "original_row": "| [L053 · 4. Проверки задержки:112](../specs/validation-and-roadmap.md#L112) — DNS failure, timeout, TLS failure, HTTP redirect/ошибка и отказ proxy различимы. | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 240,
+      "original_row": "| [L054 · 4. Проверки задержки:113](../specs/validation-and-roadmap.md#L113) — Три выборки одного endpoint дают медиану; другой endpoint и другая сеть имеют отдельную идентичность результата. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 241,
+      "original_row": "| [L055 · 4. Проверки задержки:114](../specs/validation-and-roadmap.md#L114) — Пакет из 10 000 проверок ограничивает параллелизм, допускает отмену и не оставляет probe-runtime. | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 242,
+      "original_row": "| [L056 · 4. Проверки задержки:115](../specs/validation-and-roadmap.md#L115) — Проверка недоступности gstatic не выдаётся за доказательство полной недоступности интернета. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 243,
+      "original_row": "| [L057 · 10. Дизайн-review документации:204](../specs/validation-and-roadmap.md#L204) — P1: срок действия защиты приватных назначений расходился между сетевым документом и cleanup-контрактом. Добавлена таблица состояний, синхронизированы lifecycle, Linux-адаптер, ADR-006 и приёмка остановки. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 244,
+      "original_row": "| [L058 · 10. Дизайн-review документации:205](../specs/validation-and-roadmap.md#L205) — P2: отсутствовал общий порядок DNS/Fake-IP и CIDR при нескольких адресах и ошибке разрешения. Добавлена таблица решений, определены два кода отказа и случаи D-01…D-07. | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 249,
+      "original_row": "| [L059 · 2. Событийная работа:15](../specs/performance.md#L15) — Один scheduler на controller, без таймера на каждый профиль/домен/сервер. | [scheduler](2026-11-11-scheduler-windows.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 250,
+      "original_row": "| [L060 · 2. Событийная работа:16](../specs/performance.md#L16) — Изменения сети, питания и интерфейсов приходят от host. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 251,
+      "original_row": "| [L061 · 2. Событийная работа:17](../specs/performance.md#L17) — В скрытом UI нет кадров анимации, обновления списков и опроса счётчиков ради отображения. | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 252,
+      "original_row": "| [L062 · 2. Событийная работа:18](../specs/performance.md#L18) — Трей получает события состояния без анимированной иконки и постоянного опроса скорости. Каталог процессов обновляется только для открытого выбора/явного действия или по доступным событиям; периодический полный обход `/proc` в фоне не допускается. | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 253,
+      "original_row": "| [L063 · 2. Событийная работа:19](../specs/performance.md#L19) — Статистика собирается для подписанного видимого потребителя не чаще 1 раза в секунду. После отписки/скрытия окна периодический опрос отключается; сохраняются только необходимые для функциональности события ядра. | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 254,
+      "original_row": "| [L064 · 2. Событийная работа:20](../specs/performance.md#L20) — Проверки серверов по умолчанию ручные. Открытие списка не запускает измерение всей подписки. | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 255,
+      "original_row": "| [L065 · 2. Событийная работа:21](../specs/performance.md#L21) — Смена сети инвалидирует старые результаты и объединяет близкие события; не запускает 10 000 проверок. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 256,
+      "original_row": "| [L066 · 2. Событийная работа:22](../specs/performance.md#L22) — Подписки и ru-direct проверяются не чаще одного раза за 24 часа в автоматическом режиме; задания объединяются в одно разрешённое окно. Интервал настраиваемый. | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 257,
+      "original_row": "| [L067 · 2. Событийная работа:23](../specs/performance.md#L23) — На Android фоновые обновления переносятся при metered network, battery saver или ограничениях ОС. Подключение не разрывается ради обновления данных. | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 258,
+      "original_row": "| [L068 · 4. Память и масштабирование:51](../specs/performance.md#L51) — Очередь управляющих команд — 128 — Обратное давление/явный отказ «занято», без потери Stop | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 259,
+      "original_row": "| [L069 · 4. Память и масштабирование:52](../specs/performance.md#L52) — События состояния — Snapshot + 256 событий — Пересинхронизация snapshot; терминальные ошибки не теряются | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 260,
+      "original_row": "| [L070 · 4. Память и масштабирование:53](../specs/performance.md#L53) — Пакет статистики — Последнее значение на активную сессию — Объединение, а не накопление истории | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 261,
+      "original_row": "| [L071 · 4. Память и масштабирование:54](../specs/performance.md#L54) — Живые логи — 2 MiB либо 2 000 строк — Кольцевой буфер и счётчик вытеснений | [logs](2026-11-11-fr16-completion.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 262,
+      "original_row": "| [L072 · 4. Память и масштабирование:55](../specs/performance.md#L55) — Журналы на диске — 5 файлов по 4 MiB — Ротация; debug с ограниченным временем | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 263,
+      "original_row": "| [L073 · 4. Память и масштабирование:56](../specs/performance.md#L56) — История проверок — Последние 10 на сервер — Очистка при записи пакетами | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 264,
+      "original_row": "| [L074 · 4. Память и масштабирование:57](../specs/performance.md#L57) — Потоки CPU-heavy задач — 1 на mobile, до 2 на desktop — Очередь/отмена; не поток на профиль | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 265,
+      "original_row": "| [L075 · 5. Предварительные бюджеты измерений:65](../specs/performance.md#L65) — Дополнительный idle CPU controller/helper/tray-host — Не более 0,2% одного логического CPU в среднем — 15 минут, окно скрыто, нет пользовательского трафика/обновлений; desktop renderer включён в учёт, если его процесс остаётся жить | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 266,
+      "original_row": "| [L076 · 5. Предварительные бюджеты измерений:66](../specs/performance.md#L66) — Периодические пробуждения приложения в тихом фоне — Нет собственных частых периодических задач — Протокольные keepalive измеряются отдельно | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 267,
+      "original_row": "| [L077 · 5. Предварительные бюджеты измерений:67](../specs/performance.md#L67) — PSS controller + helper — До 64 MiB в нормальной нагрузке — Без GUI и памяти выбранного engine | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 268,
+      "original_row": "| [L078 · 5. Предварительные бюджеты измерений:68](../specs/performance.md#L68) — Пиковая память управляющего слоя при импорте 10 000 серверов — До 192 MiB — Лимитированное тело до 32 MiB, память после импорта возвращается к рабочему диапазону | [import](2026-11-10-import-matrix.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 269,
+      "original_row": "| [L079 · 5. Предварительные бюджеты измерений:69](../specs/performance.md#L69) — Реакция UI на локальное действие — p95 до 100 мс — Сеть и запуск ядра асинхронны | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 270,
+      "original_row": "| [L080 · 5. Предварительные бюджеты измерений:70](../specs/performance.md#L70) — Надбавка к энергии за 8 часов connected-idle — Цель до 5% относительно такого же engine-only сценария — Несколько повторов, одинаковое железо/сеть; при малом baseline учитывать шум | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 275,
+      "original_row": "| [L081 · 2. Linux: границы доверия:23](../specs/platforms.md#L23) — UI → controller — Версионные команды; UID пользователя и принадлежащие ему профили | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 276,
+      "original_row": "| [L082 · 2. Linux: границы доверия:24](../specs/platforms.md#L24) — controller → helper — Системная авторизация, проверка peer credentials, лимиты, неизменяемый проверенный план | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 277,
+      "original_row": "| [L083 · 2. Linux: границы доверия:25](../specs/platforms.md#L25) — helper → engine — Только системно установленный доверенный бинарник, проверенный конфиг и ограниченный service profile | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 278,
+      "original_row": "| [L084 · 2. Linux: границы доверия:26](../specs/platforms.md#L26) — подписка → import — Только данные; ни команды, ни пути к исполняемым файлам | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 279,
+      "original_row": "| [L085 · 2. Linux: границы доверия:27](../specs/platforms.md#L27) — engine → логи/UI — Непроверенные строки, ограничение размера, очистка credentials и управляющих последовательностей | [logs](2026-11-11-fr16-completion.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 280,
+      "original_row": "| [L086 · 6. Android: интеграция двух ядер:73](../specs/platforms.md#L73) — UI-процесс общается с сервисом через типизированный Binder API и может быть уничтожен отдельно. | [app](2026-11-11-g-app.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 281,
+      "original_row": "| [L087 · 6. Android: интеграция двух ядер:74](../specs/platforms.md#L74) — Один `VpnService` в процессе `:vpn` содержит controller и общую Rust-библиотеку через UniFFI. | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 282,
+      "original_row": "| [L088 · 6. Android: интеграция двух ядер:75](../specs/platforms.md#L75) — Выбранное native-ядро работает в одном отдельном исполнительном процессе: `:engine_xray` либо `:engine_singbox`. Компоненты исполнителей не экспортируются наружу. | [app](2026-11-11-g-app.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 283,
+      "original_row": "| [L089 · 6. Android: интеграция двух ядер:76](../specs/platforms.md#L76) — Каждый исполнитель загружает только свою библиотеку с одним Go runtime. Неиспользуемый исполнитель не запускается; после остановки его процесс завершается в рамках собственного lifecycle, чтобы не удерживать невыгружаемый runtime. | [app](2026-11-11-g-app.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 284,
+      "original_row": "| [L090 · 6. Android: интеграция двух ядер:77](../specs/platforms.md#L77) — TUN FD передаётся исполнителю через `ParcelFileDescriptor`; пакеты далее идут прямо между дескриптором и native-ядром. | [package](2026-11-10-arch-package.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 285,
+      "original_row": "| [L091 · 8. Непроверенные интеграции, которые нельзя скрыть:105](../specs/platforms.md#L105) — Разделённые исполнители, Binder-передача сокетов и TUN с конкретными libXray/libbox. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 286,
+      "original_row": "| [L092 · 8. Непроверенные интеграции, которые нельзя скрыть:106](../specs/platforms.md#L106) — Права Linux-ядра и возможность перенести больше сетевых операций в helper. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 287,
+      "original_row": "| [L093 · 8. Непроверенные интеграции, которые нельзя скрыть:107](../specs/platforms.md#L107) — DNS и Fake-IP после переключения движка, сна, смены сети и отзыва VPN-разрешения. | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 288,
+      "original_row": "| [L094 · 8. Непроверенные интеграции, которые нельзя скрыть:108](../specs/platforms.md#L108) — WG + основной outbound в одном Android-ядре, внутренний DNS и keepalive. | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 289,
+      "original_row": "| [L095 · 8. Непроверенные интеграции, которые нельзя скрыть:109](../specs/platforms.md#L109) — Переносимость/лицензирование пакета native-зависимостей. | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 294,
+      "original_row": "| [L096 · 1. Основные сущности:11](../specs/data-and-contracts.md#L11) — Subscription — ID, имя, ссылка на секретный URL, формат, состояние обновления, последний snapshot | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 295,
+      "original_row": "| [L097 · 1. Основные сущности:12](../specs/data-and-contracts.md#L12) — ServerProfile — ID, источник, отображаемое имя, адрес, протокол, транспорт, TLS, ссылки на секреты, ограничения ядра | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 296,
+      "original_row": "| [L098 · 1. Основные сущности:13](../specs/data-and-contracts.md#L13) — NativeProfile — Исходный JSON, engine-id и версия схемы, отчёт разбора, ограничения управляемых настроек | [import](2026-11-10-import-matrix.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 297,
+      "original_row": "| [L099 · 1. Основные сущности:14](../specs/data-and-contracts.md#L14) — RoutingPolicy — Упорядоченные личные правила, включённые пресеты, default action | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 298,
+      "original_row": "| [L100 · 1. Основные сущности:15](../specs/data-and-contracts.md#L15) — RoutingRule — Стабильный ID, включение, группы условий источника/назначения, протокол/порт, действие, порядок и происхождение | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 299,
+      "original_row": "| [L101 · 1. Основные сущности:16](../specs/data-and-contracts.md#L16) — ApplicationRef — Платформа, ID desktop entry или Android package, имя для UI и подтверждённое сопоставление селекторов | [production](2026-11-11-production-acceptance-frozen-config.md); needsuser: Android отложен | Возобновить по отдельному решению пользователя. |",
+      "promotion": false
+    },
+    {
+      "index_line": 300,
+      "original_row": "| [L102 · 1. Основные сущности:17](../specs/data-and-contracts.md#L17) — SourceSelector — Тип и значение: точный executable path, process name либо поддержанная платформенная идентичность; необходимые capabilities | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 301,
+      "original_row": "| [L103 · 1. Основные сущности:18](../specs/data-and-contracts.md#L18) — ProcessCandidate — Снимок запущенной программы: PID/идентичность экземпляра, имя, доступный executable и область охвата предлагаемого правила | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 302,
+      "original_row": "| [L104 · 1. Основные сущности:19](../specs/data-and-contracts.md#L19) — RoutingEditorState — Простой/расширенный режим, черновик и выделение; не меняет семантику RoutingPolicy | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 303,
+      "original_row": "| [L105 · 1. Основные сущности:20](../specs/data-and-contracts.md#L20) — RouteExplanation — Входные данные, победившее правило, неизвестные признаки, поколение и тип доказательства: расчёт либо наблюдённый поток | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 304,
+      "original_row": "| [L106 · 1. Основные сущности:21](../specs/data-and-contracts.md#L21) — PrivateNetwork — CIDR, DNS-суффиксы, resolver, способ доступа, поведение при потере VPN | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 305,
+      "original_row": "| [L107 · 1. Основные сущности:22](../specs/data-and-contracts.md#L22) — DnsPolicy — Fake DNS, реальные upstream, bootstrap, исключения, IPv6 | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 306,
+      "original_row": "| [L108 · 1. Основные сущности:23](../specs/data-and-contracts.md#L23) — ConnectionProfile — ServerProfile/NativeProfile, выбранное ядро, RoutingPolicy, DnsPolicy, режим TUN/локального прокси | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 307,
+      "original_row": "| [L109 · 1. Основные сущности:24](../specs/data-and-contracts.md#L24) — ProbeResult — Сервер, ядро, метод, URL, network-generation, длительность, этап ошибки, время проверки | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 308,
+      "original_row": "| [L110 · 1. Основные сущности:25](../specs/data-and-contracts.md#L25) — EngineDescriptor — Версия, источник, хэш артефакта, поддерживаемые возможности и версия адаптера | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 309,
+      "original_row": "| [L111 · 1. Основные сущности:26](../specs/data-and-contracts.md#L26) — AppliedSession — ID сессии, поколения плана/сети, ядро, принадлежащие ресурсы, состояние | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 310,
+      "original_row": "| [L112 · 4. Контракты платформенных портов:70](../specs/data-and-contracts.md#L70) — EngineHost — Возможности, проверка плана, старт, остановка, статистика, проверка outbound — Версионный контракт; никакого shell command от UI | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 311,
+      "original_row": "| [L113 · 4. Контракты платформенных портов:71](../specs/data-and-contracts.md#L71) — NetworkHost — Снимок, наблюдение, подготовка, применение, откат/освобождение — Владение только своими ресурсами; повторное освобождение безопасно | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 312,
+      "original_row": "| [L114 · 4. Контракты платформенных портов:72](../specs/data-and-contracts.md#L72) — ResolverHost — Снимок DNS, split DNS, адресный сброс кэша — Чужие зоны/линки сохраняются | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 313,
+      "original_row": "| [L115 · 4. Контракты платформенных портов:73](../specs/data-and-contracts.md#L73) — CredentialStore — Получить/сохранить/удалить секрет по opaque ID — UI и логи получают маскированное представление | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 314,
+      "original_row": "| [L116 · 4. Контракты платформенных портов:74](../specs/data-and-contracts.md#L74) — Repository — Транзакции и миграции — Один writer, согласованные snapshots | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 315,
+      "original_row": "| [L117 · 4. Контракты платформенных портов:75](../specs/data-and-contracts.md#L75) — FetchHost — Ограниченная загрузка по заданному сетевому пути — Отмена, timeout и учёт выбранной сети | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 316,
+      "original_row": "| [L118 · 4. Контракты платформенных портов:76](../specs/data-and-contracts.md#L76) — Clock/Scheduler — Время, дедлайны, разрешённое окно фоновой работы — Подставные часы для тестов; без таймера на каждый сервер | [scheduler](2026-11-11-scheduler-windows.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 317,
+      "original_row": "| [L119 · 4. Контракты платформенных портов:77](../specs/data-and-contracts.md#L77) — PowerHost — Батарея, metered, состояние UI, фоновые ограничения — Событийное обновление политики задач | [package](2026-11-10-arch-package.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 318,
+      "original_row": "| [L120 · 4. Контракты платформенных портов:78](../specs/data-and-contracts.md#L78) — ApplicationCatalog — Страницы desktop/package-каталога, ограниченный снимок процессов, проверка сопоставления приложения — Нет запуска Exec, передачи argv/environment или постоянного фонового обхода процессов | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 319,
+      "original_row": "| [L121 · 4. Контракты платформенных портов:79](../specs/data-and-contracts.md#L79) — DesktopShellHost — Трей, уведомления, восстановление регистрации и открытие нужного экрана — Только команды controller и подписки на состояние; не владеет сетевой сессией | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 324,
+      "original_row": "| [L122 · 3. Приватные VPN и LAN:40](../specs/networking.md#L40) — обнаруженные маршруты активного VPN, подтверждённые пользователем для постоянного пресета; | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 325,
+      "original_row": "| [L123 · 3. Приватные VPN и LAN:41](../specs/networking.md#L41) — вручную заданные CIDR, внутренние DNS-суффиксы и привязка к VPN. | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 326,
+      "original_row": "| [L124 · 4. DNS-политика:53](../specs/networking.md#L53) — bootstrap для адреса прокси-сервера, источников конфигурации и DNS-сервера; | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 327,
+      "original_row": "| [L125 · 4. DNS-политика:54](../specs/networking.md#L54) — реальные DNS-ответы для прямых назначений; | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 328,
+      "original_row": "| [L126 · 4. DNS-политика:55](../specs/networking.md#L55) — Fake DNS для выбранных проксируемых доменов; | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 329,
+      "original_row": "| [L127 · 4. DNS-политика:56](../specs/networking.md#L56) — внутренние DNS-серверы/домены приватных VPN; | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 330,
+      "original_row": "| [L128 · 4. DNS-политика:57](../specs/networking.md#L57) — исключения для LAN, `.local`, внутренних имён и пользовательских доменов; | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 331,
+      "original_row": "| [L129 · 4. DNS-политика:58](../specs/networking.md#L58) — поведение IPv6 и недоступного DNS. | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 332,
+      "original_row": "| [L130 · Совместное решение доменных и CIDR-правил:88](../specs/networking.md#L88) — Назначение уже задано реальным IP — Не требуется для CIDR; sniffing не меняет фактический адрес — Правила применяются к этому адресу и доступному имени в общем порядке | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 333,
+      "original_row": "| [L131 · Совместное решение доменных и CIDR-правил:89](../specs/networking.md#L89) — Имя относится к сохранённой внутренней зоне — Только resolver соответствующего VPN — Приватный путь имеет приоритет; отсутствие VPN/resolver даёт отказ без публичного DNS fallback | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 334,
+      "original_row": "| [L132 · Совместное решение доменных и CIDR-правил:90](../specs/networking.md#L90) — Перед подходящим доменным правилом есть ещё не проверенное CIDR-правило — Обязательно; внутренние зоны разрешаются через VPN, остальные — через явно заданный реальный policy-resolver, по умолчанию через выбранный прокси — Сначала проверяется старшее CIDR-правило; личное доменное «прокси» не обходит более старший приватный CIDR | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 335,
+      "original_row": "| [L133 · Совместное решение доменных и CIDR-правил:91](../specs/networking.md#L91) — Подходящее доменное правило не имеет нерешённых CIDR-условий выше себя — Для выбора действия не требуется; последующее разрешение для соединения следует DNS-политике — Доменное правило может решить маршрут сразу; для прокси допустим Fake DNS | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 336,
+      "original_row": "| [L134 · Совместное решение доменных и CIDR-правил:92](../specs/networking.md#L92) — Несколько публичных A/AAAA соответствуют разным обычным правилам — Используется один актуальный набор ответов для разрешённых семейств IP — CIDR-правило совпадает, если ему соответствует хотя бы один адрес; побеждает первое правило в общем порядке, одно действие применяется ко всему соединению | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 337,
+      "original_row": "| [L135 · Совместное решение доменных и CIDR-правил:93](../specs/networking.md#L93) — Ответ смешивает защищённые приватные адреса с публичными либо адреса разных приватных VPN — Публичное повторное разрешение не исправляет конфликт — Отказ `DNS_POLICY_AMBIGUOUS`; диагностика требует однозначного приватного DNS/пресета, произвольный адрес не выбирается | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 338,
+      "original_row": "| [L136 · Совместное решение доменных и CIDR-правил:94](../specs/networking.md#L94) — Обязательное реальное разрешение завершилось ошибкой — Повтор допустим только в пределах заданного resolver-пути и бюджета — Отказ `DNS_POLICY_UNRESOLVED`, без перехода к младшему доменному правилу, DIRECT или системному resolver | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 339,
+      "original_row": "| [L137 · 8. IPv6, MTU и отказ:146](../specs/networking.md#L146) — Подключение действует, включая закрытое окно UI — Доступ через соответствующий VPN; при его исчезновении — блокировка адресов и запрет публичного DNS fallback — Controller задаёт политику; helper учитывает и поддерживает собственные сетевые ресурсы | [dns](2026-11-11-dns-pinned-lease-blocker.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 340,
+      "original_row": "| [L138 · 8. IPv6, MTU и отказ:147](../specs/networking.md#L147) — Временный сбой, восстановление или смена ядра — Защита сохраняется между попытками и поколениями; разрыв основного туннеля её не снимает — Helper удерживает защиту сессии до передачи новому поколению либо начала полной остановки | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 341,
+      "original_row": "| [L139 · 8. IPv6, MTU и отказ:148](../specs/networking.md#L148) — Повторы исчерпаны, принято решение окончательно остановиться — Сессионная защита сохраняется до демонтажа; при включённом kill switch публичная блокировка остаётся после остановки TUN, при выключенном восстанавливается обычная сеть — Переход через «Остановка» к «Ошибка» с явным статусом блокировки; helper учитывает сохранённые ресурсы, причина сбоя остаётся видимой | [storage](2026-11-11-maintenance-main-integration.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 342,
+      "original_row": "| [L140 · 8. IPv6, MTU и отказ:149](../specs/networking.md#L149) — Явные «Отключить» / «Выйти и отключиться» — Сессионная защита снимается после остановки захвата; включённый kill switch отображается отдельно и снимается явным разблокированием — Остановка TUN не выдаётся за разблокирование сети; внешние VPN и их политика остаются под управлением своих владельцев | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 343,
+      "original_row": "| [L141 · 8. IPv6, MTU и отказ:150](../specs/networking.md#L150) — Очистка не завершена или helper недоступен — Фактическое покрытие неизвестно; возможны оставшиеся блокировки — «Ошибка очистки», перечень известных остатков и повторная сверка владения при восстановлении helper; нельзя заявлять полную очистку или гарантированную защиту | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 348,
+      "original_row": "| [L142 · 1. Трей Linux:13](../specs/routing-and-tray.md#L13) — Нажать значок — Открыть/поднять окно; повторный запуск не создаёт второй controller | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 349,
+      "original_row": "| [L143 · 1. Трей Linux:14](../specs/routing-and-tray.md#L14) — Подключить / отключить — Та же команда и состояние, что в основном окне; отключение проходит полную сетевую очистку | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 350,
+      "original_row": "| [L144 · 1. Трей Linux:15](../specs/routing-and-tray.md#L15) — Выбрать сервер — Открыть раздел «Серверы» с поиском и выбором профиля; смена применяется через controller | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 351,
+      "original_row": "| [L145 · 1. Трей Linux:16](../specs/routing-and-tray.md#L16) — Открыть маршрутизацию / логи — Открыть соответствующий раздел; не держать его модель активной всё время | [logs](2026-11-11-fr16-completion.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 352,
+      "original_row": "| [L146 · 1. Трей Linux:17](../specs/routing-and-tray.md#L17) — Выйти и отключиться — Остановить сессию, подтвердить очистку, завершить desktop-host; ошибка очистки остаётся доступной пользователю | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 353,
+      "original_row": "| [L147 · 1. Трей Linux:18](../specs/routing-and-tray.md#L18) — Перезапуск Plasma или службы трея — Зарегистрировать значок заново по событию; подключение не перезапускается | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 354,
+      "original_row": "| [L148 · 1. Трей Linux:19](../specs/routing-and-tray.md#L19) — Трей недоступен — Сохранить доступное окно управления; действие закрытия не должно незаметно прятать приложение без способа вернуть его | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 355,
+      "original_row": "| [L149 · 3. Простой режим:39](../specs/routing-and-tray.md#L39) — Приложения доступны по понятному имени и значку из desktop-каталога; поиск и выбор не требуют знания PID. | [tray](2026-11-11-fr19-cleanup-negative.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 356,
+      "original_row": "| [L150 · 3. Простой режим:40](../specs/routing-and-tray.md#L40) — Выбор из списка запущенных процессов помогает найти исполняемый файл. По умолчанию создаётся правило программы для её следующих запусков, что явно написано в форме. | [app](2026-11-11-g-app.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 357,
+      "original_row": "| [L151 · 3. Простой режим:41](../specs/routing-and-tray.md#L41) — Адресная форма принимает домен, суффикс, IPv4/IPv6 и CIDR; пользователь не пишет JSON и маску вручную, если выбирает один IP. | [import](2026-11-10-import-matrix.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 358,
+      "original_row": "| [L152 · 3. Простой режим:42](../specs/routing-and-tray.md#L42) — Пресеты LAN, приватного VPN и ru-direct представлены отдельными переключателями с кратким описанием. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 359,
+      "original_row": "| [L153 · 3. Простой режим:43](../specs/routing-and-tray.md#L43) — Поле «Остальной трафик» задаёт общее действие. Первоначально это прокси; сценарий «только выбранные приложения через прокси» получается явным выбором DIRECT для остальных и правилом proxy для нужных приложений. | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 360,
+      "original_row": "| [L154 · 3. Простой режим:44](../specs/routing-and-tray.md#L44) — Карточка показывает применённое действие и конфликт с более приоритетным правилом. Добавление карточки не переставляет существующие правила незаметно. | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 365,
+      "original_row": "| [L155 · Главный экран:18](../specs/ui-backend-contract.md#L18) — `closed=true` — Команды больше не отправляются; действуют правила завершения host | [editor](2026-11-11-editor-policy-diagnostics.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 366,
+      "original_row": "| [L156 · Главный экран:19](../specs/ui-backend-contract.md#L19) — `ready=false` — Подключение недоступно, показывается инициализация или ошибка старта | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 367,
+      "original_row": "| [L157 · Главный экран:20](../specs/ui-backend-contract.md#L20) — `ready && can_stop` — Основное действие отправляет `stop`; карточка показывает `active_name`, а не новый выбор | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 368,
+      "original_row": "| [L158 · Главный экран:21](../specs/ui-backend-contract.md#L21) — `ready && !can_stop && can_connect` — Действие `connect`, карточка показывает `selected_name` | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 369,
+      "original_row": "| [L159 · Главный экран:22](../specs/ui-backend-contract.md#L22) — Нет активной сессии и выбранного профиля — Карточка предлагает открыть выбор сервера; подключение недоступно | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 370,
+      "original_row": "| [L160 · Главный экран:23](../specs/ui-backend-contract.md#L23) — Остальные случаи — Подключение недоступно, причина берётся из состояния; недоступность не означает успешное соединение | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 371,
+      "original_row": "| [L161 · Подключение и ошибки:48](../specs/ui-backend-contract.md#L48) — `Disconnected` — Активного локального proxy нет | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 372,
+      "original_row": "| [L162 · Подключение и ошибки:49](../specs/ui-backend-contract.md#L49) — `Preparing` — Подготовка подключения; `stop` служит отменой | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 373,
+      "original_row": "| [L163 · Подключение и ошибки:50](../specs/ui-backend-contract.md#L50) — `Starting` — Строка поддерживается текущим UI, но backend пока не публикует отдельную такую фазу | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 374,
+      "original_row": "| [L164 · Подключение и ошибки:51](../specs/ui-backend-contract.md#L51) — `Checking` — Ядро запущено, HTTPS-доступ ещё проверяется; успех не объявлен | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 375,
+      "original_row": "| [L165 · Подключение и ошибки:52](../specs/ui-backend-contract.md#L52) — `Connected` — Есть подтверждённый текущей проверкой HTTPS-доступ через SOCKS; это не гарантия TUN/system proxy | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 376,
+      "original_row": "| [L166 · Подключение и ошибки:53](../specs/ui-backend-contract.md#L53) — `Limited` — Ядро остаётся запущенным, актуального подтверждения доступа нет | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 377,
+      "original_row": "| [L167 · Подключение и ошибки:54](../specs/ui-backend-contract.md#L54) — `Stopping` — Идёт остановка; наличие действия определяется `can_stop` | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 378,
+      "original_row": "| [L168 · Подключение и ошибки:55](../specs/ui-backend-contract.md#L55) — `CleanupError` — Очистка не подтверждена; при доступном `can_stop` повторяется `stop` | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 379,
+      "original_row": "| [L169 · Подключение и ошибки:56](../specs/ui-backend-contract.md#L56) — `Error` — Подключение не удалось; подробность берётся из `error` | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 380,
+      "original_row": "| [L170 · Подключение и ошибки:57](../specs/ui-backend-contract.md#L57) — Неизвестная строка — Нейтральное неизвестное состояние, без зелёного успеха и выдуманной capability | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 381,
+      "original_row": "| [L171 · Навигация, настройки и выбор сервера:91](../specs/ui-backend-contract.md#L91) — Подключение: `set_engine`, копирование `listen_address`, выбранный engine и текущий режим | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 382,
+      "original_row": "| [L172 · Навигация, настройки и выбор сервера:94](../specs/ui-backend-contract.md#L94) — Серверы / подписки: `import_source` сохраняет/выбирает источник и сразу запускает загрузку; | [refresh](2026-11-10-refresh-contract.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 383,
+      "original_row": "| [L173 · Навигация, настройки и выбор сервера:102](../specs/ui-backend-contract.md#L102) — Диагностика: `set_probe_target`, `reset_probe_target`, `check_tcp`, `cancel_tcp`. | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 384,
+      "original_row": "| [L174 · Навигация, настройки и выбор сервера:105](../specs/ui-backend-contract.md#L105) — Защита и маршрутизация: будущие режимы показываются как недоступные до | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    },
+    {
+      "index_line": 385,
+      "original_row": "| [L175 · Навигация, настройки и выбор сервера:107](../specs/ui-backend-contract.md#L107) — Выбор сервера: `query` с поиском и offset, `select_profile` с актуальной | [production](2026-11-11-production-acceptance-frozen-config.md); missing: полное leaf proof не установлено | Проверить это условие отдельно; сохранить вход/наблюдение/ожидание, exact source и состояние после cleanup. |",
+      "promotion": false
+    }
+  ],
+  "pull_requests": [
+    {
+      "pr": 155,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/155",
+      "head": "1cf6aba2280a2ec8e45d7f5d0655f939e85fc9e6",
+      "merge": "1e83e6ef1188f3019df5cfc16bb86e0e68ed8a71",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "FAILURE",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496255708/job/132130019942"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496243282/job/132129975817"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496255708/job/132130019310"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496243282/job/132129975669"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496255708/job/132130019673"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496243282/job/132129975391"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496255708/job/132130019658"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496243282/job/132129975992"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496255708/job/132130019970"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43496243282/job/132129975647"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "FR07 integrated manual witness; synthetic key"
+    },
+    {
+      "pr": 166,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/166",
+      "head": "87a51f9dd8d24035260d6df1811762a3dc998935",
+      "merge": "14229843f9a11bf98ec4f5992df00f3247102ea2",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513069303/job/132187934542"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513062153/job/132187911115"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513069303/job/132187934441"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513062153/job/132187910927"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513069303/job/132187934392"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513062153/job/132187910931"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513069303/job/132187934283"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513062153/job/132187910909"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513069303/job/132187933993"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513062153/job/132187910612"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "A4 trusted build/ELF/compliance controller; final package OPEN"
+    },
+    {
+      "pr": 168,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/168",
+      "head": "5a5e3beea896ee31b5043c1fe194adb4c7e74a49",
+      "merge": "131562484c930712bb04b38fbf9dfb30dddfc90f",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "FAILURE",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504920472/job/132159937485"
+        },
+        {
+          "name": "rust",
+          "conclusion": "FAILURE",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504885385/job/132159814260"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504920472/job/132159937576"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504885385/job/132159813867"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504920472/job/132159937512"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504885385/job/132159814261"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504920472/job/132159937569"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504885385/job/132159814239"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504920472/job/132159937121"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43504885385/job/132159814212"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "N3 custody included through 171"
+    },
+    {
+      "pr": 169,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/169",
+      "head": "88c398a1a3973f24c65eb7e1b369711daf3547a5",
+      "merge": "73778dbd3dd99d2d9ce778aa52e46a9e46025420",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513106394/job/132188060852"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513098190/job/132188033477"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513106394/job/132188061204"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513098190/job/132188033101"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513106394/job/132188061295"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513098190/job/132188033532"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513106394/job/132188061416"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513098190/job/132188033487"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513106394/job/132188061191"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513098190/job/132188033455"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "LocalSocks 100 cycles; not full native P05"
+    },
+    {
+      "pr": 171,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/171",
+      "head": "ca801bc1b6916522954b6e97a081b305f7b0bfe7",
+      "merge": "3e64220fc16b7cfdd2170bd0fffc7049d056c8a7",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510318514/job/132178550122"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510310532/job/132178522805"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510318514/job/132178550143"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510310532/job/132178523249"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510318514/job/132178550149"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510310532/job/132178523042"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510318514/job/132178550009"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510310532/job/132178523207"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510318514/job/132178549536"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43510310532/job/132178523080"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "N2/N3 authenticated old3/custody; factory CLOSED"
+    },
+    {
+      "pr": 173,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/173",
+      "head": "dac33e741246de94563dfcba2ce41a8b7d849000",
+      "merge": "14a2e52f3a55b01c1c17b308b20b7d1ce1dd37a2",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520067224/job/132211803448"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520060172/job/132211782411"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520067224/job/132211803538"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520060172/job/132211782613"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520067224/job/132211803049"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520060172/job/132211782471"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520067224/job/132211803377"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520060172/job/132211782861"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520067224/job/132211803501"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43520060172/job/132211782998"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "LocalSocks alternating cores; not full native P05"
+    },
+    {
+      "pr": 174,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/174",
+      "head": "fa39b23f2e1cfb7e1eafca98c45dd50d64ab4210",
+      "merge": "465a4dd87b75e7f5031129036225c99f8cf6f206",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516242000/job/132198803802"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516235553/job/132198780330"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516242000/job/132198803812"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516235553/job/132198780221"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516242000/job/132198804275"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516235553/job/132198779957"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516242000/job/132198803763"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516235553/job/132198780472"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516242000/job/132198803564"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43516235553/job/132198780194"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "P11 integrated 14 boundaries; full P11 OPEN"
+    },
+    {
+      "pr": 175,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/175",
+      "head": "8576f53ce942f0e8107c796bd578338d84fc7e5b",
+      "merge": "0a2c0a420eb2a16040cb675612a2aad4fb271039",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518967007/job/132208074569"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518962171/job/132208056799"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518967007/job/132208074096"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518962171/job/132208057221"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518967007/job/132208074426"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518962171/job/132208057235"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518967007/job/132208074425"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518962171/job/132208057069"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518967007/job/132208074399"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43518962171/job/132208057214"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "N4 actual Plain consumer bridge; full admission OPEN"
+    },
+    {
+      "pr": 176,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/176",
+      "head": "77131bfb9e6f64334f7d999ee4f9abb1f241cc9a",
+      "merge": "5f62821fb575f1c7ccade11d15e2eee6febcd629",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513707047/job/132190117397"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513673698/job/132190005933"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513707047/job/132190117916"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513673698/job/132190006205"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513707047/job/132190117830"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513673698/job/132190006161"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513707047/job/132190118032"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513673698/job/132190005619"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513707047/job/132190117878"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43513673698/job/132190006085"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Historical requirement delta only"
+    },
+    {
+      "pr": 177,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/177",
+      "head": "6d3b53acc929d2467be1f415d6403691f19f2018",
+      "merge": "40881657d0f534d34160c68d0d19cb9bf62d81e2",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531695963/job/132250725932"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531690901/job/132250709489"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531695963/job/132250725921"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531690901/job/132250709525"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531695963/job/132250726022"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531690901/job/132250709554"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531695963/job/132250725628"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531690901/job/132250709206"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531695963/job/132250725977"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43531690901/job/132250709524"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Controlled concurrent P-07 GUI/core/hidden consumer"
+    },
+    {
+      "pr": 179,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/179",
+      "head": "2599fe70ca93ebd14baaa8932e9de69fc5d66a94",
+      "merge": "9f02440f1f4c6c05d585a6106c6dd149f8debc48",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522003139/job/132218340768"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43521996663/job/132218316538"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522003139/job/132218340398"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43521996663/job/132218316946"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522003139/job/132218340878"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43521996663/job/132218316853"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522003139/job/132218340843"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43521996663/job/132218316849"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522003139/job/132218340697"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43521996663/job/132218316868"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "A4 rehearsal Rust proxy failure before build; no final acceptance"
+    },
+    {
+      "pr": 180,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/180",
+      "head": "b3a2838243cfefd3b5989b449956ad309ed270a1",
+      "merge": "7e909c754ea2798a2c5615702224391b19e82ee1",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522613549/job/132220388874"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522554769/job/132220187767"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522613549/job/132220388885"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522554769/job/132220187893"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522613549/job/132220388818"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522554769/job/132220187859"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522613549/job/132220388542"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522554769/job/132220187744"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522613549/job/132220388976"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43522554769/job/132220187392"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "N5a private authorization lifetime/revocation and exact binding"
+    },
+    {
+      "pr": 182,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/182",
+      "head": "b0b3aaa7a24e14e5c49962c358f294b6b7dceb25",
+      "merge": "a29ea61610ea5de9fd188e65198295d71e9f2278",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529920050/job/132244777744"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529914503/job/132244758320"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529920050/job/132244778148"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529914503/job/132244758412"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529920050/job/132244777730"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529914503/job/132244758335"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529920050/job/132244777384"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529914503/job/132244758393"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529920050/job/132244777673"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43529914503/job/132244757966"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "N5 supported-profile input manifest; implementation/load UNKNOWN"
+    },
+    {
+      "pr": 183,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/183",
+      "head": "5004508c51bcb89cc0b70d904d815b07be358f2c",
+      "merge": "36cc6a9737e009652e6ca9af51c7f37ad22757c9",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530547525/job/132246845778"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530539570/job/132246819039"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530547525/job/132246845514"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530539570/job/132246818717"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530547525/job/132246845765"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530539570/job/132246819024"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530547525/job/132246845767"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530539570/job/132246819163"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530547525/job/132246845822"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43530539570/job/132246819065"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Disk restart oracle process isolation"
+    },
+    {
+      "pr": 184,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/184",
+      "head": "ea81c3054f18b9a1e1a497dc98ca4ff223fe6bd6",
+      "merge": "0a5d8204567f75d5c2504afadbf6cb509df34bc2",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533390765/job/132256347836"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533324496/job/132256122923"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533384012/job/132256324991"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533390765/job/132256347662"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533324496/job/132256122974"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533384012/job/132256324854"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533390765/job/132256347798"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533324496/job/132256122938"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533384012/job/132256324984"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533390765/job/132256347446"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533324496/job/132256123008"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533384012/job/132256324907"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533390765/job/132256347933"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533324496/job/132256122643"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43533384012/job/132256324638"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Private move-only VerifiedTransport; mint denies; real-userns CI ignored"
+    },
+    {
+      "pr": 185,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/185",
+      "head": "727e41883b0d4f261e6895ad345be83d769df668",
+      "merge": "cce6c4e4522491c6830bb6ae533a88fbb84030db",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541214567/job/132281962471"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541211350/job/132281951830"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541214567/job/132281962396"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541211350/job/132281951563"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541214567/job/132281962415"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541211350/job/132281951888"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541214567/job/132281962433"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541211350/job/132281951773"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541214567/job/132281962141"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541211350/job/132281951805"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Controlled P-03 offscreen/software 3x100 lifecycle"
+    },
+    {
+      "pr": 186,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/186",
+      "head": "2dbfc042a1f4c7caae734d834ae2e7bcb585a57b",
+      "merge": "0fc3442b45a2cc633f736b28d11c9863f7d35533",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538603444/job/132273563611"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538597200/job/132273544351"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538603444/job/132273564133"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538597200/job/132273544431"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538603444/job/132273563880"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538597200/job/132273544145"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538603444/job/132273563838"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538597200/job/132273544381"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538603444/job/132273564089"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43538597200/job/132273544490"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "P04A compile-only mixed data/cancel/resources; integrated P04A OPEN"
+    },
+    {
+      "pr": 189,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/189",
+      "head": "71cf169d4596b9fb374e501ca0712b505fce6864",
+      "merge": "302f8bf1d618e054083430925d168d4f022d6748",
+      "head_in_base": false,
+      "head_in_accepted": true,
+      "merge_in_accepted": true,
+      "state": "MERGED",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541660537/job/132283369456"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541656323/job/132283356333"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541660537/job/132283369118"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541656323/job/132283356350"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541660537/job/132283369546"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541656323/job/132283356013"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541660537/job/132283369464"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541656323/job/132283356472"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541660537/job/132283369405"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43541656323/job/132283356438"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "FR16 actual disk consumer + host stalled drain/ACK/revoke"
+    },
+    {
+      "pr": 178,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/178",
+      "head": "d0aa37d1ee484d0e95ce877aa9b50e104c2cca5a",
+      "merge": null,
+      "head_in_base": false,
+      "head_in_accepted": false,
+      "merge_in_accepted": false,
+      "state": "OPEN",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543789195/job/132290170249"
+        },
+        {
+          "name": "rust",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543785113/job/132290157073"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543789195/job/132290170446"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543785113/job/132290156883"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543789195/job/132290170499"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543785113/job/132290157109"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543789195/job/132290170458"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543785113/job/132290157149"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543789195/job/132290170517"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543785113/job/132290157232"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "P-01 report pending final review"
+    },
+    {
+      "pr": 181,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/181",
+      "head": "70c148caa79ffb392624bfa6ebec128a41cd1628",
+      "merge": null,
+      "head_in_base": false,
+      "head_in_accepted": false,
+      "merge_in_accepted": false,
+      "state": "OPEN",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542439921/job/132285845846"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542432285/job/132285823397"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542439921/job/132285845905"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542432285/job/132285823651"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542439921/job/132285845876"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542432285/job/132285823783"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542439921/job/132285845661"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542432285/job/132285823777"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542439921/job/132285845921"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542432285/job/132285823854"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "A4 partial data/keyring custody; backup Busy unresolved"
+    },
+    {
+      "pr": 187,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/187",
+      "head": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+      "merge": null,
+      "head_in_base": false,
+      "head_in_accepted": false,
+      "merge_in_accepted": false,
+      "state": "OPEN",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539573742/job/132276703879"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539568879/job/132276686500"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539573742/job/132276703717"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539568879/job/132276686881"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539573742/job/132276703946"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539568879/job/132276686306"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539573742/job/132276703913"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539568879/job/132276686632"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539573742/job/132276703904"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43539568879/job/132276686555"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "P-02 measurement/preflight candidate; not accepted"
+    },
+    {
+      "pr": 188,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/188",
+      "head": "47997a0631e9cd3910be5b5a3917cff2322b54dc",
+      "merge": null,
+      "head_in_base": false,
+      "head_in_accepted": false,
+      "merge_in_accepted": false,
+      "state": "OPEN",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542836837/job/132287101108"
+        },
+        {
+          "name": "rust",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542833243/job/132287089464"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542836837/job/132287101059"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542833243/job/132287089601"
+        },
+        {
+          "name": "python",
+          "conclusion": "FAILURE",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542833243/job/132287089551"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542836837/job/132287101084"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542836837/job/132287100719"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542833243/job/132287089604"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542836837/job/132287101025"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43542833243/job/132287089230"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Private N5c common-boundary candidate; canonical runtime OPEN"
+    },
+    {
+      "pr": 190,
+      "url": "https://github.com/MYRSGRAL/yonik/pull/190",
+      "head": "36ced8e1d4db1218a7547b4ae4d141b112708a15",
+      "merge": null,
+      "head_in_base": false,
+      "head_in_accepted": false,
+      "merge_in_accepted": false,
+      "state": "OPEN",
+      "checks": [
+        {
+          "name": "rust",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543543873/job/132289370789"
+        },
+        {
+          "name": "rust",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543538811/job/132289356356"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543543873/job/132289370863"
+        },
+        {
+          "name": "ui_benchmark_model",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543538811/job/132289356101"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543543873/job/132289370778"
+        },
+        {
+          "name": "python",
+          "conclusion": "SUCCESS",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543538811/job/132289356252"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543543873/job/132289370827"
+        },
+        {
+          "name": "native_adapter",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543538811/job/132289356320"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543543873/job/132289370560"
+        },
+        {
+          "name": "desktop",
+          "conclusion": "",
+          "url": "https://github.com/MYRSGRAL/yonik/actions/runs/43543538811/job/132289356327"
+        }
+      ],
+      "github_reviews": [],
+      "scope": "Static implementation bytes candidate; actual load UNKNOWN"
+    }
+  ],
+  "evidence": [
+    {
+      "pr": 177,
+      "path": "docs/validation/2026-11-14-p07-production-gui.md",
+      "blob": "32d75b2f741b597ab08828e4a07d497602d1dd61",
+      "sha256": "1178083d7015787e9602f92e54e9379fca9ba65a84bd3e9415a8feaa57663bc1"
+    },
+    {
+      "pr": 177,
+      "path": "docs/validation/2026-11-14-p07-hidden-consumer.md",
+      "blob": "9e0bc074b650a53932a482fafc09c9200a4a1d6a",
+      "sha256": "fed386ede7175f2f91d879ae4819e9c3f0d1c364a90e4313307414f4f8d83b76"
+    },
+    {
+      "pr": 177,
+      "path": "docs/validation/p07-gui-bindings.json",
+      "blob": "0e999e9a79c950b86945170db2933d015e922133",
+      "sha256": "b4309e68815e3eab633e805d212de4a7ef5c1fda3b9cc4d499e4ccb21e63a005"
+    },
+    {
+      "pr": 177,
+      "path": "docs/validation/p07-hidden-bindings.json",
+      "blob": "ed83793c312d55f22a19c905832b85459b754577",
+      "sha256": "505f188003076394cc18ed783e019e09376bdfeba349ff1964c0185d3629b5e7"
+    },
+    {
+      "pr": 185,
+      "path": "docs/validation/2026-11-14-p03-integrated.md",
+      "blob": "fc052ab8acbf8cda1ada6ec653b58536795b40b7",
+      "sha256": "1d6855bb7316bc3380b0d6a957ec3cbd7cb1f897f02b7ce9ff7e9bc0ee13711b"
+    },
+    {
+      "pr": 185,
+      "path": "docs/validation/p03-integrated-bindings.json",
+      "blob": "b03237779e43382eaebe66090de8bf2316071d6b",
+      "sha256": "d833bb0c5772388b593aa5592cdd5e90e528bc70ea7a08310b2cb133757d5d66"
+    },
+    {
+      "pr": 186,
+      "path": "docs/validation/p04a-unadmitted/README.md",
+      "blob": "6ac6ce4663dd41cdc6019fa72034c8f9356fb34a",
+      "sha256": "20f221ef371c2325ed6ac42a9f4b5ab6b6e3de1cc63e3631e81aadca72805662"
+    },
+    {
+      "pr": 186,
+      "path": "docs/validation/p04a-unadmitted/binding.json",
+      "blob": "51fe1f50b8fa95de1b76d12256fdfb50fe39f5ce",
+      "sha256": "43457f3b44cf09ad07a3df9ed228c02b26c237f0ce7ad64fcc90dedd450640fe"
+    },
+    {
+      "pr": 189,
+      "path": "docs/validation/2026-11-14-fr16-consumer-acceptance.md",
+      "blob": "2084571d0968c2dc5d086862791e2f06f778f229",
+      "sha256": "eec7d5bda5fcb2d03d7329b8eaf9b4962dbbe542e481e14ce4a1a12d1d9e6615"
+    },
+    {
+      "pr": 189,
+      "path": "docs/validation/2026-11-14-fr16-host-disk-boundary.md",
+      "blob": "bf26440bfc8d897a925f86fd745a9659e50cd0e9",
+      "sha256": "64bb3a8063f193f8bb1cbfcb70011c072af95f4dfd0048c6481ada93c55f13b1"
+    },
+    {
+      "pr": 182,
+      "path": "docs/validation/2026-11-14-n5-supported-profile-inputs.md",
+      "blob": "ff5ed262e1dd9b9b7445c5b93074bce7c182ce24",
+      "sha256": "6b765ba999a32d56747f714c97db7b35c4d799825c322468da5dc2df8092dd66"
+    },
+    {
+      "pr": 184,
+      "path": "docs/validation/2026-11-14-n5b-ci-runtime-precondition.md",
+      "blob": "f2a49153c88e1f7124da5693e1abf0407f324490",
+      "sha256": "ace8e97b6074b6a64522b3115516b599b1805c15173952194fecccae1fb1393a"
+    },
+    {
+      "pr": 171,
+      "path": "docs/validation/2026-11-14-runtime-reviewed-integration.md",
+      "blob": "a7719537bc914002c3783306f70fe6aa410828ae",
+      "sha256": "bf5928a366fedb476304093b10eccfb64f51c83549e5ef62f1e1c328133b390c"
+    },
+    {
+      "pr": 166,
+      "path": "docs/validation/2026-11-13-package-provenance-preflight.md",
+      "blob": "b6b8581b2d860c88398d06ac2a41ed64dd95cb3f",
+      "sha256": "ccdd6ddbe4890ebfc15f98aaabdde45f3cbc1a7d6369761b6a7a6245a4be38e6"
+    },
+    {
+      "pr": 155,
+      "path": "docs/validation/2026-11-13-fr07-integrated.md",
+      "blob": "36dc6246b957e48612c0654d5b72d03d00d5b034",
+      "sha256": "498f92ab8cbdc09d2c41a8c66fbc7d24a7d2ebe7faa4b82efb8ced91b1546ccd"
+    },
+    {
+      "pr": 169,
+      "path": "docs/validation/2026-11-13-local-socks-resource-100.md",
+      "blob": "822cc37a2f064c600e61090e1a5a413f11b4d757",
+      "sha256": "274763c5c29bd0c31db6569e7018b20a8ff41d69e2e84b062d61e687aac550f5"
+    },
+    {
+      "pr": 173,
+      "path": "docs/validation/2026-11-14-local-socks-alternating-host.md",
+      "blob": "93d54e7231ebed5be2b5d04d9aadce3b7c4070ef",
+      "sha256": "def3183fd343a46e460a9a7243c02e36017c8f89a772f9a5f4530e6b93470573"
+    },
+    {
+      "pr": 174,
+      "path": "docs/validation/2026-11-14-p11-integrated-candidate.md",
+      "blob": "8e66231ece9be44a73aa57374c24c6bdbb36fb07",
+      "sha256": "94cacab7ef0bb975870cbcab4ca8524b3bccf5ec89c5153e06e04fed9f2a2ea1"
+    },
+    {
+      "pr": 175,
+      "path": "docs/validation/2026-11-14-n4-consumer-component.md",
+      "blob": "c337a9973f38e05241607b2c77fc3ca70491206d",
+      "sha256": "eaaea5d6a54cecf9b4a83108226022601ac097fcb329c7996cf8eedd0d10872e"
+    },
+    {
+      "pr": 179,
+      "path": "docs/validation/2026-11-14-controller-rehearsal-14229843.md",
+      "blob": "24ebd3b43182d252bfe18255396904813af9dd0b",
+      "sha256": "0ad3b474231a20a41abb8da1da078e46a8c3b8dd9a1288b1a5f9a08a45bb7902"
+    }
+  ],
+  "preserved_pending_refs": [
+    {
+      "sha": "36ced8e1d4db1218a7547b4ae4d141b112708a15",
+      "in_accepted": false
+    },
+    {
+      "sha": "cfa8bc12090eb4b2f6eca973024991b8aa93c53a",
+      "in_accepted": false
+    },
+    {
+      "sha": "f6fb2ea1115e175a3cec0f62a14279ee7c4e891f",
+      "in_accepted": false
+    },
+    {
+      "sha": "47997a0631e9cd3910be5b5a3917cff2322b54dc",
+      "in_accepted": false
+    },
+    {
+      "sha": "d0aa37d1ee484d0e95ce877aa9b50e104c2cca5a",
+      "in_accepted": false
+    },
+    {
+      "sha": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+      "in_accepted": false
+    },
+    {
+      "sha": "70c148caa79ffb392624bfa6ebec128a41cd1628",
+      "in_accepted": false
+    }
+  ],
+  "delta_criteria": [
+    "| PR / exact head → merge (полные SHA в JSON) | Принятый scope и ограничение |",
+    "| #171 ca801bc → 3e64220, включает #168 | N2/N3 canonical one-shot authorization, authenticated old3, queue/FD custody. Полный issuer не создан. |",
+    "| #166 87a51f9 → 1422984 | A4 source/build/ELF/compliance controller; не final package. #179 2599fe7 → 9f02440 фиксирует rehearsal failure до build, не новый PASS. |",
+    "| #155 1cf6aba → 1e83e6e | FR07 manual→save→new GUI→Connect/Stop bounded witness; synthetic key сохранён. |",
+    "| #169 88c398a → 73778db; #173 dac33e7 → 14a2e52 | LocalSocks resource/alternating-core witnesses; не полный native P-05. Старый #173 66df cleanup-incoming устарел как текущий статус. |",
+    "| #174 fa39b23 → 465a4dd | Integrated P11 14 boundaries. Старый c51bcf3 incoming сменён принятым head; полный P11 не закрыт. |",
+    "| #175 8576f53 → 0a2c0a4 | Actual Rust owned ATTACH/private Plain consumer обоих cores; восемь controls. Не production admission. |",
+    "| #180 b3a2838 → 7e909c7 | Private N5a lifetime/revocation, exact authorized binding и ACK fence; не full factory. |",
+    "| #182 b0b3aaa → a29ea61 | Supported-profile inputs и UNKNOWN implementation/load. Принятие manifest не attestation. |",
+    "| #183 5004508 → 36cc6a9 | Disk rotation restart oracle/process isolation; не весь FR16. |",
+    "| #177 6d3b53a → 4088165 | Controlled P-07 concurrent core/checks/import/logs, Stop/Cancel, bounded queues и hidden GUI consumer. Exact 10 SUCCESS; GUI/hidden CLEAN + integration R2 60a9 CLEAN. Не физический Wayland/energy proof. |",
+    "| #184 ea81c30 → 0a5d820 | Private move-only VerifiedTransport, прежние credentials/peer/pidfd/starttime/ACK. Exact **15**, не 10 SUCCESS. Real-userns fixture ignored в CI после uid_map EPERM; mint по-прежнему отказывает до receive. |",
+    "| #185 727e418 → cce6c4e | Controlled P-03, mixed-policy/model/Loader-frame/backend gate, 3×100 offscreen/software; exact10 SUCCESS + integrated bf54 CLEAN + union/preset 576897 CLEAN. Не physical Plasma/GPU/network Apply/long uptime. |",
+    "| #186 2dbfc04 → 0fc3442 | Compile-only unadmitted mixed AND/cancel/resources/pinned codec proof; exact10 SUCCESS + R1 6c931bf0 CLEAN. Не integrated P04A, 1000-rule UI, runtime attribution или Apply. |",
+    "| #189 71cf169 → 302f8bf | Disk consumer и host boundary ниже; exact10 SUCCESS + consumer 10b CLEAN + host 346 CLEAN + binding 575 CLEAN. Не native authority. |",
+    "| Критерий | Что именно доказано / предел |",
+    "| Разделение App/Engine | Типизированные source, Engine ProcessExited виден в sample export, App исключён. Это не поток исходных сообщений стороннего ядра. |",
+    "| Фильтры | Actual read(source=Engine, code=ProcessExited)→LogPage.export; mutation отключения source filter RED. |",
+    "| Bounds/rotation/backpressure | Очередь128, 1003→128 enqueued/875 dropped, 5×4MiB, partial-tail recovery, I/O failure terminal без retry; live ring/page bounds из прежнего slice. |",
+    "| Export/privacy | Canary SECRET/ESC/NUL/CR подан через reject_native, bytes отброшены; закрытые поля export безопасны в проверенном пути. Это не redaction неизвестного raw config/log input. |",
+    "| Host drain/ACK | Actual Actor Stop и mutation ACK при stalled disk; closed snapshot/control.closed отсутствуют до drain; после release приходят. Same watch lease отзывает pending DesktopFetch; lease synthetic, не active native core. |",
+    "| Crash/recovery | Owned child SIGKILL после rename chain до create active, restart. Не power-loss и не kill внутри rename syscall. |",
+    "| data-and-contracts:93 | «Исходные сообщения стороннего ядра доступны как технические детали…» — **unproven этим evidence**. reject_native только увеличивает rejection counter, исходный текст не сохраняет. Нужен отдельный source-bound witness доступности технических деталей через нормативно выбранный путь. |",
+    "| Gate | Следующее действие и зависимость |",
+    "| N5 full issuer CLOSED | После отдельного completeness review связать exact deployed systemd/libseccomp/kernel/ABI policy с успешной загрузкой в authenticated pending invocation, затем owner→issuer→factory→owned ATTACH→actual health/revoke. Source semantics/properties/errno сами по себе не attestation. New16 runtime запрещён до отдельного разрешения; новых probes не запускать. |",
+    "| N5c #188 47997a | Private common-boundary candidate, review CLEAN не ancestry. Не входит в 302f; дождаться authoritative CI/review и отдельного принятия. Canonical installed runtime/service coverage OPEN. |",
+    "| N5 bytes #190 36ced8e | cfa8bc1/f6fb2ea сохранены; static signed implementation/emitter/compat candidate не входит в 302f. Отдельно review/CI и acceptance, actual filter load остаётся UNKNOWN. |",
+    "| Native/DNS/G-APP | После issuer — actual bound native TUN двух cores, DNS D01…07, app A01…08, WG/LAN/network transitions, route correctness/cleanup. Component N4 не заменяет full Linux matrix. |",
+    "| P-01 #178 d0aa37d | Report MEASUREMENTS_SAVED_PENDING_FINAL_REVIEW. Review final terminal/identity/source/metrics; не перезапускать frozen campaign ради ledger. |",
+    "| P-02 #187 51fd15a | Candidate/preflight и measurements остаются отдельно; закончить campaign/review exact execution-source и engine-only pair. Наличие short controls/CI не принимает длинный результат. |",
+    "| P-03/P-07 | Controlled scope принят; physical G-UI/G-POWER deferred NOT PASS. Общий FR18 не закрыт. |",
+    "| P04A/P04B | Собрать integrated import/compiler normal+10x/10,100,1000 app-rules provenance/cancel/resources witness, учесть variance (compile CV до22.74%). P04B actual routing ждёт N5; data artifact не admission. |",
+    "| P-05/P-06/P-08 | Native lifecycle/flow cost/long sleep-network-WG campaign после N5 и fixtures. P-06 требует одинаковых реальных маршрутов engine-only/full-app; logical recovery не deferred только из-за energy части. |",
+    "| Toolkit | Equivalent functional Qt/GTK4/Slint workload/source binding, не empty window; historical corrected bench/ui subtree binding не означает новое измерение. Physical решение отдельно. |",
+    "| A4 #181 70c148c | Data/keyring custody partial; actualBackup Busy, нет valid backup/profile/revision gate. Сначала typed cause/admission/copy diagnosis, затем final reviewed package/install/upgrade/rollback/uninstall. |",
+    "| P11/FR16/storage | Закрыть native technical-details mapping и остальные original P11 RU/EN/export/backup/recovery критерии на integrated source; частичная приёмка не full P11. |",
+    "| Финальный A5 | После A1…A4 и native scope сопоставить ВСЕ original rows и текстовые инварианты; не считать merged PR denominator. Android P03/P26/G-ANDROID и physical G-UI/G-POWER deferred, NOT PASS. |"
+  ]
+}
