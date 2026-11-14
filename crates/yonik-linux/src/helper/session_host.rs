@@ -1241,6 +1241,36 @@ impl Backend {
         uid: u32,
     ) -> Result<ProtectionState, ServiceError> {
         let (_keep, mut cancel) = fresh_cancel();
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.artifact.attribution_required)
+        {
+            if self.verify_session(&mut cancel).await.is_ok() {
+                let ticket = &self
+                    .active
+                    .as_ref()
+                    .ok_or(ServiceError::Unavailable)?
+                    .ticket;
+                match self
+                    .supervisor
+                    .as_mut()
+                    .ok_or(ServiceError::Unavailable)?
+                    .native_attached(ticket)
+                    .await
+                {
+                    Ok(attached) => {
+                        if attached {
+                            self.worker_uncertain = false;
+                        }
+                        return Ok(ProtectionState::TunnelStarting);
+                    }
+                    Err(_) => {}
+                }
+            }
+            self.invalidate()?;
+            return self.finish_session(uid, false).await;
+        }
         if !self.worker_uncertain {
             if let (Some(active), Some(supervisor)) = (&self.active, &self.supervisor) {
                 if supervisor.observe(&active.ticket).await == Ok(WorkerLiveness::Running)

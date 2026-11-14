@@ -487,6 +487,9 @@ pub struct SystemWorkerSupervisor {
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
         if !self.clean {
+            if let Some(runtime) = self.native_runtime.take() {
+                std::mem::forget(runtime);
+            }
             if let Some(payload) = self.retained_copy.take() {
                 // Без empty-cgroup proof нельзя освободить global reserve:
                 // он остаётся в карантине до выхода helper, ограничен ByteBudget.
