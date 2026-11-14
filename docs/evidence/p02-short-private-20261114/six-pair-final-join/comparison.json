@@ -1,0 +1,1362 @@
+{
+  "aggregate": {
+    "sing-box": {
+      "engine": {
+        "cpu_s": {
+          "max": 0.04,
+          "median": 0.03,
+          "min": 0.03
+        },
+        "private_dirty_end_kib": {
+          "max": 16376,
+          "median": 16172,
+          "min": 14372
+        },
+        "pss_end_kib": {
+          "max": 47451,
+          "median": 41006,
+          "min": 38248
+        }
+      },
+      "full": {
+        "cpu_s": {
+          "max": 0.04,
+          "median": 0.02,
+          "min": 0.02
+        },
+        "private_dirty_end_kib": {
+          "max": 97708,
+          "median": 95204,
+          "min": 88992
+        },
+        "pss_end_kib": {
+          "max": 149069,
+          "median": 144969,
+          "min": 133490
+        }
+      },
+      "paired_full_minus_engine": {
+        "cpu_s": {
+          "max": 0.01,
+          "median": -0.01,
+          "min": -0.02
+        },
+        "private_dirty_end_kib": {
+          "max": 81332,
+          "median": 80832,
+          "min": 72820
+        },
+        "pss_end_kib": {
+          "max": 110821,
+          "median": 97518,
+          "min": 92484
+        }
+      }
+    },
+    "xray": {
+      "engine": {
+        "cpu_s": {
+          "max": 0.03,
+          "median": 0.02,
+          "min": 0.02
+        },
+        "private_dirty_end_kib": {
+          "max": 8500,
+          "median": 8440,
+          "min": 8412
+        },
+        "pss_end_kib": {
+          "max": 33844,
+          "median": 33840,
+          "min": 33752
+        }
+      },
+      "full": {
+        "cpu_s": {
+          "max": 0.04,
+          "median": 0.04,
+          "min": 0.02
+        },
+        "private_dirty_end_kib": {
+          "max": 70384,
+          "median": 68356,
+          "min": 68196
+        },
+        "pss_end_kib": {
+          "max": 124450,
+          "median": 122599,
+          "min": 121979
+        }
+      },
+      "paired_full_minus_engine": {
+        "cpu_s": {
+          "max": 0.02,
+          "median": 0.02,
+          "min": -0.01
+        },
+        "private_dirty_end_kib": {
+          "max": 61972,
+          "median": 59916,
+          "min": 59696
+        },
+        "pss_end_kib": {
+          "max": 90698,
+          "median": 88759,
+          "min": 88135
+        }
+      }
+    }
+  },
+  "classification": "SIX_PAIR_DATA_JOIN_REVIEW_REQUIRED_BOUNDED_OBSERVATIONAL",
+  "clock_ticks_per_second": 100,
+  "controls": {
+    "binary_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+    "classification": "TARGETED_CONTROLS_COMPLETED_NOT_FULL_P02_ACCEPTANCE",
+    "cleanup_exit_code": 0,
+    "cleanup_fault_results": {
+      "checked_source": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+      "finished_unix": 1794618413.7773132,
+      "results": [
+        {
+          "before_fault": {
+            "cpu_ticks": 2,
+            "descendants": [],
+            "fd": 9,
+            "main_thread_context_switches_proxy_not_wakeups": {
+              "nonvoluntary_ctxt_switches": 1,
+              "voluntary_ctxt_switches": 9
+            },
+            "namespaces": {
+              "mnt": "mnt:[4026531832]",
+              "net": "net:[4026531833]",
+              "pid": "pid:[4026531836]",
+              "user": "user:[4026531837]"
+            },
+            "pid": 1735678,
+            "private_dirty_kib": 13712,
+            "pss_kib": 37012,
+            "starttime": "4859091",
+            "threads": 13,
+            "wakeups": null,
+            "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+          },
+          "config_sha256": "fe53437bb293838351be6ef211d5a5eb177037b31ea8d82f20e72352f24f6112",
+          "core": "sing-box",
+          "exe_sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+          "fault": "own actual engine SIGSTOP; injected driver health abort; TERM pending, KILL required",
+          "outcome": "ACTUAL_ENGINE_CLEANUP_FAULT_CONTROL_COMPLETED",
+          "pidfd_exit_ready": true,
+          "reaped": true,
+          "returncode": -9,
+          "same_socks_rebind": true,
+          "scope": "root engine_only cleanup; not production GUI cleanup fault API"
+        },
+        {
+          "before_fault": {
+            "cpu_ticks": 0,
+            "descendants": [],
+            "fd": 7,
+            "main_thread_context_switches_proxy_not_wakeups": {
+              "nonvoluntary_ctxt_switches": 0,
+              "voluntary_ctxt_switches": 59
+            },
+            "namespaces": {
+              "mnt": "mnt:[4026531832]",
+              "net": "net:[4026531833]",
+              "pid": "pid:[4026531836]",
+              "user": "user:[4026531837]"
+            },
+            "pid": 1736777,
+            "private_dirty_kib": 8244,
+            "pss_kib": 33328,
+            "starttime": "4860108",
+            "threads": 12,
+            "wakeups": null,
+            "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+          },
+          "config_sha256": "ad6be29adcda1e9c109cb494e838101dedbd0ec3ecfc89006cf10c80746622d8",
+          "core": "xray",
+          "exe_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+          "fault": "own actual engine SIGSTOP; injected driver health abort; TERM pending, KILL required",
+          "outcome": "ACTUAL_ENGINE_CLEANUP_FAULT_CONTROL_COMPLETED",
+          "pidfd_exit_ready": true,
+          "reaped": true,
+          "returncode": -9,
+          "same_socks_rebind": true,
+          "scope": "root engine_only cleanup; not production GUI cleanup fault API"
+        }
+      ],
+      "started_unix": 1794618393.4973848
+    },
+    "cleanup_session": 65254,
+    "finished_unix": 1794618457.6461372,
+    "gui_controls": {
+      "sing-box": {
+        "actual_gui_wrong_ca_kind": "tls",
+        "actual_gui_wrong_ca_status": "Limited",
+        "baseline_short_rows": 2,
+        "fixture_no_http_assertion_completed": true,
+        "trusted_restored_oracle": {
+          "config_sha256": "fe53437bb293838351be6ef211d5a5eb177037b31ea8d82f20e72352f24f6112",
+          "outcome": "SHORT_ORACLE_PASS_NOT_900S"
+        }
+      },
+      "xray": {
+        "actual_gui_wrong_ca_kind": "tls",
+        "actual_gui_wrong_ca_status": "Limited",
+        "baseline_short_rows": 2,
+        "fixture_no_http_assertion_completed": true,
+        "trusted_restored_oracle": {
+          "config_sha256": "ad6be29adcda1e9c109cb494e838101dedbd0ec3ecfc89006cf10c80746622d8",
+          "outcome": "SHORT_ORACLE_PASS_NOT_900S"
+        }
+      }
+    },
+    "limitations": [
+      "Targeted cleanup fault exercises root engine_only teardown using actual stopped pinned engines; not a production GUI cleanup_fault API.",
+      "Old overlapping windows have explicit control interference; no noise-free acceptance asserted.",
+      "No new Rust build, no 900-second pair repeated, no source changes or merge."
+    ],
+    "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+    "old_campaign_classification": "CANDIDATE_NOT_ACCEPTED; measurement source 35408d5; no retroactive runtime guards",
+    "old_campaign_handle": {
+      "deadline_unix": 1794628424.0076032,
+      "pid": 1658427,
+      "starttime": "4662119",
+      "terminal_files": [
+        "result.json",
+        "failure.json"
+      ]
+    },
+    "old_campaign_identity_matches": true,
+    "overlap": [
+      {
+        "classification": "CONTROL_OVERLAP_NOISE; CANDIDATE_NOT_ACCEPTED",
+        "last_sample_write_unix": 1794618434.4501448,
+        "recorded_sample_span_start_estimate_unix": 1794618254.2631047,
+        "span_method": "mtime minus last elapsed; inferred bounds, not recorded per-row wallclock",
+        "window": "sing-box-2-full"
+      }
+    ],
+    "root_worktree_not_changed": true,
+    "same_pins": {
+      "sing-box-1.14.4/sing-box": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+      "xray-26.10.31/xray": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
+    },
+    "six_tests": "6/6; six-tests.log",
+    "source_commit": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+    "started_unix": 1794618309.3094847,
+    "targeted_exit_code": 0,
+    "targeted_session": 77243
+  },
+  "excluded": {
+    "core": "sing-box",
+    "excluded_groups": [
+      "full",
+      "engine"
+    ],
+    "offset_method": "mtime минус elapsed, не per-row wallclock",
+    "offsets_approx_s": [
+      55.04,
+      203.37
+    ],
+    "origin": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2",
+    "overlap_seconds": 148.33665251731873,
+    "reason": "Полная старая pair исключена из paired comparison: targeted-control overlap в full; raw сохранён.",
+    "repeat": 2,
+    "samples_sha256": {
+      "engine": "03ad23f14b7f20e7ccebfde3ab499c44bfc9bd1ecb7c55f75603068b0e3d92ab",
+      "full": "b6c607e7e655852daddc24fdd2ff2a5baddab428a78b1c0f67c820bcaa5af68e"
+    }
+  },
+  "inputs_manifest_sha256": "32586cb580e385d583c437ba54be130d7b55a64e306907052b8e2b828d56fc4d",
+  "old_measurement_binding": {
+    "binary": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/yonik-desktop",
+    "binary_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+    "build_profile": "dev/unoptimized debuginfo; not release budget acceptance",
+    "composition_sha256": "40ac1fcd4bfc708f5be65896f50f89232714af783b66dc85025c406d4ae778d2",
+    "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+    "pins": {
+      "sing-box-1.14.4/sing-box": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+      "xray-26.10.31/xray": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
+    },
+    "repeats": 3,
+    "scope": "LocalSocks/no-app-rules/offscreen actual Qt GUI/private SNI; not physical Plasma/energy/TUN",
+    "seconds": 900,
+    "source_head": "6d1905eeff0e541300c8adf281445f9048904d38"
+  },
+  "order": "full→engine; fixed order bias",
+  "pair_count": 6,
+  "pairs": [
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-short-final-20261114/validation.json",
+      "config_bytes_identical": true,
+      "config_sha256": "25103d35b60c55e4b682eb2b36b1484990db083ddbe36cb846ee6b9ac61f9a5d",
+      "core": "sing-box",
+      "core_elf_sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+      "driver_sha256": "4e51d4676132da15e957479c84b404c3e3be0aa9adb31a766d796cfb0ff47ce7",
+      "driver_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "full_minus_engine": {
+        "cpu_s": -0.01,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 0,
+          "voluntary_ctxt_switches": 13
+        },
+        "private_dirty_end_kib": 72820,
+        "pss_end_kib": 92484,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 1659430,
+        "product_gui": 1659434,
+        "sampler": 1658427,
+        "secret_service": 1659431,
+        "tray_fixture": 1659432
+      },
+      "measurement_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "bounded_observational_reuse",
+      "repeat": 1,
+      "runtime_held_pidfd_guards": false,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.03,
+          "cpu_ticks_delta": 3,
+          "duration_s": 900.029156620003,
+          "group_pids": [
+            1694777
+          ],
+          "identities": [
+            {
+              "pid": 1694777,
+              "starttime": "4754854"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 0
+          },
+          "private_dirty_change_kib": 196,
+          "private_dirty_end_kib": 16172,
+          "private_dirty_range_kib": {
+            "max": 16172,
+            "median": 16152,
+            "min": 15976
+          },
+          "private_dirty_start_kib": 15976,
+          "processes": [
+            {
+              "cpu_ticks_delta": 3,
+              "fd_end": 9,
+              "fd_start": 9,
+              "pid": 1694777,
+              "private_dirty_end_kib": 16172,
+              "pss_end_kib": 41006,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 195,
+          "pss_end_kib": 41006,
+          "pss_range_kib": {
+            "max": 41006,
+            "median": 40987,
+            "min": 40811
+          },
+          "pss_start_kib": 40811,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/sing-box-1-engine/samples.json",
+          "samples_sha256": "b26a79871e485c5fe52185362ea54f3ef4d79954299628193ea047f9426f29f8",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.02,
+          "cpu_ticks_delta": 2,
+          "duration_s": 900.0028438419977,
+          "group_pids": [
+            1659434,
+            1659494
+          ],
+          "identities": [
+            {
+              "pid": 1659434,
+              "starttime": "4664585"
+            },
+            {
+              "pid": 1659494,
+              "starttime": "4664821"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 13
+          },
+          "private_dirty_change_kib": -5428,
+          "private_dirty_end_kib": 88992,
+          "private_dirty_range_kib": {
+            "max": 94512,
+            "median": 94420,
+            "min": 88988
+          },
+          "private_dirty_start_kib": 94420,
+          "processes": [
+            {
+              "cpu_ticks_delta": 0,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 1659434,
+              "private_dirty_end_kib": 34192,
+              "pss_end_kib": 78677,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 2,
+              "fd_end": 10,
+              "fd_start": 10,
+              "pid": 1659494,
+              "private_dirty_end_kib": 54800,
+              "pss_end_kib": 54813,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": -5340,
+          "pss_end_kib": 133490,
+          "pss_range_kib": {
+            "max": 139000,
+            "median": 138870,
+            "min": 133455
+          },
+          "pss_start_kib": 138830,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/sing-box-1-full/samples.json",
+          "samples_sha256": "45a7c6e3ee82e455dd748c81f37a163a2568aec3f7de645879de7c47ef91d45a",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    },
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-sb2-single-execute-terminal.json",
+      "config_bytes_identical": true,
+      "config_sha256": "72dce20688cdad920ecdabe6e441164d17b834737e3315d04d390edc2e1e5cf8",
+      "core": "sing-box",
+      "core_elf_sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+      "driver_sha256": "508f837200ffa07aaaca6e88cc296c41dd789bf6dfbd9aa054d6bd8c43536f23",
+      "driver_source_commit": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+      "full_minus_engine": {
+        "cpu_s": 0.01,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 1,
+          "voluntary_ctxt_switches": 14
+        },
+        "private_dirty_end_kib": 81332,
+        "pss_end_kib": 97518,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 3328117,
+        "product_gui": 3328121,
+        "sampler": 3328083,
+        "secret_service": 3328118,
+        "tray_fixture": 3328119
+      },
+      "measurement_source_commit": "b1b9ce10525082039ecbdf87a6abbf33fc11449f",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "replacement",
+      "repeat": 2,
+      "runtime_held_pidfd_guards": true,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.03,
+          "cpu_ticks_delta": 3,
+          "duration_s": 900.031132714008,
+          "group_pids": [
+            3346662
+          ],
+          "identities": [
+            {
+              "pid": 3346662,
+              "starttime": "9348176"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 0
+          },
+          "private_dirty_change_kib": 220,
+          "private_dirty_end_kib": 16376,
+          "private_dirty_range_kib": {
+            "max": 16376,
+            "median": 16376,
+            "min": 16156
+          },
+          "private_dirty_start_kib": 16156,
+          "processes": [
+            {
+              "cpu_ticks_delta": 3,
+              "fd_end": 9,
+              "fd_start": 9,
+              "pid": 3346662,
+              "private_dirty_end_kib": 16376,
+              "pss_end_kib": 47451,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 220,
+          "pss_end_kib": 47451,
+          "pss_range_kib": {
+            "max": 47451,
+            "median": 47451,
+            "min": 47231
+          },
+          "pss_start_kib": 47231,
+          "rows": 31,
+          "sampler_pid": 3328083,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-replacement-sb2-reviewed/engine/samples.json",
+          "samples_sha256": "bb49420d7dc8877d03f81e414032f6e784b8d3bd46e26f056454230e1e6ea360",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.04,
+          "cpu_ticks_delta": 4,
+          "duration_s": 900.0410538800061,
+          "group_pids": [
+            3328121,
+            3328216
+          ],
+          "identities": [
+            {
+              "pid": 3328121,
+              "starttime": "9257928"
+            },
+            {
+              "pid": 3328216,
+              "starttime": "9258143"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 1,
+            "voluntary_ctxt_switches": 14
+          },
+          "private_dirty_change_kib": 20,
+          "private_dirty_end_kib": 97708,
+          "private_dirty_range_kib": {
+            "max": 97708,
+            "median": 97704,
+            "min": 97532
+          },
+          "private_dirty_start_kib": 97688,
+          "processes": [
+            {
+              "cpu_ticks_delta": 0,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 3328121,
+              "private_dirty_end_kib": 34112,
+              "pss_end_kib": 81360,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 4,
+              "fd_end": 10,
+              "fd_start": 10,
+              "pid": 3328216,
+              "private_dirty_end_kib": 63596,
+              "pss_end_kib": 63609,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 34,
+          "pss_end_kib": 144969,
+          "pss_range_kib": {
+            "max": 144993,
+            "median": 144967,
+            "min": 144741
+          },
+          "pss_start_kib": 144935,
+          "rows": 31,
+          "sampler_pid": 3328083,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-replacement-sb2-reviewed/full/samples.json",
+          "samples_sha256": "22ae9e6e25aead2c9173cd2e8aa58e312345c179c9857812e30e3417fe05980e",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    },
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-short-final-20261114/validation.json",
+      "config_bytes_identical": true,
+      "config_sha256": "25103d35b60c55e4b682eb2b36b1484990db083ddbe36cb846ee6b9ac61f9a5d",
+      "core": "sing-box",
+      "core_elf_sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+      "driver_sha256": "4e51d4676132da15e957479c84b404c3e3be0aa9adb31a766d796cfb0ff47ce7",
+      "driver_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "full_minus_engine": {
+        "cpu_s": -0.02,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 0,
+          "voluntary_ctxt_switches": 16
+        },
+        "private_dirty_end_kib": 80832,
+        "pss_end_kib": 110821,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 1787642,
+        "product_gui": 1787650,
+        "sampler": 1658427,
+        "secret_service": 1787643,
+        "tray_fixture": 1787644
+      },
+      "measurement_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "bounded_observational_reuse",
+      "repeat": 3,
+      "runtime_held_pidfd_guards": false,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.04,
+          "cpu_ticks_delta": 4,
+          "duration_s": 900.0202461840017,
+          "group_pids": [
+            1809779
+          ],
+          "identities": [
+            {
+              "pid": 1809779,
+              "starttime": "5115496"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 0
+          },
+          "private_dirty_change_kib": 168,
+          "private_dirty_end_kib": 14372,
+          "private_dirty_range_kib": {
+            "max": 14372,
+            "median": 14360,
+            "min": 14204
+          },
+          "private_dirty_start_kib": 14204,
+          "processes": [
+            {
+              "cpu_ticks_delta": 4,
+              "fd_end": 9,
+              "fd_start": 9,
+              "pid": 1809779,
+              "private_dirty_end_kib": 14372,
+              "pss_end_kib": 38248,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 167,
+          "pss_end_kib": 38248,
+          "pss_range_kib": {
+            "max": 38249,
+            "median": 38237,
+            "min": 38081
+          },
+          "pss_start_kib": 38081,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/sing-box-3-engine/samples.json",
+          "samples_sha256": "87f36b05671048e86a3adaff371d8f6741c96edb4b5478900e87855d4161cc9d",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.02,
+          "cpu_ticks_delta": 2,
+          "duration_s": 900.0283917339984,
+          "group_pids": [
+            1787650,
+            1787814
+          ],
+          "identities": [
+            {
+              "pid": 1787650,
+              "starttime": "5025209"
+            },
+            {
+              "pid": 1787814,
+              "starttime": "5025465"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 16
+          },
+          "private_dirty_change_kib": 56,
+          "private_dirty_end_kib": 95204,
+          "private_dirty_range_kib": {
+            "max": 95204,
+            "median": 95196,
+            "min": 95024
+          },
+          "private_dirty_start_kib": 95148,
+          "processes": [
+            {
+              "cpu_ticks_delta": 0,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 1787650,
+              "private_dirty_end_kib": 34064,
+              "pss_end_kib": 87917,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 2,
+              "fd_end": 10,
+              "fd_start": 10,
+              "pid": 1787814,
+              "private_dirty_end_kib": 61140,
+              "pss_end_kib": 61152,
+              "role": "engine",
+              "threads_end": 13,
+              "threads_start": 13,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 128,
+          "pss_end_kib": 149069,
+          "pss_range_kib": {
+            "max": 149078,
+            "median": 149058,
+            "min": 148816
+          },
+          "pss_start_kib": 148941,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/sing-box-3-full/samples.json",
+          "samples_sha256": "8a538207efe923ff8687ca700b573dafd81f6df6a6f652c6d3f14797787f518b",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    },
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-short-final-20261114/validation.json",
+      "config_bytes_identical": true,
+      "config_sha256": "4f998308c405747d62fe8812a09f962ec0f0772eeea0e025eb8f7b58ee20752a",
+      "core": "xray",
+      "core_elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "driver_sha256": "4e51d4676132da15e957479c84b404c3e3be0aa9adb31a766d796cfb0ff47ce7",
+      "driver_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "full_minus_engine": {
+        "cpu_s": -0.01,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 5,
+          "voluntary_ctxt_switches": 24
+        },
+        "private_dirty_end_kib": 59696,
+        "pss_end_kib": 88759,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 1826077,
+        "product_gui": 1826081,
+        "sampler": 1658427,
+        "secret_service": 1826078,
+        "tray_fixture": 1826079
+      },
+      "measurement_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "bounded_observational_reuse",
+      "repeat": 1,
+      "runtime_held_pidfd_guards": false,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.03,
+          "cpu_ticks_delta": 3,
+          "duration_s": 900.0294039340006,
+          "group_pids": [
+            1861634
+          ],
+          "identities": [
+            {
+              "pid": 1861634,
+              "starttime": "5295664"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 20
+          },
+          "private_dirty_change_kib": 96,
+          "private_dirty_end_kib": 8500,
+          "private_dirty_range_kib": {
+            "max": 8500,
+            "median": 8496,
+            "min": 8404
+          },
+          "private_dirty_start_kib": 8404,
+          "processes": [
+            {
+              "cpu_ticks_delta": 3,
+              "fd_end": 7,
+              "fd_start": 7,
+              "pid": 1861634,
+              "private_dirty_end_kib": 8500,
+              "pss_end_kib": 33840,
+              "role": "engine",
+              "threads_end": 11,
+              "threads_start": 11,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 96,
+          "pss_end_kib": 33840,
+          "pss_range_kib": {
+            "max": 33840,
+            "median": 33836,
+            "min": 33744
+          },
+          "pss_start_kib": 33744,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-1-engine/samples.json",
+          "samples_sha256": "16d427ac3a1afac3738e231655bfbfc82a7ce67fb197573c178e93c7cf15bedc",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.02,
+          "cpu_ticks_delta": 2,
+          "duration_s": 900.0268471119998,
+          "group_pids": [
+            1826081,
+            1826164
+          ],
+          "identities": [
+            {
+              "pid": 1826081,
+              "starttime": "5205519"
+            },
+            {
+              "pid": 1826164,
+              "starttime": "5205631"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 5,
+            "voluntary_ctxt_switches": 44
+          },
+          "private_dirty_change_kib": 80,
+          "private_dirty_end_kib": 68196,
+          "private_dirty_range_kib": {
+            "max": 68196,
+            "median": 68036,
+            "min": 67960
+          },
+          "private_dirty_start_kib": 68116,
+          "processes": [
+            {
+              "cpu_ticks_delta": 1,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 1826081,
+              "private_dirty_end_kib": 34192,
+              "pss_end_kib": 88595,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 1,
+              "fd_end": 8,
+              "fd_start": 8,
+              "pid": 1826164,
+              "private_dirty_end_kib": 34004,
+              "pss_end_kib": 34004,
+              "role": "engine",
+              "threads_end": 12,
+              "threads_start": 12,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 148,
+          "pss_end_kib": 122599,
+          "pss_range_kib": {
+            "max": 122689,
+            "median": 122411,
+            "min": 121125
+          },
+          "pss_start_kib": 122451,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-1-full/samples.json",
+          "samples_sha256": "c008706b125f41e098dc0e940c7c257f927f0b38a06c928b0225df4a923ed748",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    },
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-short-final-20261114/validation.json",
+      "config_bytes_identical": true,
+      "config_sha256": "4f998308c405747d62fe8812a09f962ec0f0772eeea0e025eb8f7b58ee20752a",
+      "core": "xray",
+      "core_elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "driver_sha256": "4e51d4676132da15e957479c84b404c3e3be0aa9adb31a766d796cfb0ff47ce7",
+      "driver_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "full_minus_engine": {
+        "cpu_s": 0.02,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 0,
+          "voluntary_ctxt_switches": 23
+        },
+        "private_dirty_end_kib": 61972,
+        "pss_end_kib": 90698,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 1881691,
+        "product_gui": 1881696,
+        "sampler": 1658427,
+        "secret_service": 1881692,
+        "tray_fixture": 1881693
+      },
+      "measurement_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "bounded_observational_reuse",
+      "repeat": 2,
+      "runtime_held_pidfd_guards": false,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.02,
+          "cpu_ticks_delta": 2,
+          "duration_s": 900.0016065379968,
+          "group_pids": [
+            1893873
+          ],
+          "identities": [
+            {
+              "pid": 1893873,
+              "starttime": "5475816"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 23
+          },
+          "private_dirty_change_kib": 100,
+          "private_dirty_end_kib": 8412,
+          "private_dirty_range_kib": {
+            "max": 8412,
+            "median": 8408,
+            "min": 8312
+          },
+          "private_dirty_start_kib": 8312,
+          "processes": [
+            {
+              "cpu_ticks_delta": 2,
+              "fd_end": 7,
+              "fd_start": 7,
+              "pid": 1893873,
+              "private_dirty_end_kib": 8412,
+              "pss_end_kib": 33752,
+              "role": "engine",
+              "threads_end": 11,
+              "threads_start": 11,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 100,
+          "pss_end_kib": 33752,
+          "pss_range_kib": {
+            "max": 33752,
+            "median": 33748,
+            "min": 33652
+          },
+          "pss_start_kib": 33652,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-2-engine/samples.json",
+          "samples_sha256": "399edbbfaf8ded8ef252b5d072e9e56989e4187c664ba895ee76f6fb6f6787c0",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.04,
+          "cpu_ticks_delta": 4,
+          "duration_s": 900.0289861170022,
+          "group_pids": [
+            1881696,
+            1881810
+          ],
+          "identities": [
+            {
+              "pid": 1881696,
+              "starttime": "5385687"
+            },
+            {
+              "pid": 1881810,
+              "starttime": "5385792"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 46
+          },
+          "private_dirty_change_kib": -12,
+          "private_dirty_end_kib": 70384,
+          "private_dirty_range_kib": {
+            "max": 70396,
+            "median": 70380,
+            "min": 70240
+          },
+          "private_dirty_start_kib": 70396,
+          "processes": [
+            {
+              "cpu_ticks_delta": 1,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 1881696,
+              "private_dirty_end_kib": 34172,
+              "pss_end_kib": 88238,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 3,
+              "fd_end": 8,
+              "fd_start": 8,
+              "pid": 1881810,
+              "private_dirty_end_kib": 36212,
+              "pss_end_kib": 36212,
+              "role": "engine",
+              "threads_end": 12,
+              "threads_start": 12,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 155,
+          "pss_end_kib": 124450,
+          "pss_range_kib": {
+            "max": 124459,
+            "median": 124358,
+            "min": 124275
+          },
+          "pss_start_kib": 124295,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-2-full/samples.json",
+          "samples_sha256": "4d14957b2bc7116263727fd02c66ad9958d2739ff64bc9f7aced490bd5363910",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    },
+    {
+      "cleanup_evidence": "/home/myrs/projects/yonik/local/evidence/p02-short-final-20261114/validation.json",
+      "config_bytes_identical": true,
+      "config_sha256": "4f998308c405747d62fe8812a09f962ec0f0772eeea0e025eb8f7b58ee20752a",
+      "core": "xray",
+      "core_elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+      "driver_sha256": "4e51d4676132da15e957479c84b404c3e3be0aa9adb31a766d796cfb0ff47ce7",
+      "driver_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "full_minus_engine": {
+        "cpu_s": 0.02,
+        "main_thread_context_delta_proxy_not_wakeups": {
+          "nonvoluntary_ctxt_switches": 32,
+          "voluntary_ctxt_switches": 117
+        },
+        "private_dirty_end_kib": 59916,
+        "pss_end_kib": 88135,
+        "uss_end_kib": null
+      },
+      "gui_elf_sha256": "e3aee54cab750d072dc1f9d075a3c5eb4b0911d96360d834d5680f3bd812e8f8",
+      "infrastructure_excluded": {
+        "bus": 1914322,
+        "product_gui": 1914326,
+        "sampler": 1658427,
+        "secret_service": 1914323,
+        "tray_fixture": 1914324
+      },
+      "measurement_source_commit": "35408d531a86ec858e1d2fc3489e8e092fda5d27",
+      "observer_sha256": "e7c94f3a66b6f6c7d439ea35ca6f0b867170aff4ee0d000a9c45be4b90b092d5",
+      "origin": "bounded_observational_reuse",
+      "repeat": 3,
+      "runtime_held_pidfd_guards": false,
+      "windows": {
+        "engine": {
+          "cpu_s": 0.02,
+          "cpu_ticks_delta": 2,
+          "duration_s": 900.0026320930046,
+          "group_pids": [
+            1930185
+          ],
+          "identities": [
+            {
+              "pid": 1930185,
+              "starttime": "5655960"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 0,
+            "voluntary_ctxt_switches": 0
+          },
+          "private_dirty_change_kib": 128,
+          "private_dirty_end_kib": 8440,
+          "private_dirty_range_kib": {
+            "max": 8440,
+            "median": 8432,
+            "min": 8312
+          },
+          "private_dirty_start_kib": 8312,
+          "processes": [
+            {
+              "cpu_ticks_delta": 2,
+              "fd_end": 7,
+              "fd_start": 7,
+              "pid": 1930185,
+              "private_dirty_end_kib": 8440,
+              "pss_end_kib": 33844,
+              "role": "engine",
+              "threads_end": 12,
+              "threads_start": 12,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": 128,
+          "pss_end_kib": 33844,
+          "pss_range_kib": {
+            "max": 33844,
+            "median": 33836,
+            "min": 33716
+          },
+          "pss_start_kib": 33716,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-3-engine/samples.json",
+          "samples_sha256": "0e35723519e63b5622bb017170762e0e4e7d016e81dcb15ee8d3c5a5cc7a56ba",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        },
+        "full": {
+          "cpu_s": 0.04,
+          "cpu_ticks_delta": 4,
+          "duration_s": 900.0009938160001,
+          "group_pids": [
+            1914326,
+            1914365
+          ],
+          "identities": [
+            {
+              "pid": 1914326,
+              "starttime": "5565833"
+            },
+            {
+              "pid": 1914365,
+              "starttime": "5565941"
+            }
+          ],
+          "main_thread_context_delta_proxy_not_wakeups": {
+            "nonvoluntary_ctxt_switches": 32,
+            "voluntary_ctxt_switches": 117
+          },
+          "private_dirty_change_kib": 256,
+          "private_dirty_end_kib": 68356,
+          "private_dirty_range_kib": {
+            "max": 68356,
+            "median": 68252,
+            "min": 67944
+          },
+          "private_dirty_start_kib": 68100,
+          "processes": [
+            {
+              "cpu_ticks_delta": 3,
+              "fd_end": 27,
+              "fd_start": 31,
+              "pid": 1914326,
+              "private_dirty_end_kib": 34312,
+              "pss_end_kib": 87935,
+              "role": "gui_with_integrated_product_tray",
+              "threads_end": 4,
+              "threads_start": 10,
+              "uss_end_kib": null
+            },
+            {
+              "cpu_ticks_delta": 1,
+              "fd_end": 8,
+              "fd_start": 8,
+              "pid": 1914365,
+              "private_dirty_end_kib": 34044,
+              "pss_end_kib": 34044,
+              "role": "engine",
+              "threads_end": 12,
+              "threads_start": 12,
+              "uss_end_kib": null
+            }
+          ],
+          "pss_change_kib": -96,
+          "pss_end_kib": 121979,
+          "pss_range_kib": {
+            "max": 122206,
+            "median": 122167,
+            "min": 121489
+          },
+          "pss_start_kib": 122075,
+          "rows": 31,
+          "sampler_pid": 1658427,
+          "samples_path": "/home/myrs/projects/yonik/local/evidence/p02-short-private-20261114/short-campaign2/xray-3-full/samples.json",
+          "samples_sha256": "30e6b8f975893401747554f06363892ef39917bc926f4da162903aff68866fdd",
+          "uss_change_kib": null,
+          "uss_end_kib": null,
+          "wakeups": null
+        }
+      }
+    }
+  ],
+  "qualifications": [
+    "R-A: старые пять пар — только bounded observational snapshots; новые guards не применялись ретроактивно.",
+    "Нет process-spawn tracing между samples; отсутствие краткоживущих children не доказано.",
+    "GUI включает integrated product tray; private SNI fixture исключён, отдельной PSS product tray нет.",
+    "Private_Dirty — нижняя часть USS; точный USS неизвестен. Context switches — только main-thread proxy, не wakeups.",
+    "Dev/unoptimized GUI, LocalSocks/no-app-rules/offscreen/software/private SNI; старые AC/powersave conditions не доказывают условия новой пары.",
+    "Нет процента CPU overhead при near-zero baseline; нет energy/GPU/physical/8h/final Linux P02 PASS.",
+    "Нет зарегистрированного targeted-control overlap в retained пяти; иная host-нагрузка не исключена."
+  ],
+  "replacement_terminal": {
+    "cleanup_fallbacks": [],
+    "config_bytes_equal": true,
+    "config_sha256": "72dce20688cdad920ecdabe6e441164d17b834737e3315d04d390edc2e1e5cf8",
+    "engine": {
+      "cpu_s": 0.03,
+      "duration_s": 900.031132714008,
+      "group_pids": [
+        3346662
+      ],
+      "private_dirty_end_kib": 16376,
+      "pss_end_kib": 47451,
+      "sampler_outside_group": 3328083,
+      "wakeups": null,
+      "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+    },
+    "exit_code": 0,
+    "failure_json_present": false,
+    "full": {
+      "cpu_s": 0.04,
+      "duration_s": 900.0410538800061,
+      "group_pids": [
+        3328121,
+        3328216
+      ],
+      "private_dirty_end_kib": 97708,
+      "pss_end_kib": 144969,
+      "sampler_outside_group": 3328083,
+      "wakeups": null,
+      "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+    },
+    "live_owned_identities": [],
+    "manifest_sha256": "21f90aa0776ba26870c0e691c7479d9a122efbd64e961ae4beac8d781b51033e",
+    "native_handle": 21523,
+    "owned_identity_checks": [
+      {
+        "pid": 3328083,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257882"
+      },
+      {
+        "pid": 3328121,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257928"
+      },
+      {
+        "pid": 3328216,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9258143"
+      },
+      {
+        "pid": 3346662,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9348176"
+      },
+      {
+        "pid": 3328101,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257915"
+      },
+      {
+        "pid": 3328117,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257921"
+      },
+      {
+        "pid": 3328118,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257921"
+      },
+      {
+        "pid": 3328119,
+        "proc_present": false,
+        "same_identity_alive": false,
+        "starttime": "9257921"
+      }
+    ],
+    "pin_errors": [],
+    "result_config_sha256": "72dce20688cdad920ecdabe6e441164d17b834737e3315d04d390edc2e1e5cf8",
+    "result_sha256": "eb0442a7b0665e2b529e07724fe826586210c270c730732f5f7a20d31785bf0b",
+    "status": "REPLACEMENT_PAIR_RECORDED_REVIEW_REQUIRED",
+    "verified_unix": 1794664202.8129756
+  },
+  "uss": null,
+  "uss_reason": "Private_Clean не сохранён; Private_Dirty не равен USS.",
+  "validator_source_commit": "51fd15a3a94c1e5e2ca400e1dcd7ccf26438715e",
+  "wakeups": null,
+  "window_count": 12
+}
