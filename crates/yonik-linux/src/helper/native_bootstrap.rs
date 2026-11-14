@@ -160,6 +160,7 @@ use std::{os::fd::OwnedFd, sync::Arc};
 pub(crate) struct RuntimeScopeStamp {
     inner: Arc<VerifiedCoverage>,
     owner: crate::managed_network::Ownership,
+    queue: Arc<BoundTun>,
 }
 pub(crate) struct SessionRole {
     scope: RuntimeScopeStamp,
@@ -252,6 +253,7 @@ pub(crate) fn verify_pending(
     let stamp = RuntimeScopeStamp {
         inner: Arc::new(coverage),
         owner: journal.ownership(),
+        queue: Arc::clone(&queue),
     };
     stamp.validate_admission()?;
     stamp
@@ -264,6 +266,7 @@ pub(crate) fn verify_pending(
         scope: RuntimeScopeStamp {
             inner: Arc::clone(&stamp.inner),
             owner: stamp.owner,
+            queue: Arc::clone(&stamp.queue),
         },
     };
     Ok(IssuedNativeRoles {
@@ -300,6 +303,7 @@ impl RuntimeScopeStamp {
         Self {
             inner: Arc::clone(&self.inner),
             owner: self.owner,
+            queue: Arc::clone(&self.queue),
         }
     }
 }

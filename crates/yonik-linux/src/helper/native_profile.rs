@@ -109,7 +109,13 @@ fn parse(file: &File) -> Result<Deployment> {
     if bytes.len() as u64 != before.len || stamp(file)? != before {
         return Err(Error::Stale);
     }
-    let value: Deployment = serde_json::from_slice(&bytes).map_err(|_| Error::Untrusted)?;
+    parse_bytes(&bytes)
+}
+fn parse_bytes(bytes: &[u8]) -> Result<Deployment> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_METADATA {
+        return Err(Error::Untrusted);
+    }
+    let value: Deployment = serde_json::from_slice(bytes).map_err(|_| Error::Untrusted)?;
     if value.schema != 1
         || value.policy_id != POLICY
         || value.kernel_abi != ABI
@@ -240,5 +246,53 @@ impl VerifiedInstalledProfile {
     }
     pub(super) fn observation(&self) -> &BootstrapUnitObservation {
         &self.observation
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn metadata() -> serde_json::Value {
+        serde_json::json!({ "schema":1, "worker_sha256":[1;32].to_vec(),
+            "source_archive_sha256":[2;32].to_vec(),"policy_id":POLICY,
+            "policy_sha256":[3;32].to_vec(),"kernel_release":"6.18.1-test", 
+            "kernel_machine":std::env::consts::ARCH,"kernel_abi":ABI })
+    }
+    #[test]
+    fn pure_deployment_metadata_accepts_complete_contract_data() {
+        assert!(parse_bytes(&serde_json::to_vec(&metadata()).unwrap()).is_ok());
+    }
+    #[test]
+    fn pure_deployment_metadata_rejects_unknown_duplicate_missing_and_zero_digest() {
+        let mut value = metadata();
+        value["enabled"] = true.into();
+        assert!(parse_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        let encoded = serde_json::to_string(&metadata()).unwrap();
+        let duplicate = format!("{{\"schema\":1,{}", &encoded[1..]);
+        assert!(parse_bytes(duplicate.as_bytes()).is_err());
+        for field in ["schema", "worker_sha256", "kernel_release", "kernel_abi"] {
+            let mut value = metadata();
+            value.as_object_mut().unwrap().remove(field);
+            assert!(parse_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+        for field in ["worker_sha256", "source_archive_sha256", "policy_sha256"] {
+            let mut value = metadata();
+            value[field] = serde_json::json!([0; 32].to_vec());
+            assert!(parse_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+    }
+    #[test]
+    fn pure_deployment_metadata_rejects_bounds_path_and_abi_substitution() {
+        assert!(parse_bytes(&vec![b' '; 4097]).is_err());
+        for (field, bad) in [
+            ("kernel_release", "../../release"),
+            ("kernel_machine", "unknown"),
+            ("kernel_abi", "v3"),
+            ("policy_id", "unit"),
+        ] {
+            let mut value = metadata();
+            value[field] = bad.into();
+            assert!(parse_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
     }
 }
