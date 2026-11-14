@@ -1,0 +1,255 @@
+{
+  "frozen_ref": "2599fe70ca93ebd14baaa8932e9de69fc5d66a94",
+  "frozen_statement_fix": "40c754e12d1bf5e3d15d7d5f79c38675f43e11dc",
+  "registry_inventories_not_header_closure": [
+    {
+      "ref": "2599fe70ca93ebd14baaa8932e9de69fc5d66a94",
+      "path": "docs/evidence/linux-controller-rehearsal-14229843/registry-inventory.json",
+      "sha256": "e3f3aa5b2c5e07403489ac08e74ee7a159680c524dfedd648f33405bbc8db8ca",
+      "retained_file_count": 13,
+      "qt_header_depfile_records": []
+    },
+    {
+      "ref": "2599fe70ca93ebd14baaa8932e9de69fc5d66a94",
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/registry-inventory.json",
+      "sha256": "aead5cbae3efd6cc3d6bae7e471e278d8b5659a5be3ced828f830267c9a4c442",
+      "retained_file_count": 46,
+      "qt_header_depfile_records": []
+    },
+    {
+      "ref": "2599fe70ca93ebd14baaa8932e9de69fc5d66a94",
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-3/registry-inventory.json",
+      "sha256": "20da62ce87f0a9475a14067426da82c9b9654ed7ea43ea03582c36ca84e70607",
+      "retained_file_count": 770,
+      "qt_header_depfile_records": []
+    }
+  ],
+  "rust_commands": [
+    {
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/0.command.json",
+      "sha256": "b8bf21ba93f70636e372d6701a47924864cba1fe563d138e2f4c6aac68262d73",
+      "argv": [
+        "rustc",
+        "--version"
+      ],
+      "exit": 0,
+      "build_env": {
+        "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+        "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+        "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+        "CARGO_BUILD_JOBS": "1",
+        "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2"
+      }
+    },
+    {
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/1.command.json",
+      "sha256": "55b4f2d985f19a013e6f953f4c52fc28b06469752992cc5652a3671fc8167b15",
+      "argv": [
+        "cargo",
+        "--version"
+      ],
+      "exit": 0,
+      "build_env": {
+        "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+        "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+        "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+        "CARGO_BUILD_JOBS": "1",
+        "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2"
+      }
+    },
+    {
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/2.command.json",
+      "sha256": "a9c813a68dde5d61fe2b0fddffd4b6c02529600d1b20f03356120cd99310d2bc",
+      "argv": [
+        "/home/myrs/projects/yonik/local/orchestration/with-rust-slot",
+        "cargo",
+        "rustc",
+        "--locked",
+        "--release",
+        "-p",
+        "yonik-desktop",
+        "--features",
+        "gui",
+        "--bin",
+        "yonik-desktop",
+        "--",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_qml_module_cloud_highpriority_yonik",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_yonik_desktop",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt_lib",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt"
+      ],
+      "exit": 0,
+      "build_env": {
+        "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+        "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+        "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+        "CARGO_BUILD_JOBS": "1",
+        "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2"
+      }
+    },
+    {
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/3.command.json",
+      "sha256": "329103e707fd59165cd28231ee9fc612795d5a1e7a1b9b829dfdec3ea6ec539a",
+      "argv": [
+        "/home/myrs/projects/yonik/local/orchestration/with-rust-slot",
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "yonik-linux",
+        "--bin",
+        "yonik-helper",
+        "--bin",
+        "yonik-worker"
+      ],
+      "exit": 0,
+      "build_env": {
+        "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+        "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+        "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+        "CARGO_BUILD_JOBS": "1",
+        "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2"
+      }
+    },
+    {
+      "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/9.command.json",
+      "sha256": "c520a33a033bdc01403fcd1b51a655d8cf2c215343e4125972abf9e45e4930f1",
+      "argv": [
+        "/home/myrs/projects/yonik/local/orchestration/with-rust-slot",
+        "cargo",
+        "clean",
+        "--target-dir",
+        "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target"
+      ],
+      "exit": 0,
+      "build_env": {
+        "RUSTUP_TOOLCHAIN": "1.85.1-x86_64-unknown-linux-gnu",
+        "RUSTC": "/home/myrs/.rustup/toolchains/1.85.1-x86_64-unknown-linux-gnu/bin/rustc",
+        "CARGO_TARGET_DIR": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target",
+        "CARGO_BUILD_JOBS": "1",
+        "YONIK_BUILD_ID": "0.1.0+14229843f9a11bf98ec4f5992df00f3247102ea2"
+      }
+    }
+  ],
+  "desktop_build_stderr": {
+    "path": "docs/evidence/linux-controller-rehearsal-14229843-msrv85-2/controller-logs/2.stderr",
+    "sha256": "73e26d63eee262ca5347d49a3f18955e781e5018f3ca2a6d6b772e7b69c4a418",
+    "bytes": 10469,
+    "bounded_header_generated_path_excerpt": [
+      {
+        "line": 213,
+        "text": "warning: yonik-desktop@0.1.0: In file included from /usr/include/qt6/QtCore/qstring.h:15,"
+      },
+      {
+        "line": 214,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qhashfunctions.h:10,"
+      },
+      {
+        "line": 215,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qlist.h:12,"
+      },
+      {
+        "line": 216,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qstringlist.h:6,"
+      },
+      {
+        "line": 217,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QStringList:1,"
+      },
+      {
+        "line": 218,
+        "text": "warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target/release/build/yonik-desktop-a54d3af1659f2cc0/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:11,"
+      },
+      {
+        "line": 219,
+        "text": "warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target/release/build/yonik-desktop-a54d3af1659f2cc0/out/cxxqtbuild/include/cxx-qt-lib/qstring.h:9,"
+      },
+      {
+        "line": 220,
+        "text": "warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target/release/build/yonik-desktop-a54d3af1659f2cc0/out/cxxqtgen/src/bridge.cxx.cpp:1:"
+      },
+      {
+        "line": 221,
+        "text": "warning: yonik-desktop@0.1.0: /usr/include/qt6/QtCore/qchar.h:48:31: warning: defining 'QChar', which previously failed to be complete in a SFINAE context [-Wsfinae-incomplete=]"
+      },
+      {
+        "line": 226,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcomparehelpers.h:29,"
+      },
+      {
+        "line": 227,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qcompare.h:661,"
+      },
+      {
+        "line": 228,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qnamespace.h:14,"
+      },
+      {
+        "line": 229,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/qbytearray.h:10,"
+      },
+      {
+        "line": 230,
+        "text": "warning: yonik-desktop@0.1.0:                  from /usr/include/qt6/QtCore/QByteArray:1,"
+      },
+      {
+        "line": 231,
+        "text": "warning: yonik-desktop@0.1.0:                  from /var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843-msrv85-2/target/release/build/yonik-desktop-a54d3af1659f2cc0/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:10:"
+      }
+    ]
+  },
+  "package_elf_lineage": [
+    {
+      "path": "usr/bin/yonik-desktop",
+      "sha256": "1ed746b9e2a1e576914dff1344314d3af1b0bf58f601db197e3807c77320fb2d",
+      "matches_frozen_msrv85_2_registry": true
+    },
+    {
+      "path": "usr/lib/yonik/yonik-helper",
+      "sha256": "b7880c28c9210574103137dd81527565562649f483ebbadd77bb9d36d2786e2c",
+      "matches_frozen_msrv85_2_registry": true
+    },
+    {
+      "path": "usr/lib/yonik/yonik-worker",
+      "sha256": "62c73e012b0ad1e69b17c8776194c2bf78f3d720d365dc45698fd1b1ac5db014",
+      "matches_frozen_msrv85_2_registry": true
+    }
+  ],
+  "package_qt_dependency_lines": [
+    "depend = qt6-base",
+    "depend = qt6-declarative",
+    "depend = qt6-svg"
+  ],
+  "exact_outer_source_offers_except_go_zips": [
+    "usr/share/yonik/sources/xray/upstream.tar",
+    "usr/share/yonik/sources/xray/patched.tar",
+    "usr/share/yonik/sources/xray/manifest.json",
+    "usr/share/yonik/sources/xray/prebuild.json",
+    "usr/share/yonik/sources/xray/native-broker-codec.json",
+    "usr/share/yonik/sources/xray/native-broker-codec.patch",
+    "usr/share/yonik/sources/xray/source-lock.json",
+    "usr/share/yonik/sources/sing-box/upstream.tar",
+    "usr/share/yonik/sources/sing-box/patched.tar",
+    "usr/share/yonik/sources/sing-box/manifest.json",
+    "usr/share/yonik/sources/sing-box/prebuild.json",
+    "usr/share/yonik/sources/sing-box/external-tun-configuration.patch",
+    "usr/share/yonik/sources/sing-box/native-broker-codec.json",
+    "usr/share/yonik/sources/sing-box/native-broker-codec.patch",
+    "usr/share/yonik/sources/sing-box/resolution-pin.patch",
+    "usr/share/yonik/sources/sing-box/resolution-provenance.patch",
+    "usr/share/yonik/sources/sing-box/source-lock.json",
+    "usr/share/yonik/sources/sing-box/strict-complete-dns.patch",
+    "usr/share/yonik/sources/release-source.tar"
+  ],
+  "historical_qt_primary_manifest_version": "6.12.0",
+  "actual142_build_qt_version": "MISSING",
+  "actual142_header_hash_binding": "MISSING",
+  "actual142_depfiles_and_generated_sources": "MISSING",
+  "final_build_capture_required": true,
+  "production_gate": false
+}
