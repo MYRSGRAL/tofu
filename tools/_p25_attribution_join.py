@@ -355,9 +355,11 @@ def _attribute(
             argv(row["original_argv"])
         if "compiler_id" in row:
             identity(row["compiler_id"])
-        for field in ("cwd", "depfile", "unit"):
+        for field in ("cwd", "unit"):
             if field in row and row[field] is not None:
                 _absolute(row[field])
+        if row.get("depfile") is not None:
+            relative(row["depfile"])
         for field in ("config_sha256", "stdout_sha256", "stderr_sha256"):
             if field in row:
                 sha(row[field])

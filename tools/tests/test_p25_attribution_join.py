@@ -222,6 +222,20 @@ class AttributionTests(unittest.TestCase):
                 with self.assertRaises(join.CaptureError):
                     self.run_join()
 
+    def test_observed_wrapper_record_preserves_relative_depfile(self) -> None:
+        self.observed["records"][0].update(
+            schema=1,
+            config_sha256=checksum(encode(self.observed["config"])),
+            original_argv=["-c", "/build/bridge.cpp"],
+            cwd="/build",
+            unit="/build/bridge.cpp",
+            depfile="p25capture/0.d",
+            stdout_sha256=checksum(b""),
+            stderr_sha256=checksum(b""),
+        )
+        result = self.run_join()
+        self.assertEqual(result["units"][0]["classification"], "OBSERVED")
+
     def test_classification_cases(self) -> None:
         cases = {
             "missing-origin": "MISSING",
