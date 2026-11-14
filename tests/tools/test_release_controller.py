@@ -251,6 +251,130 @@ class ControllerTest(unittest.TestCase):
             os.stat(self.registry / "unit/frozen.json").st_mode & 0o777, 0o600
         )
 
+    def capture_only(self) -> dict:
+        return c._collect(
+            self.repo,
+            self.registry,
+            "unit",
+            self.task,
+            self.runner,
+            rust_capture_only=True,
+        )
+
+    def test_rust_capture_only_stops_before_native_source_package(self) -> None:
+        self.freeze()
+        original_run = self.runner.run
+
+        def run(argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+            self.assertTrue(argv[0] in ("rustc", "cargo", c.SLOT))
+            if argv[:3] == [c.SLOT, "cargo", "clean"]:
+                self.assertTrue(
+                    (self.registry / "unit/build-capture-manifest.json").is_file()
+                )
+            return original_run(argv, cwd, env)
+
+        with (
+            patch.object(self.runner, "run", side_effect=run),
+            patch.object(c, "restore_job_source", side_effect=AssertionError("source")),
+            patch.object(c, "required_offers", side_effect=AssertionError("offers")),
+            patch.object(c, "package_files", side_effect=AssertionError("package")),
+            patch.object(c, "write_package", side_effect=AssertionError("package")),
+            patch.object(c, "check_core", side_effect=AssertionError("native")),
+        ):
+            result = self.capture_only()
+        self.assertEqual(result["state"], "RUST_CAPTURED_ONLY")
+        self.assertFalse(result["final_linux_acceptance"])
+        self.assertFalse((self.task / "target").exists())
+        folder = self.registry / "unit"
+        self.assertTrue((folder / "rust-captured-only.json").is_file())
+        self.assertFalse((folder / "collected.json").exists())
+        self.assertFalse((folder / "package.tar").exists())
+        with self.assertRaises(ValueError):
+            self.collect()
+        with self.assertRaises(ValueError):
+            c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
+        # Даже ошибочно помещённый partial в full-record slot не принимается.
+        (folder / "collected.json").write_text(json.dumps(result))
+        with self.assertRaises(ValueError):
+            c._verify(self.repo, self.registry, "unit", self.upstream, self.root)
+
+    def test_rust_capture_only_reuse_is_missing_without_build(self) -> None:
+        self.freeze()
+        with patch.object(c, "RUST_REUSE_TARGET", "unit"):
+            with self.assertRaisesRegex(ValueError, "MISSING"):
+                self.capture_only()
+        self.assertEqual(self.runner.commands, [])
+        self.assertFalse(self.task.exists())
+
+    def test_capture_only_cli_dispatch(self) -> None:
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "release_controller.py",
+                    "collect",
+                    "--release-id",
+                    "unit",
+                    "--rust-capture-only",
+                ],
+            ),
+            patch.object(
+                c, "collect_release", return_value={"state": "RUST_CAPTURED_ONLY"}
+            ) as collect,
+            patch.object(sys, "stdout", io.StringIO()),
+        ):
+            c.main()
+        collect.assert_called_once_with("unit", rust_capture_only=True)
+        for operation in ("freeze", "ingest-cores"):
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "release_controller.py",
+                        operation,
+                        "--release-id",
+                        "unit",
+                        "--rust-capture-only",
+                    ],
+                ),
+                patch.object(sys, "stderr", io.StringIO()),
+                self.assertRaises(SystemExit) as error,
+            ):
+                c.main()
+            self.assertEqual(error.exception.code, 2)
+
+    def test_rust_capture_only_retention_failure_keeps_target(self) -> None:
+        self.freeze()
+        with patch.object(c, "retain_build_capture", side_effect=OSError("retention")):
+            with self.assertRaises(OSError):
+                self.capture_only()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+        self.assertFalse((self.registry / "unit/rust-captured-only.json").exists())
+
+    def test_rust_capture_only_fsync_failure_keeps_target(self) -> None:
+        self.freeze()
+        with patch.object(
+            c, "sync_retained_build_inputs", side_effect=OSError("fsync")
+        ):
+            with self.assertRaises(OSError):
+                self.capture_only()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+        self.assertFalse((self.registry / "unit/rust-captured-only.json").exists())
+
     def test_capture_retained_before_clean(self) -> None:
         self.freeze()
         original = self.runner.run
@@ -385,6 +509,15 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(events, ["prepare", "retain"])
         self.assertEqual(result["final_profile"], c.final_capture_profile())
         self.assertEqual(result["build_capture"]["status"], "MISSING")
+
+    def test_capture_only_uses_frozen_final_profile(self) -> None:
+        with patch.object(self, "collect", side_effect=self.capture_only):
+            self.test_final_profile_invokes_only_selected_prepare_and_retain()
+        result = json.loads(
+            (self.registry / "unit/rust-captured-only.json").read_bytes()
+        )
+        self.assertEqual(result["state"], "RUST_CAPTURED_ONLY")
+        self.assertFalse((self.registry / "unit/collected.json").exists())
 
     def test_uncollected_and_fabricated_context(self) -> None:
         self.freeze()
