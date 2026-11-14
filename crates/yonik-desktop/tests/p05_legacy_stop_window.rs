@@ -22,7 +22,13 @@ struct App {
 impl App {
     fn start() -> Self {
         let data = PathBuf::from(std::env::var_os("P05_DATA").expect("private fixture data"));
-        let (trace_tx, trace) = mpsc::sync_channel(512);
+        let (trace_tx, trace) = mpsc::sync_channel(
+            std::env::var("P05_TRACE_CAP")
+                .ok()
+                .map(|v| v.parse::<usize>().expect("capacity"))
+                .unwrap_or(512)
+                .min(512),
+        );
         let overflow = Arc::new(AtomicBool::new(false));
         let config = HostConfig::new(
             data.clone(),
@@ -207,6 +213,13 @@ fn actual_legacy_stop_window() {
     }
     app.close();
     schedules(true);
+    let prepared = schedules(false);
+    let second_due = prepared
+        .iter()
+        .find(|(id, _)| *id == 3)
+        .expect("second source")
+        .1
+        .due_wall;
     control("mode/held");
     let mut app = App::start();
     app.connect();
@@ -258,7 +271,7 @@ fn actual_legacy_stop_window() {
     app.wait(|v| v["revision"] == 2 && v["busy"] == false);
     let second_before = control("stats")["second_requests"].clone();
     std::thread::sleep(Duration::from_secs(95));
-    let closed = app.event(|e| e["phase"] == "state" && e["window_deadline_ns"].is_null());
+    let closed = app.event(|e| e["phase"] == "window_closed" && e["window_deadline_ns"].is_null());
     assert!(closed["at_ns"].as_u64().expect("monotonic") >= deadline.as_u64().expect("deadline"));
     assert_eq!(
         control("stats")["second_requests"],
@@ -271,13 +284,35 @@ fn actual_legacy_stop_window() {
     assert!(page["pending"].is_null());
     app.close();
     let persisted = schedules(false);
+    let second = persisted
+        .iter()
+        .find(|(id, _)| *id == 3)
+        .expect("second source")
+        .1;
+    assert_eq!(
+        second.due_wall, second_due,
+        "second source due сохраняется без переноса за окно"
+    );
+    assert_eq!(second.failures, 0);
     assert!(
-        persisted
-            .iter()
-            .any(|(id, s)| *id == 3 && s.due_wall.is_some())
+        second.due_wall.expect("due")
+            <= std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("wall")
+                .as_secs()
     );
     let mut app = App::start();
     app.send(json!({"command":"select_source","id":2}));
     app.wait(|v| v["source_id"] == 2 && v["revision"] == 2);
     app.close();
+    let reopened = schedules(false);
+    assert_eq!(
+        reopened
+            .iter()
+            .find(|(id, _)| *id == 3)
+            .expect("reopened source")
+            .1
+            .due_wall,
+        second_due
+    );
 }

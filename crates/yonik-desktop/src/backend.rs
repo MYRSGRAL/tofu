@@ -4239,7 +4239,31 @@ async fn run(
                     || policy.metered
                     || policy.battery_saver))
         {
-            if let Err(error) = scheduled.close_window(actor.service(), now).await {
+            #[cfg(feature = "test-support")]
+            {
+                schedule_trace.begin_drain(&config);
+                schedule_trace.emit(
+                    &config,
+                    &scheduled,
+                    *proxy_session.borrow(),
+                    origin.elapsed(),
+                    "window_drain_begin",
+                );
+            }
+            let closed = scheduled.close_window(actor.service(), now).await;
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                if closed.is_ok() {
+                    "window_closed"
+                } else {
+                    "window_close_failed"
+                },
+            );
+            if let Err(error) = closed {
                 actor
                     .state
                     .schedule_error(error, Some(scheduled.generation));
@@ -4260,14 +4284,23 @@ async fn run(
         // Production Stop по-прежнему единственный источник его отзыва.
         #[cfg(test)]
         let lease = lease.or_else(|| proxy_fixture.as_ref().and_then(|_| *proxy_session.borrow()));
-        proxy_session.send_if_modified(|current| {
+        if proxy_session.send_if_modified(|current| {
             if *current == lease {
                 false
             } else {
                 *current = lease;
                 true
             }
-        });
+        }) {
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                "lease_published",
+            );
+        }
         if manual_host.as_ref().is_some_and(|host| host.stale()) {
             actor.pending = None;
             if scheduled.review.is_none() {
