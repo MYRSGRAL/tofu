@@ -13,7 +13,9 @@ def проверить() -> None:
     data = json.loads((folder / "2026-11-14-linux-criteria-302f8bf.json").read_text())
     counts = data["plan_counts"]
     assert counts == {"denominator": 26, "ready": 3, "partial": 21, "deferred": 2}
-    original = (folder / "2026-11-11-linux-acceptance-index.md").read_text().splitlines()
+    original = (
+        (folder / "2026-11-11-linux-acceptance-index.md").read_text().splitlines()
+    )
     expected = [
         (n, line)
         for n, line in enumerate(original, 1)
