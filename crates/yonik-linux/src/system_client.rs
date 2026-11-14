@@ -54,6 +54,14 @@ pub struct Capabilities {
     pub allow_lan: bool,
 }
 
+/// Разрешает лишь попытку Prepare с attribution; не доказывает активную сессию.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativePrepareEligibility {
+    version: u32,
+    pub can_prepare_attribution: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BundleCapabilities {
@@ -261,11 +269,23 @@ impl SystemClient {
             };
             if reply.header().sender().map(|s| s.as_str()) != Some(self.owner.as_str())
                 || reply.body().len() > MAX_JSON + 8
-                || method == "BundleCapabilitiesV1"
-                    && (reply.header().unix_fds().unwrap_or(0) != 0
-                        || reply.body().signature().as_ref().map(|s| s.as_str()) != Some("s"))
+                || matches!(
+                    method,
+                    "BundleCapabilitiesV1" | "NativePrepareEligibilityV1"
+                ) && (reply.header().unix_fds().unwrap_or(0) != 0
+                    || reply.body().signature().as_ref().map(|s| s.as_str()) != Some("s"))
             {
                 return Err(ClientError::Protocol);
+            }
+            if failed
+                && method == "NativePrepareEligibilityV1"
+                && reply.header().error_name().map(|name| name.as_str())
+                    == Some("org.freedesktop.DBus.Error.UnknownMethod")
+            {
+                if Self::owner(&self.connection).await? != self.owner {
+                    return Err(ClientError::OwnerLost);
+                }
+                return Ok("{\"version\":1,\"can_prepare_attribution\":false}".into());
             }
             let json: String = reply
                 .body()
@@ -365,6 +385,33 @@ impl SystemClient {
             _ = self.lost.changed() => Err(ClientError::OwnerLost),
             result = operation => result,
         }
+    }
+    pub async fn native_prepare_eligibility(
+        &mut self,
+        deadline: Instant,
+        cancel: Cancellation,
+    ) -> Result<NativePrepareEligibility, ClientError> {
+        let json = match self
+            .call(
+                "NativePrepareEligibilityV1",
+                "{\"version\":1}".into(),
+                deadline,
+                cancel,
+            )
+            .await
+        {
+            Ok(json) => json,
+            Err(ClientError::Unsupported) => {
+                return Ok(NativePrepareEligibility {
+                    version: 1,
+                    can_prepare_attribution: false,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        let reply: NativePrepareEligibility = decode(&json)?;
+        version(reply.version)?;
+        Ok(reply)
     }
     pub async fn capabilities(
         &mut self,

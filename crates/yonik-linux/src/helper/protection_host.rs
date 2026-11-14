@@ -86,6 +86,7 @@ struct Backend {
     watch: NetworkWatch,
     seed: u64,
     epoch: u64,
+    native_eligibility: Option<super::native_profile::VerifiedStaticInstalledImage>,
     native_owner: session_host::native_owner::NativeOwnerState,
     bindings: Option<NetworkStamp>,
     supervisor: Option<super::SystemWorkerSupervisor>,
@@ -98,6 +99,7 @@ struct Backend {
     isolated: bool,
 }
 enum Operation {
+    NativeEligibility,
     Prepare(u32, bool),
     PrepareProfile(u32, Box<super::service::SystemProfileRequest>),
     PrepareBundle(u32, Box<super::service::SystemBundleRequest>),
@@ -121,6 +123,7 @@ enum Operation {
     },
 }
 enum Reply {
+    NativeEligibility(bool),
     Prepared(GuardArtifact),
     State(ProtectionState),
 }
@@ -175,6 +178,7 @@ impl SystemProtectionHost {
                 watch,
                 seed,
                 epoch: 1,
+                native_eligibility: None,
                 native_owner: session_host::native_owner::NativeOwnerState::fresh(),
                 bindings: None,
                 supervisor: None,
@@ -371,6 +375,23 @@ impl Backend {
     ) -> Result<Reply, ServiceError> {
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
         match operation {
+            Operation::NativeEligibility => {
+                cancel.check().map_err(|_| ServiceError::Cancelled)?;
+                let now = std::time::Instant::now();
+                let cached = self
+                    .native_eligibility
+                    .as_ref()
+                    .is_some_and(|image| now < image.deadline() && image.validate().is_ok());
+                if !cached {
+                    self.native_eligibility = super::native_bootstrap::load_static_preflight(
+                        now + Duration::from_secs(3),
+                    )
+                    .ok();
+                }
+                cancel.check().map_err(|_| ServiceError::Cancelled)?;
+                Ok(Reply::NativeEligibility(self.native_eligibility.is_some()))
+            }
+
             #[cfg(test)]
             Operation::RuntimeProbe(completed) => {
                 tokio::spawn(async move {
@@ -564,6 +585,15 @@ fn compile_protection(
 }
 impl ProtectionHost for SystemProtectionHost {
     type Artifact = GuardArtifact;
+    async fn native_prepare_eligibility(
+        &mut self,
+        cancel: Cancellation,
+    ) -> Result<bool, ServiceError> {
+        match self.job(Operation::NativeEligibility, cancel).await? {
+            Reply::NativeEligibility(value) => Ok(value),
+            _ => Err(ServiceError::Unavailable),
+        }
+    }
     fn bundle_transport(&self) -> bool {
         true
     }

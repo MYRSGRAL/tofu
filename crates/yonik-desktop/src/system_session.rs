@@ -119,11 +119,18 @@ impl SystemSession {
     ) -> Result<(), ClientError> {
         self.fence(revision)?;
         self.prepared = None;
-        if !self
+        let legacy_available = self
             .client
             .capabilities(deadline, cancel.clone())
             .await?
-            .system_tun
+            .system_tun;
+        if !legacy_available
+            && (!policy.policy().requires_attribution()
+                || !self
+                    .client
+                    .native_prepare_eligibility(deadline, cancel.clone())
+                    .await?
+                    .can_prepare_attribution)
         {
             return Err(ClientError::Unsupported);
         }
@@ -168,7 +175,14 @@ impl SystemSession {
         self.state = State::Unknown;
         self.capability = None;
         let caps = self.client.capabilities(deadline, cancel.clone()).await?;
-        if caps.system_tun {
+        if caps.system_tun
+            || self
+                .client
+                .native_prepare_eligibility(deadline, cancel.clone())
+                .await
+                .map(|reply| reply.can_prepare_attribution)
+                .unwrap_or(false)
+        {
             self.capability = Some(Instant::now());
         }
         let result = self.client.state(deadline, cancel).await;

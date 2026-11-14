@@ -37,7 +37,8 @@ subprocess, shell, сетевых клиентов, dispatch произволь�
 как явный отсутствующий pin и никогда не создаёт готовую fixture.
 
 `source_commit`/`source_archive_sha256` связывают YonIK source с helper, worker,
-desktop ELF. Каждая из пяти `artifacts` содержит собственный source commit,
+desktop и acceptance driver ELF. Каждая из шести `artifacts` содержит
+собственный source commit,
 source archive hash, ELF hash/size, build receipt hash, fixed installed path,
 uid/gid/mode. Два prebuilt ядра имеют собственные upstream source archives и
 receipts, а не фиктивную ссылку на YonIK source. Никакие Go builds не выполняются.
@@ -49,13 +50,23 @@ Receipt — assertion доверенного builder, не самостояте�
 Ожидаемые staged inputs: pinned `guest-base.img` (<=16 GiB),
 `guest-base.receipt.json` (`FRESH_GUEST_BASE_V1`, trusted fresh origin,
 NEW_ACCEPTANCE_N5 lineage, NEVER_RUN assertion доверенного builder), `source.tar`, `yonik-helper`, `yonik-worker`,
-`yonik-desktop`, `sing-box`, `xray`, пять `<binary>.receipt.json`,
+`yonik-desktop`, `n5-guest-driver`, `sing-box`, `xray`, шесть `<binary>.receipt.json`,
 `sing-box.source.tar`, `xray.source.tar` и пять canonical unit files. ELF должен
 быть ELF64 little endian x86_64, размером 64 bytes..128 MiB; source archive <=512
 MiB; receipt <=4096 bytes; unit <=65536 bytes. Копирование потоковое, без
 распаковки, с O_NOFOLLOW/regular-file/size и fstat до/после чтения. Частичный
 каталог после ошибки не готов: seal `SEALED_GUEST_FIXTURE_V1.json` создаётся
 последним. Повторное использование существующего destination запрещено.
+
+Драйвер обязателен как `artifacts.driver`: staged `n5-guest-driver` и
+`n5-guest-driver.receipt.json`, installed
+`/usr/lib/yonik-acceptance/n5-guest-driver`, root:root 0555, regular ELF.
+Его source commit/archive должны совпадать с Yonik source; receipt связан с
+ELF hash и этими source pins. Отсутствие driver entry или null pins даёт
+`MISSING`, а подмена path/UID/GID/mode/hash/source — `REJECTED`.
+Это закрывает уже существующее требование actual driver, не добавляет
+production gate или generic argv/env/caller-path API. `setup_plan` включает
+только фиксированную установку драйвера как DATA. Runtime остаётся CLOSED.
 
 `units` зафиксированы literal SHA256 source `3e3127d` (reviewed PR216 head).
 `canonical-units.json` хранит те же **неисполняемые DATA** для pure-тестов и review;
@@ -80,9 +91,10 @@ Receipt обязан быть создан доверенным collector **в O
 monotonic timestamps, actual kernel BUILDID/release/machine, installed files,
 unit hashes, exact profile DATA и guest-only grant binding.
 
-Для пяти ELF нужны actual hash/size/path/root uid+gid/0555 mode/regular kind и
+Для шести ELF нужны actual hash/size/path/root uid+gid/0555 mode/regular kind и
 полная ordered ancestor chain (parent до `/`, root-owned directories без
-writable group/other bits). Native source/profile установлены root:root 0444
+writable group/other bits, special mode bits; search bits обязательны).
+Native source/profile установлены root:root 0444
 по `/usr/lib/yonik/native-{source-v1.tar,profile-v1.json}`; worker root:root 0555.
 Profile file digest берётся от canonical JSON DATA. Таким образом digest policy
 не подменяет installed ELF/source identity или readonly contract.
@@ -106,7 +118,7 @@ captures вместе с receipts и проверять provenance до инте
 ## Только будущий guest-only grant
 
 Перед любым действием отдельно предъявляются: полный source commit/archive SHA,
-SHA256 canonical **заполненного** manifest, base/provenance hash, пять ELF/build
+SHA256 canonical **заполненного** manifest, base/provenance hash, шесть ELF/build
 receipt pins, exact kernel BUILDID и source/profile DATA, фиксированный setup
 план и случаи runner. Разрешение должно прямо охватывать fresh OWN GUEST,
 установку этих конкретных artifacts, guest-only profile registration и bounded
@@ -123,8 +135,17 @@ probes не входят в `setup_plan` и требуют конкретиза�
 
 ## Выполненные проверки подготовки
 
-Пройдено 14 тестов `fixture_tests.py`; ruff format/check пройдены.
+Пройдено 19 тестов `fixture_tests.py`; Ruff 0.17.4 format/check пройдены.
 Только `fixture_tests.py`: pure synthetic DATA, собственные временные regular
 files/symlinks, JSON/ELF-header модели. Ни ELF, ни unit, ни provisioning argv не
 исполняются. Отдельно выполняются `ruff format` и `ruff check`; новые зависимости
 не устанавливаются. Реальных acceptance receipts в этом каталоге нет.
+
+Оставшиеся fixture pins перечислены точно в `manifest.pending.json`: source
+commit/archive; fresh guest base/provenance; kernel BUILDID; coverage digest;
+для каждого из шести ELF — hash, size, source commit/archive, build receipt hash;
+пять unit hashes; profile worker/source/policy hashes, kernel release/BUILDID;
+PID1 hash, worker UID/GID и topology/UID-caps/cgroup-controller hashes.
+Все 52 поля пока null; preflight возвращает `MISSING`. Никакие synthetic значения из тестов не переносятся в
+manifest; `READY` и receipt JSON не дают native authority и не регистрируют host
+profile. Новый observer channel и wire/Go ABI этот пакет не вводит.

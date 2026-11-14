@@ -61,6 +61,17 @@
       "uid": 0,
       "gid": 0,
       "mode": 365
+    },
+    "driver": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/lib/yonik-acceptance/n5-guest-driver",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
     }
   },
   "units": {

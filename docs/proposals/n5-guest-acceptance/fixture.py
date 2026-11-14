@@ -14,6 +14,11 @@ from typing import Any
 SCHEMA = "SEALED_GUEST_FIXTURE_V1"
 RECEIPT = "SEALED_GUEST_RECEIPT_V1"
 FILES = {
+    "driver": (
+        "n5-guest-driver",
+        "/usr/lib/yonik-acceptance/n5-guest-driver",
+        0o555,
+    ),
     "helper": ("yonik-helper", "/usr/lib/yonik/yonik-helper", 0o555),
     "worker": ("yonik-worker", "/usr/lib/yonik/yonik-worker", 0o555),
     "desktop": ("yonik-desktop", "/usr/bin/yonik-desktop", 0o555),
@@ -34,6 +39,7 @@ COVERAGE_POLICY_SHA256 = (
 POLICY = "yonik-own-namespace-fixed16-v1"
 ABI = "linux-native-abi260-ynkch004-ynkns004-v1"
 LIMIT = 512 * 1024 * 1024
+ELF_LIMIT = 128 * 1024 * 1024
 
 
 class Missing(ValueError):
@@ -224,7 +230,7 @@ def _manifest(value: Any) -> list[str]:
         if a["size"] is None:
             missing.append(name + ".size")
         else:
-            _number(a["size"], 64, LIMIT)
+            _number(a["size"], 64, ELF_LIMIT)
         _number(a["mode"], 0, 0o7777)
         if (
             (a["installed_path"], a["uid"], a["gid"], a["mode"])
@@ -233,15 +239,10 @@ def _manifest(value: Any) -> list[str]:
             or type(a["gid"]) is not int
         ):
             raise Invalid("Нарушен installed file contract")
-        if (
-            name not in ("core_a", "core_b")
-            and a["source_archive_sha256"] is not None
-            and (
-                a["source_archive_sha256"] != m["source_archive_sha256"]
-                or a["source_commit"] != m["source_commit"]
-            )
-        ):
-            raise Invalid("ELF из другого source archive")
+        if name not in ("core_a", "core_b"):
+            for key in ("source_archive_sha256", "source_commit"):
+                if a[key] is not None and m[key] is not None and a[key] != m[key]:
+                    raise Invalid("ELF из другого source archive/commit")
     units = _object(m["units"], set(UNITS))
     for unit in UNITS:
         _pin(units[unit], missing, unit)
@@ -394,7 +395,10 @@ def validate_receipt(
                     ancestor["path"] != str(path)
                     or ancestor["uid"] != 0
                     or ancestor["gid"] != 0
-                    or mode & 0o022
+                    or mode & 0o7022
+                    or mode & 0o111 != 0o111
+                    or type(ancestor["uid"]) is not int
+                    or type(ancestor["gid"]) is not int
                     or ancestor["kind"] != "directory"
                 ):
                     raise Invalid("Untrusted installed ancestor")
@@ -557,7 +561,7 @@ def _copy_input(
     )
     try:
         before = os.fstat(fd)
-        limit = 128 * 1024 * 1024 if elf else limit
+        limit = ELF_LIMIT if elf else limit
         if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= limit:
             raise Invalid("Неверный bounded source input")
         if expected_size is not None and before.st_size != expected_size:

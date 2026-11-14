@@ -402,6 +402,7 @@ impl VerifiedStaticInstalledImage {
         self.validate()
     }
     pub(crate) fn validate(&self) -> Result<()> {
+        verify_installed()?;
         let dir = child(&child(&child(&root()?, "usr")?, "lib")?, "yonik")?;
         for ((name, retained), expected) in [
             ("native-profile-v1.json", &self.inner.installed._metadata),

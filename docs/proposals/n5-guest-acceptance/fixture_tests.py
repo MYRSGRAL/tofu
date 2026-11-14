@@ -218,6 +218,136 @@ def receipt(m: dict) -> dict:
 
 
 class FixtureTests(unittest.TestCase):
+    def test_driver_is_required_with_exact_contract(self) -> None:
+        m, _ = inputs()
+        driver = m["artifacts"]["driver"]
+        self.assertEqual(
+            driver["installed_path"], "/usr/lib/yonik-acceptance/n5-guest-driver"
+        )
+        steps = fixture.setup_plan(m)
+        self.assertEqual(
+            steps[0]["argv"][-2:],
+            ["/run/yonik-n5-inputs/n5-guest-driver", driver["installed_path"]],
+        )
+        del m["artifacts"]["driver"]
+        self.assertEqual(fixture.preflight(m).status, "MISSING")
+        self.assertEqual(fixture.setup_plan(m), ())
+
+    def test_driver_missing_pins_and_source_substitution(self) -> None:
+        for key in (
+            "sha256",
+            "size",
+            "source_commit",
+            "source_archive_sha256",
+            "build_receipt_sha256",
+        ):
+            with self.subTest(missing=key):
+                m, _ = inputs()
+                m["artifacts"]["driver"][key] = None
+                self.assertEqual(fixture.preflight(m).status, "MISSING")
+        for key, value in (
+            ("source_commit", "f" * 40),
+            ("source_archive_sha256", "f" * 64),
+            ("installed_path", "/usr/bin/other"),
+            ("mode", 0o755),
+            ("uid", 1),
+            ("gid", 1),
+            ("size", fixture.ELF_LIMIT + 1),
+        ):
+            with self.subTest(field=key):
+                m, _ = inputs()
+                m["artifacts"]["driver"][key] = value
+                self.assertEqual(fixture.preflight(m).status, "REJECTED")
+
+    def test_driver_receipt_identity_and_ancestor_bounds(self) -> None:
+        m, _ = inputs()
+        for key, value in (
+            ("sha256", "f" * 64),
+            ("size", 65),
+            ("installed_path", "/other"),
+            ("uid", 1),
+            ("gid", 1),
+            ("mode", 0o755),
+            ("kind", "symlink"),
+        ):
+            with self.subTest(field=key):
+                r = receipt(m)
+                r["files"]["driver"][key] = value
+                self.assertEqual(fixture.validate_receipt(m, r).status, "REJECTED")
+        for key, value in (
+            ("path", "/other"),
+            ("uid", 1),
+            ("gid", 1),
+            ("mode", 0o777),
+            ("mode", 0o4755),
+            ("mode", 0o644),
+            ("kind", "symlink"),
+        ):
+            for index in range(4):
+                with self.subTest(ancestor=index, field=key, value=value):
+                    r = receipt(m)
+                    r["files"]["driver"]["ancestors"][index][key] = value
+                    self.assertEqual(fixture.validate_receipt(m, r).status, "REJECTED")
+        for chain in ([], receipt(m)["files"]["driver"]["ancestors"] * 2):
+            r = receipt(m)
+            r["files"]["driver"]["ancestors"] = chain
+            self.assertEqual(fixture.validate_receipt(m, r).status, "REJECTED")
+        r = receipt(m)
+        del r["files"]["driver"]
+        self.assertEqual(fixture.validate_receipt(m, r).status, "MISSING")
+
+    def test_driver_staging_attacks_never_seal(self) -> None:
+        for attack in (
+            "missing",
+            "tampered",
+            "substituted",
+            "symlink",
+            "header",
+            "receipt",
+        ):
+            with (
+                self.subTest(attack=attack),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                m, data = inputs()
+                name = "n5-guest-driver"
+                if attack == "missing":
+                    del data[name]
+                elif attack == "tampered":
+                    data[name] += b"tampered"
+                elif attack == "substituted":
+                    data[name] = data["yonik-worker"]
+                elif attack == "header":
+                    data[name] = b"X" * 64
+                    m["artifacts"]["driver"]["sha256"] = digest(data[name])
+                elif attack == "receipt":
+                    record = json.loads(data[name + ".receipt.json"])
+                    record["source_commit"] = "f" * 40
+                    data[name + ".receipt.json"] = fixture.canonical(record)
+                    m["artifacts"]["driver"]["build_receipt_sha256"] = digest(
+                        data[name + ".receipt.json"]
+                    )
+                root = Path(directory)
+                for filename, blob in data.items():
+                    (root / filename).write_bytes(blob)
+                if attack == "symlink":
+                    (root / name).unlink()
+                    (root / name).symlink_to(root / "yonik-worker")
+                result = fixture.stage_inputs(m, root, root / "stage")
+                self.assertEqual(
+                    result.status, "MISSING" if attack == "missing" else "REJECTED"
+                )
+                self.assertFalse(
+                    (root / "stage" / "SEALED_GUEST_FIXTURE_V1.json").exists()
+                )
+
+    def test_pending_manifest_stays_missing(self) -> None:
+        m = fixture.load(Path(__file__).with_name("manifest.pending.json"))
+        check = fixture.preflight(m)
+        self.assertEqual(check.status, "MISSING")
+        self.assertIn("driver.sha256", check.reasons)
+        self.assertEqual(fixture.setup_plan(m), ())
+
     def test_complete_model_and_missing_capture(self) -> None:
         m, _ = inputs()
         self.assertEqual(fixture.validate_receipt(m, receipt(m)).status, "READY")

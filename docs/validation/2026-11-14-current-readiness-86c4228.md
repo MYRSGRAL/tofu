@@ -1,4 +1,4 @@
-# Текущая готовность и оставшаяся очередь — accepted 48ce743
+# Текущая готовность и оставшаяся очередь — accepted b5a9af1
 
 Это компактный source-bound реестр 26 пунктов, не новый test framework и не
 замена исторических 256 строк. Исторический счёт **3/21/2**, знаменатель **26**
@@ -10,13 +10,15 @@ Linux done, final A5 и release PASS не заявлены.
 
 ## Принятая база и источник утверждений
 
-Авторитетный MAIN — `48ce74304a3fb7263ccc7e2c06d96394113a687d` (PR187);
+Авторитетный MAIN — `b5a9af15e8a652ad4c9cde7901df776e94edcca8` (PR218);
+исторический PR187 — `48ce74304a3fb7263ccc7e2c06d96394113a687d`;
 source transfer P05 ограничен `cfcb4576dd0ead9cbf65a5bed95ff4f008813ba9`
 (PR191), предыдущий accepted217 — `a3f609e66e5a95b978c0bf3da34ade4f1445e219`.
 Read-only GitHub API подтвердил PR191 MERGED, exact head
 `b8c7380586472d396b5a60b49bd349fc5c96d80f`, merge SHA выше и parents:
 `a3f609e66e5a95b978c0bf3da34ade4f1445e219` и exact head PR191.
-Локального объекта merge191 нет; источник этой проверки — API, не локальная ancestry.
+Исторический источник этой проверки PR191 — API; актуальная локальная ancestry
+PR216/218 проверена отдельно ниже.
 [PR191](https://github.com/MYRSGRAL/yonik/pull/191) принят как software-only toolkit
 campaign v6; это не physical G-UI/G-POWER PASS.
 Startup [PR214](https://github.com/MYRSGRAL/yonik/pull/214) принят на
@@ -50,10 +52,36 @@ acceptance handoff, не повторная проверка CI/API в наст�
 `379515a` теперь входит в accepted #211: worker-output source integration принят.
 Это не full FR16 runtime/final A5. `ac26` и capture `9f` сами по себе
 не повышают readiness. Startup214 и P25 capture215 + join217 теперь accepted
-в указанных выше границах. N5 software `4ae21`: pure PASS по trusted handoff;
-[PR216](https://github.com/MYRSGRAL/yonik/pull/216) остаётся DRAFT:
-known-positive-path repair, не accepted и не native runtime PASS. Runtime/profile
-закрыты для этой задачи; новые исполнения и профильные проверки не разрешены.
+в указанных выше границах. N5 [PR216](https://github.com/MYRSGRAL/yonik/pull/216)
+теперь accepted software/source: exact head
+`c411b32ce0303158ddb04230f8aff2488ea34bfb`, merge
+`0f69d5e200f9d9434a51f9e2163cdf32c58d655b`, exact 10 CI green и trusted
+scoped reviews: CORE/PIPE baseline/deltas, INSPECT/bus lifetime, main exeFD
+Candidate_Verified/transport, root exact compile inputs/retained source+ELF binding.
+Это заменяет прежний DRAFT/known-positive-path repair статус, но не runtime PASS.
+
+[PR218](https://github.com/MYRSGRAL/yonik/pull/218): exact head
+`088b502197f16e49ce41045ddcf4a5947b6feee9`, merge/current accepted MAIN
+`b5a9af15e8a652ad4c9cde7901df776e94edcca8`, exact 10 CI green и trusted R1/R2
+CLEAN (`38cf32c5` controller/default pipeline, `7991ecc2` used-input retainer).
+Приняты только source-only Rust capturepartial/SDK bytes helpers: они позволяют
+`RUST_CAPTURED_ONLY`, никогда не означают `COLLECTED`; full source OPEN,
+legal NOTPROVEN. Actual build/capture NOT RUN.
+
+Acceptance receipts root: локальные
+`/home/myrs/projects/yonik/local/orchestration/evidence/accepted-216-merge.json` и
+`/home/myrs/projects/yonik/local/orchestration/evidence/accepted-218-merge.json`.
+CI/review утверждения взяты только из trusted acceptance handoff/receipts;
+в этой задаче CI и review заново не исполнялись.
+Локальный Git подтверждает parents merge216: `48ce743` + exact head216;
+parents merge218: merge216 + exact head218. Оба exact head и merge216 — ancestors
+accepted MAIN; accepted MAIN — ancestor текущего task HEAD.
+
+Read-only eligibility `41b` — LOCAL review CLEAN, не accepted main.
+Driver/fixture/root capture CODE pending. Actual sealed tuple, runtime grant,
+profile registration, packet/DNS/app owner, cleanup, full FR16, physical PAM/power
+и final A4/A5 остаются OPEN. Runtime/profile исполнения закрыты для этой задачи;
+новые сборки, capture, runtime и профильные проверки не запускались.
 
 ## P05: принятое решение и границы
 
@@ -129,7 +157,7 @@ Android deferred: P03/P26 (2).
 | P22 | Готов | Исходные batch checks/diagnostics с сохранёнными source bounds. |
 | P23 | Частично | Toolkit191 software-only accepted; physical G-UI/G-POWER отложены без waiver/PASS. |
 | P24 | Частично | Конечный source freeze/package/helper/cores и final A5 OPEN. |
-| P25 | Частично | P25 capture215 + join217 source/tool integration accepted; actual final build и итоговая release/FR/licensing acceptance OPEN. |
+| P25 | Частично | P25 capture215 + join217 и PR218 Rust capturepartial/SDK bytes helpers source-only accepted (`RUST_CAPTURED_ONLY`, не `COLLECTED`); actual final build и итоговая release/FR/licensing acceptance OPEN. |
 | P26 | Отложен | Android приложение/поставка после P03 и Linux v1. |
 
 P21: [requirements:45](../specs/requirements.md) называет две настройки,
@@ -142,7 +170,7 @@ P21: [requirements:45](../specs/requirements.md) называет две нас�
 
 1. Root интегрирует coherent docs patch; final6pairs PR187 принят (`48ce743`). Startup214,
    capture215 + join217 и toolkit191 уже accepted в указанных software/source bounds.
-2. Native N5 (software 4ae21 pure PASS; PR216 DRAFT, known-positive-path repair не accepted) и P12–P17: authority/installed lifecycle, DNS, attribution,
+2. Native N5 (PR216 accepted software/source; read-only eligibility `41b` LOCAL review CLEAN, не accepted main) и P12–P17: driver/fixture/root capture CODE pending; actual sealed tuple, runtime grant, profile registration, authority/installed lifecycle, packet/DNS/app owner, cleanup, attribution,
    private-network и integrated policy proofs. LocalSocks не заменяет System/TUN.
 3. P19–P21 и full FR16 runtime: product paths, physical startup/PAM/reboot/lock и worker
    availability; принятый #211 source integration и capture не закрывают эти строки.
@@ -153,5 +181,5 @@ P21: [requirements:45](../specs/requirements.md) называет две нас�
    software принят отдельно в #214 (оба default OFF); physical power и
    PAM/reboot/lock остаются отдельными gates без PASS. Android P03/P26 остаются отложенными.
 
-Проверка этой правки — только 26 уникальных IDs, решение root 9/15/2, локальные Git ancestry до доступной базы и API merge191,
+Проверка этой правки — только 26 уникальных IDs, решение root 9/15/2, локальные Git ancestry PR216/218 и исторический API merge191,
 локальные ссылки и diff scope. Исторические 256 строк и их artifacts не менялись.
