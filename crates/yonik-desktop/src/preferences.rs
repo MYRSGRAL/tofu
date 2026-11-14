@@ -123,9 +123,39 @@ impl Store {
         }
         Ok(Some(bytes))
     }
-    /// CAS только для сериализованного owner под host single-instance lock.
-    /// Store не захватывает общий lock: external writers могут гоняться с rename.
-    /// Не подключён к production dispatcher до отдельного integration leaf.
+    /// Общий lock всех writers; runtime-dir GUI не участвует в identity.
+    /// Неблокирующий отказ ограничивает ожидание actor и сохраняет исходник.
+    fn writer_lock(&self) -> std::io::Result<File> {
+        let path = self.path.with_file_name("preferences.writer.lock");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(&path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file()
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.mode() & 0o7777 != 0o600
+            || meta.nlink() != 1
+        {
+            return Err(std::io::Error::other("небезопасный lock настроек"));
+        }
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
+        let current = fs::symlink_metadata(&path)?;
+        if current.dev() != meta.dev()
+            || current.ino() != meta.ino()
+            || current.file_type().is_symlink()
+        {
+            return Err(std::io::Error::other("lock настроек заменён"));
+        }
+        Ok(file)
+    }
+    /// CAS под общим writer lock, который удерживается до directory fsync.
     #[allow(dead_code)]
     pub fn save_startup(
         &mut self,
@@ -134,6 +164,7 @@ impl Store {
         autoconnect: bool,
         target: Option<crate::startup_policy::Target>,
     ) -> std::io::Result<(Preferences, SaveOutcome)> {
+        let _lock = self.writer_lock()?;
         let mut settings = match &self.original {
             Some(bytes) => serde_json::from_slice::<Preferences>(bytes)?,
             None => Preferences::default(),
@@ -148,10 +179,14 @@ impl Store {
         settings.autostart_into_tray = autostart_into_tray;
         settings.autoconnect = autoconnect;
         settings.autoconnect_target = target;
-        let outcome = self.save(&settings)?;
+        let outcome = self.save_locked(&settings)?;
         Ok((settings, outcome))
     }
     pub fn save(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
+        let _lock = self.writer_lock()?;
+        self.save_locked(settings)
+    }
+    fn save_locked(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
         let previous_revision = self
             .original
             .as_deref()
@@ -366,6 +401,78 @@ mod tests {
 #[cfg(test)]
 mod startup_tests {
     use super::{Preferences, SaveOutcome, Store, fs};
+    #[test]
+    fn lock_symlink_hardlink_и_неверные_права_не_трогаются() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("yonik-startup-lock-unsafe-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, p, _) = Store::open(&root);
+        let lock = root.join("preferences.writer.lock");
+        let victim = root.join("victim");
+        fs::write(&victim, b"foreign").expect("fixture");
+        fs::set_permissions(&victim, fs::Permissions::from_mode(0o600)).expect("fixture");
+        std::os::unix::fs::symlink(&victim, &lock).expect("fixture");
+        assert!(store.save(&p).is_err());
+        fs::remove_file(&lock).expect("fixture");
+        fs::hard_link(&victim, &lock).expect("fixture");
+        assert!(store.save_startup(0, true, true, None).is_err());
+        fs::remove_file(&lock).expect("fixture");
+        fs::write(&lock, b"foreign").expect("fixture");
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).expect("fixture");
+        assert!(store.save(&p).is_err());
+        assert_eq!(fs::read(&victim).expect("fixture"), b"foreign");
+        assert!(!root.join("preferences.json").exists());
+        fs::remove_dir_all(root).expect("fixture");
+    }
+
+    #[test]
+    fn другой_процесс_с_другим_runtime_не_обходит_lock() {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        let root =
+            std::env::temp_dir().join(format!("yonik-startup-process-lock-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, p, _) = Store::open(&root);
+        store.save(&p).expect("seed");
+        let mut child = Command::new("python3")
+            .args(["-c", "import fcntl,sys; f=open(sys.argv[1], 'r+'); fcntl.flock(f, fcntl.LOCK_EX); print('held', flush=True); sys.stdin.read()"])
+            .arg(root.join("preferences.writer.lock"))
+            .env("XDG_RUNTIME_DIR", root.join("different-runtime"))
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().expect("fixture lock owner");
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().expect("stdout"))
+            .read_line(&mut ready)
+            .expect("ready");
+        assert_eq!(ready.trim(), "held");
+        let original = fs::read(root.join("preferences.json")).expect("original");
+        let ordinary = store.save(&p);
+        let startup = store.save_startup(0, true, true, None);
+        drop(child.stdin.take());
+        assert!(child.wait().expect("child").success());
+        assert!(ordinary.is_err());
+        assert!(startup.is_err());
+        assert_eq!(
+            fs::read(root.join("preferences.json")).expect("preserved"),
+            original
+        );
+        store.save_startup(0, true, false, None).expect("released");
+        fs::remove_dir_all(root).expect("fixture");
+    }
+
+    #[test]
+    fn общий_lock_блокирует_оба_writer_без_ожидания() {
+        let root = std::env::temp_dir().join(format!("yonik-startup-lock-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, p, _) = Store::open(&root);
+        let held = store.writer_lock().expect("lock");
+        assert!(store.save(&p).is_err());
+        assert!(store.save_startup(0, true, true, None).is_err());
+        drop(held);
+        store.save(&p).expect("lock освобождён");
+        fs::remove_dir_all(root).expect("fixture");
+    }
+
     #[test]
     fn миграция_и_четыре_комбинации() {
         let root = std::env::temp_dir().join(format!("yonik-startup-prefs-{}", std::process::id()));
