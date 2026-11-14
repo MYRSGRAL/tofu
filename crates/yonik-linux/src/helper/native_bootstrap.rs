@@ -10,7 +10,7 @@ use crate::{
     Cancellation,
     worker::anchor_exchange::{Challenge, NamespaceObservation},
 };
-use std::{os::unix::net::UnixStream, time::Instant};
+use std::os::unix::net::UnixStream;
 use tokio::time::Instant as Deadline;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -159,6 +159,7 @@ use std::{os::fd::OwnedFd, sync::Arc};
 /// Admission deadline проверяется только при promotion, не на runtime health.
 pub(crate) struct RuntimeScopeStamp {
     inner: Arc<VerifiedCoverage>,
+    owner: crate::managed_network::Ownership,
 }
 pub(crate) struct SessionRole {
     scope: RuntimeScopeStamp,
@@ -236,7 +237,12 @@ pub(crate) fn verify_pending(
         .authorization
         .validate_owner(owner)
         .map_err(|_| Error::Untrusted)?;
-    if journal.ownership().generation() != coverage.expected.generation {
+    if coverage
+        .authorization
+        .owner_binding()
+        .map_err(|_| Error::Untrusted)?
+        != journal.ownership()
+    {
         return Err(Error::Untrusted);
     }
     queue
@@ -245,6 +251,7 @@ pub(crate) fn verify_pending(
     queue.attach_metadata().map_err(|_| Error::Untrusted)?;
     let stamp = RuntimeScopeStamp {
         inner: Arc::new(coverage),
+        owner: journal.ownership(),
     };
     stamp.validate_admission()?;
     stamp
@@ -256,6 +263,7 @@ pub(crate) fn verify_pending(
     let run = RunRole {
         scope: RuntimeScopeStamp {
             inner: Arc::clone(&stamp.inner),
+            owner: stamp.owner,
         },
     };
     Ok(IssuedNativeRoles {
@@ -271,5 +279,27 @@ pub(crate) fn verify_pending(
 impl SessionRole {
     pub(crate) fn into_parts(self) -> (RuntimeScopeStamp, Arc<BoundTun>, OwnedFd) {
         (self.scope, self.queue, self.worker)
+    }
+}
+
+impl VerifiedCoverage {
+    pub(crate) fn take_handoff(&self) -> Result<OwnedFd> {
+        self.custody.take_handoff().map_err(|_| Error::Protocol)
+    }
+}
+
+impl RuntimeScopeStamp {
+    pub(crate) fn lookup_binding(&self) -> (u32, u32, crate::managed_network::Ownership) {
+        (
+            self.inner.expected.task_pid,
+            self.inner.profile.observation().native_uid(),
+            self.owner,
+        )
+    }
+    pub(crate) fn fork_lookup(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            owner: self.owner,
+        }
     }
 }
