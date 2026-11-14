@@ -24,6 +24,81 @@ enum Error {
     Consumed,
 }
 
+/// Нормализованные fixed16 DATA. Не proof и не профиль admission.
+struct RuntimeData16 {
+    pairs: [[u32; 2]; KNOWN8.len()],
+}
+impl RuntimeData16 {
+    fn try_from_observations(
+        observations: &[yonik_nsfs::kernel_probe_v2::Observation],
+    ) -> Result<Self, Error> {
+        if observations.len() != KNOWN8.len() {
+            return Err(Error::ObservationMismatch);
+        }
+        let mut pairs = [[0; 2]; KNOWN8.len()];
+        let mut seen = [false; KNOWN8.len()];
+        for observation in observations {
+            let flag = match observation.namespace {
+                "cgroup" => 0x02000000,
+                "ipc" => 0x08000000,
+                "net" => 0x40000000,
+                "mount" => 0x00020000,
+                "pid" => 0x20000000,
+                "user" => 0x10000000,
+                "uts" => 0x04000000,
+                "time" => 0x80,
+                _ => return Err(Error::ObservationMismatch),
+            };
+            let index = KNOWN8
+                .iter()
+                .position(|known| *known == flag)
+                .ok_or(Error::ObservationMismatch)?;
+            if seen[index] {
+                return Err(Error::ObservationMismatch);
+            }
+            seen[index] = true;
+            pairs[index] = [
+                checked_errno(observation.unshare_errno)?,
+                checked_errno(observation.clone_selector_errno)?,
+            ];
+        }
+        Ok(Self { pairs })
+    }
+}
+fn checked_errno(value: i32) -> Result<u32, Error> {
+    if !(1..=4095).contains(&value) {
+        return Err(Error::Protocol);
+    }
+    Ok(value as u32)
+}
+
+struct RuntimeData {
+    vector: [u32; VECTOR],
+}
+impl RuntimeData {
+    fn from_reports(
+        old3: &yonik_nsfs::kernel_probe::Report,
+        fixed16: RuntimeData16,
+    ) -> Result<Self, Error> {
+        let mut vector = [0; VECTOR];
+        vector[..3].copy_from_slice(&[
+            checked_errno(old3.unshare)?,
+            checked_errno(old3.setns)?,
+            checked_errno(old3.clone3)?,
+        ]);
+        for (slot, pair) in vector[3..].chunks_exact_mut(2).zip(fixed16.pairs) {
+            slot.copy_from_slice(&pair);
+        }
+        Ok(Self { vector })
+    }
+}
+
+/// Отсутствие наблюдения не равно наблюдённому нулю. Не obligation профиля.
+struct DiagnosticCounts {
+    baseline: Option<u32>,
+    current: Option<u32>,
+}
+
 /// Значения поступают из private pending context, никогда из report.
 struct Expected {
     nonce: [u8; 32],
@@ -279,6 +354,28 @@ struct UnitObservations {
 }
 #[cfg(test)]
 fn encode_unit(e: &Expected, observation: UnitObservations) -> Result<[u8; FRAME], Error> {
+    encode_data_v4(
+        e,
+        &RuntimeData {
+            vector: observation.vector,
+        },
+        DiagnosticCounts {
+            baseline: Some(observation.baseline),
+            current: Some(observation.current),
+        },
+    )
+}
+
+/// Чистый DATA encoder: context остаётся private, caller registration отсутствует.
+/// Не вызывает probes, profile verifier или admission; receipt остаётся absent.
+fn encode_data_v4(
+    e: &Expected,
+    data: &RuntimeData,
+    counts: DiagnosticCounts,
+) -> Result<[u8; FRAME], Error> {
+    // В frozen layout нет тега unavailable. Не выдумываем значение или новый wire.
+    let baseline = counts.baseline.ok_or(Error::EvidenceUnavailable)?;
+    let current = counts.current.ok_or(Error::EvidenceUnavailable)?;
     let mut f = [0; FRAME];
     f[..8].copy_from_slice(b"YNKNS004");
     for (o, v) in [
@@ -302,12 +399,12 @@ fn encode_unit(e: &Expected, observation: UnitObservations) -> Result<[u8; FRAME
         (120, e.task_pid),
         (136, e.server_pid),
         (216, 2),
-        (220, observation.baseline),
-        (224, observation.current),
+        (220, baseline),
+        (224, current),
     ] {
         f[o..o + 4].copy_from_slice(&v.to_be_bytes());
     }
-    for (i, v) in observation.vector.iter().enumerate() {
+    for (i, v) in data.vector.iter().enumerate() {
         f[232 + i * 4..236 + i * 4].copy_from_slice(&v.to_be_bytes());
     }
     decode(&f, e)?;
@@ -318,6 +415,178 @@ fn encode_unit(e: &Expected, observation: UnitObservations) -> Result<[u8; FRAME
 mod tests {
     use super::*;
     use std::time::Duration;
+    fn source16() -> Vec<yonik_nsfs::kernel_probe_v2::Observation> {
+        [
+            "time", "mount", "cgroup", "uts", "ipc", "user", "pid", "net",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, namespace)| yonik_nsfs::kernel_probe_v2::Observation {
+            namespace,
+            unshare_errno: 4 + i as i32 * 2,
+            clone_selector_errno: 5 + i as i32 * 2,
+        })
+        .collect()
+    }
+    fn runtime_data() -> RuntimeData {
+        RuntimeData::from_reports(
+            &yonik_nsfs::kernel_probe::Report {
+                unshare: 1,
+                setns: 2,
+                clone3: 3,
+            },
+            RuntimeData16::try_from_observations(&source16()).unwrap(),
+        )
+        .unwrap()
+    }
+    #[test]
+    fn pure_runtime_source_order_to_distinct_wire19() {
+        let wire = [
+            1, 2, 3, 8, 9, 12, 13, 18, 19, 6, 7, 16, 17, 14, 15, 10, 11, 4, 5,
+        ];
+        assert_eq!(runtime_data().vector, wire);
+        let mut reordered = source16();
+        reordered.reverse();
+        let data = RuntimeData::from_reports(
+            &yonik_nsfs::kernel_probe::Report {
+                unshare: 1,
+                setns: 2,
+                clone3: 3,
+            },
+            RuntimeData16::try_from_observations(&reordered).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data.vector, wire);
+    }
+    #[test]
+    fn pure_runtime_rejects_missing_duplicate_unknown_and_errno() {
+        let mut input = source16();
+        input.pop();
+        assert!(RuntimeData16::try_from_observations(&input).is_err());
+        let mut input = source16();
+        input.push(yonik_nsfs::kernel_probe_v2::Observation {
+            namespace: "time",
+            unshare_errno: 1,
+            clone_selector_errno: 2,
+        });
+        assert!(RuntimeData16::try_from_observations(&input).is_err());
+        let mut input = source16();
+        input[7].namespace = "time";
+        assert!(RuntimeData16::try_from_observations(&input).is_err());
+        input[7].namespace = "unknown";
+        assert!(RuntimeData16::try_from_observations(&input).is_err());
+        for value in [i32::MIN, -1, 0, 4096, i32::MAX] {
+            for field in 0..16 {
+                let mut input = source16();
+                if field % 2 == 0 {
+                    input[field / 2].unshare_errno = value;
+                } else {
+                    input[field / 2].clone_selector_errno = value;
+                }
+                assert!(RuntimeData16::try_from_observations(&input).is_err());
+            }
+            for field in 0..3 {
+                let mut report = yonik_nsfs::kernel_probe::Report {
+                    unshare: 1,
+                    setns: 2,
+                    clone3: 3,
+                };
+                match field {
+                    0 => report.unshare = value,
+                    1 => report.setns = value,
+                    _ => report.clone3 = value,
+                }
+                assert!(
+                    RuntimeData::from_reports(
+                        &report,
+                        RuntimeData16::try_from_observations(&source16()).unwrap()
+                    )
+                    .is_err()
+                );
+            }
+        }
+        let input: Vec<_> = source16()
+            .into_iter()
+            .map(|mut o| {
+                o.unshare_errno = 1;
+                o.clone_selector_errno = 4095;
+                o
+            })
+            .collect();
+        assert!(RuntimeData16::try_from_observations(&input).is_ok());
+    }
+    #[test]
+    fn pure_runtime_encoder_golden_and_unavailable_counts() {
+        let mut e = expected();
+        e.observations = runtime_data().vector;
+        let counts = DiagnosticCounts {
+            baseline: Some(0),
+            current: Some(u32::MAX),
+        };
+        let f = encode_data_v4(&e, &runtime_data(), counts).unwrap();
+        let mut golden = [0u8; FRAME];
+        golden[..8].copy_from_slice(b"YNKNS004");
+        for (a, b, value) in [
+            (8, 40, 2),
+            (40, 72, 3),
+            (72, 88, 1),
+            (96, 112, 4),
+            (152, 184, 5),
+        ] {
+            golden[a..b].fill(value);
+        }
+        for (offset, value) in [(88, 1u64), (112, 9), (128, 11), (144, 13)] {
+            golden[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+        }
+        for (offset, value) in [(120, 10u32), (136, 12), (216, 2), (224, u32::MAX)] {
+            golden[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        for (i, value) in [
+            1u32, 2, 3, 8, 9, 12, 13, 18, 19, 6, 7, 16, 17, 14, 15, 10, 11, 4, 5,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            golden[232 + i * 4..236 + i * 4].copy_from_slice(&value.to_be_bytes());
+        }
+        assert_eq!(f, golden);
+        let parsed = decode(&f, &e).unwrap();
+        assert_eq!(parsed.baseline_filters, 0);
+        assert_eq!(parsed.current_filters, u32::MAX);
+        assert_eq!(parsed.receipt_reference, None);
+        assert_eq!(parsed.supported_profile(), Err(Error::EvidenceUnavailable));
+        for counts in [
+            DiagnosticCounts {
+                baseline: None,
+                current: Some(0),
+            },
+            DiagnosticCounts {
+                baseline: Some(0),
+                current: None,
+            },
+            DiagnosticCounts {
+                baseline: None,
+                current: None,
+            },
+        ] {
+            assert_eq!(
+                encode_data_v4(&e, &runtime_data(), counts),
+                Err(Error::EvidenceUnavailable)
+            );
+        }
+        e.observations[0] = 99;
+        assert_eq!(
+            encode_data_v4(
+                &e,
+                &runtime_data(),
+                DiagnosticCounts {
+                    baseline: Some(0),
+                    current: Some(0)
+                }
+            ),
+            Err(Error::ObservationMismatch)
+        );
+    }
     fn expected() -> Expected {
         Expected {
             nonce: [2; 32],
