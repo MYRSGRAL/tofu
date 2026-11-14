@@ -457,3 +457,19 @@ impl VerifiedCoverage {
         })
     }
 }
+
+impl RuntimeScopeStamp {
+    pub(crate) fn same_scope(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+            && self.owner == other.owner
+            && Arc::ptr_eq(&self.queue, &other.queue)
+    }
+}
+
+impl VerifiedCoverage {
+    pub(crate) fn verify_lookup_image(&self, image: &std::fs::File) -> Result<()> {
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        self.profile.verify_lookup_image(image)?;
+        validate_receive_admission(&self.authorization, self.deadline)
+    }
+}

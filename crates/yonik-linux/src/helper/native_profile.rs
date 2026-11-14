@@ -261,6 +261,43 @@ impl VerifiedInstalledProfile {
     }
 }
 
+impl VerifiedInstalledProfile {
+    pub(super) fn verify_lookup_image(&self, image: &File) -> Result<()> {
+        use std::os::unix::fs::FileExt;
+        immutable(image)?;
+        let before = stamp(image)?;
+        if before != stamp(&self.installed.image)? || before.len == 0 || before.len > MAX_ELF {
+            return Err(Error::Untrusted);
+        }
+        // read_at не зависит от offset shared FD и не меняет его у owner.
+        let mut offset = 0u64;
+        let mut digest = Sha256::new();
+        let mut bytes = [0u8; 16384];
+        while offset < before.len {
+            let count = image
+                .read_at(&mut bytes, offset)
+                .map_err(|_| Error::Unavailable)?;
+            if count == 0
+                || offset
+                    .checked_add(count as u64)
+                    .is_none_or(|v| v > before.len)
+            {
+                return Err(Error::Stale);
+            }
+            if offset == 0 && (count < 4 || &bytes[..4] != b"\x7fELF") {
+                return Err(Error::Untrusted);
+            }
+            digest.update(&bytes[..count]);
+            offset += count as u64;
+        }
+        let actual: [u8; 32] = digest.finalize().into();
+        if stamp(image)? != before || actual != self.installed.deployment.worker_sha256 {
+            return Err(Error::Stale);
+        }
+        Ok(())
+    }
+}
+
 /// Linux экспортирует native-endian ELF notes; принимается один полный GNU build-id.
 fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
     if notes.len() > 65536 {
