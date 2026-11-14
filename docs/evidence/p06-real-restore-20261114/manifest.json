@@ -1,0 +1,71 @@
+{
+  "base": "8ea826a04a745c8916e14a4329588c75f66b683e",
+  "scope": "normal maintenance Backup → Restore NEW → fresh normal DesktopHost, actual private KSecretD",
+  "binding": {
+    "source_manifest_sha256": "6990a3c51b011c09e22b00accdb76ff1b945d88f90a2271dbbcaf31a93bb5c0e",
+    "archive_sha256": "5e3e557bf6bfe70da7defe43a7abac70d1b59580b2992af8f122aebfee6027eb",
+    "source_pre_post_exact": true,
+    "build_exit": 0,
+    "binary_sha256": "a4873ff1ec5e892ef7051a85da63873546a08e1cddb9bd19eb9326f3240bb01f",
+    "historical_unbound_executed": false
+  },
+  "source_runtime_check": {
+    "source_pre_build_post_build_post_runtime_exact": true,
+    "files": 2132,
+    "binary_hash_still_exact": true
+  },
+  "commands": {
+    "build": "flock -s /var/tmp/codex-myrs/transient/p06-real-restore-bound /home/myrs/projects/yonik/local/orchestration/with-rust-slot env CARGO_TARGET_DIR=/var/tmp/codex-myrs/transient/p06-real-restore-bound/target CARGO_BUILD_JOBS=1 RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= cargo +1.85.1 build --locked -p yonik-desktop --example p06_real_restore",
+    "clippy": "same flock/slot/environment; cargo +1.85.1 clippy --locked --no-deps -p yonik-desktop --example p06_real_restore -- -D warnings",
+    "run": "python tools/p06_real_restore.py local/evidence/p06-real-restore-bound/p06_real_restore local/evidence/p06-real-restore-bound/actual"
+  },
+  "runtime_inputs": {
+    "executables": {
+      "/usr/bin/ksecretd": "68bc49018a313a38c84b2f1e169870210dd58718c0df6a39dce884c8acc55b74",
+      "/usr/bin/dbus-daemon": "522332a124a114f1018e5bd9639bc1f682e2bba121ddf1b74fa6b4a612bc6823",
+      "/usr/bin/busctl": "dd79ce5de50a090dd341a2f82be66411eb156e35fc298f097862e8afb98e54fe",
+      "/usr/bin/python": "dd65a07e8f535525443d63e2bd6dd10efbf22bf22e0b6d65e634266acc7ac976"
+    },
+    "packages": "kwallet 6.30.0-1.1\ndbus 1.16.2-1.1\npython 3.14.7-2\n",
+    "isolation": "private empty-service-dir bus + own HOME/XDG + fresh nonce; no host credentials"
+  },
+  "toolchain": "rustc 1.85.1 (4eb161250 2025-03-15)\nbinary: rustc\ncommit-hash: 4eb161250e340c8f48f66e2b929ef4a5bed7c181\ncommit-date: 2025-03-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.85.1\nLLVM version: 19.1.7\n",
+  "checks": {
+    "build_exit": 0,
+    "clippy_exit": 0,
+    "runtime_exit": 0
+  },
+  "retained_evidence": "/home/myrs/.t3/worktrees/yonik/t3-1c52ca16-f07156ea4067fb30/local/evidence/p06-real-restore-bound",
+  "historical_unbound_executed": false,
+  "hashes": {
+    "source-before.json": "6990a3c51b011c09e22b00accdb76ff1b945d88f90a2271dbbcaf31a93bb5c0e",
+    "source-before.tar.gz": "5e3e557bf6bfe70da7defe43a7abac70d1b59580b2992af8f122aebfee6027eb",
+    "source-archive.sha256": "c0770cbc9a5bb80385fe606c379d5104bc675f394cdf92471fd197e130fcc3db",
+    "toolchain.log": "e569d7e196207e57f20aae13320a6b747b909de88c603c401bdb14ee3eeb121c",
+    "build.log": "f7a7835f18287c85d3d26c13eeb1df2889c7f92ce7e870106fd6210477d8108c",
+    "runtime-inputs.json": "48800de8d3da138338dfbeadfd182aac487f59ca1f47b3e3ba46af6aeba9a15c",
+    "commands.json": "14a4711308f0b76a32b9e8b0173c20aeb380a79dfe22fb5acf2d3ac734661bd1",
+    "build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "p06_real_restore": "a4873ff1ec5e892ef7051a85da63873546a08e1cddb9bd19eb9326f3240bb01f",
+    "build-binding.json": "78b3269239790007718696003d6658dfee4b730213297f92b3ad8ced448a4024",
+    "clippy.log": "04d803e3131d3051a8e8303b72d5b38a855ec79b72f5022efe36676a7cab1c8d",
+    "runtime-launcher.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "runtime.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runtime-source-check.json": "7d140c673e0aacbd8589805c80e5d25232c5bb548baf600fc3549d90bee71fa4",
+    "actual/daemon.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "actual/seed.log": "0d4c0e8c22a6ca03e218d96992920597850ae5c31ff68e429d668721d2267c6b",
+    "actual/backup.log": "bc45d1bbe92b89df6cb183954a663c396fece284b19476508a81be83f0054689",
+    "actual/restore.log": "4a978da76e0e9b65697dc3dfab08ca1f821f9a04cfeea10c5d1262061dec0e37",
+    "actual/negative.log": "53be8f516da2fd54eedea44f370e0c6cce4c6b07c6e1fa33ee69c2ac9a161d73",
+    "actual/reopen.log": "eda98b9f9afcf6325448b61fa0f136d1717b7fae69c2e8f059f1ba3f9ec15e4c",
+    "actual/verify.log": "99418743492f9123fba66f98dc4cd04b46e7ed20fb712e9ccd2fdf1390bd7424",
+    "actual/result.json": "c724a6c01249cd24b04a17ee11bd69e02f0e6f7956ae0ab684e73847a4c1a62e"
+  },
+  "compiled_source_hashes": {
+    "Cargo.lock": "e382980de006ea12a6b7bc1c690bfc467bd34915226aae270241fdac0118ea98",
+    "Cargo.toml": "844e69eb9feeaf4232de36b8360d91afc9afe88e39aa9e95787c97752f064cc6",
+    "crates/yonik-desktop/Cargo.toml": "c959abf7bd2b907436584f18a6201e6a9aef9730b2462dbf39b2ab22361afa82",
+    "crates/yonik-desktop/examples/p06_real_restore.rs": "f882f8f614d7cc6f031d647f91a4ce8f782645f62746f3b8710485bdc2ed4756",
+    "tools/p06_real_restore.py": "a69d90fa0d3775ac0f6251fb80473a962fd6135ef9631c0ac160f98ead2ac3c9"
+  }
+}
