@@ -104,3 +104,32 @@ async fn event_log_observes_real_process_stop_and_reap() {
     );
     assert_eq!(page.events[1].source, EventSource::Engine);
 }
+
+#[tokio::test]
+async fn native_readers_are_joined_after_local_start_failure() {
+    use crate::host::{BinarySnapshot, Cancellation, Sha256};
+    use sha2::{Digest, Sha256 as Hasher};
+    use std::num::NonZeroU16;
+    use yonik_engine::{Engine, ProbeAccess};
+    let binary = BinarySnapshot::load(
+        std::path::Path::new("/usr/bin/false"),
+        Sha256(Hasher::digest(std::fs::read("/usr/bin/false").unwrap()).into()),
+        Engine::Xray,
+    )
+    .unwrap();
+    let checked = super::CheckedConfig {
+        binary,
+        bytes: b"{}".to_vec(),
+        digest: ConfigDigest::new([0; 32]),
+        port: NonZeroU16::new(24444).unwrap(),
+        probe_port: NonZeroU16::new(24444).unwrap(),
+        probe_access: ProbeAccess::default(),
+    };
+    let mut session = LocalSession::new()
+        .unwrap()
+        .with_event_log(crate::event_log::EventLog::new());
+    let (_sender, mut cancel) = Cancellation::new();
+    assert!(session.start(checked, &mut cancel).await.is_err());
+    assert!(session.readers.is_none());
+    assert!(session.child.is_none());
+}

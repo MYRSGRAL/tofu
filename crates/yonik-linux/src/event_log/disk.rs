@@ -371,6 +371,10 @@ fn encode((e, context): Record) -> String {
         EventCode::CleanupConfirmed => 4,
         EventCode::CleanupFailed => 5,
         EventCode::ProcessExited => 6,
+        EventCode::NativeSingStarted => 7,
+        EventCode::NativeSingMissingInterface => 8,
+        EventCode::NativeXrayStarted => 9,
+        EventCode::NativeXrayLocalDns => 10,
     };
     let (present, session, generation) =
         context.map_or((0, 0, 0), |c| (1, c.session_id, c.generation));
@@ -389,13 +393,36 @@ fn valid(line: &[u8]) -> bool {
         return false;
     };
     let fields: Vec<_> = text.split(' ').collect();
-    fields.len() == 9
-        && fields[0] == "1"
+    if fields.len() != 9 || fields[0] != "1" {
+        return false;
+    }
+    let code = match fields[3] {
+        "1" | "2" | "3" | "4" | "5" | "6" => None,
+        "7" => Some(EventCode::NativeSingStarted),
+        "8" => Some(EventCode::NativeSingMissingInterface),
+        "9" => Some(EventCode::NativeXrayStarted),
+        "10" => Some(EventCode::NativeXrayLocalDns),
+        _ => return false,
+    };
+    let Ok(value) = fields[5].parse::<i32>() else {
+        return false;
+    };
+    let optional = match fields[4] {
+        "0" => None,
+        "1" => Some(value),
+        _ => return false,
+    };
+    let native_valid = code.is_none_or(|code| {
+        fields[2] == "2"
+            && fields[6] == "1"
+            && fields[7].parse::<u64>().is_ok_and(|n| n != 0)
+            && fields[8].parse::<u64>().is_ok_and(|n| n != 0)
+            && (optional.is_some() || value == 0)
+            && super::native_details::project(EventSource::Engine, code, optional).is_some()
+    });
+    native_valid
         && fields[1].parse::<u64>().is_ok()
         && matches!(fields[2], "1" | "2")
-        && matches!(fields[3], "1" | "2" | "3" | "4" | "5" | "6")
-        && matches!(fields[4], "0" | "1")
-        && fields[5].parse::<i32>().is_ok()
         && matches!(fields[6], "0" | "1")
         && fields[7].parse::<u64>().is_ok()
         && fields[8].parse::<u64>().is_ok()
@@ -785,3 +812,49 @@ mod acceptance;
 
 #[cfg(any(test, feature = "test-support"))]
 pub(super) mod test_support;
+
+#[cfg(test)]
+mod native_codec_tests {
+    use super::*;
+    #[test]
+    fn native_numeric_records_revalidate_and_legacy_reader_rejects_new_codes() {
+        for (code, value) in [
+            (EventCode::NativeSingStarted, Some(123)),
+            (EventCode::NativeSingMissingInterface, None),
+            (EventCode::NativeXrayStarted, None),
+            (EventCode::NativeXrayLocalDns, None),
+        ] {
+            let line = encode((
+                LogEvent {
+                    id: u64::MAX,
+                    source: EventSource::Engine,
+                    code,
+                    value,
+                },
+                Some(EventContext {
+                    session_id: u64::MAX,
+                    generation: u64::MAX,
+                }),
+            ));
+            assert!(line.len() <= 192);
+            assert_eq!(line.split_whitespace().count(), 9);
+            assert!(valid(line.trim_end().as_bytes()));
+            // Точный старый code allowlist, не запуск прежнего binary.
+            let old_code = line.split_whitespace().nth(3).unwrap();
+            assert!(!matches!(old_code, "1" | "2" | "3" | "4" | "5" | "6"));
+            assert!(!line.contains("started"));
+        }
+        for line in [
+            "1 1 2 7 0 0 1 1 1",
+            "1 1 2 7 1 -1 1 1 1",
+            "1 1 2 7 1 8640001 1 1 1",
+            "1 1 1 9 0 0 1 1 1",
+            "1 1 2 9 1 0 1 1 1",
+            "1 1 2 9 0 42 1 1 1",
+            "1 1 2 9 0 0 0 0 0",
+            "1 1 2 11 0 0 1 1 1",
+        ] {
+            assert!(!valid(line.as_bytes()));
+        }
+    }
+}

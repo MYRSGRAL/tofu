@@ -1,0 +1,71 @@
+{
+  "frozen_head": "6aec304d5b9e20465f08b03be12c9e6a4f0aab8d",
+  "scope": "compact diagnostics notice visibility; NOT full FR16 PASS",
+  "cause": "new unconditional notice increases unqueried panel height; one original wheel does not reach atEnd",
+  "red": "same step78 locally; atEnd=false,moving=false in diagnostic",
+  "green": {
+    "142_actions_normal": true,
+    "142_actions_compact_380_600_scale1_5": true,
+    "both_native_notice_visible": true
+  },
+  "deadline_changed": false,
+  "generic_driver_changed": false,
+  "production_rust_changed": false,
+  "artifact": {
+    "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fixed-yonik-desktop",
+    "sha256": "27497da9be725d21e642f7859392d4da2ad64114d63966a7b51ba4134e743c90"
+  },
+  "source": {
+    "crates/yonik-desktop/qml/LogsView.qml": "52abd5f8687283bff957c072f2bfe728eb3fee0c758765e8f37b672004230469",
+    "crates/yonik-desktop/tests/fr16_notice.py": "e548a35877749861d30746f0c61fd0d94b11801879018deecdcdf0a50bda5102",
+    "crates/yonik-desktop/tests/fr16_local_native.py": "556cb86c4f1b7576aad417b37da38b291b08d6064f7b1612c59bd1275125410e"
+  },
+  "evidence": [
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/frozen.json",
+      "sha256": "5345e42dec008ce46b305f4d1542dcd170e2281df6cf4ff1a76c37d5f95761fa"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/ci-artifact-files.json",
+      "sha256": "9e360d1d976d738d40b46b77ebba496e239bdddecc43bd8edb7ffb889ff73cdc"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/baseline-ci.json",
+      "sha256": "4f0a205e307b4d8963164fe57500d573b952db271b4ab23e869ddbd935c83f7e"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/diagnostic-result.json",
+      "sha256": "f44a3c16675546cf3975844fcc6637bc189c6cf97d0e3eab95b9f0ef5646e074"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/local-compact-red.log",
+      "sha256": "1d22740ac44d04fa0d36755c986f80f060380fd418f6e85789bc24516482fb9b"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fix-build.log",
+      "sha256": "02a5bb60b55528955ea606565d8895e14c3e6ba349db689dd2f1546ba896c114"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fix-execution-binding.json",
+      "sha256": "2da8a53d710519bf000aad86f7a1a8fc78d9eadad98573a89e2c047eed1489f2"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fixed-ui/result.json",
+      "sha256": "1dd137180654f271a2ecc37b71945749ec8e9df71bf905ce2e0bd4dee6bd0d74"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fixed-native/xray/result.json",
+      "sha256": "f655ba9f2a4c187c3d12aae6274671f1437e359dcbe978c541f0cb065b369d4f"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/fixed-native/sing-box/result.json",
+      "sha256": "d06b75aeb2bf4e5283630bf7e7e8d1c9db79d051c9f2a2410af474ff8775c057"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-ci-6aec304/cleanup.json",
+      "sha256": "d7cf5a07d50db29e0ed26a037b985d6f75dfda5b470d4cdcec9f90fce1be7d3a"
+    }
+  ],
+  "remote_new_head_ci": "not yet claimed",
+  "cleanup": "PASS; target and own task root removed"
+}
