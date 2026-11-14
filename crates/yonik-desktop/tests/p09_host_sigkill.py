@@ -79,7 +79,13 @@ def observe(core: dict, fd: int, port: int) -> dict:
     )
 
 
-def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> None:
+def run(
+    binary: Path,
+    engines: Path,
+    output: Path,
+    engine: str = "sing-box",
+    expected_verdict: str | None = None,
+) -> None:
     assert os.getpid() == 1, "Supervisor должен быть namespace init"
     relative, pin = CORES[engine]
     core_path = engines / relative
@@ -156,6 +162,19 @@ def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> 
                                         fd = os.pidfd_open(core["pid"])
                                         tracked.append((core, fd))
                                         case["host"] = capture(host.pid)
+                                        case["host_profile"] = dict(
+                                            line.split(":", 1)
+                                            for line in Path(f"/proc/{host.pid}/status")
+                                            .read_text()
+                                            .splitlines()
+                                            if line.startswith(
+                                                (
+                                                    "Seccomp:",
+                                                    "TracerPid:",
+                                                    "NoNewPrivs:",
+                                                )
+                                            )
+                                        )
                                         case["core"] = core
                                         case["live_negative_canary"] = observe(
                                             core, fd, port
@@ -178,6 +197,10 @@ def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> 
                                             assert not children(host.pid)
                                             assert available(port)
                                             case["exit_reap_rebind"] = True
+                                            if expected_verdict == "exits":
+                                                case["repeat_stop_ack"] = command(
+                                                    host, "stop", "stop"
+                                                )
                                             command(host, "shutdown", "closed")
                                             assert host.wait(timeout=5) == 0
                                         else:
@@ -187,6 +210,13 @@ def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> 
                                             )
                                             case["host_exit"] = -signal.SIGKILL
                                             start = time.monotonic()
+                                            if expected_verdict == "exits":
+                                                assert select.select([fd], [], [], 1)[
+                                                    0
+                                                ], "нет immediate exit после host death"
+                                                case["exit_ready_seconds"] = (
+                                                    time.monotonic() - start
+                                                )
                                             for offset in (0, 1, 2, 3):
                                                 time.sleep(
                                                     max(
@@ -216,6 +246,10 @@ def run(binary: Path, engines: Path, output: Path, engine: str = "sing-box") -> 
                                                 and last["port_available"]
                                                 else "unknown"
                                             )
+                                            if expected_verdict is not None:
+                                                assert (
+                                                    case["verdict"] == expected_verdict
+                                                ), case["verdict"]
                                     finally:
                                         # На ошибке Connect сначала учитываем только собственных детей host.
                                         if host.poll() is None:
@@ -274,13 +308,32 @@ if __name__ == "__main__":
     parser.add_argument("output", type=Path)
     parser.add_argument("--engine", choices=CORES, default="sing-box")
     parser.add_argument("--inside", action="store_true")
+    parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--expected-verdict", choices=("exits", "survives"))
     args = parser.parse_args()
     binary, engines, output = (
         value.resolve() for value in (args.binary, args.engines, args.output)
     )
     output.mkdir(parents=True, exist_ok=True)
+    if args.receipt:
+        receipt = json.loads(args.receipt.read_text())
+        assert receipt["status"] == "VERIFIED_LINUX_RAW"
+        artifact = receipt["executables"]["local_socks_alternating"]
+        assert hashlib.sha256(binary.read_bytes()).hexdigest() == artifact["sha256"]
+        profile = dict(
+            line.split(":", 1)
+            for line in Path("/proc/self/status").read_text().splitlines()
+            if ":" in line
+        )
+        assert profile["Seccomp"].strip() == "0" and profile["TracerPid"].strip() == "0"
+        assert not os.environ.get("LD_PRELOAD") and not os.environ.get("LD_AUDIT")
+        (
+            output / ("inside-profile.json" if args.inside else "preexec-profile.json")
+        ).write_text(json.dumps(profile, indent=2))
+    if args.expected_verdict == "exits":
+        assert args.receipt, "candidate требует receipt"
     if args.inside:
-        run(binary, engines, output, args.engine)
+        run(binary, engines, output, args.engine, args.expected_verdict)
     else:
         subprocess.run(
             [
@@ -298,6 +351,12 @@ if __name__ == "__main__":
                 "--engine",
                 args.engine,
                 "--inside",
+                *(["--receipt", str(args.receipt.resolve())] if args.receipt else []),
+                *(
+                    ["--expected-verdict", args.expected_verdict]
+                    if args.expected_verdict
+                    else []
+                ),
             ],
             check=True,
             timeout=120,

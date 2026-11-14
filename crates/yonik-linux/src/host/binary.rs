@@ -216,6 +216,7 @@ impl BinarySnapshot {
                 command.env(key, value);
             }
         }
+        yonik_nsfs::local_parent_death::install_kill_on_parent_death(command.as_std_mut());
         command
     }
 }

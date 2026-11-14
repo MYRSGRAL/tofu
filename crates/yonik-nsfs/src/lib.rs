@@ -2,6 +2,8 @@
 #![cfg(target_os = "linux")]
 pub mod kernel_probe;
 pub mod kernel_probe_v2;
+/// Fixed parent-death adapter локального sealed core; отдельное unsafe approval.
+pub mod local_parent_death;
 use std::{io, os::fd::AsFd};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
