@@ -39,6 +39,9 @@ HEADER_FIELDS = set(
     "id origin_path sha256 bytes installed_package package_version package_mtree_match qt_version_candidate spdx_expressions notice_excerpt gpl3_compatible_candidates source_fragment version_exact_source_offer_counterpart scope final_capture_join legal_status forwarding_include QT_VERSION_STR reason_no_automatic_license".split()
 )
 OBSERVED_FIELDS = set("schema records qt input_origins config config_sha256".split())
+OBSERVED_RECORD_FIELDS = set(
+    "schema config_sha256 argv original_argv cwd compiler exit depfile unit stdout_sha256 stderr_sha256 compiler_id normalized_depfile".split()
+)
 FILE_FIELDS = set("id root path kind sha256 source_ref".split())
 CODE_KINDS = {"source", "sdk-source", "header", "sdk-unit", "generated"}
 
@@ -333,6 +336,31 @@ def _attribute(
 
     observed_units: dict[tuple, list[dict]] = defaultdict(list)
     for row in sequence(observed["records"]):
+        object_fields(
+            row,
+            OBSERVED_RECORD_FIELDS,
+            {"argv", "compiler", "exit", "normalized_depfile"},
+        )
+        object_fields(row["compiler"], {"path", "sha256"}, {"path", "sha256"})
+        _absolute(row["compiler"]["path"])
+        sha(row["compiler"]["sha256"])
+        argv(row["argv"])
+        require(type(row["exit"]) is int, "Invalid observed exit")
+        if "schema" in row:
+            require(
+                type(row["schema"]) is int and row["schema"] == 1,
+                "Unknown observed schema",
+            )
+        if "original_argv" in row:
+            argv(row["original_argv"])
+        if "compiler_id" in row:
+            identity(row["compiler_id"])
+        for field in ("cwd", "depfile", "unit"):
+            if field in row and row[field] is not None:
+                _absolute(row[field])
+        for field in ("config_sha256", "stdout_sha256", "stderr_sha256"):
+            if field in row:
+                sha(row[field])
         normalized = dep(row.get("normalized_depfile"))
         if normalized is not None:
             observed_units[(normalized["unit"], argv(row["argv"]))].append(row)

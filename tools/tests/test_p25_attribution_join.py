@@ -201,6 +201,27 @@ class AttributionTests(unittest.TestCase):
         self.assertFalse(result["final_linux_acceptance"])
         self.assertEqual(self.candidate, before)
 
+    def test_observed_records_require_closed_nested_objects(self) -> None:
+        for case in (
+            "record-scalar",
+            "compiler-list",
+            "record-extra",
+            "compiler-extra",
+        ):
+            with self.subTest(case=case):
+                self.setUp()
+                row = self.observed["records"][0]
+                if case == "record-scalar":
+                    self.observed["records"].append("invalid")
+                elif case == "compiler-list":
+                    row["compiler"] = []
+                elif case == "record-extra":
+                    row["unexpected"] = True
+                else:
+                    row["compiler"]["unexpected"] = True
+                with self.assertRaises(join.CaptureError):
+                    self.run_join()
+
     def test_classification_cases(self) -> None:
         cases = {
             "missing-origin": "MISSING",
