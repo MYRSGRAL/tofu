@@ -198,3 +198,27 @@ fn p07_both_compilers_refuse_before_routes() {
         assert!(compile(engine, &policy, PolicyMode::IpOnly).is_ok());
     }
 }
+
+#[test]
+fn transport_native_adapters_refuse_enabled_preserve_disabled() {
+    let mut policy = Policy::default();
+    policy.user_rules.push(Rule {
+        id: 51,
+        enabled: true,
+        action: Action::Block,
+        conditions: Conditions {
+            transport: yonik_domain::TransportConditions::parse(Some(&["tcp"]), None).unwrap(),
+            ..Default::default()
+        },
+    });
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert_eq!(
+            compile(engine, &policy, PolicyMode::IpOnly).unwrap_err(),
+            PolicyCompileError::UnsupportedTransport(51)
+        );
+    }
+    policy.user_rules[0].enabled = false;
+    for engine in [Engine::Xray, Engine::SingBox] {
+        assert!(compile(engine, &policy, PolicyMode::IpOnly).is_ok());
+    }
+}
