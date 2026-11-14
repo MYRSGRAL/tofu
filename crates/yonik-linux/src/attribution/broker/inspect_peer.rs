@@ -19,9 +19,19 @@ pub(crate) struct VerifiedPeerSnapshot {
     files: [OwnedFd; 4],
     view: [(u64, u64); 3],
     executable: (u64, u64),
+    identity: SnapshotIdentity,
+}
+#[derive(PartialEq, Eq)]
+struct SnapshotIdentity {
+    pid: u32,
+    uid: u32,
+    start: u64,
+    observer: u32,
+    invocation: [u8; 16],
+    is_peer: bool,
 }
 impl VerifiedPeerSnapshot {
-    fn from_packet(packet: Packet) -> Result<Self, Unavailable> {
+    fn from_packet(packet: Packet, binding: &Binding, is_peer: bool) -> Result<Self, Unavailable> {
         let files: [OwnedFd; 4] = packet
             .rights
             .try_into()
@@ -50,13 +60,38 @@ impl VerifiedPeerSnapshot {
             files,
             view,
             executable: (st.st_dev, st.st_ino),
+            identity: SnapshotIdentity {
+                pid: if is_peer {
+                    binding.caller
+                } else {
+                    binding.inspector
+                },
+                uid: binding.uid,
+                start: if is_peer {
+                    binding.caller_start
+                } else {
+                    binding.inspector_start
+                },
+                observer: binding.inspector,
+                invocation: binding.invocation,
+                is_peer,
+            },
         })
     }
     pub(crate) fn namespace_view(&self) -> [(u64, u64); 3] {
         self.view
     }
     fn same(&self, other: &Self) -> bool {
-        self.view == other.view && self.executable == other.executable
+        self.view == other.view
+            && self.executable == other.executable
+            && self.identity == other.identity
+    }
+    pub(crate) fn require_same_identity(&self, other: &Self) -> Result<(), AttributionFailure> {
+        if self.same(other) {
+            Ok(())
+        } else {
+            Err(AttributionFailure::ProcessChanged)
+        }
     }
 }
 struct Protocol {
@@ -115,7 +150,8 @@ impl Protocol {
                 },
             );
         }
-        let snapshot = VerifiedPeerSnapshot::from_packet(packet).map_err(native)?;
+        let snapshot =
+            VerifiedPeerSnapshot::from_packet(packet, &self.binding, true).map_err(native)?;
         fence(deadline).map_err(native)?;
         Ok(snapshot)
     }
@@ -171,7 +207,8 @@ impl PeerAttestation {
         binding
             .validate(&packet.bytes, wire::ACK, 0, packet.rights.len())
             .map_err(native)?;
-        let inspector = VerifiedPeerSnapshot::from_packet(packet).map_err(native)?;
+        let inspector =
+            VerifiedPeerSnapshot::from_packet(packet, &binding, false).map_err(native)?;
         let image =
             File::from(rustix::io::fcntl_dupfd_cloexec(&inspector.files[3], 3).map_err(native)?);
         lease.verify_image(&image).map_err(native)?;
