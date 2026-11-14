@@ -1,0 +1,77 @@
+{
+  "kind": "data-only historical evidence availability reconciliation; не original execution manifest",
+  "observed_task_head": "d7f9f0b3405bb3c5dfbd3b2c8cadfa4a76f7f046",
+  "original_producer_source": "538ff996507ccc2566d9330e5148e7d4d1767587",
+  "historical_source172": "6f45329b2e0a9b1659232fd4558d75308a6bc6c7",
+  "accepted_base": "8ea826a04a745c8916e14a4329588c75f66b683e",
+  "origin": "/home/myrs/.t3/worktrees/yonik/t3-8fef14a4-df61cef1986fac0c/local/validation/desktop-reviewed-integration",
+  "secondary_canonical_origin": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/validation/desktop-reviewed-integration",
+  "pr174_expected_hash_manifest": {
+    "path": "/home/myrs/projects/yonik/local/evidence/pr174-acceptance-gate-fix/binding.json",
+    "sha256": "117afdd0983d7403f63703f07bf94d615bd9873d6679e731e9078f888f476594"
+  },
+  "own_fixture_root": "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/validation/desktop-reviewed-integration",
+  "exact_files": {
+    "source-binding.json": {
+      "sha256": "58ce5e2f28dc21ae6ba2facb1313202aee5dcbae9c6f5d4984f8325b69eff227",
+      "bytes": 780,
+      "secondary_origin_byte_exact": true,
+      "own_copy_byte_exact": true
+    },
+    "desktop-tests.log": {
+      "sha256": "84ba02851f1662b663b14ea756a0a52efa6c96ea3fc509fcbc83527e8e52aab2",
+      "bytes": 25802,
+      "secondary_origin_byte_exact": true,
+      "own_copy_byte_exact": true
+    }
+  },
+  "verified": {
+    "source_binding_blobs": 7,
+    "historical_desktop_ledger_blobs": 10,
+    "required_pass_test_names": 7,
+    "each_required_name_count": 1,
+    "original_log_passed": 176,
+    "original_log_failed": 0,
+    "original_log_ignored": 4,
+    "ancestry_edges": [
+      [
+        "128a070884e82bf21b5c22a74ba908dadd7daf5a",
+        "538ff996507ccc2566d9330e5148e7d4d1767587"
+      ],
+      [
+        "538ff996507ccc2566d9330e5148e7d4d1767587",
+        "6f45329b2e0a9b1659232fd4558d75308a6bc6c7"
+      ],
+      [
+        "6f45329b2e0a9b1659232fd4558d75308a6bc6c7",
+        "3e64220fc16b7cfdd2170bd0fffc7049d056c8a7"
+      ],
+      [
+        "6f45329b2e0a9b1659232fd4558d75308a6bc6c7",
+        "8ea826a04a745c8916e14a4329588c75f66b683e"
+      ],
+      [
+        "8ea826a04a745c8916e14a4329588c75f66b683e",
+        "d7f9f0b3405bb3c5dfbd3b2c8cadfa4a76f7f046"
+      ]
+    ]
+  },
+  "public_sanitized_copy": "Только exact original source metadata и compiler/test log; нет URL, private PEM, bearer или secret assignment; байты не редактировались.",
+  "gate": {
+    "command": "python -B -m unittest tools.tests.test_p11_integrated_candidate",
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/home/myrs/projects/yonik/local/evidence/p11-historical-reconciliation-20261114/p11-gate.log",
+    "log_sha256": "8eb0a1b99c7f5e2ba7f342c7ac54e5e7de77cc956f57e7cdba76d4dfe41d7b06",
+    "negative_controls": "Существующие mandatory missing-file rejection и stale blob/empty review controls прошли без изменения gate."
+  },
+  "preserved": {
+    "p05_actual_binding_sha256": "8416afa9adbedcccc97f93c7a5fef0dd94309cb83974e579ba4cb050494648c8",
+    "p05_source_freeze_and_execution": true,
+    "old_source_blobs_and_producer_execution": true,
+    "mandatory_gate_unchanged": true
+  },
+  "new_build_or_native_runtime": false,
+  "scope_limit": "Исторический source172/scoped producer proof; не исполнение whole current backend/P05 witness. Недостающим был own path, original evidence доступен. Replay не требуется."
+}
