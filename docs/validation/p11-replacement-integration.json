@@ -36,8 +36,8 @@
     "passed": 6,
     "failed": 0,
     "skipped": 0,
-    "log": "/home/myrs/projects/yonik/local/orchestration/evidence/p11-replacement-typed-20261114/final-freshness-gate.log",
-    "sha256": "5d34d04bd67a7e8c9524d1e535fb22b0f510147ee63f0db386d5a0b50befed40"
+    "log": "/home/myrs/projects/yonik/local/orchestration/evidence/p11-replacement-typed-20261114/final-port-freshness-gate.log",
+    "sha256": "f14752120ed42bb997751048f6d70d28a822192f350783e347f840d3899fb71c"
   },
   "original_P11_promotion": "conditional on exact final CI and merge, per R1 a8b6f83b/R2 932b7107; historical marker unchanged",
   "proposed_PLAN_counts": {
