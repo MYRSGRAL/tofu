@@ -38,7 +38,13 @@ jobs:
       - name: Проверить clippy
         run: cargo +1.85.1 clippy --workspace --all-targets --locked -- -D warnings
       - name: Выполнить тесты
-        run: cargo +1.85.1 test --workspace --locked
+        # FD/flock fixtures требуют отсутствия fork из соседнего harness-теста.
+        # Assertions и полный состав workspace-тестов сохраняются.
+        run: cargo +1.85.1 test --workspace --locked -- --test-threads=1
+      - name: Проверить pure N5 guest driver
+        run: |
+          cargo +1.85.1 clippy -p yonik-desktop --example n5_guest_driver --features test-support --locked -- -D warnings
+          cargo +1.85.1 test -p yonik-desktop --example n5_guest_driver --features test-support --locked -- --test-threads=1
       - name: Проверить настоящие TUN, firewall и recovery в отдельных namespaces
         shell: bash
         run: |
