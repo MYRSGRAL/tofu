@@ -43,14 +43,14 @@ frozen source142 Git, source ZIP hashes и frozen inventories. Не заменя
 | `usr/lib/yonik/cores/xray`, `sing-box` | Первичные core LICENSE, модульные notices, upstream+patched source, patches/toolchain/build данные | Первичные core LICENSE побайтно сверены в `patched.tar:src/LICENSE` с frozen upstream texts (hashes в ledger), отдельно в notices их нет. Actual ELF entries присутствуют; `sources/{xray,sing-box}/{upstream.tar,patched.tar,manifest.json,prebuild.json,source-lock.json}` и adapter patches в том же tar; Go inventory и тексты поставлены. 169 из 173 исторических Go records имеют source ZIP в tar, hashes проверены | Четыре отсутствующих ZIP: purego и три cronet records (полные module names в ledger). Это более широкий historical inventory, отсутствие ZIP само по себе не доказанный missing source фактического ELF; closure binding проверял frozen controller, не новый RE |
 | Qt headers/templates/generated C++/QML | Первичные применимые Qt/generated-code условия и attribution, соответствующий source | Сохранён `composition/qt-sources.json` с первичными hashes; 169 уникальных Qt primary hashes отсутствуют в shipped notices index | Это **кандидаты для attribution**, не 169 обязательных недостающих лицензий: inventory включает third-party/tests/alternative licenses. Точный применимый generated/header набор не установлен. Старый checksum RE не повторялся; missing release-source closure отдельно от missing required text |
 | Qt DSO/plugins/OS | Условия фактической интеграции; внешняя поставка не равна содержимому YonIk | Entry list не содержит libQt/OS DSO; external dataset не повышен до redistributed payload | Не вводится SLSA/побитовая воспроизводимость каждого OS file как новое требование |
-| Notices UI и shipped source statement | Утверждения должны описывать конкретную поставку | SOURCE-OBLIGATIONS и SCOPE byte-identical source142 и accepted3247; CurrentNoticesView в accepted Git утверждает отсутствие cores | Ниже конкретное противоречие statement, независимо от полноты source closure |
+| Notices UI и shipped source statement | Утверждения должны описывать конкретную поставку | SOURCE-OBLIGATIONS и SCOPE byte-identical source142 и accepted3247; NoticesView в accepted Git утверждает отсутствие cores | Ниже конкретное противоречие statement, независимо от полноты source closure |
 
 ## Конкретный дефект statement и один следующий шаг
 
 В actual tar одновременно есть `usr/lib/yonik/cores/xray`,
 `usr/lib/yonik/cores/sing-box` и `usr/share/licenses/yonik/SOURCE-OBLIGATIONS.md`,
 где сказано: «planned Arch package не содержит xray/sing-box и не устанавливает их».
-Accepted `crates/yonik-desktop/qml/CurrentNoticesView.qml:32` также утверждает
+Accepted `crates/yonik-desktop/qml/NoticesView.qml:32` также утверждает
 «не включённые в пакет». Это воспроизводимое несоответствие текущей модели
 поставки; вывод основан на actual entries, а не ingest/registry observations.
 Не утверждается отсутствие MPL/GPL текстов или core source archives.
@@ -76,3 +76,13 @@ Final A5, legal policy/OR/WITH, новые сборки/установка/VM/ne
 Rust/Go/C++ builds, engine exec, keyring/service operations или новых зависимостей.
 
 Ruff отсутствует в PATH; установка не выполнялась. Reconciler — исследовательская обвязка конкретного retained tar, не новый production validator.
+
+## Delta после frozen c005b53
+
+Новые statements изменены отдельным коммитом по разрешению root; ledger.json
+и его source142/accepted3247 comparisons остаются историческим свидетельством
+package142. Текущие SOURCE-OBLIGATIONS/NoticesView не приписываются старому tar.
+В source нет `packaging/licenses/SCOPE.md`: `tools/compile_notices.py` копирует
+`packaging/licenses/composition/P25-SCOPE.md` в `usr/share/licenses/yonik/SCOPE.md`.
+Actual shipped SCOPE уже проверен reconciler как byte-identical frozen source.
+Дополнение по Qt и точный незакрытый attribution gap: [qt-join.md](qt-join.md).
