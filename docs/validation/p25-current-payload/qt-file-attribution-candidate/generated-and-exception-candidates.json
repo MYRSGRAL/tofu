@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "scope": "existing input/primary facts; final generated outputs not yet available",
+  "primary_exception": {
+    "identifier": "Qt-GPL-exception-1.0",
+    "sha256": "40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+    "installed_path": "/usr/share/licenses/qt6-base/Qt-GPL-exception-1.0.txt",
+    "retained_primary_refs": [
+      {
+        "package": "qt6-base",
+        "inventory_version": "6.12.0",
+        "source_path": "LICENSES/Qt-GPL-exception-1.0.txt",
+        "sha256": "40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "file": "texts/40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "source_offer_member": "src/packaging/licenses/composition/texts/40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "verified": true
+      },
+      {
+        "package": "qt6-declarative",
+        "inventory_version": "6.12.0",
+        "source_path": "LICENSES/Qt-GPL-exception-1.0.txt",
+        "sha256": "40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "file": "texts/40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "source_offer_member": "src/packaging/licenses/composition/texts/40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+        "verified": true
+      }
+    ],
+    "exception_1": {
+      "covers": "larger work containing output of the covered application, terms of choice subject to both stated restrictions",
+      "restrictions": [
+        "larger work not otherwise derived from/based on covered application",
+        "larger work must not itself generate output containing the covered application output in original/modified form"
+      ],
+      "not_a_fact_here": "that a particular 6.11.2 tool or final generated file carries this exception"
+    },
+    "exception_2": {
+      "covers": "combination of covered application with independent plugins; source-offer notice condition",
+      "not_a_blanket": "permission for arbitrary header/template/generated fragment"
+    },
+    "with_not_added": true
+  },
+  "families": [
+    {
+      "family": "Qt moc/rcc outputs",
+      "installed_package_candidate": "qt6-base 6.11.2-3.1",
+      "available_primary_evidence": [
+        "GPL-3.0-only",
+        "Qt-GPL-exception-1.0"
+      ],
+      "tool_file_spdx": "NOT_OBSERVED_FROM_VERSION_EXACT_SOURCE",
+      "candidate_use": "Exception 1 only if exact generator source/output declaration establishes coverage and both restrictions hold; GPL3 candidate separately if actual output/source carrier permits it",
+      "header_expression_not_rewritten": true,
+      "resolve_after_mandatory_build": [
+        "retained output text/hash",
+        "actual depfile/compiler unit",
+        "matching generator provenance/source declaration"
+      ]
+    },
+    {
+      "family": "QML-generated C++/registration outputs",
+      "installed_package_candidate": "qt6-declarative 6.11.2-2.1",
+      "available_primary_evidence": [
+        "GPL-3.0-only",
+        "Qt-GPL-exception-1.0"
+      ],
+      "tool_file_spdx": "NOT_OBSERVED_FROM_VERSION_EXACT_SOURCE",
+      "candidate_use": "same conditional Exception 1 analysis; no transfer from aggregate Qt package license set",
+      "resolve_after_mandatory_build": [
+        "actual generated paths/bytes, only tools actually used",
+        "matching generator provenance/source declaration"
+      ]
+    },
+    {
+      "family": "CXX/CXX-Qt bridge outputs and copied cxx-qt-lib headers",
+      "available_generator_versions": {
+        "cxx-gen": "0.7.176",
+        "cxx": "1.0.176",
+        "cxx-qt-gen": "0.10.0",
+        "cxx-qt-lib": "0.10.0"
+      },
+      "available_expression_candidates": "MIT OR Apache-2.0 in retained crate metadata",
+      "candidate_options": [
+        "MIT with corresponding notice conditions if the copied fragment has matching license/source identity",
+        "Apache-2.0 with corresponding notice/patent conditions if the copied fragment has matching license/source identity"
+      ],
+      "output_exception_claim": null,
+      "not_inferred": "generator crate license is not automatically the license of all generated output",
+      "primary_refs": "candidate-join.json:cxx_generator_candidates",
+      "curated_primary_limitation": "cxx-qt MIT primary has placeholder copyright year/holders; not a replacement for exact copyright attribution",
+      "resolve_after_mandatory_build": [
+        "bridge bytes/hash and file-level notices",
+        "actual CXX source/generated dependencies",
+        "fragment-to-retained-source counterpart"
+      ]
+    },
+    {
+      "family": "Own generated guards/resources/notice registrations",
+      "available_source_inputs": [
+        {
+          "member": "src/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+          "size": 35149
+        },
+        {
+          "member": "src/Cargo.lock",
+          "sha256": "e382980de006ea12a6b7bc1c690bfc467bd34915226aae270241fdac0118ea98",
+          "size": 68602
+        },
+        {
+          "member": "src/crates/yonik-desktop/build.rs",
+          "sha256": "5e7afaf20e6e9e6b1638782226632d4e3f3474bbf230eb1473b2ef3c3c5d8ae5",
+          "size": 4952
+        },
+        {
+          "member": "src/crates/yonik-desktop/src/bridge.rs",
+          "sha256": "7bcfd27cf84b19fb074184e5298be5a7f980d6e447d149b95b6d84349988edb4",
+          "size": 1332
+        },
+        {
+          "member": "src/crates/yonik-desktop/src/application.cpp",
+          "sha256": "e3ac3a61c4ad6c657e8c55b2f0a14926295be804b9e96c29a6f00cb5ca79b770",
+          "size": 24477
+        },
+        {
+          "member": "src/crates/yonik-desktop/src/application.h",
+          "sha256": "453e152a128006e6af9b024b5fbfb862fa27751e989664650ebfce6c574fae7c",
+          "size": 259
+        },
+        {
+          "member": "src/crates/yonik-desktop/resources.qrc",
+          "sha256": "dbc93a618057cc0489021b1aa67348fc4cd532a171a3fef5a12acc040024b9d4",
+          "size": 519
+        },
+        {
+          "member": "src/packaging/licenses/composition/qt-sources.json",
+          "sha256": "9424021d3a969e4ce78c47b9c09db4f370766d31ac0aa02b38226bec588c21de",
+          "size": 52243
+        }
+      ],
+      "source_scope": "historical source142 only; new final freeze must match its own retained source archive",
+      "candidate_use": "own source/license chain if source identity and output bytes match; embedded Qt generator boilerplate evaluated separately",
+      "actual_generated_bytes_claimed": false
+    }
+  ],
+  "single_missing_input_ref": "candidate-join.json:single_missing_input",
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false
+}

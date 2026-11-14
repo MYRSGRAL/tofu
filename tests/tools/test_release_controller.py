@@ -251,6 +251,141 @@ class ControllerTest(unittest.TestCase):
             os.stat(self.registry / "unit/frozen.json").st_mode & 0o777, 0o600
         )
 
+    def test_capture_retained_before_clean(self) -> None:
+        self.freeze()
+        original = self.runner.run
+
+        def checked(argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+            if argv[:3] == [c.SLOT, "cargo", "clean"]:
+                manifest = json.loads(
+                    (self.registry / "unit/build-capture-manifest.json").read_bytes()
+                )
+                self.assertEqual(manifest["status"], "MISSING")
+                self.assertIn(
+                    "qt:observed-query-and-tool", manifest["producer_missing"]
+                )
+            return original(argv, cwd, env)
+
+        self.runner.run = checked
+        self.collect()
+
+    def test_retention_failure_preserves_target(self) -> None:
+        self.freeze()
+        with patch.object(
+            c, "retain_build_capture", side_effect=OSError("fixture retention")
+        ):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+
+    def test_retained_source_and_elfs_synced_before_capture(self) -> None:
+        self.freeze()
+        synced = set()
+        original_sync = os.fsync
+        original_retain = c.retain_build_capture
+
+        def sync(fd: int) -> None:
+            name = Path(os.readlink(f"/proc/self/fd/{fd}")).name
+            synced.add(name)
+            original_sync(fd)
+
+        def retain(*args, **kwargs) -> dict:
+            self.assertTrue({"source.tar", *c.RUST}.issubset(synced))
+            return original_retain(*args, **kwargs)
+
+        with (
+            patch.object(c.os, "fsync", side_effect=sync),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            self.collect()
+
+    def test_retained_elf_sync_failure_preserves_target(self) -> None:
+        self.freeze()
+        original_sync = os.fsync
+
+        def sync(fd: int) -> None:
+            if Path(os.readlink(f"/proc/self/fd/{fd}")).name == "yonik-worker":
+                raise OSError("fixture ELF fsync failure")
+            original_sync(fd)
+
+        with patch.object(c.os, "fsync", side_effect=sync):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+        self.assertFalse((self.registry / "unit/build-capture-manifest.json").exists())
+
+    def test_final_profile_freeze_and_hash_rejection(self) -> None:
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture tooling")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        original_recipe = json.dumps(c.RECIPE, sort_keys=True)
+        frozen = c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        self.assertTrue(c.verify_final_profile(frozen))
+        self.assertEqual(json.dumps(c.RECIPE, sort_keys=True), original_recipe)
+        self.assertIn("sha256", frozen["final_profile"])
+        frozen["final_profile"]["sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            c.verify_final_profile(frozen)
+        with self.assertRaises(ValueError):
+            c._freeze(
+                self.repo,
+                self.registry,
+                c.RUST_REUSE_TARGET,
+                commit,
+                "p25-final-cxx-v1",
+            )
+
+    def test_final_profile_cannot_be_added_to_old_source(self) -> None:
+        with self.assertRaises(subprocess.CalledProcessError):
+            c._freeze(self.repo, self.registry, "unit", self.commit, "p25-final-cxx-v1")
+        self.assertFalse((self.registry / "unit").exists())
+
+    def test_final_profile_invokes_only_selected_prepare_and_retain(self) -> None:
+        import _p25_final_profile as profile
+
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture final profile")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        events = []
+
+        def prepare(source: Path, build: Path, env: dict[str, str]) -> None:
+            events.append("prepare")
+            self.assertFalse((build / "release").exists())
+
+        def retain(*args, **kwargs) -> dict:
+            events.append("retain")
+            self.assertTrue((self.task / "target/release/yonik-desktop").exists())
+            self.assertTrue(kwargs["final_profile"])
+            return {"status": "MISSING", "positive_metadata": {"fixture": True}}
+
+        with (
+            patch.object(profile, "prepare", side_effect=prepare),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            result = self.collect()
+        self.assertEqual(events, ["prepare", "retain"])
+        self.assertEqual(result["final_profile"], c.final_capture_profile())
+        self.assertEqual(result["build_capture"]["status"], "MISSING")
+
     def test_uncollected_and_fabricated_context(self) -> None:
         self.freeze()
         with self.assertRaises(ValueError):

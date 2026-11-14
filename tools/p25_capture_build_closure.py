@@ -24,6 +24,7 @@ KINDS = {
     "sdk-source": "source",
     "primary": "source",
     "header": "sdk",
+    "sdk-unit": "sdk",
     "tool": "sdk",
     "generated": "build",
     "elf": "build",
@@ -311,7 +312,7 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
             else MAX_GENERATED
             if kind == "generated"
             else MAX_TEXT
-            if kind in ("header", "source", "sdk-source", "primary")
+            if kind in ("header", "sdk-unit", "source", "sdk-source", "primary")
             else MAX_METADATA
         )
         try:
@@ -325,7 +326,7 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
             continue
         require(observed == checksum, f"Hash mismatch: {key}")
         files[key]["verified"] = True
-        if kind == "header":
+        if kind in ("header", "sdk-unit"):
             contents[key] = data[:16384]
         elif kind == "primary":
             contents[key] = b"x" if data.strip() else b""
@@ -385,7 +386,7 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
 
     headers = []
     for key, row in files.items():
-        if row["kind"] != "header" or not row["verified"]:
+        if row["kind"] not in ("header", "sdk-unit") or not row["verified"]:
             continue
         source_ref = (
             get(row["source_ref"], "sdk-source") if row.get("source_ref") else None
@@ -471,6 +472,7 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
     if not units:
         missing.append("depfiles")
     unit_ids: set[str] = set()
+    invocation_ids: set[tuple[str, str | None]] = set()
     dependency_headers: set[str] = set()
     compile_units = []
     for unit in units:
@@ -487,8 +489,13 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
                 "Неверный CXX argv",
             )
         get(unit["file"])
-        require(files[unit["file"]]["kind"] in ("source", "generated"), "Неверный unit")
-        require(unit["file"] not in unit_ids, "Повтор unit")
+        require(
+            files[unit["file"]]["kind"] in ("source", "generated", "sdk-unit"),
+            "Неверный unit",
+        )
+        invocation = (unit["file"], unit["depfile"])
+        require(invocation not in invocation_ids, "Повтор unit/depfile")
+        invocation_ids.add(invocation)
         unit_ids.add(unit["file"])
         captured_unit = dict(unit, normalized_depfile=None)
         compile_units.append(captured_unit)
@@ -515,13 +522,13 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
                 get(key)
                 require(
                     files[key]["kind"]
-                    in ("source", "sdk-source", "header", "generated"),
+                    in ("source", "sdk-source", "header", "sdk-unit", "generated"),
                     "Неверный dependency kind",
                 )
-                if files[key]["kind"] == "header":
+                if files[key]["kind"] in ("header", "sdk-unit"):
                     dependency_headers.add(key)
     for key, row in files.items():
-        if row["kind"] == "header" and key not in dependency_headers:
+        if row["kind"] in ("header", "sdk-unit") and key not in dependency_headers:
             missing.append(f"header_depfile_coverage:{key}")
     if not generated_ids <= unit_ids:
         missing.append("generated_compile_units")
@@ -541,6 +548,22 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
         reader.read("build", record_path, MAX_METADATA) == raw,
         "Metadata изменились во время capture",
     )
+    unbound_generated = []
+    for key, row in files.items():
+        if row["kind"] == "generated" and row["verified"] and key not in generated_ids:
+            missing.append(f"generated_record:{key}")
+            try:
+                text = contents[key].decode("utf-8")
+            except UnicodeError as error:
+                raise CaptureError("Generated source не UTF-8") from error
+            unbound_generated.append(
+                {
+                    "file": row,
+                    "text": text,
+                    "generation_record": None,
+                    **conditions(row),
+                }
+            )
     return {
         "schema": 1,
         "status": "MISSING" if missing else "CAPTURED",
@@ -557,6 +580,7 @@ def _capture(reader: Reader, record_path: str, expected: str) -> dict:
         "binding_scope": "caller-pinned-record; independent source/provenance authority required",
         "headers": headers,
         "generated_sources": generated,
+        "unbound_generated_sources": unbound_generated,
         "files": list(files.values()),
         "read_bytes": reader.total,
     }

@@ -131,6 +131,15 @@ class CaptureTests(unittest.TestCase):
             self.roots, "record.json", hashlib.sha256(raw).hexdigest()
         )
 
+    def test_unbound_generated_invalid_utf8_rejected(self) -> None:
+        self.record["generated"] = []
+        (self.roots["build"] / "moc.cpp").write_bytes(b"\xff")
+        for row in self.files:
+            if row["id"] == "generated":
+                row["sha256"] = hashlib.sha256(b"\xff").hexdigest()
+        with self.assertRaises(capture.CaptureError):
+            self.run_capture()
+
     def test_closed_fixture(self) -> None:
         report = self.run_capture()
         self.assertEqual(report["status"], "CAPTURED")
