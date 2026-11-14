@@ -108,6 +108,7 @@ impl LookupLeafLease {
     pub(crate) fn uid(&self) -> u32 {
         self.0.uid
     }
+    #[allow(dead_code)] // Согласованный opaque lifecycle API; validate уже проверяет starttime.
     pub(crate) fn start(&self) -> u64 {
         self.0.start
     }
