@@ -696,6 +696,7 @@ mod host_gate {
             ..Default::default()
         };
         draft.rules.push(crate::editor::RuleInput {
+            transport: None,
             platform_sources: None,
             id: 1,
             enabled: true,
