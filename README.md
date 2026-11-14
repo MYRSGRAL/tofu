@@ -143,22 +143,42 @@ Changing the setting immediately retries the download. Device-limit failures hav
 a separate message; the app never generates another ID to bypass the limit.
 HWID applies to subscription downloads.
 
+The routing draft supports destination `tcp`/`udp` and ports 1–65535
+(for example `443,8000-8080`, up to 16 ranges per rule). These are destination
+conditions, not the local SOCKS listening port. Enabled transport conditions
+currently block Connect as unsupported; saving them does not enforce them on
+traffic. The first transport-draft save requires a verified current encrypted backup and upgrades
+the database to format5; older readers refuse it. Keep a matching backup before
+using an older binary.
+
+In **Settings → Startup and updates**, login startup and autoconnect are separate
+options, both off by default. Confirm the current saved profile, engine, mode and
+routing revision with **Confirm current target**. Saving does not connect. A changed
+target or unavailable key blocks the startup attempt; no other profile is selected
+and the keyring is not unlocked automatically. Stop cancels a pending attempt.
+Login startup manages only the user XDG `autostart/yonik.desktop` entry and uses
+`/usr/bin/yonik-desktop --start-hidden`; the menu-entry installer does not place a
+binary there. Normal launches stay visible; hidden launch requires a registered
+tray, otherwise the window appears.
+
 The **About** page and window title show the build ID. When updating, quit the
 previous instance through its tray menu: closing a window can merely hide it,
 and launching again restores the running instance.
 
 **Settings → Diagnostics** accepts a custom HTTPS URL and expected status
 (200–299); the default requires exactly 204. The GUI uses a five-second timeout,
-checks TLS and rejects redirects. Settings apply to the next Connect and remain
-for this session; editing is disabled while a core is active. The URL is hidden
+checks TLS and rejects redirects. Settings apply to the next Connect; safe URLs persist across restarts,
+while URLs with credentials, query or fragment remain session-only; editing is disabled while a core is active. The URL is hidden
 by default and stays out of state/tray/trace. The active result shows HTTP status
 and duration or TLS/timeout/transport failure. This is a single HTTPS measurement,
 not TCP host latency or a continuous internet guarantee.
 
 Closing hides the window when a tray is available; otherwise it requests a clean
 shutdown. Quit waits for session cleanup. Tray commands use the same controller.
-The current tray has basic connect/disconnect/restore/quit;
-routing screens, persistent GUI preferences and full T-01…T-04 acceptance remain pending.
+The current tray has basic connect/disconnect/restore/quit.
+The routing editor saves drafts; network activation and full T-01…T-04 acceptance remain pending.
+Engine, language and safe HTTPS check settings persist; URLs with credentials,
+query or fragment remain session-only.
 [GUI checks and remaining gates](docs/validation/2026-11-09-native-desktop.md).
 
 [Configurable HTTPS checks and evidence](docs/validation/2026-11-09-configurable-health.md).

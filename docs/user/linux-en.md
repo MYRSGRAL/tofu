@@ -2,11 +2,12 @@
 
 [Русский](linux-ru.md) · [Project home](../../README.md)
 
-Applies to base `db8226ef585b8251fe02ca3dbbe0f7ac759fc636`: Linux,
+Applies to base `48ce74304a3fb7263ccc7e2c06d96394113a687d`: Linux,
 CachyOS/Arch x86_64, KDE Plasma/Wayland. Android is deferred. The working user
 path is local SOCKS5 for explicitly configured applications. System TUN,
 DNS/Fake-IP, kill switch and applying application routes through the GUI remain
-unavailable (`system_tun=false`). Bundling a helper does not enable these features.
+unavailable (`system_tun=false`). Bundling a helper does not enable these features. No actual registered System
+profile is supplied; draft admission work does not enable this user path.
 Full P25 acceptance is not claimed: licenses, runtime composition and performance
 requirements remain open.
 
@@ -95,7 +96,9 @@ out of argv, logs, screenshots and bug reports.
    discarded imports preserve the last approved snapshot. Deleting a subscription
    removes its servers from this device.
 
-The GUI accepts URLs; there is no separate file picker or manual profile editor.
+The add dialog also accepts local text or a file up to 8 MiB; manual entry is
+available. Review the report and create the requested encrypted backup before
+the first local save. Local sources do not download or refresh from the network.
 For offline analysis of a subscription body (URI/Base64/supported JSON), use stdin,
 keeping the original file private and outside git:
 
@@ -108,10 +111,11 @@ reports with rejected records. Limits: 8 MiB input, 32 MiB decoded, 20,000 URIs,
 64 KiB per URI, JSON depth 64. See [import limits](../validation/2026-11-09-subscription-import.md).
 These paths do not fully satisfy FR-06/07.
 
-The GUI currently selects Direct for downloads. The ManualProxy API requires
-explicit trusted DNS configuration for a domain proxy endpoint; that setting has
-no GUI wiring yet. Do not assume availability or silently replace failure with
-DIRECT. Scheduled refresh requires confirmed power/network/visibility conditions;
+Adding a URL uses Direct. For subscription updates in Proxy mode, configure
+**Settings → Connection** with a trusted DNS-over-TCP IP:port (or [IPv6]:port);
+it is used through the active SOCKS session and does not change OS/core DNS.
+Disconnect before editing. An empty value disables DNS for domain endpoints.
+Scheduled refresh requires confirmed power/network/visibility conditions;
 unknown conditions block background work (fail closed). Do not rely on refresh
 while hidden; refresh manually in the open GUI when needed.
 
@@ -131,15 +135,33 @@ permissions/access instead of deleting it. The routing editor saves a draft only
 **Apply to network** is disabled. Draft rules do not control the running SOCKS
 session or application traffic.
 
+The routing draft supports destination `tcp`/`udp` and ports 1–65535
+(for example `443,8000-8080`, up to 16 ranges per rule). These are destination
+conditions, not the local SOCKS listening port. Enabled transport conditions
+currently block Connect as unsupported; saving them does not enforce them on
+traffic. The first transport-draft save requires a verified current encrypted backup and upgrades
+the database to format5; older readers refuse it. Keep a matching backup before
+using an older binary.
+
+In **Settings → Startup and updates**, login startup and autoconnect are separate
+options, both off by default. Confirm the current saved profile, engine, mode and
+routing revision with **Confirm current target**. Saving does not connect. A changed
+target or unavailable key blocks the startup attempt; no other profile is selected
+and the keyring is not unlocked automatically. Stop cancels a pending attempt.
+Login startup manages only the user XDG `autostart/yonik.desktop` entry and uses
+`/usr/bin/yonik-desktop --start-hidden`; the menu-entry installer does not place a
+binary there. Normal launches stay visible; hidden launch requires a registered
+tray, otherwise the window appears.
+
 Closing the window with a working tray can hide it and leave the session running.
 Choose **Quit** in the tray for full exit and wait for shutdown. Relaunching with
 the same data-dir restores the existing instance. `CleanupError` means cleanup is
 unconfirmed: repeat Stop if offered and retain a sanitized error description.
 Do not report successful disconnection or manually flush network state.
 
-The safeCopy change in **#82 is pending**, not merged into this base; availability
-in current main is not promised. Independently check diagnostics for secrets
-before sharing.
+Diagnostics offers a sanitized export and bounded rotating disk logs. Check
+the exported contents before sharing; software checks do not establish physical
+power-loss durability.
 
 ## Package install, update, rollback and removal
 
@@ -156,7 +178,7 @@ or functionality. Verify provenance separately. The clean-VM install/update/roll
 matrix remains incomplete; this is not an accepted host installer. For your own
 verified package, normal package-manager actions in the VM are
 `sudo pacman -U /absolute/path/yonik.pkg.tar.zst` and `sudo pacman -R yonik`.
-These mutate the system and were not executed here. There are no auto-start hooks,
+These mutate the system and were not executed here. The package has no automatic startup hooks; login startup is an explicit GUI option,
 but an explicit client request can activate the D-Bus service. Do not run the
 helper manually or create an engine registry through workaround commands. The
 system registry requires a separate trusted supplier; user engine-dir does not

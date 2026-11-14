@@ -94,6 +94,54 @@ impl Challenge {
         self.bytes[..8].copy_from_slice(b"YNKNS003");
         self.exchange_marker(stream, pid, uid, V3_OFFER)
     }
+    /// Только UNIT: существующий report slot, без production caller.
+    #[cfg(test)]
+    pub(crate) fn exchange_v4(
+        mut self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+        deadline: Instant,
+    ) -> Result<(NamespaceObservation, [u8; 512]), WorkerError> {
+        self.deadline = self.deadline.min(deadline);
+        self.bytes[..8].copy_from_slice(b"YNKNS003");
+        let observation = self.exchange_marker(stream, pid, uid, b"YNKANC04")?;
+        let data = observation
+            .custody
+            .data_v4
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .as_ref()
+            .copied()
+            .ok_or(WorkerError::Protocol)?;
+        Ok((observation, data))
+    }
+    /// Production DATA carrier: epoch задаёт owner, не ответ worker.
+    pub(crate) fn exchange_v4_bound(
+        mut self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+        deadline: Instant,
+        epoch: u64,
+    ) -> Result<(NamespaceObservation, [u8; 512]), WorkerError> {
+        if epoch == 0 {
+            return Err(WorkerError::Protocol);
+        }
+        self.deadline = self.deadline.min(deadline);
+        self.bytes[..8].copy_from_slice(b"YNKCH004");
+        self.bytes[112..120].copy_from_slice(&epoch.to_be_bytes());
+        let observation = self.exchange_marker(stream, pid, uid, b"YNKANC04")?;
+        let data = observation
+            .custody
+            .data_v4
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .as_ref()
+            .copied()
+            .ok_or(WorkerError::Protocol)?;
+        Ok((observation, data))
+    }
     /// Binding формируется из уже свежего namespace challenge. Поля server остаются
     /// наблюдением issuer до отдельного canonical PID1/kernel admission.
     pub fn role_binding(
@@ -188,6 +236,28 @@ impl Challenge {
         }
         drop(tx);
         send(&rx, &self.bytes, &[])?;
+        let (data_v4, executable) = if offer == b"YNKANC04" {
+            let (bytes, mut fds, credentials) = receive_sized::<512>(&rx, self.deadline)?;
+            let strict = &self.bytes[..8] == b"YNKCH004";
+            #[cfg(not(test))]
+            if !strict {
+                return Err(WorkerError::Protocol);
+            }
+            if fds.len() != usize::from(strict)
+                || credentials.pid.as_raw_pid() as u32 != pid
+                || credentials.uid.as_raw() != uid
+            {
+                return Err(WorkerError::Peer);
+            }
+            let executable = if strict {
+                Some(report_executable(fds.pop().ok_or(WorkerError::Protocol)?)?)
+            } else {
+                None
+            };
+            (Some(bytes), executable)
+        } else {
+            (None, None)
+        };
         let report = if offer == V3_OFFER {
             let (bytes, fds, credentials) = receive(&rx, self.deadline)?;
             if !fds.is_empty()
@@ -265,6 +335,25 @@ impl Challenge {
                 .lock()
                 .map_err(|_| WorkerError::Protocol)? = report;
         }
+        {
+            *observation
+                .custody
+                .data_v4
+                .lock()
+                .map_err(|_| WorkerError::Protocol)? = data_v4;
+        }
+        *observation
+            .custody
+            .executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)? = executable;
+        if offer == b"YNKANC04" {
+            *observation
+                .custody
+                .handoff
+                .lock()
+                .map_err(|_| WorkerError::Protocol)? = Some(rx);
+        }
         Ok(observation)
     }
 }
@@ -331,16 +420,50 @@ pub struct NamespaceIdentity([(u64, u64); 3]);
 
 struct NamespaceCustody {
     fds: Mutex<Option<[OwnedFd; 2]>>,
-    expires: Instant,
+    expires: Mutex<Option<Instant>>,
     kernel: Mutex<Option<KernelObservation>>,
+    handoff: Mutex<Option<OwnedFd>>,
+    revoked: std::sync::atomic::AtomicBool,
+    data_v4: Mutex<Option<[u8; 512]>>,
+    bound_v4: Mutex<bool>,
+    executable: Mutex<Option<File>>,
+    retained_executable: Mutex<Option<File>>,
 }
 pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
+/// Только lifetime FD: не предоставляет lookup/admission/use authority.
+pub(crate) struct NamespaceRetention {
+    _custody: Arc<NamespaceCustody>,
+}
+
 impl NamespaceRevocation {
     pub(crate) fn revoke(&self) {
-        self.0.close();
+        self.0.deny();
     }
 }
 impl NamespaceCustody {
+    fn deny(&self) {
+        self.revoked
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.data_v4
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.handoff
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+    fn expired(&self) -> bool {
+        self.revoked.load(std::sync::atomic::Ordering::Acquire)
+            || self
+                .expires
+                .lock()
+                .map_or(true, |expiry| expiry.is_some_and(|e| Instant::now() >= e))
+    }
     fn close(&self) {
         // При poisoning возможен только отказ: извлекаем и закрываем custody.
         let mut fds = self
@@ -348,6 +471,10 @@ impl NamespaceCustody {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         fds.take();
+        self.data_v4
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         self.kernel
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -365,21 +492,15 @@ impl NamespaceObservation {
         }
         let custody = Arc::new(NamespaceCustody {
             fds: Mutex::new(Some(net_pid)),
-            expires,
+            expires: Mutex::new(Some(expires)),
             kernel: Mutex::new(None),
+            handoff: Mutex::new(None),
+            revoked: std::sync::atomic::AtomicBool::new(false),
+            data_v4: Mutex::new(None),
+            bound_v4: Mutex::new(false),
+            executable: Mutex::new(None),
+            retained_executable: Mutex::new(None),
         });
-        let timer = Arc::downgrade(&custody);
-        // Не продлевает namespace custody: timer содержит только Weak, FD не dup.
-        // В production максимум одна fresh Run invocation у supervisor Permit.
-        std::thread::Builder::new()
-            .name("yonik-ns-lease".into())
-            .spawn(move || {
-                std::thread::sleep(expires.saturating_duration_since(Instant::now()));
-                if let Some(custody) = timer.upgrade() {
-                    custody.close()
-                }
-            })
-            .map_err(|_| WorkerError::Io)?;
         Ok(Self {
             custody,
             identities: NamespaceIdentity(identities),
@@ -414,6 +535,75 @@ impl NamespaceObservation {
         *observation.custody.kernel.lock().unwrap() = Some(report);
         observation
     }
+    /// Одноразовый actual-image witness. Дополнительная owning копия живёт до terminal cleanup.
+    pub(crate) fn take_executable(&self) -> Result<File, WorkerError> {
+        if self.custody.expired() {
+            return Err(WorkerError::Timeout);
+        }
+        let mut slot = self
+            .custody
+            .executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        let mut retained = self
+            .custody
+            .retained_executable
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        if retained.is_some() {
+            return Err(WorkerError::Protocol);
+        }
+        let file = slot.take().ok_or(WorkerError::Protocol)?;
+        match file.try_clone() {
+            Ok(copy) => {
+                *retained = Some(copy);
+                Ok(file)
+            }
+            Err(_) => {
+                *slot = Some(file);
+                Err(WorkerError::Io)
+            }
+        }
+    }
+    pub(crate) fn retention(&self) -> NamespaceRetention {
+        NamespaceRetention {
+            _custody: Arc::clone(&self.custody),
+        }
+    }
+    pub(crate) fn same_custody(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.custody, &other.custody)
+    }
+    pub(crate) fn take_handoff(&self) -> Result<OwnedFd, WorkerError> {
+        if self.custody.expired() {
+            return Err(WorkerError::Timeout);
+        }
+        self.custody
+            .handoff
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .take()
+            .ok_or(WorkerError::Protocol)
+    }
+    pub(crate) fn promote_runtime(
+        &self,
+        stamp: &crate::helper::native_bootstrap::RuntimeScopeStamp,
+    ) -> Result<(), WorkerError> {
+        stamp.validate_admission().map_err(|_| WorkerError::Peer)?;
+        if !stamp.owns_observation(self) {
+            return Err(WorkerError::Peer);
+        }
+        let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
+        let mut expiry = self
+            .custody
+            .expires
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        if fds.is_none() || expiry.is_none_or(|e| Instant::now() >= e) {
+            return Err(WorkerError::Timeout);
+        }
+        *expiry = None;
+        Ok(())
+    }
     pub(crate) fn bind_run(
         &self,
         nonce: [u8; 32],
@@ -422,8 +612,32 @@ impl NamespaceObservation {
         epoch: u64,
     ) -> Result<(), WorkerError> {
         let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
-        if fds.is_none() || Instant::now() >= self.custody.expires || epoch == 0 {
+        if fds.is_none() || self.custody.expired() || epoch == 0 {
             return Err(WorkerError::Timeout);
+        }
+        if let Some(data) = self
+            .custody
+            .data_v4
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?
+            .as_ref()
+        {
+            if data[8..40] != nonce
+                || data[72..88] != session
+                || data[88..96] != generation.to_be_bytes()
+                || data[112..120] != epoch.to_be_bytes()
+                || std::mem::replace(
+                    &mut *self
+                        .custody
+                        .bound_v4
+                        .lock()
+                        .map_err(|_| WorkerError::Protocol)?,
+                    true,
+                )
+            {
+                return Err(WorkerError::Protocol);
+            }
+            return Ok(());
         }
         let mut kernel = self
             .custody
@@ -448,7 +662,14 @@ impl NamespaceObservation {
         &self.identities
     }
     pub fn retained_namespace_count(&self) -> usize {
-        if Instant::now() >= self.custody.expires {
+        if self
+            .custody
+            .revoked
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return 0;
+        }
+        if self.custody.expired() {
             self.custody.close()
         }
         self.custody
@@ -459,13 +680,28 @@ impl NamespaceObservation {
             .map_or(0, |fds| fds.len())
     }
     pub fn revoke(&self) {
-        self.custody.close()
+        self.custody.deny()
     }
 }
 impl Drop for NamespaceObservation {
     fn drop(&mut self) {
         self.revoke()
     }
+}
+
+fn report_executable(fd: OwnedFd) -> Result<File, WorkerError> {
+    let flags = rustix::fs::fcntl_getfl(&fd).map_err(|_| WorkerError::Io)?;
+    let descriptor = rustix::io::fcntl_getfd(&fd).map_err(|_| WorkerError::Io)?;
+    let stat = rustix::fs::fstat(&fd).map_err(|_| WorkerError::Io)?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile
+        || flags.intersects(
+            rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::RDWR | rustix::fs::OFlags::PATH,
+        )
+        || !descriptor.contains(rustix::io::FdFlags::CLOEXEC)
+    {
+        return Err(WorkerError::Protocol);
+    }
+    Ok(File::from(fd))
 }
 
 fn timeout(socket: &OwnedFd, deadline: Instant) -> Result<(), WorkerError> {
@@ -483,7 +719,7 @@ fn timeout(socket: &OwnedFd, deadline: Instant) -> Result<(), WorkerError> {
 }
 fn send(
     socket: &OwnedFd,
-    bytes: &[u8; FRAME],
+    bytes: &[u8],
     fds: &[std::os::fd::BorrowedFd<'_>],
 ) -> Result<(), WorkerError> {
     let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(3))];
@@ -498,7 +734,7 @@ fn send(
         SendFlags::NOSIGNAL,
     )
     .map_err(|_| WorkerError::Io)?
-        != FRAME
+        != bytes.len()
     {
         return Err(WorkerError::Protocol);
     }
@@ -508,8 +744,14 @@ fn receive(
     socket: &OwnedFd,
     deadline: Instant,
 ) -> Result<([u8; FRAME], Vec<OwnedFd>, rustix::net::UCred), WorkerError> {
+    receive_sized::<FRAME>(socket, deadline)
+}
+fn receive_sized<const N: usize>(
+    socket: &OwnedFd,
+    deadline: Instant,
+) -> Result<([u8; N], Vec<OwnedFd>, rustix::net::UCred), WorkerError> {
     timeout(socket, deadline)?;
-    let mut bytes = [0; FRAME + 1];
+    let mut bytes = [0; N];
     let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(3), ScmCredentials(1))];
     let mut ancillary = RecvAncillaryBuffer::new(&mut space);
     let msg = recvmsg(
@@ -535,7 +777,7 @@ fn receive(
         }
     }
     if Instant::now() >= deadline
-        || msg.bytes != FRAME
+        || msg.bytes != N
         || msg
             .flags
             .intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC)
@@ -543,9 +785,7 @@ fn receive(
         return Err(WorkerError::Protocol);
     }
     Ok((
-        bytes[..FRAME]
-            .try_into()
-            .map_err(|_| WorkerError::Protocol)?,
+        bytes[..N].try_into().map_err(|_| WorkerError::Protocol)?,
         fds,
         credentials.ok_or(WorkerError::Peer)?,
     ))
@@ -566,7 +806,8 @@ pub(crate) fn bootstrap(
     }
     let v2 = &marker == super::role_handoff::OFFER;
     let v3 = &marker == V3_OFFER;
-    if &marker != OFFER && !v2 && !v3 {
+    let v4 = &marker == b"YNKANC04";
+    if &marker != OFFER && !v2 && !v3 && !v4 {
         return Ok(None);
     }
     if mode != WorkerMode::Run {
@@ -597,7 +838,9 @@ pub(crate) fn bootstrap(
     }
     if msg.bytes != 8
         || &marker
-            != if v3 {
+            != if v4 {
+                b"YNKANC04"
+            } else if v3 {
                 V3_OFFER
             } else if v2 {
                 super::role_handoff::OFFER
@@ -622,9 +865,41 @@ pub(crate) fn bootstrap(
     if !extra.is_empty()
         || c.pid != peer.pid
         || !c.uid.is_root()
-        || &challenge[..8] != if v3 { b"YNKNS003" } else { b"YNKNS001" }
-        || challenge[112..] != [0; 16]
+        || &challenge[..8]
+            != if v4 {
+                b"YNKCH004"
+            } else if v3 {
+                b"YNKNS003"
+            } else {
+                b"YNKNS001"
+            }
+        || (!v4 && challenge[112..] != [0; 16])
     {
+        return Err(WorkerError::Peer);
+    }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    ))]
+    let produced = if v4 {
+        let data = super::native_data::ProducedV4::produce(
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+        )?;
+        let executable = File::open("/proc/self/exe").map_err(|_| WorkerError::Io)?;
+        send(&socket, data.report()?, &[executable.as_fd()])?;
+        Some(data)
+    } else {
+        None
+    };
+    #[cfg(not(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    )))]
+    if v4 {
         return Err(WorkerError::Peer);
     }
     if v3 {
@@ -659,6 +934,21 @@ pub(crate) fn bootstrap(
     if ack != closed || !extra.is_empty() || c.pid != peer.pid || !c.uid.is_root() {
         return Err(WorkerError::Peer);
     }
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_pointer_width = "64",
+        target_env = "gnu"
+    ))]
+    if let Some(produced) = produced {
+        return super::role_handoff::receive_v4_handoff(
+            &socket,
+            &challenge,
+            peer.pid.as_raw_pid() as u32,
+            deadline,
+            produced,
+        )
+        .map(Some);
+    }
     if v2 {
         return super::role_handoff::receive_run_handoff(
             &socket,
@@ -669,6 +959,56 @@ pub(crate) fn bootstrap(
         .map(Some);
     }
     Ok(None)
+}
+
+/// UNIT peer: не исполняет kernel probes и не требует root/foreign UID.
+#[cfg(test)]
+pub(crate) fn unit_v4_peer(stream: UnixStream, make: impl FnOnce(&[u8; 128]) -> (Vec<u8>, usize)) {
+    let mut marker = [0; 8];
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+    let msg = recvmsg(
+        &stream,
+        &mut [IoSliceMut::new(&mut marker)],
+        &mut ancillary,
+        RecvFlags::CMSG_CLOEXEC,
+    )
+    .unwrap();
+    assert_eq!(msg.bytes, 8);
+    assert_eq!(&marker, b"YNKANC04");
+    let socket = ancillary
+        .drain()
+        .find_map(|p| match p {
+            RecvAncillaryMessage::ScmRights(mut fds) => fds.next(),
+            _ => None,
+        })
+        .unwrap();
+    let deadline = Instant::now() + DEADLINE;
+    let (challenge, extra, _) = receive(&socket, deadline).unwrap();
+    assert!(extra.is_empty());
+    let (data, fd_count) = make(&challenge);
+    let file = File::open("/dev/null").unwrap();
+    let rights = vec![file.as_fd(); fd_count];
+    if send(&socket, &data, &rights).is_err() {
+        return;
+    }
+    let files = ["net", "pid", "mnt"].map(|k| File::open(format!("/proc/self/ns/{k}")).unwrap());
+    if send(
+        &socket,
+        &challenge,
+        &files.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+    )
+    .is_err()
+    {
+        return;
+    }
+    drop(files);
+    let mut closed = challenge;
+    closed[..8].copy_from_slice(b"YNKCLOSE");
+    if send(&socket, &closed, &[]).is_err() {
+        return;
+    }
+    let _ = receive(&socket, deadline);
 }
 
 #[cfg(test)]
@@ -758,6 +1098,128 @@ mod tests {
         if attack == "valid" {
             assert!(result.is_ok());
         }
+    }
+    fn production_v4_peer(stream: UnixStream, attack: &str) {
+        let mut marker = [0; 8];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+        let message = recvmsg(
+            &stream,
+            &mut [IoSliceMut::new(&mut marker)],
+            &mut ancillary,
+            RecvFlags::CMSG_CLOEXEC,
+        )
+        .unwrap();
+        assert_eq!(message.bytes, 8);
+        assert_eq!(&marker, b"YNKANC04");
+        let mut sockets = Vec::new();
+        for part in ancillary.drain() {
+            if let RecvAncillaryMessage::ScmRights(fds) = part {
+                sockets.extend(fds);
+            } else {
+                panic!("Неожиданный ancillary");
+            }
+        }
+        assert_eq!(sockets.len(), 1);
+        let socket = sockets.pop().unwrap();
+        let deadline = Instant::now() + DEADLINE;
+        let (request, extra, _) = receive(&socket, deadline).unwrap();
+        assert!(extra.is_empty());
+        assert_eq!(&request[..8], b"YNKCH004");
+        assert_eq!(&request[112..120], &9u64.to_be_bytes());
+        assert_eq!(&request[120..], &[0; 8]);
+        let mut report = [0; 512];
+        report[..120].copy_from_slice(&request[..120]);
+        report[..8].copy_from_slice(b"YNKNS004");
+        let image = File::open(if attack == "wrongtype" {
+            "/dev/null"
+        } else {
+            "/proc/self/exe"
+        })
+        .unwrap();
+        let rights = match attack {
+            "zero" => vec![],
+            "multiple" => vec![image.as_fd(), image.as_fd()],
+            _ => vec![image.as_fd()],
+        };
+        send(&socket, &report, &rights).unwrap();
+        if attack != "valid" {
+            return;
+        }
+        let namespaces =
+            ["net", "pid", "mnt"].map(|name| File::open(format!("/proc/self/ns/{name}")).unwrap());
+        send(
+            &socket,
+            &request,
+            &namespaces.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        drop(namespaces);
+        let mut closed = request;
+        closed[..8].copy_from_slice(b"YNKCLOSE");
+        send(&socket, &closed, &[]).unwrap();
+        let (ack, extra, _) = receive(&socket, deadline).unwrap();
+        assert_eq!(ack, closed);
+        assert!(extra.is_empty());
+    }
+    #[test]
+    fn production_v4_receiver_requires_one_executable_and_canonical_credentials() {
+        for attack in ["zero", "multiple", "wrongtype", "pid", "uid"] {
+            let (helper, peer) = UnixStream::pair().unwrap();
+            let task = std::thread::spawn(move || production_v4_peer(peer, attack));
+            let result = Challenge::new([1; 32], [2; 16], 7, [3; 16])
+                .unwrap()
+                .exchange_v4_bound(
+                    &helper,
+                    std::process::id() + u32::from(attack == "pid"),
+                    rustix::process::getuid()
+                        .as_raw()
+                        .wrapping_add(u32::from(attack == "uid")),
+                    Instant::now() + DEADLINE,
+                    9,
+                );
+            assert!(result.is_err(), "{attack}");
+            drop(helper);
+            task.join().unwrap();
+        }
+    }
+    #[test]
+    fn production_v4_positive_owning_executable_survives_revoke_and_cancel_drop() {
+        use std::os::fd::AsRawFd;
+        let (helper, peer) = UnixStream::pair().unwrap();
+        let task = std::thread::spawn(move || production_v4_peer(peer, "valid"));
+        let (observation, report) = Challenge::new([1; 32], [2; 16], 7, [3; 16])
+            .unwrap()
+            .exchange_v4_bound(
+                &helper,
+                std::process::id(),
+                rustix::process::getuid().as_raw(),
+                Instant::now() + DEADLINE,
+                9,
+            )
+            .unwrap();
+        task.join().unwrap();
+        assert_eq!(&report[..8], b"YNKNS004");
+        assert_eq!(observation.retained_namespace_count(), 2);
+        let image = observation.take_executable().unwrap();
+        assert!(image.metadata().unwrap().is_file());
+        assert!(observation.take_executable().is_err());
+        drop(image);
+        let fd = observation
+            .custody
+            .retained_executable
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_raw_fd();
+        let retention = observation.retention();
+        observation.revoke();
+        assert!(observation.take_executable().is_err());
+        drop(observation);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        drop(retention);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_err());
     }
     #[test]
     fn authorized_challenge_uses_owner_nonce_and_rejects_revoke() {
@@ -1097,6 +1559,30 @@ mod tests {
         assert_eq!(witness.retained_namespace_count(), 2);
         witness.revoke();
         assert_eq!(witness.retained_namespace_count(), 0);
+    }
+    #[test]
+    fn revoked_custody_denies_use_but_retains_owned_fds_until_drop() {
+        use std::os::fd::AsRawFd;
+        let observation = NamespaceObservation::new(
+            [
+                OwnedFd::from(File::open("/dev/null").unwrap()),
+                OwnedFd::from(File::open("/dev/null").unwrap()),
+            ],
+            [(1, 1); 3],
+            Instant::now() + DEADLINE,
+        )
+        .unwrap();
+        let fd = observation.custody.fds.lock().unwrap().as_ref().unwrap()[0].as_raw_fd();
+        observation.revoke();
+        assert_eq!(observation.retained_namespace_count(), 0);
+        assert!(observation.bind_run([1; 32], [1; 16], 1, 1).is_err());
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        assert!(observation.same_custody(&observation));
+        let retained = observation.retention();
+        drop(observation);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        drop(retained);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_err());
     }
     #[test]
     fn legacy_rights_remain_queued_after_bootstrap_peek() {

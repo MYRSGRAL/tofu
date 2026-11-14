@@ -19,7 +19,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod inspect_codec;
+mod inspect_peer;
 mod kernel;
+mod lookup_channel;
+#[allow(dead_code)]
+mod lookup_codec;
+mod lookup_leaf;
+pub(crate) use inspect_peer::{PeerAttestation, VerifiedPeerSnapshot};
+mod remote;
+pub(crate) use lookup_codec::LookupBinding;
+pub(crate) use remote::RemoteLookup;
 
 pub const FRAME_BYTES: usize = 136;
 const CACHE_ENTRIES: usize = 64;
@@ -83,7 +93,7 @@ struct Process {
     pidfd: OwnedFd,
     namespaces: [(u64, u64); 3],
 }
-fn bounded(path: &str) -> Result<String, Unavailable> {
+pub(crate) fn bounded(path: &str) -> Result<String, Unavailable> {
     let mut text = String::new();
     fs::File::open(path)
         .map_err(|_| Unavailable::Coverage)?
@@ -248,6 +258,10 @@ pub struct TrustedContext {
     cancelled: Arc<AtomicBool>,
 }
 impl TrustedContext {
+    fn validate_scope(&self) -> Result<(), Unavailable> {
+        self.lookup_view.validate()
+    }
+
     pub fn from_host(
         worker_pid: u32,
         worker_uid: u32,
@@ -329,29 +343,50 @@ pub(super) enum ProjectedLookup {
 }
 
 impl Broker {
+    fn lookup_leaf(binding: &LookupBinding) -> Result<Self, Unavailable> {
+        let pid = std::process::id();
+        let view = BrokerLookupView::capture()?;
+        if view.namespaces[0] != binding.network {
+            return Err(Unavailable::Coverage);
+        }
+        // В leaf это собственный liveness anchor; main engine PID здесь не нужен.
+        let context = TrustedContext {
+            worker: Process::capture(pid, binding.target_uid)?,
+            lookup_view: view,
+            target_uid: binding.target_uid,
+            epoch: binding.epoch,
+            nonce: binding.nonce,
+            digest: binding.digest,
+            revoked: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        Self::build(context, false)
+    }
+
     pub fn new(context: TrustedContext) -> Result<Self, Unavailable> {
-        if rustix::process::getuid().as_raw() != context.target_uid
-            || rustix::process::geteuid().as_raw() != context.target_uid
-        {
-            return Err(Unavailable::Authority);
-        }
+        Self::build(context, true)
+    }
+    fn build(context: TrustedContext, legacy: bool) -> Result<Self, Unavailable> {
         let status = bounded("/proc/self/status")?;
-        for field in ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"] {
-            if status
-                .lines()
-                .find_map(|l| l.strip_prefix(field))
-                .and_then(|v| u64::from_str_radix(v.trim(), 16).ok())
-                != Some(0)
-            {
-                return Err(Unavailable::Authority);
-            }
-        }
+        let caps = ["CapInh:", "CapPrm:", "CapEff:", "CapAmb:"].map(|field| {
+            let mut values = status.lines().filter_map(|line| line.strip_prefix(field));
+            let value = values
+                .next()
+                .and_then(|v| u64::from_str_radix(v.trim(), 16).ok());
+            if values.next().is_some() { None } else { value }
+        });
+        validate_lookup_credentials(
+            rustix::process::getuid().as_raw(),
+            rustix::process::geteuid().as_raw(),
+            context.target_uid,
+            caps,
+        )?;
         rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
             .map_err(|_| Unavailable::Authority)?;
         context.worker.validate()?;
-        context.lookup_view.validate()?;
+        context.validate_scope()?;
         // Legacy direct-proc admission сохраняет прежний контракт общего scope.
-        if context.worker.namespaces != context.lookup_view.namespaces {
+        if legacy && context.worker.namespaces != context.lookup_view.namespaces {
             return Err(Unavailable::Coverage);
         }
         Ok(Self {
@@ -392,6 +427,7 @@ impl Broker {
         if self.context.cancelled.load(Ordering::Acquire) {
             return Err(Unavailable::Cancelled);
         }
+        self.context.validate_scope()?;
         self.context.worker.validate()?;
         let (bytes, c) = match receive_frame(socket) {
             Ok(frame) => frame,
@@ -402,6 +438,7 @@ impl Broker {
             Err(error) => return Err(error),
         };
         self.context.worker.accept_credentials(c)?;
+        self.context.validate_scope()?;
         self.context.worker.validate()?;
         if self.context.cancelled.load(Ordering::Acquire) {
             return Err(Unavailable::Cancelled);
@@ -599,6 +636,23 @@ impl Drop for Broker {
     }
 }
 
+/// Только fixed worker --lookup entry. Не принимает FD/path/UID/command от caller.
+pub fn serve_lookup() -> Result<(), Unavailable> {
+    lookup_leaf::run()
+}
+
+fn validate_lookup_credentials(
+    uid: u32,
+    euid: u32,
+    target: u32,
+    caps: [Option<u64>; 4],
+) -> Result<(), Unavailable> {
+    if target == 0 || uid != target || euid != target || caps != [Some(0); 4] {
+        return Err(Unavailable::Authority);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Process, TrustedContext, Unavailable};
@@ -645,3 +699,31 @@ mod lookup_view_tests {
 
 #[cfg(test)]
 pub(in crate::attribution) use kernel::report_cold_witnesses;
+
+#[cfg(test)]
+mod lookup_identity_tests {
+    use super::*;
+    #[test]
+    fn pure_lookup_identity_accepts_only_actual_app_uid_with_all_caps_zero() {
+        assert_eq!(
+            validate_lookup_credentials(1000, 1000, 1000, [Some(0); 4]),
+            Ok(())
+        );
+        for (uid, euid, target) in [(0, 0, 1000), (1000, 0, 1000), (1000, 1000, 2000), (0, 0, 0)] {
+            assert_eq!(
+                validate_lookup_credentials(uid, euid, target, [Some(0); 4]),
+                Err(Unavailable::Authority)
+            );
+        }
+        for index in 0..4 {
+            for value in [None, Some(1), Some(1 << 12)] {
+                let mut caps = [Some(0); 4];
+                caps[index] = value;
+                assert_eq!(
+                    validate_lookup_credentials(1000, 1000, 1000, caps),
+                    Err(Unavailable::Authority)
+                );
+            }
+        }
+    }
+}

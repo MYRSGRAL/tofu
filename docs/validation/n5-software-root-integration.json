@@ -1,0 +1,35 @@
+{
+  "tested_head": "1c5e8efd31752732c3b04de5877c0d33420da6a7",
+  "root_head": "ba94a20091c9ca80de3c12cdc7a47872b1bdc729",
+  "source_archive_sha256": "731d2aad65b9795d8b0f1942d1b6726f9e7a4ecbf94295d2926402c03822fea1",
+  "elf_sha256": "87e0d178af95d578895cfbc77e04ac73ef5b68e1ccfb06bbf3ba6708ef6ec83d",
+  "archive_regular_files_checked": 2934,
+  "archive_mismatch": [],
+  "root_compile_inputs_compared": 448,
+  "all_compared_inputs_exact": true,
+  "compiler_comment": "rustc1.85.1",
+  "named_tests": 42,
+  "whole_root_execution": false,
+  "runtime_admission": false,
+  "root_pre_receipt": "ba94a20091c9ca80de3c12cdc7a47872b1bdc729",
+  "acceptance": {
+    "software_source_reviews": "CLEAN in cited scopes",
+    "runtime": "NOT_EXECUTED",
+    "profile_registration": "CLOSED",
+    "missing_profile": "EvidenceUnavailable",
+    "full_Linux": "OPEN",
+    "whole_candidate_CI": "REQUIRED"
+  },
+  "frozen_sha256": {
+    "fixed_self_fence": "95deca7eaf2946a556a45b986650ac9eb170e867a3489ef1d6b107e00ad8a6ec",
+    "fixed_fence_receipt": "dbd9b507d0eb25c1243bdf18a0a768f917cc3d027cd2f56564300ddbc14a8a08"
+  },
+  "root_checks": {
+    "python_discovery": 360,
+    "P11": 6,
+    "closed_runner_mocks": 16,
+    "sealed_fixture_pure": 14,
+    "cargo_fmt_1_85_1": "PASS",
+    "ruff_scoped": "PASS"
+  }
+}

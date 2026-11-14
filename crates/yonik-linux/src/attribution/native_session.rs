@@ -1,6 +1,8 @@
 //! Custody и переходы frozen ABI. Caller FD и окружение не создают authority.
+#[cfg(test)]
+use super::broker::Broker;
 use super::{
-    broker::{Broker, Lookup, Unavailable},
+    broker::{Lookup, Unavailable},
     native_wire::{self as wire, Header, Kind, Malformed, Sequence},
 };
 use crate::managed_network::tun::BoundTun;
@@ -28,11 +30,37 @@ pub struct Session {
     app_required: bool,
     roles: Option<Roles>,
     sequence: Sequence,
+    scope: Option<crate::helper::native_bootstrap::RuntimeScopeStamp>,
 }
 struct Roles {
     tun: TunRole,
     worker: OwnedFd,
+    #[cfg(test)]
     broker: Option<Broker>,
+    remote: Option<super::broker::RemoteLookup>,
+}
+
+impl Roles {
+    fn lookup(&mut self, flow: super::broker::Flow) -> Lookup {
+        if let Some(remote) = self.remote.as_mut() {
+            return remote.lookup(flow);
+        }
+        #[cfg(test)]
+        if let Some(local) = self.broker.as_mut() {
+            return local.lookup(flow);
+        }
+        Lookup::MechanismUnavailable(Unavailable::Authority)
+    }
+    fn project(&mut self, flow: super::broker::Flow, epoch: u64) -> super::broker::ProjectedLookup {
+        if let Some(remote) = self.remote.as_mut() {
+            return remote.lookup_and_project(flow, epoch);
+        }
+        #[cfg(test)]
+        if let Some(local) = self.broker.as_mut() {
+            return local.lookup_and_project(flow, epoch);
+        }
+        super::broker::ProjectedLookup::Unavailable(Unavailable::Authority)
+    }
 }
 
 // Production хранит только helper-owned queue; raw FD доступен лишь fixture.
@@ -65,15 +93,52 @@ impl TunRole {
 }
 
 impl Session {
+    pub(crate) fn from_verified(
+        role: crate::helper::native_bootstrap::SessionRole,
+        remote: super::broker::RemoteLookup,
+    ) -> Result<Self, Unavailable> {
+        let (scope, queue, worker) = role.into_parts();
+        scope.validate().map_err(|_| Unavailable::Authority)?;
+        remote.validate_scope(&scope)?;
+
+        let (nonce, session, generation, invocation, epoch, digest) = scope.context();
+        Ok(Self {
+            phase: Phase::Hello,
+            epoch,
+            digest,
+            nonce,
+            session,
+            generation,
+            invocation,
+            app_required: true,
+            roles: Some(Roles {
+                tun: TunRole::Bound(queue),
+                worker,
+                #[cfg(test)]
+                broker: None,
+                remote: Some(remote),
+            }),
+            sequence: Sequence::default(),
+            scope: Some(scope),
+        })
+    }
+
     /// Пока kernel/unit proof не может быть выпущен, raw caller входы
     /// безусловно отвергаются. Этот gate не принимает fd, env или proof bytes.
     pub fn verified_helper_bootstrap() -> Result<Self, Unavailable> {
         Err(Unavailable::Authority)
     }
     pub fn close(&mut self) {
+        if let Some(scope) = self.scope.take() {
+            scope.revoke();
+        }
         self.phase = Phase::Closed;
         self.sequence.retire();
         if let Some(mut roles) = self.roles.take() {
+            if let Some(remote) = roles.remote.as_mut() {
+                remote.revoke();
+            }
+            #[cfg(test)]
             if let Some(broker) = roles.broker.as_mut() {
                 broker.revoke();
             }
@@ -85,6 +150,9 @@ impl Session {
         self.close();
     }
     fn header(&self, frame: &[u8]) -> Result<Header, Malformed> {
+        if let Some(scope) = &self.scope {
+            scope.validate().map_err(|_| Malformed)?;
+        }
         let header = Header::decode(frame, 0)?;
         if header.epoch != self.epoch || header.digest != self.digest || frame[64..96] != self.nonce
         {
@@ -93,6 +161,9 @@ impl Session {
         Ok(header)
     }
     fn frame(&self, kind: Kind) -> Result<Vec<u8>, Malformed> {
+        if let Some(scope) = &self.scope {
+            scope.validate().map_err(|_| Malformed)?;
+        }
         let mut bytes = vec![0; kind.fixed_bytes().ok_or(Malformed)?];
         Header {
             kind,
@@ -177,10 +248,10 @@ impl Session {
         }
         let flow = wire::lookup_flow(bytes)?;
         self.sequence.begin(header.request_id)?;
-        let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-            Some(broker) => broker.lookup(flow),
-            None => Lookup::MechanismUnavailable(Unavailable::Authority),
-        };
+        let result = self.roles.as_mut().map_or(
+            Lookup::MechanismUnavailable(Unavailable::Authority),
+            |roles| roles.lookup(flow),
+        );
         self.sequence.complete(header.request_id)?;
         Ok(result)
     }
@@ -198,10 +269,10 @@ impl Session {
             }
             let flow = wire::lookup_flow(bytes)?;
             self.sequence.begin(header.request_id)?;
-            let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-                Some(broker) => broker.lookup_and_project(flow, self.epoch),
-                None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
-            };
+            let result = self.roles.as_mut().map_or(
+                super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
+                |roles| roles.project(flow, self.epoch),
+            );
             self.sequence.complete(header.request_id)?;
             Ok(result)
         })();
@@ -268,7 +339,9 @@ mod tests {
                     },
                     worker: worker.into(),
                     broker: None,
+                    remote: None,
                 }),
+                scope: None,
                 sequence: Sequence::new(),
             },
             peer,

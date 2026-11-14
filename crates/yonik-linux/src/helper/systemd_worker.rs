@@ -24,6 +24,10 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue},
 };
 
+mod lookup_leaf;
+pub(crate) use lookup_leaf::{
+    LookupLeafLease, PeerVerifierLease, VerifiedLookupLeaf, VerifiedPeerVerifier,
+};
 const BUS: &str = "unix:path=/run/dbus/system_bus_socket";
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER: &str = "/org/freedesktop/systemd1";
@@ -207,6 +211,18 @@ impl RawIdentityIo for FixtureIdentityIo {
     }
 }
 impl BootstrapUnitObservation {
+    pub(super) fn native_pid(&self) -> u32 {
+        self.pid
+    }
+    pub(super) fn native_uid(&self) -> u32 {
+        self.uid
+    }
+    pub(super) fn native_start(&self) -> u64 {
+        self.start
+    }
+    pub(super) fn native_invocation(&self) -> [u8; 16] {
+        self.invocation
+    }
     /// Только transport observation: NS_GET_NSTYPE/kernel attestation обязательны
     /// отдельно. Возвращаемое значение не может активировать attribution.
     pub fn exchange(
@@ -251,7 +267,7 @@ impl BootstrapUnitObservation {
         }
         Ok(())
     }
-    fn validate_identity(&self) -> Result<()> {
+    pub(super) fn validate_identity(&self) -> Result<()> {
         let io: &dyn RawIdentityIo = &RealIdentityIo;
         #[cfg(test)]
         let io: &dyn RawIdentityIo = self.fixture_io.as_ref().map_or(io, |fixture| fixture);
@@ -441,6 +457,56 @@ impl WorkerMode {
     }
 }
 
+fn native_activation_ready(active: &str, pid: u32) -> Result<bool> {
+    match (active, pid) {
+        ("active", 1..) => Ok(true),
+        ("activating" | "inactive" | "active", _) => Ok(false),
+        _ => Err(WorkerSupervisorError::Stale),
+    }
+}
+/// Отмена выигрывает select, но завершённый неполученный результат остаётся owning.
+async fn wait_owned<T>(
+    slot: &mut Option<JoinHandle<T>>,
+    cancel: &mut Cancellation,
+    deadline: Instant,
+) -> Result<T> {
+    let handle = slot.as_mut().ok_or(WorkerSupervisorError::Protocol)?;
+    let mut joined = false;
+    let result = bounded(cancel, deadline, async {
+        let result = handle.await.map_err(unavailable);
+        joined = true;
+        result
+    })
+    .await;
+    if joined {
+        *slot = None;
+    }
+    result
+}
+type NativeAdmission = Result<(
+    super::native_bootstrap::VerifiedPendingRun,
+    crate::worker::anchor_exchange::NamespaceObservation,
+    [u8; 512],
+)>;
+struct NativeRuntime {
+    _permit: Arc<Permit>,
+    task_start: u64,
+    stamp: Arc<std::sync::Mutex<Option<super::native_bootstrap::RuntimeScopeStamp>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<
+        std::thread::JoinHandle<std::result::Result<(), crate::attribution::broker::Unavailable>>,
+    >,
+    ready: std::sync::mpsc::Receiver<()>,
+    attached: bool,
+}
+impl Drop for NativeRuntime {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _result = thread.join();
+        }
+    }
+}
 /// Не Clone: один владелец в процессе. Отменённая future оставляет pending и
 /// blocking transfer внутри владельца; только recover снова разрешает запуск.
 pub struct SystemWorkerSupervisor {
@@ -453,10 +519,52 @@ pub struct SystemWorkerSupervisor {
     clean: bool,
     retained_copy: Option<Arc<WorkerPayload>>,
     fence: Box<dyn WorkerFence>,
+    native_runtime: Option<NativeRuntime>,
+    native_transfer: Option<JoinHandle<Result<WorkerAck>>>,
+    native_admission: Option<JoinHandle<NativeAdmission>>,
+    native_custody: Option<crate::worker::anchor_exchange::NamespaceRetention>,
+    lookup_leaf: Option<lookup_leaf::LeafPending>,
+    peer_verifier: Option<lookup_leaf::PeerPending>,
+    peer_inspection: Option<JoinHandle<Result<()>>>,
+    native_lookup_transfer: Option<JoinHandle<Result<crate::attribution::broker::RemoteLookup>>>,
+    native_remote: Option<crate::attribution::broker::RemoteLookup>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
+        if let Some(inspection) = self.peer_inspection.take() {
+            std::mem::forget(inspection);
+        }
+        // Preparation может жить при clean fixed worker units; неизвестный stop не освобождает permit.
+        if let Some(verifier) = self.peer_verifier.take() {
+            std::mem::forget(verifier);
+        }
+
         if !self.clean {
+            if let Some(task) = self.native_lookup_transfer.take() {
+                std::mem::forget(task);
+            }
+            if let Some(remote) = self.native_remote.take() {
+                std::mem::forget(remote);
+            }
+
+            if let Some(leaf) = self.lookup_leaf.take() {
+                std::mem::forget(leaf);
+            }
+
+            if let Some(custody) = self.native_custody.take() {
+                std::mem::forget(custody);
+            }
+
+            if let Some(task) = self.native_admission.take() {
+                std::mem::forget(task);
+            }
+            if let Some(task) = self.native_transfer.take() {
+                std::mem::forget(task);
+            }
+
+            if let Some(runtime) = self.native_runtime.take() {
+                std::mem::forget(runtime);
+            }
             if let Some(payload) = self.retained_copy.take() {
                 // Без empty-cgroup proof нельзя освободить global reserve:
                 // он остаётся в карантине до выхода helper, ограничен ByteBudget.
@@ -504,6 +612,15 @@ impl SystemWorkerSupervisor {
                 clean: false,
                 retained_copy: None,
                 fence: Box::new(SystemFence),
+                native_runtime: None,
+                native_transfer: None,
+                native_admission: None,
+                native_custody: None,
+                lookup_leaf: None,
+                peer_verifier: None,
+                peer_inspection: None,
+                native_lookup_transfer: None,
+                native_remote: None,
             };
             supervisor.validate_contract().await?;
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
@@ -648,6 +765,239 @@ impl SystemWorkerSupervisor {
         }
         self.cleanup(cancel, deadline).await
     }
+    /// Conditional native start. Отсутствующий immutable deployment закрывает admission.
+    pub(crate) async fn attest_preparation(
+        &mut self,
+        peer: Arc<crate::attribution::PeerProcess>,
+        source: super::native_bootstrap::VerifiedStaticInstalledImage,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        if self.peer_inspection.is_some() {
+            return Err(WorkerSupervisorError::Busy);
+        }
+        let verifier = self
+            .launch_peer_verifier(
+                peer.captured().map_err(unavailable)?,
+                &source,
+                cancel,
+                deadline,
+            )
+            .await?;
+        let permit = Arc::clone(&self.permit);
+        self.peer_inspection = Some(tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            peer.attest(verifier, source).map_err(unavailable)
+        }));
+        wait_owned(&mut self.peer_inspection, cancel, deadline).await??;
+        Ok(())
+    }
+    #[allow(clippy::too_many_arguments)] // Каждый owning вход проверяется отдельным boundary.
+    pub(crate) async fn start_native(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        owner: &RunAuthority,
+        authorization: RunAuthorization,
+        queue: Arc<crate::managed_network::tun::BoundTun>,
+        journal: &crate::managed_network::Journal,
+        topology: crate::LinuxTopology,
+        epoch: u64,
+        output: Option<crate::output_transport::ValidatedWriters>,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        use super::native_bootstrap::{VerifiedPendingRun, verify_pending};
+        use crate::worker::role_handoff::{Binding, Roles};
+        let deadline = Instant::now() + DEADLINE;
+        self.begin(WorkerMode::Run, cancel, deadline).await?;
+        self.retained_copy = Some(Arc::clone(&payload));
+        let stream = bounded(cancel, deadline, async {
+            tokio::net::UnixStream::connect(WorkerMode::Run.channel())
+                .await
+                .map_err(unavailable)
+        })
+        .await?;
+        verify_socket(WorkerMode::Run)?;
+        let stream = stream.into_std().map_err(unavailable)?;
+        stream.set_nonblocking(false).map_err(unavailable)?;
+        loop {
+            let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+            authorization.validate_owner(owner).map_err(unavailable)?;
+            if native_activation_ready(&state.active, state.pid)? {
+                break;
+            }
+            bounded(cancel, deadline, async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok(())
+            })
+            .await?;
+        }
+        let mut observation = bounded(cancel, deadline, self.inspect_anchor_bootstrap()).await?;
+        observation.expires = deadline;
+        let task_start = observation.start;
+        let pid = observation.pid;
+        let uid = observation.uid;
+        let invocation = observation.invocation;
+        let pending = VerifiedPendingRun::verify(
+            self,
+            owner,
+            authorization,
+            observation,
+            *payload.digest().as_bytes(),
+            epoch,
+            cancel,
+            deadline,
+        )
+        .await?;
+        let admission_stream = stream.try_clone().map_err(unavailable)?;
+        let permit = Arc::clone(&self.permit);
+        self.native_admission = Some(tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            pending.receive_blocking(admission_stream)
+        }));
+        let (pending, custody, frame) =
+            wait_owned(&mut self.native_admission, cancel, deadline).await??;
+        self.native_custody = Some(custody.retention());
+        let coverage = pending
+            .finish_receive(self, owner, custody, frame, cancel)
+            .await?;
+        let handoff = coverage.take_handoff()?;
+        let (helper, worker) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::CLOEXEC,
+            None,
+        )
+        .map_err(unavailable)?;
+        let leaf = self
+            .launch_lookup_leaf(owner, &coverage, cancel, deadline)
+            .await?;
+        let coverage = coverage.revalidate(self, owner, cancel).await?;
+        let issued = verify_pending(coverage, owner, queue, journal, topology, helper)?;
+        let (nonce, session, generation, invocation_context, epoch, digest) =
+            issued.run.context()?;
+        let binding = Binding {
+            nonce,
+            session,
+            generation,
+            invocation: invocation_context,
+            epoch,
+            digest,
+            server_pid: std::process::id(),
+            server_start: bootstrap_start(std::process::id())?,
+        };
+        let server_pid = rustix::process::Pid::from_raw(std::process::id() as i32)
+            .ok_or(WorkerSupervisorError::Protocol)?;
+        let roles = Roles {
+            channel: worker,
+            server_pidfd: rustix::process::pidfd_open(
+                server_pid,
+                rustix::process::PidfdFlags::NONBLOCK,
+            )
+            .map_err(unavailable)?,
+            record: binding.record().map_err(unavailable)?,
+        };
+        let lookup_scope = issued.session.lookup_scope();
+        self.native_lookup_transfer = Some(tokio::task::spawn_blocking(move || {
+            crate::attribution::broker::RemoteLookup::from_verified(leaf, lookup_scope)
+                .map_err(unavailable)
+        }));
+        let remote = wait_owned(&mut self.native_lookup_transfer, cancel, deadline).await??;
+        let session =
+            crate::attribution::native_session::Session::from_verified(issued.session, remote)
+                .map_err(unavailable)?;
+        let (ready_tx, ready) = std::sync::mpsc::sync_channel(1);
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("yonik-native-broker".into())
+            .spawn(move || {
+                session.serve_with_ready(&thread_stop, || {
+                    ready_tx
+                        .send(())
+                        .map_err(|_| crate::attribution::broker::Unavailable::Cancelled)
+                })
+            })
+            .map_err(unavailable)?;
+        let scope = Arc::new(std::sync::Mutex::new(None));
+        self.native_runtime = Some(NativeRuntime {
+            _permit: Arc::clone(&self.permit),
+            task_start,
+            stamp: Arc::clone(&scope),
+            stop,
+            thread: Some(thread),
+            ready,
+            attached: false,
+        });
+        let permit = Arc::clone(&self.permit);
+        self.native_transfer = Some(tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            crate::worker::role_handoff::handoff_verified_run(
+                issued.run,
+                &handoff,
+                roles,
+                &binding,
+                pid,
+                uid,
+                deadline.into_std(),
+                |stamp| {
+                    *scope
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(stamp);
+                },
+            )
+            .map_err(unavailable)?;
+            payload
+                .send_output_before(&stream, WorkerMode::Run, output, deadline.into_std())
+                .map_err(unavailable)
+        }));
+        let ack = wait_owned(&mut self.native_transfer, cancel, deadline).await??;
+        if ack.status != WorkerStatus::Accepted || ack.pid != pid {
+            return Err(WorkerSupervisorError::Protocol);
+        }
+        let ticket = WorkerTicket { pid, invocation };
+        let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        if !ticket.matches(&state) {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.current = Some(WorkerTicket { pid, invocation });
+        self.pending = None;
+        Ok(ticket)
+    }
+    /// ATTACH ACK плюс текущая canonical invocation; network health проверяет owner.
+    pub(crate) async fn native_attached(&mut self, ticket: &WorkerTicket) -> Result<bool> {
+        if self.observe(ticket).await? != WorkerLiveness::Running {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        let runtime = self
+            .native_runtime
+            .as_mut()
+            .ok_or(WorkerSupervisorError::Stale)?;
+        if bootstrap_start(ticket.pid())? != runtime.task_start {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        runtime
+            .stamp
+            .lock()
+            .map_err(unavailable)?
+            .as_ref()
+            .ok_or(WorkerSupervisorError::Stale)?
+            .validate()?;
+        if runtime
+            .thread
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        if !runtime.attached {
+            match runtime.ready.try_recv() {
+                Ok(()) => runtime.attached = true,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(_) => return Err(WorkerSupervisorError::Protocol),
+            }
+        }
+        Ok(runtime.attached)
+    }
     pub async fn start(
         &mut self,
         payload: Arc<WorkerPayload>,
@@ -776,7 +1126,11 @@ impl SystemWorkerSupervisor {
         bounded(cancel, deadline, self.validate_contract()).await?;
         self.clean = false;
         self.current = None;
-        self.cleanup(cancel, deadline).await
+        if self.peer_inspection.is_some() {
+            let _result = wait_owned(&mut self.peer_inspection, cancel, deadline).await?;
+        }
+        self.cleanup(cancel, deadline).await?;
+        self.stop_peer_verifier(cancel, deadline).await
     }
     async fn begin(
         &mut self,
@@ -919,6 +1273,19 @@ impl SystemWorkerSupervisor {
         }
         Ok((ack, binding))
     }
+    pub(super) async fn validate_native_profile_context(
+        &self,
+        observation: &BootstrapUnitObservation,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<()> {
+        observation.validate_identity()?;
+        bounded(cancel, deadline, self.validate_contract()).await?;
+        observation.validate_identity()?;
+        let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        observation.validate_state(&state)?;
+        observation.validate_identity()
+    }
     async fn revalidate_binding(
         &self,
         binding: &InvocationBinding,
@@ -935,6 +1302,32 @@ impl SystemWorkerSupervisor {
         // Сначала запрет новой активации, затем завершение уже начатой передачи.
         for mode in [WorkerMode::Check, WorkerMode::Run] {
             bounded(cancel, deadline, self.unit_job("StopUnit", mode.socket())).await?;
+        }
+        if let Some(handle) = self.native_admission.as_mut() {
+            let result = bounded(cancel, deadline, async {
+                handle.await.map_err(unavailable)
+            })
+            .await?;
+            self.native_admission = None;
+            if let Ok((pending, custody, frame)) = result {
+                self.native_custody = Some(custody.retention());
+                drop((pending, custody, frame));
+            }
+        }
+        if self.native_lookup_transfer.is_some() {
+            if let Ok(remote) =
+                wait_owned(&mut self.native_lookup_transfer, cancel, deadline).await?
+            {
+                self.native_remote = Some(remote);
+            }
+        }
+        if let Some(handle) = self.native_transfer.as_mut() {
+            bounded(cancel, deadline, async {
+                let _result = handle.await.map_err(unavailable)?;
+                Ok(())
+            })
+            .await?;
+            self.native_transfer = None;
         }
         if let Some(handle) = self.transfer.as_mut() {
             bounded(cancel, deadline, async {
@@ -955,12 +1348,16 @@ impl SystemWorkerSupervisor {
             }
             bounded(cancel, deadline, self.unit_job("StopUnit", mode.service())).await?;
         }
+        self.stop_lookup_leaf(cancel, deadline).await?;
         loop {
             if bounded(cancel, deadline, self.all_empty()).await? {
                 self.pending = None;
                 self.current = None;
                 self.clean = true;
                 self.retained_copy = None;
+                self.native_runtime = None;
+                self.native_custody = None;
+                self.native_remote = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {
@@ -970,7 +1367,7 @@ impl SystemWorkerSupervisor {
             .await?;
         }
     }
-    async fn unit_job(&self, method: &str, unit: &'static str) -> Result<()> {
+    async fn unit_job(&self, method: &str, unit: &str) -> Result<()> {
         tokio::time::timeout(DEADLINE, async {
             let proxy = zbus::Proxy::new(
                 &self.connection,
@@ -1335,12 +1732,12 @@ async fn bounded<T>(
     tokio::select! {biased; _=cancel.cancelled()=>Err(WorkerSupervisorError::Cancelled),_=tokio::time::sleep_until(deadline)=>Err(WorkerSupervisorError::Timeout),result=operation=>result}
 }
 
-const FILE_FLAGS: OFlags = OFlags::RDONLY
+pub(super) const FILE_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
     .union(OFlags::NOFOLLOW)
     .union(OFlags::NONBLOCK);
 const DIR_FLAGS: OFlags = FILE_FLAGS.union(OFlags::DIRECTORY);
-fn trusted(file: &File, directory: bool) -> Result<()> {
+pub(super) fn trusted(file: &File, directory: bool) -> Result<()> {
     let m = file.metadata().map_err(unavailable)?;
     if m.uid() != 0
         || m.mode() & 0o022 != 0
@@ -1351,12 +1748,12 @@ fn trusted(file: &File, directory: bool) -> Result<()> {
     }
     Ok(())
 }
-fn child(parent: &File, name: &str) -> Result<File> {
+pub(super) fn child(parent: &File, name: &str) -> Result<File> {
     let file = File::from(openat(parent, name, DIR_FLAGS, Mode::empty()).map_err(unavailable)?);
     trusted(&file, true)?;
     Ok(file)
 }
-fn root() -> Result<File> {
+pub(super) fn root() -> Result<File> {
     let file = File::from(open("/", DIR_FLAGS, Mode::empty()).map_err(unavailable)?);
     trusted(&file, true)?;
     Ok(file)
@@ -1371,7 +1768,7 @@ fn read_bounded(file: File) -> Result<String> {
     }
     Ok(contents)
 }
-fn verify_installed() -> Result<()> {
+pub(super) fn verify_installed() -> Result<()> {
     let mut parent = root()?;
     for component in ["usr", "lib", "systemd", "system"] {
         parent = child(&parent, component)?;
@@ -1577,4 +1974,87 @@ pub(super) fn unit_raw_identity_result(
 #[cfg(test)]
 pub(super) fn unit_owner_payload() -> Arc<WorkerPayload> {
     tests::binding_test_payload()
+}
+
+#[cfg(test)]
+mod native_activation_tests {
+    use super::*;
+    #[tokio::test]
+    async fn ready_admission_result_cancel_retains_ownership_until_consumed() {
+        struct Guard(Arc<AtomicBool>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Guard(Arc::clone(&dropped));
+        let mut slot = Some(tokio::spawn(async move { guard }));
+        tokio::task::yield_now().await;
+        assert!(slot.as_ref().unwrap().is_finished());
+        let (cancel_tx, mut cancel) = Cancellation::new();
+        cancel_tx.send(true).unwrap();
+        assert!(matches!(
+            wait_owned(&mut slot, &mut cancel, Instant::now() + DEADLINE).await,
+            Err(WorkerSupervisorError::Cancelled)
+        ));
+        assert!(slot.is_some());
+        assert!(!dropped.load(Ordering::Acquire));
+        let (_keep, mut fresh) = Cancellation::new();
+        let retained = wait_owned(&mut slot, &mut fresh, Instant::now() + DEADLINE)
+            .await
+            .unwrap();
+        assert!(slot.is_none());
+        assert!(!dropped.load(Ordering::Acquire));
+        drop(retained);
+        assert!(dropped.load(Ordering::Acquire));
+    }
+    #[tokio::test]
+    async fn bootstrap_inspection_uses_existing_absolute_deadline() {
+        let (_keep, mut cancel) = Cancellation::new();
+        let result = bounded(&mut cancel, Instant::now(), async {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(())
+        })
+        .await;
+        assert_eq!(result, Err(WorkerSupervisorError::Timeout));
+    }
+    #[tokio::test]
+    async fn cancelled_wait_retains_owned_transfer_until_join() {
+        struct Guard(Arc<AtomicBool>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Guard(Arc::clone(&dropped));
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let mut task = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            release_rx.recv().unwrap();
+            Ok(())
+        });
+        let (cancel_tx, mut cancel) = Cancellation::new();
+        cancel_tx.send(true).unwrap();
+        let result = bounded(&mut cancel, Instant::now() + DEADLINE, async {
+            (&mut task).await.map_err(unavailable)?
+        })
+        .await;
+        assert_eq!(result, Err(WorkerSupervisorError::Cancelled));
+        assert!(!dropped.load(Ordering::Acquire));
+        release_tx.send(()).unwrap();
+        task.await.unwrap().unwrap();
+        assert!(dropped.load(Ordering::Acquire));
+    }
+    #[test]
+    fn activating_and_zero_pid_never_admit() {
+        assert_eq!(native_activation_ready("activating", 0), Ok(false));
+        assert_eq!(native_activation_ready("active", 0), Ok(false));
+        assert_eq!(native_activation_ready("active", 42), Ok(true));
+        assert_eq!(
+            native_activation_ready("failed", 0),
+            Err(WorkerSupervisorError::Stale)
+        );
+    }
 }

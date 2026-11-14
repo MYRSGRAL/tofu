@@ -21,7 +21,7 @@ use crate::{
     worker::WorkerPayload,
 };
 #[path = "native_owner.rs"]
-pub(super) mod native_owner;
+pub(in crate::helper) mod native_owner;
 use sha2::Digest;
 use std::{
     fs::File,
@@ -567,6 +567,11 @@ impl Backend {
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }
+        self.ensure_peer_attestation(
+            Arc::clone(request.peer.as_ref().ok_or(ServiceError::Unsupported)?),
+            cancel,
+        )
+        .await?;
         request
             .peer
             .as_ref()
@@ -628,6 +633,25 @@ impl Backend {
         self.prepare_profile_inner(uid, profile, Some(bundle), cancel)
             .await
     }
+    async fn ensure_peer_attestation(
+        &mut self,
+        peer: Arc<crate::attribution::PeerProcess>,
+        cancel: &mut Cancellation,
+    ) -> Result<(), ServiceError> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        // Отсутствие approved static profile закрывает путь до любого child/Check эффекта.
+        let source = super::super::native_bootstrap::load_static_preflight(deadline.into_std())
+            .map_err(|_| ServiceError::Unsupported)?;
+        let supervisor = tokio::select! {biased;
+            _=cancel.cancelled()=>return Err(ServiceError::Cancelled),
+            _=tokio::time::sleep_until(deadline)=>return Err(ServiceError::Unavailable),
+            result=self.supervisor()=>result?,
+        };
+        supervisor
+            .attest_preparation(peer, source, cancel, deadline)
+            .await
+            .map_err(|_| ServiceError::Unsupported)
+    }
     pub(super) async fn prepare_profile(
         &mut self,
         uid: u32,
@@ -651,6 +675,11 @@ impl Backend {
             .as_ref()
             .is_some_and(|policy| policy.requires_attribution());
         if attribution_required {
+            self.ensure_peer_attestation(
+                Arc::clone(request.peer.as_ref().ok_or(ServiceError::Unsupported)?),
+                cancel,
+            )
+            .await?;
             let admission_uid = worker_uid().map_err(|_| ServiceError::Unsupported)?;
             crate::attribution::preflight(true, request.peer.as_deref(), admission_uid)
                 .await
@@ -838,7 +867,11 @@ impl Backend {
             None
         };
         let artifact = SessionArtifact {
-            native_owner_stamp: None,
+            native_owner_stamp: if attribution_required {
+                Some(self.native_owner.reserve()?)
+            } else {
+                None
+            },
             bundle: bundle_digests,
             payload,
             plan,
@@ -1054,15 +1087,25 @@ impl Backend {
             .await
             .map_err(unavailable)?;
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
-        self.worker_uncertain = true;
-        let ticket = diagnostic_result(
-            "worker_start",
-            self.supervisor()
-                .await?
-                .start_output(Arc::clone(&artifact.payload), output, cancel)
-                .await,
-        )
-        .map_err(unavailable)?;
+        let ticket = if artifact.attribution_required {
+            self.retain_canonical_queue(&artifact.plan, &tun, cancel)
+                .await?;
+            let record = self
+                .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
+                .await?;
+            self.commit_native_owner(record)?;
+            self.start_committed_native(output, cancel).await?
+        } else {
+            self.worker_uncertain = true;
+            diagnostic_result(
+                "worker_start",
+                self.supervisor()
+                    .await?
+                    .start_output(Arc::clone(&artifact.payload), output, cancel)
+                    .await,
+            )
+            .map_err(unavailable)?
+        };
         let exit_watch = diagnostic_result(
             "pidfd_watch",
             watch_worker_exit(ticket.pid(), Arc::clone(&self.exited)),
@@ -1076,8 +1119,35 @@ impl Backend {
         };
         // Сохраняем ticket до verification: даже ошибка снимка не теряет worker.
         self.active = Some(active);
-        self.worker_uncertain = false;
+        if !self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.artifact.attribution_required)
+        {
+            self.worker_uncertain = false;
+        }
         self.verify_session(cancel).await?;
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.artifact.attribution_required)
+        {
+            let ticket = &self
+                .active
+                .as_ref()
+                .ok_or(ServiceError::Unavailable)?
+                .ticket;
+            if self
+                .supervisor
+                .as_mut()
+                .ok_or(ServiceError::Unavailable)?
+                .native_attached(ticket)
+                .await
+                .map_err(unavailable)?
+            {
+                self.worker_uncertain = false;
+            }
+        }
         self.bindings = None;
         Ok(ProtectionState::TunnelStarting)
     }
@@ -1197,6 +1267,33 @@ impl Backend {
         uid: u32,
     ) -> Result<ProtectionState, ServiceError> {
         let (_keep, mut cancel) = fresh_cancel();
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.artifact.attribution_required)
+        {
+            if self.verify_session(&mut cancel).await.is_ok() {
+                let ticket = &self
+                    .active
+                    .as_ref()
+                    .ok_or(ServiceError::Unavailable)?
+                    .ticket;
+                if let Ok(attached) = self
+                    .supervisor
+                    .as_mut()
+                    .ok_or(ServiceError::Unavailable)?
+                    .native_attached(ticket)
+                    .await
+                {
+                    if attached {
+                        self.worker_uncertain = false;
+                    }
+                    return Ok(ProtectionState::TunnelStarting);
+                }
+            }
+            self.invalidate()?;
+            return self.finish_session(uid, false).await;
+        }
         if !self.worker_uncertain {
             if let (Some(active), Some(supervisor)) = (&self.active, &self.supervisor) {
                 if supervisor.observe(&active.ticket).await == Ok(WorkerLiveness::Running)

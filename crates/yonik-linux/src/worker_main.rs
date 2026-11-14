@@ -3,6 +3,13 @@
 async fn main() -> std::process::ExitCode {
     use yonik_linux::worker::{WorkerMode, serve};
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if matches!(arguments.as_slice(), [argument] if argument == "--lookup") {
+        return if yonik_linux::attribution::broker::serve_lookup().is_ok() {
+            std::process::ExitCode::SUCCESS
+        } else {
+            std::process::ExitCode::FAILURE
+        };
+    }
     let mode = match arguments.as_slice() {
         [argument] if argument == "--check" => WorkerMode::Check,
         [argument] if argument == "--run" => WorkerMode::Run,
