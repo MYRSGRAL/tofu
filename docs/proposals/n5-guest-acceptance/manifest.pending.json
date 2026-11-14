@@ -1,0 +1,92 @@
+{
+  "schema": "SEALED_GUEST_FIXTURE_V1",
+  "source_commit": null,
+  "source_archive_sha256": null,
+  "guest_base_sha256": null,
+  "guest_provenance_sha256": null,
+  "kernel_build_id": null,
+  "coverage_policy_sha256": null,
+  "artifacts": {
+    "helper": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/lib/yonik/yonik-helper",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
+    },
+    "worker": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/lib/yonik/yonik-worker",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
+    },
+    "desktop": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/bin/yonik-desktop",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
+    },
+    "core_a": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/lib/yonik/engines/sing-box",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
+    },
+    "core_b": {
+      "sha256": null,
+      "size": null,
+      "source_archive_sha256": null,
+      "source_commit": null,
+      "build_receipt_sha256": null,
+      "installed_path": "/usr/lib/yonik/engines/xray",
+      "uid": 0,
+      "gid": 0,
+      "mode": 365
+    }
+  },
+  "units": {
+    "yonik-helper.service": null,
+    "yonik-worker.service": null,
+    "yonik-worker.socket": null,
+    "yonik-worker-check.service": null,
+    "yonik-worker-check.socket": null
+  },
+  "profile": {
+    "schema": 1,
+    "worker_sha256": null,
+    "source_archive_sha256": null,
+    "policy_id": "yonik-own-namespace-fixed16-v1",
+    "policy_sha256": null,
+    "kernel_release": null,
+    "kernel_build_id": null,
+    "kernel_machine": "x86_64",
+    "kernel_abi": "linux-native-abi260-ynkch004-ynkns004-v1"
+  },
+  "environment": {
+    "pid1_sha256": null,
+    "worker_uid": null,
+    "worker_gid": null,
+    "topology_sha256": null,
+    "uid_caps_sha256": null,
+    "cgroup_controllers_sha256": null
+  }
+}
