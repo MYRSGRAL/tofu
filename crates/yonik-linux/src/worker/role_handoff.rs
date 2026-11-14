@@ -373,6 +373,7 @@ impl ProductionPermit {
     }
 }
 /// Consuming sender сохраняет owning stamp у supervisor до первой отправки.
+#[allow(clippy::too_many_arguments)] // Frozen роли, binding и authenticated peer остаются раздельными.
 pub(crate) fn handoff_verified_run(
     run: crate::helper::native_bootstrap::RunRole,
     socket: &OwnedFd,

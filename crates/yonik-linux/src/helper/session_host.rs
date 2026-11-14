@@ -1252,20 +1252,17 @@ impl Backend {
                     .as_ref()
                     .ok_or(ServiceError::Unavailable)?
                     .ticket;
-                match self
+                if let Ok(attached) = self
                     .supervisor
                     .as_mut()
                     .ok_or(ServiceError::Unavailable)?
                     .native_attached(ticket)
                     .await
                 {
-                    Ok(attached) => {
-                        if attached {
-                            self.worker_uncertain = false;
-                        }
-                        return Ok(ProtectionState::TunnelStarting);
+                    if attached {
+                        self.worker_uncertain = false;
                     }
-                    Err(_) => {}
+                    return Ok(ProtectionState::TunnelStarting);
                 }
             }
             self.invalidate()?;
