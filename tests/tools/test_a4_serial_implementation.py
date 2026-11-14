@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -631,7 +632,7 @@ class BoundedCommandTests(unittest.TestCase):
             patch.object(collector, "_command", return_value=None),
         ):
             with self.assertRaisesRegex(ValueError, "UNKNOWN"):
-                collector._snapshot(emitter, 100, True)
+                collector._snapshot(emitter, time.monotonic() + 100, True)
         emitter.emit.assert_any_call("failure", {"code": "GUARD_RED"})
         self.assertNotIn(
             unittest.mock.call("failure", {"code": "PRODUCT_JOB_FAIL"}),

@@ -19,6 +19,60 @@ collector = importlib.import_module("a4_serial_collector")
 
 
 class CleanupBoundaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        collector._alarm_expired = False
+
+    def tearDown(self) -> None:
+        collector._alarm_expired = False
+
+    def test_alarm_during_pipe_setup_still_reaps_child(self) -> None:
+        process = Mock()
+        process.poll.return_value = None
+
+        def alarm_at_fileno() -> int:
+            collector._deadline_expired(signal.SIGALRM, None)
+            return 42
+
+        process.stdout.fileno.side_effect = alarm_at_fileno
+        with (
+            patch.object(collector, "_alarm_expired", False, create=True),
+            patch.object(collector.subprocess, "Popen", return_value=process),
+            patch.object(collector.os, "set_blocking"),
+        ):
+            try:
+                collector._command("jobs", time.monotonic() + 5)
+            except TimeoutError:
+                pass
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+        process.stdout.close.assert_called_once_with()
+
+    def test_alarm_during_cleanup_does_not_interrupt_reap(self) -> None:
+        process = Mock()
+        process.stdout.fileno.return_value = 42
+
+        def alarm_at_poll() -> None:
+            collector._deadline_expired(signal.SIGALRM, None)
+            return None
+
+        process.poll.side_effect = alarm_at_poll
+        with (
+            patch.object(collector, "_alarm_expired", False, create=True),
+            patch.object(collector.subprocess, "Popen", return_value=process),
+            patch.object(collector.os, "set_blocking"),
+            patch.object(
+                collector.select, "select", return_value=([process.stdout], [], [])
+            ),
+            patch.object(collector.os, "read", return_value=b"x" * 32769),
+        ):
+            try:
+                collector._command("jobs", time.monotonic() + 5)
+            except TimeoutError:
+                pass
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=1)
+        process.stdout.close.assert_called_once_with()
+
     def test_open_pipe_cannot_hold_capture_after_leader_exit(self) -> None:
         process = subprocess.Popen(
             [sys.executable, "-c", "pass"],
@@ -92,7 +146,7 @@ class CleanupBoundaryTests(unittest.TestCase):
                     process.kill()
                 process.wait(timeout=2)
 
-    def test_alarm_raises_instead_of_bypassing_command_finally(self) -> None:
+    def test_alarm_marks_deadline_without_interrupting_ownership(self) -> None:
         with (
             tempfile.TemporaryFile() as serial,
             patch.object(collector, "_identity", return_value="own-test-boot"),
@@ -106,8 +160,8 @@ class CleanupBoundaryTests(unittest.TestCase):
         ):
             self.assertEqual(collector.main(), 1)
             handler = install.call_args.args[1]
-            with self.assertRaises(TimeoutError):
-                handler(signal.SIGALRM, None)
+            handler(signal.SIGALRM, None)
+            self.assertTrue(collector._alarm_expired)
             immediate_exit.assert_not_called()
 
     def test_alarm_during_command_read_kills_and_reaps(self) -> None:

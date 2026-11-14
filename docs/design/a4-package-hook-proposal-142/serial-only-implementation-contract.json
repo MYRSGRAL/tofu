@@ -13,7 +13,7 @@
     },
     "sources": {
       "a4_serial_driver.py": "c54ccbb7304c5288e8bf0b623cb8d066c9ecb04d564c511a1d1c52a0e7bd81f4",
-      "a4_serial_collector.py": "ae99c50d79728c00bc6cb93b7e987a037c9e7e25dfd2395fce61d16aa361bd07",
+      "a4_serial_collector.py": "72d7d67ac816529e1408f384f99c08472607ad22b93578cc4279222011d4b835",
       "a4_serial_protocol.py": "cad851a8c0e02d6cb970feacaed8da1dda19549bcdd934dfde38ded9ebac63a4",
       "a4_serial_projection.py": "8f198030897d550278c7e21a502188dbd2e07a6cf6afd4fba96b460ae7f99c7c",
       "a4_package_hook_vm.py": "a07202267a719196e42dfc5e393aee509166168989a41aed8d4e572105e7fa93"
@@ -164,22 +164,30 @@
       "ruff_check": "PASS",
       "ruff_format": "PASS"
     },
-    "cleanup_fixed_serial_suite": 43,
     "new_cleanup_regressions": 6,
     "baseline_51a89e6_assertion_RED": 2,
     "ruff_check": "PASS",
-    "ruff_format": "PASS"
+    "ruff_format": "PASS",
+    "historical_cleanup_fixed_serial_suite_at_988c463": 43,
+    "cooperative_deadline_serial_suite": 45,
+    "new_cooperative_window_regressions": 2
   },
-  "test_source_sha256": "6656a5766b4195c32ba0580ae48a18f04e427cdb5daf903304917e756fe24e6d",
+  "test_source_sha256": "412e8ba322ffcceaef51608041f85c7f48728ab6198edf810ee92057332271a3",
   "fullA4": false,
   "finalLinux": false,
   "factory": "CLOSED",
-  "cleanup_test_source_sha256": "c834e2747ce649cc00f9295765c230609a5c2b5b2e609bc07f245f1d3f191d57",
+  "cleanup_test_source_sha256": "2015aa167bf18491e643e7470d0c64151c6e506285f7a34700c4b1cc6bdfb315",
   "host_command_limits": {
     "stdout_stderr_combined_bytes": 65536,
     "capture_seconds": 45,
     "kill_reap_seconds": 1,
     "unreaped_policy": "retain task; UNKNOWN; no boot approval",
     "signals": "owned separate process group; leader not reaped before killpg"
+  },
+  "deadline_semantics": {
+    "alarm": "cooperative expired flag; never raises or exits asynchronously",
+    "command": "deadline checks plus bounded command read/wait and cleanup; alarm cannot interrupt ownership",
+    "outer_fence": "existing host QEMU deadline/stop remains final fence for uninterruptible guest kernel I/O",
+    "over_budget": "UNKNOWN; never successful evidence"
   }
 }

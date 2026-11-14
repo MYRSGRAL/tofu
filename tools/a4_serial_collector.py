@@ -39,6 +39,7 @@ SOURCE_NAMES = (
 )
 FIELDS = tuple(sorted(projection.STATES.keys() | projection.RELATIONS | {"Job"}))
 ENV = {"PATH": "/usr/bin", "LC_ALL": "C", "SYSTEMD_PAGER": "cat", "SYSTEMD_COLORS": "0"}
+_alarm_expired = False
 
 
 def _valid_path(path: str, unit: str) -> bool:
@@ -174,21 +175,22 @@ def _argv(kind: str, unit: str = "") -> list[str]:
 
 def _command(kind: str, deadline: float, unit: str = "") -> str | None:
     remaining = min(1.0, deadline - time.monotonic())
-    if remaining <= 0:
+    if remaining <= 0 or _alarm_expired:
         return None
-    process = subprocess.Popen(
-        _argv(kind, unit),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        env=ENV,
-    )
-    assert process.stdout is not None
-    os.set_blocking(process.stdout.fileno(), False)
-    data = bytearray()
-    end = time.monotonic() + remaining
+    process = None
     try:
-        while time.monotonic() < end:
+        process = subprocess.Popen(
+            _argv(kind, unit),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=ENV,
+        )
+        assert process.stdout is not None
+        os.set_blocking(process.stdout.fileno(), False)
+        data = bytearray()
+        end = time.monotonic() + remaining
+        while not _alarm_expired and time.monotonic() < end:
             ready, _, _ = select.select(
                 [process.stdout], [], [], max(0, end - time.monotonic())
             )
@@ -208,10 +210,14 @@ def _command(kind: str, deadline: float, unit: str = "") -> str | None:
     except (UnicodeError, subprocess.TimeoutExpired):
         return None
     finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=1)
-        process.stdout.close()
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=1)
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
 
 
 def _properties(text: str | None) -> dict[str, str]:
@@ -369,6 +375,8 @@ class Emitter:
 
 
 def _snapshot(emitter: Emitter, deadline: float, initial: bool) -> None:
+    if _alarm_expired or time.monotonic() >= deadline:
+        raise TimeoutError("Snapshot deadline")
     if _identity() != emitter.boot:
         raise ValueError("Boot changed")
     emitter.emit(
@@ -404,6 +412,8 @@ def _snapshot(emitter: Emitter, deadline: float, initial: bool) -> None:
     total = 0
     try:
         for unit in projection.REQUIRED:
+            if _alarm_expired or time.monotonic() >= deadline:
+                raise TimeoutError("Snapshot deadline")
             emitter.emit(
                 "properties",
                 projection.project_properties(
@@ -420,7 +430,7 @@ def _snapshot(emitter: Emitter, deadline: float, initial: bool) -> None:
                 fragment = ""
             for index, path in enumerate([fragment, *dropins]):
                 try:
-                    if time.monotonic() >= deadline:
+                    if _alarm_expired or time.monotonic() >= deadline:
                         raise TimeoutError("Snapshot deadline")
                     data = _read_unit(path, unit, rootfd, 256 * 1024 - total)
                     total += len(data)
@@ -440,7 +450,7 @@ def _snapshot(emitter: Emitter, deadline: float, initial: bool) -> None:
             raise ValueError("Product job")
     finally:
         os.close(rootfd)
-    if time.monotonic() >= deadline:
+    if _alarm_expired or time.monotonic() >= deadline:
         emitter.emit("failure", {"code": "DEADLINE"})
         raise TimeoutError("Snapshot deadline")
 
@@ -473,11 +483,15 @@ def _contract() -> dict:
 
 
 def _deadline_expired(_signal: int, _frame: object) -> None:
-    # Исключение проходит через _command finally; _exit оставлял systemctl живым.
-    raise TimeoutError("Collector deadline")
+    # Не выбрасываем из signal handler: он может сработать внутри Popen/setup
+    # или cleanup. Cooperative checks не прерывают владение subprocess.
+    global _alarm_expired
+    _alarm_expired = True
 
 
 def main() -> int:
+    global _alarm_expired
+    _alarm_expired = False
     # До guard нет subprocess, serial open, fork, чтения seed или произвольных paths.
     boot = _identity()
     contract = _contract()
@@ -491,6 +505,8 @@ def main() -> int:
     try:
         _snapshot(emitter, entered + 25, True)
         signal.alarm(0)
+        if _alarm_expired or time.monotonic() >= entered + 25:
+            raise TimeoutError("Initial snapshot deadline")
         child = os.fork()
         if child:
             emitter.emit("spawn", {"pid": child, "starttime": _starttime(child)})
@@ -505,6 +521,7 @@ def main() -> int:
         emitter.seq += 2
         emitter.total += 2048  # консервативный reserve для SPAWN/END родителя
         emitter.phase = "delayed"
+        _alarm_expired = False
         signal.signal(signal.SIGALRM, _deadline_expired)
         signal.alarm(max(1, int(entered + 50 - time.monotonic())))
         time.sleep(max(0, entered + 30 - time.monotonic()))
