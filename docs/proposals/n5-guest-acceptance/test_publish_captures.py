@@ -32,14 +32,20 @@ class PublisherTests(unittest.TestCase):
         self.addCleanup(guard.stop)
 
     def invoke(
-        self, data: dict, *, closure: bool = False, stage: str = "baseline"
+        self,
+        data: dict,
+        *,
+        closure: bool = False,
+        stage: str = "baseline",
+        store: Mock | None = None,
     ) -> Mock:
+        store = store if store is not None else Mock()
         with (
             patch.object(c, "SystemBackend", return_value=self.fixture),
             patch.object(p, "_parent", return_value=111),
             patch.object(p, "_absent"),
             patch.object(p.os, "close"),
-            patch.object(p, "_store") as store,
+            patch.object(p, "_store", store),
             patch.object(c, "collect", return_value=data),
             patch.object(u, "collect_unit_closure", return_value=data),
         ):
@@ -66,6 +72,69 @@ class PublisherTests(unittest.TestCase):
                 data["observations"]["tracked_processes"] = []
             store = self.invoke(data, stage=stage)
             self.assertEqual(store.call_args.args[1], f"capture-{stage}.json")
+
+    def test_rust_consumer_identity_bounds_before_store(self) -> None:
+        for field, value in (
+            ("start_ticks", 2**64),
+            ("uids", [1000] * 4),
+            ("pid", 2**31 - 1),
+        ):
+            data = copy.deepcopy(self.capture)
+            data["observations"]["collector"][field] = value
+            if field == "pid":
+                data["provenance"]["collector_pid"] = value
+            store = Mock()
+            with self.subTest(field=field):
+                with self.assertRaises(p.PublicationError):
+                    self.invoke(data, store=store)
+                store.assert_not_called()
+
+    def test_rust_consumer_bounds_for_units_and_tracked_processes(self) -> None:
+        for location in ("main", "members", "tracked_processes"):
+            for field, value in (
+                ("pid", 2**31 - 1),
+                ("start_ticks", 2**64),
+                ("uids", [2**32 - 1] * 4),
+            ):
+                if location == "tracked_processes" and field == "uids":
+                    continue
+                data = copy.deepcopy(self.capture)
+                identity = copy.deepcopy(data["observations"]["collector"])
+                identity[field] = value
+                stage = "baseline"
+                if location == "tracked_processes":
+                    stage = "stopped"
+                    data["provenance"]["stage"] = stage
+                    identity.pop("uids")
+                    identity["absent"] = True
+                    data["observations"][location] = [identity]
+                else:
+                    unit = data["observations"]["units"][u.UNITS[0]]
+                    unit[location] = identity if location == "main" else [identity]
+                store = Mock()
+                with self.subTest(location=location, field=field):
+                    with self.assertRaises(p.PublicationError):
+                        self.invoke(data, stage=stage, store=store)
+                    store.assert_not_called()
+        data = copy.deepcopy(self.capture)
+        data["provenance"]["stage"] = "stopped"
+        data["observations"]["tracked_processes"] = [
+            {"pid": 1, "start_ticks": 1, "absent": True}
+        ] * 513
+        store = Mock()
+        with self.assertRaises(p.PublicationError):
+            self.invoke(data, stage="stopped", store=store)
+        store.assert_not_called()
+
+    def test_rust_consumer_maximum_valid_identity(self) -> None:
+        data = copy.deepcopy(self.capture)
+        collector = data["observations"]["collector"]
+        collector.update(pid=2**31 - 2, start_ticks=2**64 - 1)
+        data["provenance"]["collector_pid"] = collector["pid"]
+        unit = data["observations"]["units"][u.UNITS[0]]
+        unit["members"] = [{**collector, "uids": [2**32 - 2] * 4}]
+        store = self.invoke(data)
+        store.assert_called_once()
 
     def test_gate_before_query_or_write(self) -> None:
         for change in ("uid", "grant", "input", "nonce", "stage"):

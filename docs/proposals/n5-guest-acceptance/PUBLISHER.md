@@ -26,6 +26,10 @@ units/helper и digest trusted systemctl. UNAVAILABLE и невалидные р
 не публикуются. Контракт существующего unit collector именует только общий
 collector digest: digest самого unit_closure_capture.py в схему не добавляется.
 
+Перед записью дополнительно проверяется область Rust consumer: положительные
+PID меньше `i32::MAX`, starttime помещается в `u64`, UID меньше `u32::MAX`.
+Collector имеет четыре UID 0; tracked processes ограничены 512 записями.
+
 Это source-bound контракт, а не криптографическая аттестация Python interpreter
 или imported module. Нужны доверенные установка, root и окружение импорта.
 Manifest hash связывает контекст, но publisher не перепроверяет содержимое

@@ -123,6 +123,26 @@ def _closure(data: dict[str, Any]) -> None:
     )
 
 
+def _consumer_bounds(data: dict[str, Any]) -> None:
+    """Числовая область Rust capture.rs строже Python DATA-схемы."""
+    observations = data["observations"]
+    identities = [observations["collector"]]
+    for unit in observations["units"].values():
+        if unit["main"] is not None:
+            identities.append(unit["main"])
+        identities.extend(unit["members"])
+    for identity in identities:
+        c.require(0 < identity["pid"] < 2**31 - 1)
+        c.require(0 < identity["start_ticks"] < 2**64)
+        c.require(all(uid < 2**32 - 1 for uid in identity["uids"]))
+    c.require(observations["collector"]["uids"] == [0, 0, 0, 0])
+    tracked = observations.get("tracked_processes", [])
+    c.require(len(tracked) <= 512)
+    for identity in tracked:
+        c.require(0 < identity["pid"] < 2**31 - 1)
+        c.require(0 < identity["start_ticks"] < 2**64)
+
+
 def _store(fd: int, name: str, raw: bytes) -> None:
     c.require(
         name in {"unit-closure.json", *(f"capture-{stage}.json" for stage in c.STAGES)}
@@ -219,6 +239,7 @@ def _publish(stage: str | None, nonce: str, case: str) -> None:
                 | ({"tracked_processes"} if stage == "stopped" else set())
             )
             c.validate_capture(data)
+            _consumer_bounds(data)
             c.require(data["provenance"]["stage"] == stage)
         p = data["provenance"]
         for key, expected in {
