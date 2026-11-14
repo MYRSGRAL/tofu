@@ -74,6 +74,15 @@ pub struct CompiledConfig {
     probe_access: ProbeAccess,
 }
 impl CompiledConfig {
+    /// Только LocalSocks host вызывает это перед config-check; SystemTUN/worker не меняются.
+    pub fn with_local_runtime_logging(mut self) -> Self {
+        self.value["log"] = match self.engine {
+            Engine::Xray => json!({"loglevel":"info", "access":"none"}),
+            Engine::SingBox => json!({"disabled":false, "level":"info", "timestamp":false}),
+        };
+        self
+    }
+
     pub fn engine(&self) -> Engine {
         self.engine
     }

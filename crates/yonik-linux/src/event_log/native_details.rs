@@ -1,5 +1,7 @@
 //! Закрытая grammar pinned runtime; только типизированная проекция без raw payload.
-//! Временный scratch не сериализуется. Production producer пока не подключён.
+//! Временный scratch не сериализуется; LocalSocks привязывает immutable scope.
+
+use super::{EventCode, EventLog, EventSource};
 
 pub(super) const MAX_LINE: usize = 4096;
 const MAX_TURN: usize = 16 * 1024;
@@ -476,5 +478,125 @@ mod tests {
                 classify(Core::SingBox, "1.14.4", frame.as_bytes()).expect("file output prefix");
             assert_eq!(d.body(), "sing-box started (0.01s)");
         }
+    }
+}
+
+/// Повторная проверка числовой проекции перед UI/export/recovery.
+pub(super) fn project(source: EventSource, code: EventCode, value: Option<i32>) -> Option<Detail> {
+    if source != EventSource::Engine {
+        return None;
+    }
+    let template = match (code, value) {
+        (EventCode::NativeSingStarted, Some(n @ 0..=8_640_000)) => Template::SingStarted(n),
+        (EventCode::NativeSingMissingInterface, None) => Template::SingMissingInterface,
+        (EventCode::NativeXrayStarted, None) => Template::XrayStarted,
+        (EventCode::NativeXrayLocalDns, None) => Template::XrayLocalDns,
+        _ => return None,
+    };
+    Some(Detail { template })
+}
+/// Этот объект создаётся владельцем child; поля scope не принимаются из stdout.
+pub(crate) struct Input {
+    framer: Framer,
+    log: EventLog,
+    core: Core,
+    version: &'static str,
+}
+impl Input {
+    pub(crate) fn new(engine: yonik_engine::Engine, log: EventLog) -> Self {
+        Self {
+            framer: Framer::new(),
+            core: match engine {
+                yonik_engine::Engine::SingBox => Core::SingBox,
+                yonik_engine::Engine::Xray => Core::Xray,
+            },
+            version: engine.version(),
+            log,
+        }
+    }
+    pub(crate) fn feed(&mut self, bytes: &[u8]) -> usize {
+        let before = (self.framer.counters.withheld, self.framer.counters.oversize);
+        let log = &self.log;
+        let n = self.framer.feed(self.core, self.version, bytes, |detail| {
+            let (code, value) = detail.projection();
+            let code = match code {
+                7 => EventCode::NativeSingStarted,
+                8 => EventCode::NativeSingMissingInterface,
+                9 => EventCode::NativeXrayStarted,
+                10 => EventCode::NativeXrayLocalDns,
+                _ => return false,
+            };
+            log.try_record(EventSource::Engine, code, value)
+        });
+        log.reject_count(
+            self.framer
+                .counters
+                .withheld
+                .saturating_sub(before.0)
+                .saturating_add(self.framer.counters.oversize.saturating_sub(before.1)),
+        );
+        n
+    }
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        if self.framer.len != 0 {
+            self.log.reject();
+        }
+    }
+}
+
+#[cfg(test)]
+mod producer_tests {
+    use super::*;
+    use crate::event_log::{EventContext, LogFilter, MAX_PAGE};
+
+    #[test]
+    fn immutable_scope_closed_projection_busy_and_canaries() {
+        let root = EventLog::new();
+        let old = root.with_context(EventContext {
+            session_id: 1,
+            generation: 7,
+        });
+        let mut input = Input::new(yonik_engine::Engine::SingBox, old.clone());
+        let _new = old.with_generation(8);
+        input.feed(b"INFO[0000] sing-box started (1.23s)\n");
+        input.feed(b"CANARY raw config/path/URL\x1b\0\r\n");
+        let page = root.read_scoped(0, LogFilter::default(), MAX_PAGE).unwrap();
+        assert_eq!(
+            page.contexts,
+            [Some(EventContext {
+                session_id: 1,
+                generation: 7
+            })]
+        );
+        assert_eq!(
+            page.page.events[0].technical_details().as_deref(),
+            Some("sing-box started (1.23s)")
+        );
+        assert!(!page.export().contains("CANARY"));
+        assert!(!page.export().contains('\x1b'));
+        assert_eq!(page.page.rejected, 1);
+        let lock = root.0.ring.lock().unwrap();
+        input.feed(b"INFO[0000] sing-box started (1.23s)\n");
+        drop(lock);
+        assert_eq!(
+            root.read(0, LogFilter::default(), MAX_PAGE)
+                .unwrap()
+                .rejected,
+            2
+        );
+        assert!(!root.try_record(EventSource::Engine, EventCode::NativeSingStarted, Some(-1)));
+        assert!(!old.try_record(EventSource::App, EventCode::NativeXrayStarted, None));
+        assert!(!old.try_record(EventSource::Engine, EventCode::NativeXrayStarted, Some(1)));
+        input.feed(b"partial CANARY");
+        drop(input);
+        assert_eq!(
+            root.read(0, LogFilter::default(), MAX_PAGE)
+                .unwrap()
+                .rejected,
+            6
+        );
     }
 }

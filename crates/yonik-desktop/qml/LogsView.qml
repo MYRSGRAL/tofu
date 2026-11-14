@@ -16,6 +16,20 @@ ColumnLayout {
     property int serial: 0
     property bool stale: true
     function tr(ru, en) { return root.english ? en : ru }
+    function productCode(code) {
+        switch (code) {
+        case "StartRequested": return tr("Запрошен запуск", "Start requested")
+        case "ProcessSpawned": return tr("Процесс запущен", "Process spawned")
+        case "StopRequested": return tr("Запрошена остановка", "Stop requested")
+        case "CleanupConfirmed": return tr("Очистка подтверждена", "Cleanup confirmed")
+        case "CleanupFailed": return tr("Ошибка очистки", "Cleanup failed")
+        case "ProcessExited": return tr("Процесс завершён", "Process exited")
+        case "NativeSingStarted": case "NativeXrayStarted": return tr("Ядро сообщило о запуске", "Core reported startup")
+        case "NativeSingMissingInterface": return tr("Ядро сообщило об отсутствии интерфейса", "Core reported missing interface")
+        case "NativeXrayLocalDns": return tr("Ядро создало локальный DNS-клиент", "Core created local DNS client")
+        default: return tr("Неизвестное событие", "Unknown event")
+        }
+    }
     function read(next) {
         root.saving = false
         root.serial += 1
@@ -66,6 +80,12 @@ ColumnLayout {
         wrapMode: Text.Wrap
         text: root.page ? root.tr("Курсор / вытеснено / отклонено / пропущено: ", "Cursor / evicted / rejected / missed: ") + [root.page.cursor, root.page.evicted, root.page.rejected, root.page.missed].join(" / ") : ""
     }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        textFormat: Text.PlainText
+        text: root.tr("Неподдерживаемые и неполные сообщения ядра скрываются; исходный текст не сохраняется.", "Unsupported and incomplete core messages are withheld; original input is not stored.")
+    }
     ListView {
         objectName: "logsRows"
         Layout.fillWidth: true
@@ -74,9 +94,11 @@ ColumnLayout {
         model: root.visible && !root.stale && root.page ? root.page.events : []
         delegate: Label {
             required property var modelData
+            objectName: modelData.technical_details ? "logsNativeDetails" : ""
             width: ListView.view.width
             textFormat: Text.PlainText
-            text: modelData.id + (modelData.session_id ? " [" + modelData.session_id + "/" + modelData.generation + "]" : "") + " · " + (modelData.source === "app" ? root.tr("Приложение", "Application") : root.tr("Движок", "Engine")) + " · " + modelData.code + (modelData.value === null ? "" : " · " + modelData.value)
+            wrapMode: Text.Wrap
+            text: modelData.id + (modelData.session_id ? " [" + modelData.session_id + "/" + modelData.generation + "]" : "") + " · " + (modelData.source === "app" ? root.tr("Приложение", "Application") : root.tr("Движок", "Engine")) + " · " + root.productCode(modelData.code) + (modelData.value === null ? "" : " · " + modelData.value) + (modelData.technical_details ? "\n" + root.tr("Технические детали: ", "Technical details: ") + modelData.technical_details : "")
         }
     }
     TextField {
