@@ -1,7 +1,7 @@
 //! Неизменяемый DATA-план. Не конфигурация stock core и не сетевое полномочие.
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, net::SocketAddr};
+use std::{collections::BTreeSet, io::Write, net::SocketAddr};
 use yonik_domain::{Action, Cidr, DnsPolicy, DomainPattern, NativeDnsMode, Policy, Rule};
 
 pub const MAX_BYTES: usize = 262_144;
@@ -119,30 +119,156 @@ fn rule(r: &Rule) -> Result<Value, PlanError> {
     )
 }
 
+// Нижняя граница JSON: строки учитываются с точным escaping и кавычками,
+// каждый элемент контейнера — минимум один байт; часть фиксированной структуры
+// оплачивается консервативным минимумом. Остаток проверяет bounded writer.
+struct ByteBudget {
+    remaining: usize,
+}
+impl ByteBudget {
+    fn charge(&mut self, bytes: usize) -> Result<(), PlanError> {
+        self.remaining = self.remaining.checked_sub(bytes).ok_or(PlanError::Bounds)?;
+        Ok(())
+    }
+    fn rows(&mut self, rows: usize) -> Result<(), PlanError> {
+        if rows > MAX_ROWS {
+            return Err(PlanError::Bounds);
+        }
+        self.charge(rows)
+    }
+    fn repeated(&mut self, rows: usize, minimum: usize) -> Result<(), PlanError> {
+        self.charge(rows.checked_mul(minimum).ok_or(PlanError::Bounds)?)
+    }
+    fn string(&mut self, text: &str) -> Result<(), PlanError> {
+        // Быстрый отказ без чтения содержимого заведомо огромной строки.
+        self.charge(text.len().checked_add(2).ok_or(PlanError::Bounds)?)?;
+        for byte in text.bytes() {
+            self.charge(match byte {
+                b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 8 | 12 => 1,
+                0..=31 => 5,
+                _ => 0,
+            })?;
+        }
+        Ok(())
+    }
+}
+fn preflight(
+    policy: &Policy,
+    dns: &DnsPolicy,
+    desired: &DesiredPlan,
+    limit: usize,
+) -> Result<(), PlanError> {
+    let mut budget = ByteBudget { remaining: limit };
+    let rules = policy
+        .user_rules
+        .len()
+        .checked_add(policy.preset_rules.len())
+        .ok_or(PlanError::Bounds)?;
+    budget.rows(rules)?;
+    // Ключи/структура самого короткого Rule длиннее 100 bytes без payload.
+    budget.repeated(rules, 100)?;
+    for count in [
+        policy.lan.len(),
+        policy.private_networks.len(),
+        policy.private_domains.len(),
+        dns.fake_exclusions.len(),
+        desired.vpns.len(),
+        desired.fake_pools.len(),
+    ] {
+        budget.rows(count)?;
+    }
+    // Вместе с rows: CIDR минимум 6 bytes ("::/0"), pattern >21 плюс имя.
+    budget.repeated(policy.lan.len(), 5)?;
+    budget.repeated(policy.private_networks.len(), 5)?;
+    budget.repeated(policy.private_domains.len(), 20)?;
+    budget.repeated(dns.fake_exclusions.len(), 20)?;
+    // Закрытые selectors/constraints никогда не сериализуются, в том числе disabled.
+    if !desired.reserved_constraints.is_empty() {
+        return Err(PlanError::Unsupported);
+    }
+    for r in policy.user_rules.iter().chain(&policy.preset_rules) {
+        let c = &r.conditions;
+        if !c.platform_sources.is_empty() {
+            return Err(PlanError::Unsupported);
+        }
+        budget.rows(c.executables.len())?;
+        budget.rows(c.domains.len())?;
+        budget.rows(c.destinations.len())?;
+        budget.repeated(c.destinations.len(), 5)?;
+        budget.repeated(c.domains.len(), 20)?;
+        for text in &c.executables {
+            budget.string(text)?;
+        }
+        for domain in &c.domains {
+            budget.string(domain.name().as_str())?;
+        }
+        // TransportConditions закрыт: ≤2 protocol strings, ≤16 port ranges.
+        if let Some(protocols) = c.transport.protocols() {
+            budget.rows(protocols.len())?;
+            for protocol in protocols {
+                budget.string(protocol)?;
+            }
+        }
+        if let Some(ports) = c.transport.ports() {
+            budget.charge(ports.ranges().len())?;
+        }
+    }
+    for d in &policy.private_domains {
+        budget.string(d.domain.name().as_str())?;
+    }
+    for d in &dns.fake_exclusions {
+        budget.string(d.name().as_str())?;
+    }
+    for vpn in &desired.vpns {
+        budget.string(&vpn.ifname)?;
+    }
+    for pool in &desired.fake_pools {
+        budget.string(pool)?;
+    }
+    Ok(())
+}
+
+struct BoundedWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+impl Write for BoundedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes
+            .len()
+            .checked_add(bytes.len())
+            .filter(|next| *next <= self.limit)
+            .ok_or_else(|| std::io::Error::other("Превышен бюджет DATA-плана"))?;
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub fn compile_plan(
     policy: &Policy,
     dns: &DnsPolicy,
     desired: &DesiredPlan,
 ) -> Result<CompiledPolicyPlan, PlanError> {
+    compile_plan_bounded(policy, dns, desired, MAX_BYTES, || {})
+}
+
+// Callback отмечает реальную границу materialization для малых regression fixtures.
+fn compile_plan_bounded(
+    policy: &Policy,
+    dns: &DnsPolicy,
+    desired: &DesiredPlan,
+    limit: usize,
+    before_value: impl FnOnce(),
+) -> Result<CompiledPolicyPlan, PlanError> {
+    preflight(policy, dns, desired, limit)?;
     if desired.version != 1 || !desired.reserved_constraints.is_empty() {
         return Err(PlanError::Unsupported);
     }
     if !dns.ipv4 && !dns.ipv6 {
         return Err(PlanError::Invalid);
-    }
-    if policy.user_rules.len() + policy.preset_rules.len() > MAX_ROWS
-        || [
-            policy.lan.len(),
-            policy.private_domains.len(),
-            policy.private_networks.len(),
-            dns.fake_exclusions.len(),
-            desired.vpns.len(),
-            desired.fake_pools.len(),
-        ]
-        .into_iter()
-        .any(|n| n > MAX_ROWS)
-    {
-        return Err(PlanError::Bounds);
     }
     endpoint(dns.upstream)?;
     endpoint(desired.bootstrap)?;
@@ -261,6 +387,7 @@ pub fn compile_plan(
             return Err(PlanError::Mapping);
         }
     }
+    before_value();
     let value = json!({"yonik_policy":{
         "version":1,"kind":"desired_data_only","desired":desired,
         "bounds":{"bytes":MAX_BYTES,"rows":MAX_ROWS,"answers":256,"parallel_lookups":2,"lookup_deadline_ms":10000},
@@ -279,9 +406,205 @@ pub fn compile_plan(
             "epoch_nonreuse":true,"fake_address_nonreuse":true,"trusted_binding_before_every_dial":true,
             "revoke_closes_sockets":true,"service_paths_nonrecursive":true,"established_tcp_ttl_close":false}
     }});
-    let bytes = serde_json::to_vec(&value).map_err(|_| PlanError::Invalid)?;
-    if bytes.len() > MAX_BYTES {
-        return Err(PlanError::Bounds);
+    let mut writer = BoundedWriter {
+        bytes: Vec::with_capacity(limit),
+        limit,
+    };
+    serde_json::to_writer(&mut writer, &value).map_err(|_| PlanError::Bounds)?;
+    Ok(CompiledPolicyPlan(writer.bytes))
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use std::cell::Cell;
+    use yonik_domain::{Conditions, DestinationPorts, TransportConditions};
+
+    fn desired() -> DesiredPlan {
+        DesiredPlan {
+            version: 1,
+            network_epoch: 1,
+            engine_epoch: 2,
+            resolver_epoch: 3,
+            policy_transport: DnsTransport::Udp,
+            policy_route: ServiceRoute::Proxy,
+            bootstrap_route: ServiceRoute::Direct,
+            bootstrap: "9.9.9.9:53".parse().unwrap(),
+            bootstrap_transport: DnsTransport::Tcp,
+            vpns: vec![],
+            fake_pools: vec![],
+            reserved_constraints: vec![],
+        }
     }
-    Ok(CompiledPolicyPlan(bytes))
+    fn dns() -> DnsPolicy {
+        DnsPolicy {
+            mode: NativeDnsMode::Real,
+            upstream: "1.1.1.1:53".parse().unwrap(),
+            ipv4: true,
+            ipv6: true,
+            fake_exclusions: vec![],
+            require_mapping_lease: false,
+            listen_port: 5353.try_into().unwrap(),
+        }
+    }
+    #[test]
+    fn small_matrix_rejected_before_materialization() {
+        let mut policy = Policy::default();
+        for id in 0..4 {
+            policy.user_rules.push(Rule {
+                id,
+                enabled: true,
+                action: Action::Direct,
+                conditions: Conditions {
+                    executables: vec![format!("/{}", "x".repeat(31)); 4],
+                    ..Conditions::default()
+                },
+            });
+        }
+        let rest = policy.user_rules.split_off(1);
+        preflight(&policy, &dns(), &desired(), 512).unwrap();
+        policy.user_rules.extend(rest);
+        let calls = Cell::new(0);
+        assert_eq!(
+            compile_plan_bounded(&policy, &dns(), &desired(), 512, || calls
+                .set(calls.get() + 1))
+            .unwrap_err(),
+            PlanError::Bounds
+        );
+        assert_eq!(calls.get(), 0);
+        // Даже отдельная строка не сканируется при недостаточном raw budget.
+        let mut budget = ByteBudget { remaining: 1 };
+        assert_eq!(budget.string(&"x".repeat(64)), Err(PlanError::Bounds));
+        assert_eq!(budget.charge(usize::MAX), Err(PlanError::Bounds));
+        assert_eq!(budget.repeated(usize::MAX, 2), Err(PlanError::Bounds));
+    }
+    #[test]
+    fn directly_constructed_desired_is_preflighted() {
+        let mut input = desired();
+        input.fake_pools = vec!["x".repeat(64)];
+        let calls = Cell::new(0);
+        assert_eq!(
+            compile_plan_bounded(&Policy::default(), &dns(), &input, 32, || calls
+                .set(calls.get() + 1))
+            .unwrap_err(),
+            PlanError::Bounds
+        );
+        assert_eq!(calls.get(), 0);
+        input.fake_pools.clear();
+        input.vpns.push(DesiredVpn {
+            vpn: 1,
+            ifname: "x".repeat(64),
+            table: 1,
+            resolver: "10.0.0.53:53".parse().unwrap(),
+            transport: DnsTransport::Udp,
+            excluded: false,
+        });
+        assert_eq!(
+            preflight(&Policy::default(), &dns(), &input, 32),
+            Err(PlanError::Bounds)
+        );
+        input.vpns.clear();
+        input.reserved_constraints.push("x".repeat(64));
+        assert_eq!(
+            preflight(&Policy::default(), &dns(), &input, 32),
+            Err(PlanError::Unsupported)
+        );
+    }
+    #[test]
+    fn escaping_and_exact_boundary() {
+        for text in ["", "plain", "кириллица", "\"\\\n\r\t\u{8}\u{c}\u{1}"] {
+            let expected = serde_json::to_vec(text).unwrap();
+            let mut budget = ByteBudget {
+                remaining: expected.len(),
+            };
+            budget.string(text).unwrap();
+            assert_eq!(budget.remaining, 0);
+            let mut budget = ByteBudget {
+                remaining: expected.len() - 1,
+            };
+            assert_eq!(budget.string(text), Err(PlanError::Bounds));
+            let mut writer = BoundedWriter {
+                bytes: Vec::with_capacity(expected.len()),
+                limit: expected.len(),
+            };
+            serde_json::to_writer(&mut writer, text).unwrap();
+            assert_eq!(writer.bytes, expected);
+            assert!(writer.write_all(b" ").is_err());
+            assert_eq!(writer.bytes, expected);
+        }
+        let policy = Policy {
+            user_rules: vec![Rule {
+                id: 1,
+                enabled: true,
+                action: Action::Proxy,
+                conditions: Conditions {
+                    executables: vec!["/a\"\\кириллица".into()],
+                    transport: TransportConditions::parse(
+                        Some(&["tcp", "udp"]),
+                        Some(DestinationPorts::parse(&[(1, 65535)]).unwrap()),
+                    )
+                    .unwrap(),
+                    ..Conditions::default()
+                },
+            }],
+            ..Policy::default()
+        };
+        let expected = compile_plan(&policy, &dns(), &desired()).unwrap();
+        let calls = Cell::new(0);
+        let exact =
+            compile_plan_bounded(&policy, &dns(), &desired(), expected.bytes().len(), || {
+                calls.set(calls.get() + 1)
+            })
+            .unwrap();
+        assert_eq!(exact.bytes(), expected.bytes());
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            compile_plan_bounded(
+                &policy,
+                &dns(),
+                &desired(),
+                expected.bytes().len() - 1,
+                || {}
+            )
+            .unwrap_err(),
+            PlanError::Bounds
+        );
+    }
+    #[test]
+    fn every_variable_container_consumes_budget() {
+        // Минимальный budget=0 даёт отказ для нетекстовых typed containers тоже.
+        let mut p = Policy::default();
+        let d = dns();
+        let x = desired();
+        p.lan.push("192.168.0.0/16".parse().unwrap());
+        assert_eq!(preflight(&p, &d, &x, 0), Err(PlanError::Bounds));
+        p.lan.clear();
+        p.private_networks.push(yonik_domain::PrivateNetwork {
+            network: "10.0.0.0/8".parse().unwrap(),
+            available: false,
+            vpn: yonik_domain::VpnId::new(1).unwrap(),
+        });
+        assert_eq!(preflight(&p, &d, &x, 0), Err(PlanError::Bounds));
+        p.private_networks.clear();
+        p.private_domains.push(yonik_domain::PrivateDomain {
+            domain: DomainPattern::Suffix("private.test".parse().unwrap()),
+            available: false,
+            vpn: yonik_domain::VpnId::new(1).unwrap(),
+        });
+        assert_eq!(preflight(&p, &d, &x, 1), Err(PlanError::Bounds));
+        p.private_domains.clear();
+        let mut d = d;
+        d.fake_exclusions
+            .push(DomainPattern::Exact("excluded.test".parse().unwrap()));
+        assert_eq!(preflight(&p, &d, &x, 1), Err(PlanError::Bounds));
+        p.preset_rules.push(Rule {
+            id: 1,
+            enabled: false,
+            action: Action::Block,
+            conditions: Conditions::default(),
+        });
+        p.preset_rules[0].conditions.domains =
+            vec![DomainPattern::Exact("one.test".parse().unwrap()); MAX_ROWS + 1];
+        assert_eq!(preflight(&p, &dns(), &x, MAX_BYTES), Err(PlanError::Bounds));
+    }
 }

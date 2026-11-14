@@ -101,3 +101,55 @@ trusted helper route witness и mapping quarantine/nonreuse implementation.
 все поля private descriptors и все оси D на обоих cores. Source/ELF hashes
 Rust unit tests этого не заменяют. ABI, production UNAVAILABLE и текущие
 compile_native_dns/private guards остаются неизменными.
+
+## R2: бюджет до materialization
+
+`compile_plan` сначала вызывает allocation-free `preflight` с бюджетом **262144**
+байта, до BTreeSet, CIDR parsing/collect, `rule`/`pattern`, любых `Value` и
+клонирования payload. Public DesiredPlan проверяется здесь независимо от `parse`.
+Сложение числа rules, умножения и списание бюджета используют checked arithmetic.
+Размер входных строк проверяется до чтения их содержимого; после этого обход
+учитывает точную добавку escaping JSON (quote/backslash и короткие escapes +1,
+остальные control bytes +5). UTF-8 bytes без escaping считаются как есть.
+
+Это **нижняя**, а не верхняя оценка итогового JSON, поэтому она не отбрасывает
+валидный JSON ровно на границе из-за завышенной оценки. Списываются:
+
+- 101 byte на rule: один за элемент и 100 за заведомо более длинные фиксированные
+  ключи/структуру; 1 на каждый executable плюс точная длина JSON string с кавычками.
+- 21 на каждый domain pattern плюс JSON string имени; 6 на каждый CIDR
+  (минимальный JSON string `"::/0"`), включая LAN/private networks.
+- 1 на каждый VPN/fake-pool descriptor плюс JSON string ifname/pool.
+- Protocol strings с кавычками/escaping плюс 1 на элемент; 1 на port range.
+  Закрытые TransportConditions дополнительно гарантируют ≤2 protocols и ≤16 ranges.
+- Все старые row limits проверяются до обхода массивов. Platform sources и reserved
+  constraints отклоняются без копирования, даже для disabled rules.
+
+Неучтённые scalar/endpoint/key/array/object bytes только увеличивают итоговый JSON.
+Таким образом после preflight сумма копируемых произвольных строк ≤MAX_BYTES;
+число элементов тоже ограничено бюджетом, а число rules отдельно ≤256. Форматируемые
+CIDR имеют длину ≤49 bytes и оплачены минимум 6 bytes каждый; SocketAddr имеет
+фиксированную верхнюю длину и встречается только в ≤256 VPN плюс двух endpoints.
+Число фиксированных ключей и Value nodes на rule/selector ограничено константой
+схемы. Следовательно промежуточный `Value` имеет O(MAX_BYTES) payload и nodes;
+несколько существующих промежуточных collect/json! копий дают только постоянный
+множитель. Нет ветки, копирующей исходную матрицу 256 MiB. Это ограничение размеров
+DATA, не точная RSS-гарантия: allocator/Value/node overhead платформозависимы.
+
+После materialization `serde_json::to_writer` пишет в `BoundedWriter` с единственной
+предвыделенной capacity=MAX_BYTES. Каждый write сначала проверяет checked total,
+при превышении не копирует chunk. Вместо прежнего полного `to_vec` с поздним отказом
+выделяется не более MAX_BYTES ёмкости выходного Vec (без учёта округления allocator).
+Golden и все semantic fields остаются прежними; fixed bounds в DATA не меняются.
+
+Private test entry использует тот же compile path с уменьшенным лимитом и callback
+непосредственно перед первым Value. Малые матрицы проверяют ноль вызовов callback
+при preflight Bounds; direct DesiredPlan покрыт без parse. Exact-boundary fixture
+использует фактическую длину небольшого валидного плана: ровно этот лимит проходит,
+на byte меньше — Bounds. Отдельно проверены JSON escaping/control/UTF-8 и overflow;
+integration fixture содержит лишь ~132 KiB исходных executable строк с удвоением
+при escaping. Старый exact-byte golden не менялся.
+
+Проверки этого correction commit: только rustfmt/diff и независимая source-level
+проверка нижней оценки. **Compile/clippy/new Rust tests pending** до root coherent
+build refresh после terminal capture03; Cargo/build/ELF здесь не запускались.

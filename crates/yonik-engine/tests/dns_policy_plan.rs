@@ -369,3 +369,25 @@ fn common_v1_exact_golden() {
         GOLDEN.as_bytes()
     );
 }
+
+#[test]
+fn aggregate_byte_budget_rejects_small_escaped_matrix() {
+    // Около 132 KiB входа; escaping удваивает payload ещё до создания Value.
+    // Каждая строка проходит прежний лимит 4096, массив меньше MAX_ROWS.
+    let policy = Policy {
+        user_rules: vec![Rule {
+            id: 1,
+            enabled: true,
+            action: Action::Direct,
+            conditions: Conditions {
+                executables: vec![format!("/{}", "\"".repeat(4095)); 33],
+                ..Conditions::default()
+            },
+        }],
+        ..Policy::default()
+    };
+    assert_eq!(
+        compile_plan(&policy, &dns(), &desired()).unwrap_err(),
+        PlanError::Bounds
+    );
+}
