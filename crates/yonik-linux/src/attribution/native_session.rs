@@ -40,6 +40,29 @@ struct Roles {
     remote: Option<super::broker::RemoteLookup>,
 }
 
+impl Roles {
+    fn lookup(&mut self, flow: super::broker::Flow) -> Lookup {
+        if let Some(remote) = self.remote.as_mut() {
+            return remote.lookup(flow);
+        }
+        #[cfg(test)]
+        if let Some(local) = self.broker.as_mut() {
+            return local.lookup(flow);
+        }
+        Lookup::MechanismUnavailable(Unavailable::Authority)
+    }
+    fn project(&mut self, flow: super::broker::Flow, epoch: u64) -> super::broker::ProjectedLookup {
+        if let Some(remote) = self.remote.as_mut() {
+            return remote.lookup_and_project(flow, epoch);
+        }
+        #[cfg(test)]
+        if let Some(local) = self.broker.as_mut() {
+            return local.lookup_and_project(flow, epoch);
+        }
+        super::broker::ProjectedLookup::Unavailable(Unavailable::Authority)
+    }
+}
+
 // Production хранит только helper-owned queue; raw FD доступен лишь fixture.
 #[cfg_attr(not(test), allow(dead_code))]
 enum TunRole {
@@ -225,19 +248,10 @@ impl Session {
         }
         let flow = wire::lookup_flow(bytes)?;
         self.sequence.begin(header.request_id)?;
-        let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
-            remote.lookup(flow)
-        } else {
-            #[cfg(not(test))]
-            {
-                Lookup::MechanismUnavailable(Unavailable::Authority)
-            }
-            #[cfg(test)]
-            match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-                Some(broker) => broker.lookup(flow),
-                None => Lookup::MechanismUnavailable(Unavailable::Authority),
-            }
-        };
+        let result = self.roles.as_mut().map_or(
+            Lookup::MechanismUnavailable(Unavailable::Authority),
+            |roles| roles.lookup(flow),
+        );
         self.sequence.complete(header.request_id)?;
         Ok(result)
     }
@@ -255,19 +269,10 @@ impl Session {
             }
             let flow = wire::lookup_flow(bytes)?;
             self.sequence.begin(header.request_id)?;
-            let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
-                remote.lookup_and_project(flow, self.epoch)
-            } else {
-                #[cfg(not(test))]
-                {
-                    super::broker::ProjectedLookup::Unavailable(Unavailable::Authority)
-                }
-                #[cfg(test)]
-                match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-                    Some(broker) => broker.lookup_and_project(flow, self.epoch),
-                    None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
-                }
-            };
+            let result = self.roles.as_mut().map_or(
+                super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
+                |roles| roles.project(flow, self.epoch),
+            );
             self.sequence.complete(header.request_id)?;
             Ok(result)
         })();

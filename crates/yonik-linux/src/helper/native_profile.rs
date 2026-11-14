@@ -270,7 +270,11 @@ impl VerifiedInstalledProfile {
 }
 
 impl VerifiedInstalledProfile {
-    pub(super) fn verify_lookup_image(&self, image: &File) -> Result<()> {
+    pub(super) fn verify_lookup_image(
+        &self,
+        image: &File,
+        deadline: std::time::Instant,
+    ) -> Result<()> {
         use std::os::unix::fs::FileExt;
         immutable(image)?;
         let before = stamp(image)?;
@@ -299,6 +303,7 @@ impl VerifiedInstalledProfile {
             offset += count as u64;
         }
         let actual: [u8; 32] = digest.finalize().into();
+        static_deadline(deadline)?;
         if stamp(image)? != before || actual != self.installed.deployment.worker_sha256 {
             return Err(Error::Stale);
         }

@@ -36,6 +36,14 @@ pub(super) fn run() -> Result<(), Unavailable> {
         .into_iter()
         .collect::<std::io::Result<_>>()
         .map_err(|_| Unavailable::Coverage)?;
+    for (file, expected) in files[..3].iter().zip(broker.context.lookup_view.namespaces) {
+        let metadata = file.metadata().map_err(|_| Unavailable::Coverage)?;
+        use std::os::unix::fs::MetadataExt;
+        if (metadata.dev(), metadata.ino()) != expected {
+            return Err(Unavailable::Coverage);
+        }
+    }
+    broker.context.validate_scope()?;
     let rights: Vec<_> = files.iter().map(AsFd::as_fd).collect();
     channel.send(&binding.encode(HELLO_ACK, 0)?, &rights, bootstrap)?;
     drop(files);

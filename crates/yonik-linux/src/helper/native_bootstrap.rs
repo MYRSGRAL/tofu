@@ -435,7 +435,8 @@ impl RuntimeScopeStamp {
 impl VerifiedCoverage {
     pub(crate) fn verify_lookup_image(&self, image: &std::fs::File) -> Result<()> {
         validate_receive_admission(&self.authorization, self.deadline)?;
-        self.profile.verify_lookup_image(image)?;
+        self.profile
+            .verify_lookup_image(image, self.deadline.into_std())?;
         validate_receive_admission(&self.authorization, self.deadline)
     }
 }
