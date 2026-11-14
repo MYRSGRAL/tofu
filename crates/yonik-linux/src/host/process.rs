@@ -131,6 +131,8 @@ pub(crate) async fn config_check(
     cancel.check()?;
     let mut child = spawn(binary, true)?;
     let operation = async {
+        #[cfg(feature = "test-support")]
+        cancel.lifecycle_reach(super::LifecycleStage::Validate, child.id().ok_or(HostError::Process)?).await?;
         write_config(&mut child, bytes, cancel).await?;
         tokio::select! {
             _ = cancel.cancelled() => Err(HostError::Cancelled),
