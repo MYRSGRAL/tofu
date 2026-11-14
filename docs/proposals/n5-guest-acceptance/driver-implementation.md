@@ -112,3 +112,83 @@ Runner future execute может достичь driver только после s
 legacy receipt/counter protocol отвергается. Максимальный output 4 MiB,
 case 180 s, cleanup 45 s. Missing/malformed observation даёт quarantine, не PASS.
 Полная Linux/P12–P17 матрица, VM, registration, runtime и services остаются открытыми.
+
+## R1 P2: live unit closure до Host
+
+`sealed.rs::verify_installed` теперь дополнительно вызывает `unit_closure::verify`.
+Одних sealed unit pins и неизменных ELF недостаточно: до Host обязательны current
+loaded manager context и root-измеренная identity работающего helper.
+Worker owning-executable/full-report proof остаётся production SOURCE_INVARIANT;
+драйвер не пытается повторно читать `/proc/<worker>/exe` как appUID.
+
+Новый producer/consumer API для ROOT: fixed readonly root-owned
+`/run/yonik-acceptance/unit-closure.json`, максимум 1 MiB, через тот же
+NOFOLLOW/ancestor/mode/stable-identity reader. Producer добавляется ROOT отдельно;
+отсутствующий capture означает `UNAVAILABLE_UNIT_CLOSURE`, до Host.
+Новых native RPC, services, capabilities или разрешений здесь нет.
+
+Exact JSON (raw property values — strings, остальные типы указаны ниже):
+
+```text
+schema: "N5_UNIT_CLOSURE_V1"
+provenance:
+  source: Git40hex
+  manifest_sha256, nonce, collector_sha256, authorization_sha256: SHA256hex64
+  case: string (exact case из root capture authorization)
+  kernel_boot_id: UUID (exact controls.kernel_boot_id)
+  manager_client_sha256: SHA256 /usr/bin/systemctl
+units: { <each of five canonical unit names>: { <property>: string } }
+helper:
+  pid: u32 > 1
+  start_ticks: u64 > 0
+  uid: 0
+  exe_sha256: SHA256 (actual executing helper, not installed-file echo)
+  exe_size: u64 > 0
+  invocation: systemd InvocationID hex32
+  exec_main_start_monotonic_usec: u64 > 0
+```
+
+Capture связывается с existing root authorization/input/manifest/source/nonce,
+collector SHA и boot ID. Producer обязан измерить helper PID/start/UID/executable
+с проверкой stable process identity до/после чтения и canonical manager binding;
+permission denied → UNAVAILABLE, без CAP_SYS_PTRACE добавления или appUID fallback.
+`helper.pid/invocation/exec_main_start_monotonic_usec` должны совпасть с текущими
+manager MainPID/InvocationID/ExecMainStartTimestampMonotonic. Helper обязан быть
+active/running; fixture должен заранее иметь этот реальный root helper под уже
+выданным USER grant. No helper activation выполняемая reader не подразумевается.
+
+Producer и consumer используют fixed readonly query для каждого unit:
+`/usr/bin/systemctl --system --no-pager --all show <canonical-unit> --property <CSV>`.
+Пять unit: helper.service, worker.service, worker-check.service, worker.socket,
+worker-check.socket с префиксом `yonik-`.
+
+Общие properties:
+`Id,LoadState,FragmentPath,DropInPaths,SourcePath,Transient,NeedDaemonReload,ActiveState,SubState,InvocationID`.
+Дополнительно для services:
+`ExecStart,ExecStartPre,ExecStartPost,ExecCondition,ExecReload,ExecStop,ExecStopPost,User,Group,Type,BusName,ControlGroup,MainPID,ExecMainStartTimestampMonotonic,Environment,EnvironmentFiles,RootDirectory,RootImage,WorkingDirectory,DynamicUser,PAMName,NoNewPrivileges,CapabilityBoundingSet,AmbientCapabilities,KillMode,PrivateNetwork,PrivateDevices,ProtectSystem,ProtectHome`.
+Дополнительно для sockets:
+`Listen,SocketUser,SocketGroup,SocketMode,DirectoryMode,Accept,RemoveOnStop,Triggers`.
+Никаких неизвестных/дублированных/отсутствующих properties; пустые properties
+обязательны, поэтому query использует --all. Весь raw ExecStart, включая runtime
+суффикс, связывается с capture и повторным manager query; отдельно проверяются
+canonical path/argv/ignore_errors. Изменённые argv при том же ELF отвергаются.
+
+Live query выполняется только после приватного VerifiedFixture, env очищено,
+system bus задан fixed canonical address, argv берутся только из compile-time
+whitelist. Каждый child ограничен 3 s и 64 KiB stdout, удерживается own pidfd,
+завершается/reaped только собственный systemctl. Реальных queries source-тесты
+не выполняют.
+
+До Host проверяются два одинаковых полных manager snapshots вокруг чтения всех
+current canonical fragments (hash каждого обязан совпасть с sealed source pin),
+повторное чтение fragment hashes и неизменность root capture. FragmentPath обязан
+быть canonical `/usr/lib/systemd/system/<name>`, DropInPaths/SourcePath пусты,
+Transient/NeedDaemonReload=false. User/Group/Exec hooks/root/environment/capability
+context проверяются по supported canonical contract. Поэтому old after-setup
+receipt + новый unit/override + те же ELF не восстанавливают SOURCE_INVARIANT.
+
+Named pure regressions в `unit_closure.rs`: valid live tuple; changed fragment
+при том же ELF; loaded override; NeedDaemonReload/changed ExecStart; wrong actual
+helper exe/invocation; duplicate/missing manager fields. Интегрированные compile
+и запуск этих pure-тестов выполняет ROOT в одном финальном Rust freeze после
+применения данного correction commit; producer API также требует ROOT-интеграции.

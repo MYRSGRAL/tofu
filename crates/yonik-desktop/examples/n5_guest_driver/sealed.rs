@@ -1,4 +1,6 @@
 //! Приватный trust boundary: только fixed root-owned sealed DATA.
+#[path = "unit_closure.rs"]
+mod unit_closure;
 use super::hash::sha256;
 use rustix::fs::{open, openat, Mode, OFlags};
 use serde::Deserialize;
@@ -186,6 +188,7 @@ impl VerifiedFixture {
                 return Err("FLOW_CLIENT_CHANGED");
             }
         }
+        unit_closure::verify(self)?;
         Ok(())
     }
     pub fn verify_runtime(&self) -> Result<()> {
