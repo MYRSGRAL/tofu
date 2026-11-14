@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "kind": "P25_TOOLS_SOURCE_UNION",
+  "accepted_base": "0f69d5e200f9d9434a51f9e2163cdf32c58d655b",
+  "union_commit": "7cd2ff0a8b6a44d7c23ea7006b1573a149c95bb4",
+  "union_tree": "bd2e2faec57645d80be71bda68e32d6f2fc62876",
+  "parents": [
+    "f993ba74e5c8b74080bd15cbafbfdb240c43eeae",
+    "c89d9cefa6d626f8612dbf7b60c550521162b343"
+  ],
+  "source_blobs": {
+    "docs/p25-rust-capture-only.md": {
+      "git_blob": "0031595127ae63c0ccc7a0397de61a19e283a14e",
+      "sha256": "1dab0c95f9ea9c411ed865eed9c63ff02be451161cece2a38993a10426cd2aae",
+      "bytes": 2896
+    },
+    "tests/tools/test_release_controller.py": {
+      "git_blob": "2ba112f065bd83605882cdfba9b026a2b95175fa",
+      "sha256": "d42c4b301d862faa12ac3d777691099d927fca6326827032c876b7d413407f2e",
+      "bytes": 47112
+    },
+    "tools/_p25_attribution_join.py": {
+      "git_blob": "ba23ee46b1716a73da818719303b1c10f52595fc",
+      "sha256": "3c6e6ce71cca706c3f9fde4df0b59317b8e466d8e4c784e414b96a97884cc1f3",
+      "bytes": 24755
+    },
+    "tools/_p25_capture_producer.py": {
+      "git_blob": "69b64c6dd6a7328536eb02a0c43dbffdbc8e6b4a",
+      "sha256": "1c3af06b7caa7863d5ee6dcadb846a9f694c918c9f38a79df0cd556397a584a6",
+      "bytes": 5814
+    },
+    "tools/_p25_final_profile.py": {
+      "git_blob": "f7ae073bcf6172c67b509f71684100accfed6a6d",
+      "sha256": "7b9e6f4298c9ded7c4ed18df3a8506e421359be19813200979f7555f72a556fc",
+      "bytes": 26792
+    },
+    "tools/_p25_used_input_bytes.py": {
+      "git_blob": "493a3f6c47319fe9bb69bec68596e27461f808fe",
+      "sha256": "937f1a4ff862e23c5c32ddc452f273dcb63fc3757be66f15773ef60a8a574d63",
+      "bytes": 13869
+    },
+    "tools/p25_capture_build_closure.py": {
+      "git_blob": "de860c36aebee89cc11bc118a24ccb985e568efa",
+      "sha256": "019bd5f41de8cf91e4926fee4519c33bf57f8af1624efba7e1de0f3da8b45858",
+      "bytes": 23355
+    },
+    "tools/p25_used_input_bytes.md": {
+      "git_blob": "1cca0b1d72bd74fbf8dec801b3340188dd870840",
+      "sha256": "a569baf28360399d0b98b8bdbe08d9236aa68c9aa733e26ae6741fd59c595205",
+      "bytes": 5060
+    },
+    "tools/release_controller.py": {
+      "git_blob": "fab9cf46317922501c38d6ef0e18e40eeb315c28",
+      "sha256": "4bdbda0d73e3d9a2b5bcc12c3ad39c35ea7e03a6d15d27a031e2e45d7f24e67e",
+      "bytes": 63244
+    },
+    "tools/tests/test_p25_used_input_bytes.py": {
+      "git_blob": "4a94740d80b38cd5600eff50c263964eba3910b4",
+      "sha256": "b5534a2ef267c13e8d3433c113b95c78fcc7802e6a85adcc88605d455bff435f",
+      "bytes": 10379
+    }
+  },
+  "new_runtime": false,
+  "final_linux_acceptance": false,
+  "legal_status": "NOTPROVEN",
+  "full_source_closure": "OPEN",
+  "integration": "Обычный merge двух независимых реализаций; SDK retainer остаётся отдельным post-capture API с trusted caller pins. Strict capture/manifest gates не изменены.",
+  "tree_scope": "union_tree фиксирует исходники до добавления данного receipt; сам receipt не входит в этот tree.",
+  "checks": {
+    "modules": [
+      "test_release_controller",
+      "test_p25_used_input_bytes",
+      "test_p25_final_profile",
+      "test_p25_attribution_join",
+      "test_p25_capture_producer",
+      "test_p25_capture_build_closure"
+    ],
+    "normal": {
+      "tests": 142,
+      "result": "OK"
+    },
+    "optimized": {
+      "tests": 142,
+      "result": "OK"
+    },
+    "ruff": {
+      "version": "0.17.4",
+      "check": "PASS",
+      "format_check": "PASS",
+      "files": [
+        "tests/tools/test_release_controller.py",
+        "tools/_p25_used_input_bytes.py",
+        "tools/release_controller.py",
+        "tools/tests/test_p25_used_input_bytes.py"
+      ]
+    },
+    "diff_check": "PASS",
+    "scope": "Synthetic filesystem/JSON fixtures, mocked builders/compiler/query; Git fixture commands и Python CLI validation. Actual Rust/compiler/Qt query/ELF/native builder/source_restore/package/install/VM/runtime не выполнялись."
+  }
+}
