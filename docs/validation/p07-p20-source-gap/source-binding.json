@@ -1,0 +1,24 @@
+{
+  "base": "3247e6c32a5ed83ec5d812dfc1f70695d3f2b3b4",
+  "kind": "read-only source audit; no runtime measurement",
+  "finding": "A-04 destination port cannot be represented in editor/domain API",
+  "source_sha256": {
+    "docs/PLAN.md": "1ce66ad7ec5159255f38da1cc867257d1e2717d3c58afdbce8a237a0edde1f12",
+    "docs/specs/routing-and-tray.md": "130473417ffbe5d3c0a73fe7f35d451da0e18f344aaa571800fedce0e7e37395",
+    "docs/specs/validation-and-roadmap.md": "d4f70873439a3f10f007e66d9b2702eea59274e698760c9444cdbd91762b3c93",
+    "crates/yonik-desktop/qml/Main.qml": "cc45e08f2832a55dcf0ca53c6c236334b99938def1a839876016aedf4ab8d26b",
+    "crates/yonik-desktop/src/editor.rs": "aadbc2b7395025314cc3ad6b69d3595f7f4acf287c790c14bfe0721c651d73b0",
+    "crates/yonik-desktop/src/backend.rs": "4d711bf14f6dc84aef3b4167287b5290a1a4d512a9c0e8957ccd1dd32a8256e8",
+    "crates/yonik-domain/src/policy.rs": "523e68476e298ebac92453844240a149e6b5761c0de22f95382c1694d841a6b0",
+    "crates/yonik-domain/src/evaluation.rs": "3d5abea0833b01021b9da8391c0ffd982856e64bff43171bf9329e819035bde2",
+    "crates/yonik-linux/src/repository.rs": "cc4de1ff197bd3ebde8bbff3e50261053817b3aa953fb4e32c56647d83ad9f1e",
+    "crates/yonik-desktop/examples/a08_gui.rs": "773f8fb5c4fd4c9f9a8d1fe7bb8d37954f44b36c1279f3d871fcf544c37376ca",
+    "crates/yonik-desktop/examples/p03_integrated.rs": "95be489889077ae7ecf5886c269f2fff98b4b40cff994269f589d7c5dbe496f3",
+    "crates/yonik-desktop/tests/p07_platform_smoke.py": "980b9e56016c9552ef31a45242626d12bb6ea5436186d0b57bd5d528ba8b0f9f",
+    "docs/validation/2026-11-14-p03-integrated.md": "1d6855bb7316bc3380b0d6a957ec3cbd7cb1f897f02b7ce9ff7e9bc0ee13711b",
+    "docs/validation/2026-11-12-p07-linux-v2.md": "d5d47af25cf69ad0bdc6e5d6784d812b7e255b3596b5a56ec9f3550e788c41d8",
+    "docs/validation/2026-11-12-p07-policy-apply-integration.md": "e4c71d27f3fc32de2d2d08dce88c90687fcd19baeea3a7e7a6bbd2f00582e365",
+    "docs/validation/p03-integrated-bindings.json": "d833bb0c5772388b593aa5592cdd5e90e528bc70ea7a08310b2cb133757d5d66",
+    "docs/validation/p07-linux-v2-manifest.json": "86e86402163c499af60def82d778708dd81b1409770819eec7001e72416cecb4"
+  }
+}
