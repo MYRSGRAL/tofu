@@ -36,6 +36,8 @@ mod output_transport;
 #[rustfmt::skip]
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64", target_env = "gnu"))]
 mod fixed_fence_receipt;
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64", target_env = "gnu"))]
+mod native_data;
 pub mod anchor_exchange;
 pub mod role_handoff;
 

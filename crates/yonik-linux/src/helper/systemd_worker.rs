@@ -207,7 +207,18 @@ impl RawIdentityIo for FixtureIdentityIo {
     }
 }
 impl BootstrapUnitObservation {
-    pub(super) fn native_pid(&self) -> u32 { self.pid }
+    pub(super) fn native_pid(&self) -> u32 {
+        self.pid
+    }
+    pub(super) fn native_uid(&self) -> u32 {
+        self.uid
+    }
+    pub(super) fn native_start(&self) -> u64 {
+        self.start
+    }
+    pub(super) fn native_invocation(&self) -> [u8; 16] {
+        self.invocation
+    }
     /// Только transport observation: NS_GET_NSTYPE/kernel attestation обязательны
     /// отдельно. Возвращаемое значение не может активировать attribution.
     pub fn exchange(
@@ -921,8 +932,10 @@ impl SystemWorkerSupervisor {
         Ok((ack, binding))
     }
     pub(super) async fn validate_native_profile_context(
-        &self, observation: &BootstrapUnitObservation,
-        cancel: &mut Cancellation, deadline: Instant,
+        &self,
+        observation: &BootstrapUnitObservation,
+        cancel: &mut Cancellation,
+        deadline: Instant,
     ) -> Result<()> {
         observation.validate_identity()?;
         bounded(cancel, deadline, self.validate_contract()).await?;

@@ -278,6 +278,26 @@ pub(crate) fn receive_run_handoff(
     Ok(RunHandoff { permit, transport })
 }
 
+#[cfg(all(
+    target_arch = "x86_64",
+    target_pointer_width = "64",
+    target_env = "gnu"
+))]
+pub(super) fn receive_v4_handoff(
+    socket: &OwnedFd,
+    challenge: &[u8; 128],
+    helper_pid: u32,
+    deadline: Instant,
+    produced: super::native_data::ProducedV4,
+) -> Result<RunHandoff, WorkerError> {
+    let transport = receive_verified_transport(socket, challenge, helper_pid, deadline)?;
+    produced.matches(&transport.binding)?;
+    Ok(RunHandoff {
+        permit: ProductionPermit { _private: () },
+        transport,
+    })
+}
+
 /// Единственный receiver-конструктор: caller bytes и Roles сами по себе не proof.
 fn receive_verified_transport(
     socket: &OwnedFd,
