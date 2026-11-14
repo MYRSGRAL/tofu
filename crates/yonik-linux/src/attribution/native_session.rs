@@ -34,6 +34,7 @@ struct Roles {
     tun: TunRole,
     worker: OwnedFd,
     broker: Option<Broker>,
+    remote: Option<super::broker::RemoteLookup>,
 }
 
 // Production хранит только helper-owned queue; raw FD доступен лишь fixture.
@@ -68,11 +69,11 @@ impl TunRole {
 impl Session {
     pub(crate) fn from_verified(
         role: crate::helper::native_bootstrap::SessionRole,
+        remote: super::broker::RemoteLookup,
     ) -> Result<Self, Unavailable> {
         let (scope, queue, worker) = role.into_parts();
         scope.validate().map_err(|_| Unavailable::Authority)?;
-        let lookup = super::broker::VerifiedLookupScope::verify(scope.fork_lookup())?;
-        let broker = Broker::from_verified(lookup)?;
+
         let (nonce, session, generation, invocation, epoch, digest) = scope.context();
         Ok(Self {
             phase: Phase::Hello,
@@ -86,7 +87,8 @@ impl Session {
             roles: Some(Roles {
                 tun: TunRole::Bound(queue),
                 worker,
-                broker: Some(broker),
+                broker: None,
+                remote: Some(remote),
             }),
             sequence: Sequence::default(),
             scope: Some(scope),
@@ -105,6 +107,9 @@ impl Session {
         self.phase = Phase::Closed;
         self.sequence.retire();
         if let Some(mut roles) = self.roles.take() {
+            if let Some(remote) = roles.remote.as_mut() {
+                remote.revoke();
+            }
             if let Some(broker) = roles.broker.as_mut() {
                 broker.revoke();
             }
@@ -214,9 +219,13 @@ impl Session {
         }
         let flow = wire::lookup_flow(bytes)?;
         self.sequence.begin(header.request_id)?;
-        let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-            Some(broker) => broker.lookup(flow),
-            None => Lookup::MechanismUnavailable(Unavailable::Authority),
+        let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
+            remote.lookup(flow)
+        } else {
+            match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
+                Some(broker) => broker.lookup(flow),
+                None => Lookup::MechanismUnavailable(Unavailable::Authority),
+            }
         };
         self.sequence.complete(header.request_id)?;
         Ok(result)
@@ -235,9 +244,13 @@ impl Session {
             }
             let flow = wire::lookup_flow(bytes)?;
             self.sequence.begin(header.request_id)?;
-            let result = match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
-                Some(broker) => broker.lookup_and_project(flow, self.epoch),
-                None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
+            let result = if let Some(remote) = self.roles.as_mut().and_then(|r| r.remote.as_mut()) {
+                remote.lookup_and_project(flow, self.epoch)
+            } else {
+                match self.roles.as_mut().and_then(|r| r.broker.as_mut()) {
+                    Some(broker) => broker.lookup_and_project(flow, self.epoch),
+                    None => super::broker::ProjectedLookup::Unavailable(Unavailable::Authority),
+                }
             };
             self.sequence.complete(header.request_id)?;
             Ok(result)
@@ -305,6 +318,7 @@ mod tests {
                     },
                     worker: worker.into(),
                     broker: None,
+                    remote: None,
                 }),
                 scope: None,
                 sequence: Sequence::new(),

@@ -252,3 +252,48 @@ mod tests {
         }
     }
 }
+
+pub(super) fn result_header(
+    binding: &LookupBinding,
+    id: u64,
+    status: u8,
+    reason: u16,
+) -> Result<[u8; REPLY], Unavailable> {
+    let header = binding.encode(RESULT, id)?;
+    let mut bytes = [0; REPLY];
+    bytes[..FRAME].copy_from_slice(&header);
+    bytes[9] = status;
+    bytes[10..12].copy_from_slice(&reason.to_be_bytes());
+    Ok(bytes)
+}
+pub(super) fn reason_code(value: Unavailable) -> u16 {
+    match value {
+        Unavailable::Authority => 1,
+        Unavailable::Coverage => 2,
+        Unavailable::Limit => 3,
+        Unavailable::Timeout => 4,
+        Unavailable::Malformed => 5,
+        Unavailable::Revoked => 6,
+        Unavailable::Cancelled => 7,
+        Unavailable::ReceiveOverflow => 8,
+        Unavailable::AmbiguousSocket => 9,
+        Unavailable::WorkerViewUnavailable => 10,
+        Unavailable::Disconnected => 11,
+    }
+}
+pub(super) fn reason_value(code: u16) -> Result<Unavailable, Unavailable> {
+    Ok(match code {
+        1 => Unavailable::Authority,
+        2 => Unavailable::Coverage,
+        3 => Unavailable::Limit,
+        4 => Unavailable::Timeout,
+        5 => Unavailable::Malformed,
+        6 => Unavailable::Revoked,
+        7 => Unavailable::Cancelled,
+        8 => Unavailable::ReceiveOverflow,
+        9 => Unavailable::AmbiguousSocket,
+        10 => Unavailable::WorkerViewUnavailable,
+        11 => Unavailable::Disconnected,
+        _ => return Err(Unavailable::Malformed),
+    })
+}

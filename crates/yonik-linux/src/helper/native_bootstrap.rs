@@ -408,3 +408,52 @@ impl RuntimeScopeStamp {
         }
     }
 }
+
+pub(crate) use super::systemd_worker::{LookupLeafLease, VerifiedLookupLeaf};
+impl SessionRole {
+    pub(crate) fn lookup_scope(&self) -> RuntimeScopeStamp {
+        self.scope.fork_lookup()
+    }
+}
+impl RuntimeScopeStamp {
+    pub(crate) fn admission_deadline(&self) -> std::time::Instant {
+        self.inner.deadline.into_std()
+    }
+}
+impl VerifiedCoverage {
+    pub(crate) fn lookup_authorization(&self) -> &RunAuthorization {
+        &self.authorization
+    }
+    pub(crate) async fn revalidate(
+        self,
+        supervisor: &SystemWorkerSupervisor,
+        owner: &RunAuthority,
+        cancel: &mut Cancellation,
+    ) -> Result<Self> {
+        cancel.check().map_err(|_| Error::Cancelled)?;
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| Error::Untrusted)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        let profile = self
+            .profile
+            .revalidate(supervisor, cancel, self.deadline)
+            .await?;
+        cancel.check().map_err(|_| Error::Cancelled)?;
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| Error::Untrusted)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        if self.custody.retained_namespace_count() != 2 {
+            return Err(Error::UnitProofGap);
+        }
+        Ok(Self {
+            profile,
+            authorization: self.authorization,
+            expected: self.expected,
+            custody: self.custody,
+            guard: self.guard,
+            deadline: self.deadline,
+        })
+    }
+}

@@ -20,9 +20,13 @@ use std::{
 };
 
 mod kernel;
+mod lookup_channel;
 #[allow(dead_code)]
 mod lookup_codec;
+mod lookup_leaf;
+mod remote;
 pub(crate) use lookup_codec::LookupBinding;
+pub(crate) use remote::RemoteLookup;
 
 pub const FRAME_BYTES: usize = 136;
 const CACHE_ENTRIES: usize = 64;
@@ -369,6 +373,27 @@ pub(super) enum ProjectedLookup {
 }
 
 impl Broker {
+    fn lookup_leaf(binding: &LookupBinding) -> Result<Self, Unavailable> {
+        let pid = std::process::id();
+        let view = BrokerLookupView::capture()?;
+        if view.namespaces[0] != binding.network {
+            return Err(Unavailable::Coverage);
+        }
+        // В leaf это собственный liveness anchor; main engine PID здесь не нужен.
+        let context = TrustedContext {
+            worker: Process::capture(pid, binding.target_uid)?,
+            lookup_view: view,
+            target_uid: binding.target_uid,
+            epoch: binding.epoch,
+            nonce: binding.nonce,
+            digest: binding.digest,
+            scope: None,
+            revoked: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        Self::build(context, false)
+    }
+
     pub(crate) fn from_verified(scope: VerifiedLookupScope) -> Result<Self, Unavailable> {
         Self::build(scope.context, false)
     }
@@ -693,3 +718,8 @@ mod lookup_view_tests {
 
 #[cfg(test)]
 pub(in crate::attribution) use kernel::report_cold_witnesses;
+
+/// Только fixed worker --lookup entry. Не принимает FD/path/UID/command от caller.
+pub fn serve_lookup() -> Result<(), Unavailable> {
+    lookup_leaf::run()
+}
