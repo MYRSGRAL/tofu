@@ -28,6 +28,7 @@ pub struct Session {
     app_required: bool,
     roles: Option<Roles>,
     sequence: Sequence,
+    scope: Option<crate::helper::native_bootstrap::RuntimeScopeStamp>,
 }
 struct Roles {
     tun: TunRole,
@@ -65,12 +66,40 @@ impl TunRole {
 }
 
 impl Session {
+    pub(crate) fn from_verified(
+        role: crate::helper::native_bootstrap::SessionRole,
+    ) -> Result<Self, Unavailable> {
+        let (scope, queue, worker) = role.into_parts();
+        scope.validate().map_err(|_| Unavailable::Authority)?;
+        let (nonce, session, generation, invocation, epoch, digest) = scope.context();
+        Ok(Self {
+            phase: Phase::Hello,
+            epoch,
+            digest,
+            nonce,
+            session,
+            generation,
+            invocation,
+            app_required: false,
+            roles: Some(Roles {
+                tun: TunRole::Bound(queue),
+                worker: worker,
+                broker: None,
+            }),
+            sequence: Sequence::default(),
+            scope: Some(scope),
+        })
+    }
+
     /// Пока kernel/unit proof не может быть выпущен, raw caller входы
     /// безусловно отвергаются. Этот gate не принимает fd, env или proof bytes.
     pub fn verified_helper_bootstrap() -> Result<Self, Unavailable> {
         Err(Unavailable::Authority)
     }
     pub fn close(&mut self) {
+        if let Some(scope) = self.scope.take() {
+            scope.revoke();
+        }
         self.phase = Phase::Closed;
         self.sequence.retire();
         if let Some(mut roles) = self.roles.take() {
@@ -269,6 +298,7 @@ mod tests {
                     worker: worker.into(),
                     broker: None,
                 }),
+                scope: None,
                 sequence: Sequence::new(),
             },
             peer,
