@@ -262,7 +262,7 @@ class ProcessDriver:
         request = (
             json.dumps(
                 {
-                    "schema": 1,
+                    "schema": 2,
                     "seq": self.seq,
                     "core": core,
                     "case": case,
@@ -324,192 +324,89 @@ class ProcessDriver:
                 self.process.stdout.close()
 
 
-def check_receipt(
-    receipt: dict[str, Any],
-    stage: str,
-    previous: dict[str, Any] | None,
-    expected: dict[str, Any],
-) -> dict[str, Any] | None:
-    if (
-        set(receipt)
-        != {
-            "schema",
-            "seq",
-            "core",
-            "case",
-            "stage",
-            "facts",
-            "binding",
-            "coverage",
-            "artifacts",
-            "kernel_build_id",
-        }
-        or type(receipt["schema"]) is not int
-        or receipt["schema"] != 1
-        or receipt["stage"] != stage
-    ):
-        raise Refused("STAGE_PROTOCOL")
-    facts = receipt["facts"]
-    if (
-        not isinstance(facts, dict)
-        or set(facts) != COUNTERS
-        or any(type(v) is not int or v not in (0, 1) for v in facts.values())
-    ):
-        raise Refused("COUNTER_PROTOCOL")
-    if facts["health"] and (
-        not facts["ack"] or not facts["admitted"] or facts["revoked"]
-    ):
-        raise Refused("FALSE_READINESS")
-    if (
-        facts["ack"]
-        and not facts["role_sends"]
-        or facts["role_sends"]
-        and not facts["admitted"]
-    ):
-        raise Refused("ROLE_ORDER")
-    if facts["admitted"] and facts["apply_sends"] != 1:
-        raise Refused("APPLY_ORDER")
-    binding = receipt["binding"]
-    if binding is not None:
-        if not isinstance(binding, dict) or set(binding) != BINDING:
-            raise Refused("BINDING_PROTOCOL")
-        for key, value in binding.items():
-            if key in {"worker_pid", "server_pid", "owner_uid"}:
-                valid = type(value) is int and 0 < value < 2**32
-            elif key in {"worker_start", "server_start", "generation", "epoch"}:
-                valid = type(value) is int and 0 < value < 2**64
-            else:
-                valid = digest(value, 32 if key == "invocation" else 64)
-            if not valid:
-                raise Refused("BINDING_PROTOCOL")
-        if (
-            previous is not None
-            and previous != binding
-            or binding["owner_uid"] != expected["caller_uid"]
-        ):
-            raise Refused("CANONICAL_CHANGED")
-    elif previous is not None or facts["admitted"]:
-        raise Refused("MISSING_CUSTODY")
-    if stage in PREFIX:
-        if (
-            binding is None
-            or receipt["artifacts"] != expected["artifacts"]
-            or receipt["kernel_build_id"] != expected["kernel_build_id"]
-        ):
-            raise Refused("ACTUAL_ARTIFACT_BINDING")
-    if stage in PREFIX:
-        index = PREFIX.index(stage)
-        for key, minimum in (
-            ("admitted", 2),
-            ("role_sends", 3),
-            ("ack", 4),
-            ("health", 5),
-        ):
-            if facts[key] != int(index >= minimum):
-                raise Refused("STAGE_FACTS")
-    if stage in PREFIX[1:]:
-        coverage = receipt["coverage"]
-        if not isinstance(coverage, dict) or set(coverage) != {
-            "baseline",
-            "current",
-            "errno",
-            "receipt_sha256",
-            "report_sha256",
-        }:
-            raise Refused("COVERAGE_PROTOCOL")
-        b, c = coverage["baseline"], coverage["current"]
-        if (
-            type(b) is not int
-            or type(c) is not int
-            or not 0 <= b < 2**32 - 1
-            or c != b + 1
-            or not isinstance(coverage["errno"], list)
-            or any(type(value) is not int for value in coverage["errno"])
-            or coverage["errno"] != [1, 1, 38] + [1] * 16
-            or any(not digest(coverage[k]) for k in ("receipt_sha256", "report_sha256"))
-        ):
-            raise Refused("COVERAGE_MISMATCH")
-    if stage in {"profile_unavailable", "profile_rejected", "report_rejected"} and any(
-        facts[k] for k in ("admitted", "role_sends", "ack", "health")
-    ):
-        raise Refused("DENIAL_BYPASS")
-    if stage in {"revoked", "cancelled", "host_lost", "unknown"} and (
-        not facts["revoked"]
-        or facts["health"]
-        or not facts["retained"]
-        or facts["empty"]
-        or facts["closed"]
-    ):
-        raise Refused("EARLY_RELEASE")
-    if (
-        stage == "healthy"
-        and facts["health"] != 1
-        or stage == "attach_ack"
-        and facts["ack"] != 1
-    ):
-        raise Refused("MISSING_ACK_HEALTH")
-    if stage == "closed" and (
-        not facts["empty"]
-        or not facts["reaped"]
-        or not facts["closed"]
-        or facts["retained"]
-        or facts["health"]
-    ):
-        raise Refused("UNCERTAIN_CLEANUP")
-    return binding
+# Исторические CASES/PREFIX выше сохраняют исходные IDs proposal, не runtime gate.
+ACTUAL = {"desktop_system_connected", "trusted_execution_tuple", "tcp_udp_policy",
+          "app_owner_policy", "worker_reaped", "cgroup_empty", "network_restored",
+          "foreign_resources_preserved"}
+INFERRED = {"full_v4_report", "custody_roles_attach_ack"}
+UNAVAILABLE = {"tampered_internal_report", "revoke_between_internal_stages"}
 
 
-def run_case(
-    driver: Driver,
-    core: str,
-    case: str,
-    expected: dict[str, Any],
-    campaign_deadline: float,
-) -> dict[str, Any]:
-    deadline = min(campaign_deadline - CLEANUP_SECONDS, time.monotonic() + CASE_SECONDS)
-    binding = None
+def check_receipt(receipt: dict[str, Any], expected: dict[str, Any]) -> None:
+    """v2: evidence class не взаимозаменяемы; legacy counters отвергаются.
+
+    expected поступает от отдельно доверенного sealed capture verifier. Совпадение
+    JSON само по себе не аутентифицирует capture и не открывает execute().
+    """
+    if (set(receipt) != {"schema", "seq", "core", "case", "stage", "claims"}
+        or type(receipt["schema"]) is not int or receipt["schema"] != 2
+        or type(receipt["seq"]) is not int or not 0 < receipt["seq"] < 2**64
+        or type(receipt["core"]) is not str or type(receipt["case"]) is not str
+        or receipt["core"] not in CORES or receipt["case"] not in CASES
+        or receipt["stage"] != "witness"):
+        raise Refused("V2_PROTOCOL")
+    claims = receipt["claims"]
+    if type(claims) is not dict or set(claims) != ACTUAL | INFERRED | UNAVAILABLE:
+        raise Refused("CLAIM_SET")
+    capture = expected.get("trusted_capture_sha256")
+    source = expected.get("executing_source_sha256")
+    if not digest(capture) or not digest(source):
+        raise Refused("MISSING_TRUSTED_PROVENANCE")
+    for name, claim in claims.items():
+        if type(claim) is not dict:
+            raise Refused("CLAIM_PROTOCOL")
+        if name in ACTUAL:
+            if (set(claim) != {"class", "capture_sha256", "observation_id"}
+                or claim["class"] != "ACTUAL" or claim["capture_sha256"] != capture
+                or type(claim["observation_id"]) is not int
+                or claim["observation_id"] <= 0
+                or expected.get("verified_observations", {}).get(name) != claim["observation_id"]):
+                raise Refused("MISSING_ACTUAL_OBSERVATION")
+        elif name in INFERRED:
+            if (set(claim) != {"class", "source_sha256", "anchor_sha256"}
+                or claim["class"] != "SOURCE_INVARIANT"
+                or claim["source_sha256"] != source
+                or claim["anchor_sha256"] != capture):
+                raise Refused("INFERENCE_BINDING")
+        elif claim != {"class": "UNAVAILABLE", "reason": "SOURCE_ONLY"}:
+            raise Refused("UNAVAILABLE_PROTOCOL")
+
+
+def run_case(driver: Driver, core: str, case: str, expected: dict[str, Any],
+             campaign_deadline: float) -> dict[str, Any]:
+    # Недоступные interleaving controls не заменяются synthetic PASS.
+    if core not in CORES or case not in CASES:
+        raise Refused("CASE_NOT_ALLOWED")
+    if case != "positive":
+        return {"core": core, "case": case, "status": "UNAVAILABLE", "reason": "SOURCE_ONLY"}
+    deadline = min(campaign_deadline, time.monotonic() + CASE_SECONDS)
     if deadline <= time.monotonic():
         return {"core": core, "case": case, "status": "BLOCKED", "reason": "DEADLINE"}
-    failure = None
+    # Полный witness обязан включать actual cleanup; Disconnected не empty fence.
+    failure = False
     stopped = False
     try:
-        for action, stage in CASES[case]:
+        for action in ("start", "await", "stop"):
             stopped |= action == "stop"
-            binding = check_receipt(
-                driver.exchange(core, case, action, deadline), stage, binding, expected
-            )
-    except (Refused, OSError) as error:
-        failure = str(error) if isinstance(error, Refused) else "TRANSPORT_FAILURE"
+            progress = driver.exchange(core, case, action, deadline)
+            if (progress != {"schema": 2, "seq": progress.get("seq"), "core": core,
+                             "case": case, "stage": action}
+                or type(progress.get("seq")) is not int or progress["seq"] <= 0):
+                raise Refused("PROGRESS_PROTOCOL")
+    except (Refused, OSError):
+        failure = True
     cleanup_deadline = min(campaign_deadline, time.monotonic() + CLEANUP_SECONDS)
     try:
-        # Stop ровно один раз. Unknown не разрешает новый Apply или release owner.
         if not stopped:
             stopped = True
-            check_receipt(
-                driver.exchange(core, case, "stop", cleanup_deadline),
-                "stopping",
-                binding,
-                expected,
-            )
-        check_receipt(
-            driver.exchange(core, case, "cleanup", cleanup_deadline),
-            "closed",
-            binding,
-            expected,
-        )
+            driver.exchange(core, case, "stop", cleanup_deadline)
+        receipt = driver.exchange(core, case, "cleanup", cleanup_deadline)
+        if receipt.get("core") != core or receipt.get("case") != case:
+            raise Refused("RECEIPT_BINDING")
+        check_receipt(receipt, expected)
     except (Refused, OSError):
-        return {
-            "core": core,
-            "case": case,
-            "status": "QUARANTINED",
-            "reason": failure or "UNCERTAIN_CLEANUP",
-        }
-    return {
-        "core": core,
-        "case": case,
-        "status": "FAIL" if failure else "PASS",
-        "reason": failure,
-    }
+        return {"core": core, "case": case, "status": "QUARANTINED", "reason": "MISSING_ACTUAL_WITNESS"}
+    return {"core": core, "case": case, "status": "FAIL" if failure else "PASS", "reason": "DRIVER_FAILURE" if failure else None}
 
 
 def execute(

@@ -97,3 +97,7 @@ required-features = ["startup-diagnostics"]
 [[example]]
 name = "p09_cancellation"
 required-features = ["test-support"]
+
+[[example]]
+name = "n5_guest_driver"
+required-features = ["test-support"]
