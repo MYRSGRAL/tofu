@@ -1,0 +1,271 @@
+{
+  "kind": "P05 narrow source/criterion DATA join; source-only recommendation",
+  "refs": {
+    "baseline": "c079e9dea02cd34376d7103dc765c0ab43c71802",
+    "accepted_main": "cfcb4576dd0ead9cbf65a5bed95ff4f008813ba9",
+    "criterion": "13983f1b82c5e575916f1fbb7333239de6507dac",
+    "trusted_R2": "b6a55c22 (not present in local object database; accepted as supplied authority)"
+  },
+  "criterion_P05": "| P05 | Подписки, обновления и идентичность профилей | Частично | CAS, rename/delete, отмена, HWID и последний snapshot реализованы. Завершить proxy-загрузку без скрытого DIRECT и полную матрицу изменения credentials/пустого/частичного ответа. Плановые обновления — P10. [Snapshots](validation/2026-11-09-subscription-snapshots.md), [identity](validation/2026-11-09-profile-identities.md). |",
+  "trusted_input": "R2 established originalP05qualifiedReady using historical 124 native cases plus normal Host/private Secret Service lease/sourceStop proof. Evidence is trusted, not rehashed or rerun.",
+  "recommendation": {
+    "root_status": "retain originalP05qualifiedReady, subject to the same R2 qualifications",
+    "mandatory_new_P05_gap": false,
+    "P1": [],
+    "P2": [],
+    "automatic_promotion": false,
+    "new_gate": false,
+    "reason": "No actual P05 import/fetch/lease/snapshot semantic regression or new uncovered P05 fetch/publication producer found in the bounded changed-source join."
+  },
+  "joins": [
+    {
+      "area": "startup214",
+      "offsets": "backend.rs@head 1532-1557, 4296-4330, 4918-4937; startup_application.rs@head 285-348, 360-483",
+      "conclusion": "Owner observation surrounds the existing master-key call without changing Missing/Locked/create semantics; absence of guard blocks startup only. New startup selects an existing profile with snapshot revision and source generation, then dispatches ordinary Connect with revalidation. It does not fetch/import/commit a subscription or mint a proxy lease. Initial reload now has a bounded timeout and blocks startup on failure; not a replacement snapshot writer."
+    },
+    {
+      "area": "lease and Stop",
+      "offsets": "backend.rs@head 3650-3751,4481-4519,4560-4605",
+      "conclusion": "DesktopFetch route selection, no-lease Proxy refusal, watch cancellation and post-fetch stale fence are unchanged. Lease still comes only from Connected, uncancelled, unfinished Running; startup reaches the same producer. Priority clears startup command and retains revoke/cancel before scheduler shutdown. No hidden DIRECT fallback added."
+    },
+    {
+      "area": "replacement",
+      "offsets": "backend.rs@head 1347-1366,4529-4546,4593-4598; desktop_schedule.rs diff",
+      "conclusion": "Successful replacement/load/publication path is unchanged. New wrapper exposes typed initialize-exhausted error and returns None on failure, matching the previous failed-if-let control flow. desktop_schedule production code unchanged; delta there is test-only. No new scheduler or fetch producer."
+    },
+    {
+      "area": "P09cancel212",
+      "offsets": "host/mod.rs,host/process.rs,host/session.rs changed hunks; backend.rs@head 4835-4838,5408-5410",
+      "conclusion": "Changes to cancellation are lifecycle observation/gates behind test-support; production cancellation check/select logic and source refresh publication fences remain unchanged."
+    },
+    {
+      "area": "FR16output211",
+      "offsets": "system_session.rs diff; backend.rs Flight and shutdown diff; worker.rs output V3 diff",
+      "conclusion": "System PreparedOutput/drain ownership affects system apply/stop and logging. SystemSession is not a ProxyLease producer; local Running lease producer is unchanged. Worker V3 adds stdout/stderr roles and decodes existing resource header through shared decoder; does not feed subscription fetch/snapshot publication."
+    },
+    {
+      "area": "repository shared change / transport policy",
+      "offsets": "repository.rs changed hunks at head 149,268,318,392,431,480,786,2430-2518; repository/backup.rs diff",
+      "conclusion": "Actual shared persistence delta explicitly retained: format5 acceptance, preserve_format4 instead of unconditional downgrade, routing v3 admission and read-only database identity. Source/snapshot CAS, reconciliation, cancellation, payload encryption identities and last-snapshot commit are unchanged in the diff. Expanded format check accepts 4 or 5; P05 writes preserve newer format. No new subscription snapshot writer or weakened source generation check found."
+    },
+    {
+      "area": "P25/toolkit",
+      "conclusion": "Changed P25 tooling and bench/ui sources do not replace the product subscription parser/service/fetch/scheduler. Product transport/routing checks may refuse unsupported Connect; they cannot silently turn Proxy fetch into Direct. This is a source relationship conclusion, not whole-head execution equivalence."
+    },
+    {
+      "area": "preferences conflict",
+      "offsets": "backend.rs@head 1886-1939; preferences.rs diff",
+      "conclusion": "CAS conflict rereads safe settings (including proxy DNS/interval/background) and returns explicit error. Existing operations keep their captured DesktopFetch. Subsequent host captures use current preferences. No source credential rewrite or snapshot publication added."
+    }
+  ],
+  "objects": [
+    {
+      "path": "crates/yonik-linux/src/fetch.rs",
+      "base_blob_or_tree": "36c04994ee0793f1df6e2c22c840fbe1afc942a0",
+      "head_blob_or_tree": "36c04994ee0793f1df6e2c22c840fbe1afc942a0",
+      "unchanged": true
+    },
+    {
+      "path": "crates/yonik-linux/src/subscriptions.rs",
+      "base_blob_or_tree": "68d46660bdd659c8c8927b05023f4665be194280",
+      "head_blob_or_tree": "68d46660bdd659c8c8927b05023f4665be194280",
+      "unchanged": true
+    },
+    {
+      "path": "crates/yonik-linux/src/subscription_scheduler.rs",
+      "base_blob_or_tree": "766c37544e94893f4812a875a3df009fd1c4efca",
+      "head_blob_or_tree": "766c37544e94893f4812a875a3df009fd1c4efca",
+      "unchanged": true
+    },
+    {
+      "path": "crates/yonik-linux/src/subscription_policy.rs",
+      "base_blob_or_tree": "5366866546a8ffd1792ad5563b6620f621938713",
+      "head_blob_or_tree": "5366866546a8ffd1792ad5563b6620f621938713",
+      "unchanged": true
+    },
+    {
+      "path": "crates/yonik-import",
+      "base_blob_or_tree": "76438e0ae3e61bbf3d000efad17132aa797480b4",
+      "head_blob_or_tree": "76438e0ae3e61bbf3d000efad17132aa797480b4",
+      "unchanged": true
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "base_blob_or_tree": "8f9d41384277888f98143e37bcc64a9899f9fc39",
+      "head_blob_or_tree": "bf39569e5f603f5dbad89d735923045cd58a72aa",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/desktop_schedule.rs",
+      "base_blob_or_tree": "bd25055d78c25bec80962642fccfb7c794f08485",
+      "head_blob_or_tree": "b81cda321c99f24261bb2cb9f4d1fe2e0f6c4a45",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/startup_application.rs",
+      "base_blob_or_tree": null,
+      "head_blob_or_tree": "e133eb6aea0fcb56b2c828f98a86db238ce9a191",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/preferences.rs",
+      "base_blob_or_tree": "bdf906f25d7ba4abf1d6cd5e28292e6ca4d5a194",
+      "head_blob_or_tree": "43a13cd41c57d86917e92257fab3eea6d630dd21",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/system_session.rs",
+      "base_blob_or_tree": "062754ac976134df581aa83650c5e20e5badddd6",
+      "head_blob_or_tree": "1ac8de560eb525ddd89ea5e2766ddd20cdf142ff",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/credentials.rs",
+      "base_blob_or_tree": "ae1403f89684a108ac28da7f76cfaf25a6b417e9",
+      "head_blob_or_tree": "d6e5f2fa8a41fbe260432e0046b19f58ae9b25a7",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/repository.rs",
+      "base_blob_or_tree": "145e3df81f5b28d35e11ece0fed98eb92242511f",
+      "head_blob_or_tree": "48f9050895a97c978a95fea984933623c3b043c9",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/repository/backup.rs",
+      "base_blob_or_tree": "36a8424a2ddb31db68755e6b1456d4e1e71ee451",
+      "head_blob_or_tree": "8f1f0122a4d3144dec07299e9126fa2d3ed36342",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/host/mod.rs",
+      "base_blob_or_tree": "59abf7f89466341c37407a9978a97d19ad3e37ba",
+      "head_blob_or_tree": "df82524cde34d53ef4ea913e91aeaaa39d70ce22",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/host/process.rs",
+      "base_blob_or_tree": "9fbdb126cbc58cc6f87db8d52fe52c26629f33c8",
+      "head_blob_or_tree": "314c5428dccaef0fc9170dfb2af3ce3652713a7b",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/host/session.rs",
+      "base_blob_or_tree": "eb47279ef39b3fcf0495e388465ec315ed02f88d",
+      "head_blob_or_tree": "8df19b4f7cb8a37c523458a31016ebdba6d1d08a",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/worker.rs",
+      "base_blob_or_tree": "d4c6bb24ab4f8c2d2c4b5910c7e99cc969660da3",
+      "head_blob_or_tree": "367cbed979f780a5f05afb545da7eda57c65a291",
+      "unchanged": false
+    },
+    {
+      "path": "crates/yonik-linux/src/system_client/output.rs",
+      "base_blob_or_tree": "be388bbd36dae3c1ee7574ad24e97530a40770ee",
+      "head_blob_or_tree": "e650e9ab55cfd0b865dfe0ae44c262f299243456",
+      "unchanged": false
+    }
+  ],
+  "exact_unchanged_backend_spans": [
+    {
+      "label": "refresh producer",
+      "head_lines": [
+        1943,
+        2002
+      ],
+      "identical_lines": 60,
+      "total_lines": 60,
+      "matching_offsets": [
+        {
+          "head_lines": [
+            1943,
+            2002
+          ],
+          "base_lines": [
+            1837,
+            1896
+          ]
+        }
+      ]
+    },
+    {
+      "label": "DesktopFetch",
+      "head_lines": [
+        3650,
+        3751
+      ],
+      "identical_lines": 102,
+      "total_lines": 102,
+      "matching_offsets": [
+        {
+          "head_lines": [
+            3650,
+            3751
+          ],
+          "base_lines": [
+            3481,
+            3582
+          ]
+        }
+      ]
+    },
+    {
+      "label": "lease publication",
+      "head_lines": [
+        4481,
+        4519
+      ],
+      "identical_lines": 39,
+      "total_lines": 39,
+      "matching_offsets": [
+        {
+          "head_lines": [
+            4481,
+            4519
+          ],
+          "base_lines": [
+            4275,
+            4313
+          ]
+        }
+      ]
+    },
+    {
+      "label": "manual result publication",
+      "head_lines": [
+        4863,
+        4878
+      ],
+      "identical_lines": 16,
+      "total_lines": 16,
+      "matching_offsets": [
+        {
+          "head_lines": [
+            4863,
+            4878
+          ],
+          "base_lines": [
+            4648,
+            4663
+          ]
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "No builds, tests, ELF inspection, runtime, GUI, probes or network/host queries executed. Git object reads and pure data only.",
+    "No whole-head execution claim; unchanged proof transferred only across the source regions identified.",
+    "Native issuer, N5 and fullLinux remain excluded. Original P10 physical acceptance remains open.",
+    "Trusted R2 unavailable locally was not independently verified. Root owns final status; product and PLAN unchanged."
+  ],
+  "workspace": "read-only; receipt is the only intentional write, outside TTL",
+  "root_decision": {
+    "criterion": "original P05",
+    "status": "qualified software Ready",
+    "native_issuer_N5_fullLinux": false,
+    "basis": "trusted R2 b6a55c22 + source transfer c079..cfcb; no new mandatory P05 gap",
+    "new_runtime": false
+  }
+}

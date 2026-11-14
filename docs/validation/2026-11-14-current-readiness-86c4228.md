@@ -2,12 +2,10 @@
 
 Это компактный source-bound реестр 26 пунктов, не новый test framework и не
 замена исторических 256 строк. Исторический счёт **3/21/2**, знаменатель **26**
-и два отложенных Android-пункта сохраняются. Принятый счёт (решение о повышении P05 ещё не принято) —
-**8/16/2**. Предложение к пакетной интеграции root: исходный P05 software Ready,
-предлагаемый итог **9 готовы / 15 частично / 2 отложены**, остаток 17 пунктов.
-Текущий принятый остаток — **18: 16 Linux + 2 Android**; после явного принятия
-предложения P05 — **17: 15 Linux + 2 Android**. Таблица ниже отражает accepted
-8/16/2; software-qualified не равен автоматически accepted.
+и два отложенных Android-пункта сохраняются. Root принял исходный P05 как
+qualified software Ready по trusted R2 и ограниченному source transfer до `cfcb457`.
+Счёт — **9 готовы / 15 частично / 2 отложены**, остаток **17: 15 Linux + 2 Android**.
+Native issuer/N5 и full Linux из этого решения не следуют.
 Linux done, final A5 и release PASS не заявлены.
 
 ## Принятая база и источник утверждений
@@ -30,7 +28,7 @@ P25 capture [PR215](https://github.com/MYRSGRAL/yonik/pull/215) принят н�
 [capture](p25-current-payload/post-build-capture-tool.md),
 [join](p25-current-payload/postcapture-attribution-join.md).
 P05 semantic transfer ниже по-прежнему ограничен `07d5868`;
-новый MAIN не расширяет его source bounds и не повышает статус P05/P21/P23/P25.
+Новый transfer до `cfcb457` описан ниже; P21/P23/P25 не повышены.
 Git objects подтверждают последовательность:
 
 - `c079e9dea02cd34376d7103dc765c0ab43c71802` →
@@ -56,7 +54,7 @@ acceptance handoff, не повторная проверка CI/API в наст�
 known-positive-path repair, не accepted и не native runtime PASS. Runtime/profile
 закрыты для этой задачи; новые исполнения и профильные проверки не разрешены.
 
-## P05: основание единственного предложенного повышения
+## P05: принятое решение и границы
 
 Trusted R2 `b6a55c22` квалифицировал исходный P05 software Ready на accepted
 `c079e9d`. Основание — [124 исторических native cases](2026-11-11-p05-refresh-acceptance.md),
@@ -88,24 +86,29 @@ output drain перед disk-log shutdown. LocalSocks lease/fetch/commit/replace
 не повтор полного принятого аудита и не System/FR16 runtime proof.
 Положительный исторический proof не объявляется exact execution нового backend.
 
-Вывод: исходный P05 предлагается Ready в software scope; P10 energy, native
+Вывод root: исходный P05 принят qualified Ready в software scope; P10 energy, native
 System authority, N5 и final A5 этим не закрыты. Полного rerun 124 cases,
 новой сборки, Host/SS/native runtime в этой задаче не было.
 
+Дополнительная read-only сверка `c079e9d..cfcb457` подтверждает неизменность
+DesktopFetch (102 строки), refresh producer (60), lease publication (39) и manual
+result publication (16). Startup/FR16/P09 не добавили непокрытый P05 producer.
+[Source binding](p05-current-source-transfer.json) сохраняет точные blobs/offsets.
+Это композиция исторического proof и source-инвариантов, не выполнение нового head.
+
 ## Все 26 строк
 
-Принятые Ready: P01/P02/P04/P06/P08/P11/P18/P22 (8). Linux Partial:
-P05/P07/P09/P10/P12/P13/P14/P15/P16/P17/P19/P20/P21/P23/P24/P25 (16).
-Android deferred: P03/P26 (2). Предложение меняет только P05, оставляя
-остальные 15 Linux Partial и оба Android deferred.
+Принятые Ready: P01/P02/P04/P05/P06/P08/P11/P18/P22 (9). Linux Partial:
+P07/P09/P10/P12/P13/P14/P15/P16/P17/P19/P20/P21/P23/P24/P25 (15).
+Android deferred: P03/P26 (2).
 
 | ID | Статус | Текущее основание или реальный остаток |
 | --- | --- | --- |
 | P01 | Готов | Требования и архитектурные контракты; implementation gates отдельно. |
-| P02 | Готов | Исторический Android compile-check; final6pairs [PR187](https://github.com/MYRSGRAL/yonik/pull/187) pending, не новый final build/VPN runtime PASS. |
+| P02 | Готов | Исторический Android compile-check; final6pairs [PR187](https://github.com/MYRSGRAL/yonik/pull/187) принят (`48ce743`), не новый final build/VPN runtime PASS. |
 | P03 | Отложен | Android runtime-host, оба engine/FFI/TUN/protect/revoke. |
 | P04 | Готов | Исходный импорт; исторические source bounds сохранены. |
-| P05 | Частично | Software qualified Ready по trusted R2; повышение предложено, решение root ожидается. |
+| P05 | Готов | Исходный software-критерий принят root: trusted R2 + source transfer до cfcb457. Native/N5/full Linux отдельно. |
 | P06 | Готов | Storage/restore; physical login/PAM и final A5 отдельно. |
 | P07 | Частично | #210 ports/protocol и format5 приняты через #213; format4 как текущий остаток устарел. Полная integrated/editor/enforcement матрица OPEN. |
 | P08 | Готов | Исходный compiler scope; native activation/DNS/handshake отдельно. |
@@ -136,7 +139,7 @@ P21: [requirements:45](../specs/requirements.md) называет две нас�
 
 ## Порядок оставшейся работы
 
-1. Root интегрирует coherent docs patch; final6pairs PR187 pending. Startup214,
+1. Root интегрирует coherent docs patch; final6pairs PR187 принят (`48ce743`). Startup214,
    capture215 + join217 и toolkit191 уже accepted в указанных software/source bounds.
 2. Native N5 (software 4ae21 pure PASS; PR216 DRAFT, known-positive-path repair не accepted) и P12–P17: authority/installed lifecycle, DNS, attribution,
    private-network и integrated policy proofs. LocalSocks не заменяет System/TUN.
@@ -149,5 +152,5 @@ P21: [requirements:45](../specs/requirements.md) называет две нас�
    software принят отдельно в #214 (оба default OFF); physical power и
    PAM/reboot/lock остаются отдельными gates без PASS. Android P03/P26 остаются отложенными.
 
-Проверка этой правки — только 26 уникальных IDs, accepted 8/16/2 и proposed 9/15/2, локальные Git ancestry до доступной базы и API merge191,
+Проверка этой правки — только 26 уникальных IDs, решение root 9/15/2, локальные Git ancestry до доступной базы и API merge191,
 локальные ссылки и diff scope. Исторические 256 строк и их artifacts не менялись.
