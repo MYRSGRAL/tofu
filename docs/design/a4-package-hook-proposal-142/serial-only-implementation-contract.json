@@ -12,8 +12,8 @@
       "tree": "7daa4ebb7cc25d3ceafab76809afc78753dc5ec3"
     },
     "sources": {
-      "a4_serial_driver.py": "d7a1462b2a32152554849b47609936c7e8767ca57724e7d5c01f783271decfd4",
-      "a4_serial_collector.py": "233aeb1a611fa2f93d8f05ab8eb437dc265559a7b1d538bde61e3ef1a8958fbb",
+      "a4_serial_driver.py": "c54ccbb7304c5288e8bf0b623cb8d066c9ecb04d564c511a1d1c52a0e7bd81f4",
+      "a4_serial_collector.py": "ae99c50d79728c00bc6cb93b7e987a037c9e7e25dfd2395fce61d16aa361bd07",
       "a4_serial_protocol.py": "cad851a8c0e02d6cb970feacaed8da1dda19549bcdd934dfde38ded9ebac63a4",
       "a4_serial_projection.py": "8f198030897d550278c7e21a502188dbd2e07a6cf6afd4fba96b460ae7f99c7c",
       "a4_package_hook_vm.py": "a07202267a719196e42dfc5e393aee509166168989a41aed8d4e572105e7fa93"
@@ -158,13 +158,28 @@
     "retained_disk_bytes": 268435456
   },
   "tests": {
-    "A4_total": 71,
-    "new_implementation": 30,
+    "historical_at_51a89e6": {
+      "A4_total": 71,
+      "new_implementation": 30,
+      "ruff_check": "PASS",
+      "ruff_format": "PASS"
+    },
+    "cleanup_fixed_serial_suite": 43,
+    "new_cleanup_regressions": 6,
+    "baseline_51a89e6_assertion_RED": 2,
     "ruff_check": "PASS",
     "ruff_format": "PASS"
   },
   "test_source_sha256": "6656a5766b4195c32ba0580ae48a18f04e427cdb5daf903304917e756fe24e6d",
   "fullA4": false,
   "finalLinux": false,
-  "factory": "CLOSED"
+  "factory": "CLOSED",
+  "cleanup_test_source_sha256": "c834e2747ce649cc00f9295765c230609a5c2b5b2e609bc07f245f1d3f191d57",
+  "host_command_limits": {
+    "stdout_stderr_combined_bytes": 65536,
+    "capture_seconds": 45,
+    "kill_reap_seconds": 1,
+    "unreaped_policy": "retain task; UNKNOWN; no boot approval",
+    "signals": "owned separate process group; leader not reaped before killpg"
+  }
 }

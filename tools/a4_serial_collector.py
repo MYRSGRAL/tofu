@@ -472,6 +472,11 @@ def _contract() -> dict:
     return contract
 
 
+def _deadline_expired(_signal: int, _frame: object) -> None:
+    # Исключение проходит через _command finally; _exit оставлял systemctl живым.
+    raise TimeoutError("Collector deadline")
+
+
 def main() -> int:
     # До guard нет subprocess, serial open, fork, чтения seed или произвольных paths.
     boot = _identity()
@@ -481,7 +486,7 @@ def main() -> int:
         "/dev/ttyS0", os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK | os.O_NOFOLLOW
     )
     emitter = Emitter(serial, contract, boot)
-    signal.signal(signal.SIGALRM, lambda *_: os._exit(2))
+    signal.signal(signal.SIGALRM, _deadline_expired)
     signal.alarm(25)
     try:
         _snapshot(emitter, entered + 25, True)
@@ -500,7 +505,7 @@ def main() -> int:
         emitter.seq += 2
         emitter.total += 2048  # консервативный reserve для SPAWN/END родителя
         emitter.phase = "delayed"
-        signal.signal(signal.SIGALRM, lambda *_: os._exit(2))
+        signal.signal(signal.SIGALRM, _deadline_expired)
         signal.alarm(max(1, int(entered + 50 - time.monotonic())))
         time.sleep(max(0, entered + 30 - time.monotonic()))
         try:
@@ -516,6 +521,7 @@ def main() -> int:
         emitter.emit("end", {"outcome": "UNKNOWN"})
         return 1
     finally:
+        signal.alarm(0)
         os.close(serial)
 
 

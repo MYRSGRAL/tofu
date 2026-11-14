@@ -9,7 +9,9 @@ import json
 import os
 import re
 import secrets
+import selectors
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -43,6 +45,63 @@ LIMITS = {
 }
 IMAGE = common.CACHE / "Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2"
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
+HOST_OUTPUT_LIMIT = 65536
+
+
+def _capture_host(
+    process: subprocess.Popen[bytes], seconds: float
+) -> tuple[bytes, bytes, str | None]:
+    """Capped pipes; PGID удерживается unreaped leader до аварийного kill."""
+    output = [bytearray(), bytearray()]
+    failure = None
+    deadline = time.monotonic() + seconds
+    streams = [process.stdout, process.stderr]
+    try:
+        with selectors.DefaultSelector() as selector:
+            for index, stream in enumerate(streams):
+                if stream is None:
+                    raise ValueError("Host capture requires both pipes")
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, index)
+            while selector.get_map() and failure is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    failure = "timeout"
+                    break
+                for key, _ in selector.select(remaining):
+                    available = HOST_OUTPUT_LIMIT - sum(map(len, output))
+                    block = os.read(key.fd, min(4096, available + 1))
+                    if not block:
+                        selector.unregister(key.fileobj)
+                        continue
+                    output[key.data].extend(block[:available])
+                    if len(block) > available:
+                        failure = "overflow"
+                        break
+            if failure is None:
+                try:
+                    process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                except subprocess.TimeoutExpired:
+                    failure = "timeout"
+    finally:
+        # Не poll/reap leader перед killpg: после освобождения PID сигнал группе
+        # недопустим. Все вызывающие создают отдельную owned session.
+        try:
+            if process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                finally:
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        failure = "reap_timeout"
+        finally:
+            for stream in streams:
+                if stream is not None:
+                    stream.close()
+    return bytes(output[0]), bytes(output[1]), failure
 
 
 def sources() -> dict[str, str]:
@@ -202,6 +261,7 @@ class SerialDriver:
         self.created_task = False
         self.started = 0.0
         self.base_stat: tuple | None = None
+        self.host_reap_unknown = False
 
     def guest(self, *_: object, **__: object) -> None:
         raise ValueError("SSH/guest dispatch absent in serial-only mode")
@@ -298,16 +358,15 @@ class SerialDriver:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={"PATH": "/usr/bin", "LC_ALL": "C", "LANG": "C"},
+            start_new_session=True,
         )
-        timeout = False
         try:
-            stdout, stderr = process.communicate(
-                timeout=max(0.001, min(45, 900 - (time.monotonic() - self.started)))
+            stdout, stderr, capture_failure = _capture_host(
+                process,
+                max(0.001, min(45, 899 - (time.monotonic() - self.started))),
             )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
-            timeout = True
+        finally:
+            self.host_reap_unknown |= process.returncode is None
         self._record(
             kind + ".json",
             {
@@ -316,7 +375,8 @@ class SerialDriver:
                 "start_ns": began,
                 "end_ns": time.monotonic_ns(),
                 "exit": process.returncode,
-                "timeout": timeout,
+                "timeout": capture_failure in {"timeout", "reap_timeout"},
+                "capture_failure": capture_failure,
                 "stdout": stdout.decode(errors="replace"),
                 "stderr": stderr.decode(errors="replace"),
             },
@@ -324,7 +384,7 @@ class SerialDriver:
         common.reject_approval(
             argv, stdout.decode(errors="replace"), stderr.decode(errors="replace")
         )
-        if timeout or process.returncode != 0:
+        if capture_failure is not None or process.returncode != 0:
             raise ValueError("Host command terminal failure: " + kind)
         return stdout.decode()
 
@@ -531,6 +591,7 @@ class SerialDriver:
             "base_unchanged": stable,
             "base_sha256_after": actual_base_sha,
             "retained": retained,
+            "host_reap_unknown": self.host_reap_unknown,
         }
         marker = self.task / "owner.json"
         own = (
@@ -542,7 +603,13 @@ class SerialDriver:
             and json.loads(marker.read_text())
             == {"token": self.token, "uid": os.getuid()}
         )
-        if own and not refs and stable and not retention_error:
+        if (
+            own
+            and not refs
+            and stable
+            and not retention_error
+            and not self.host_reap_unknown
+        ):
             # Consistent failed overlay только после QEMU reap, до scratch delete.
             retained["disk"] = self._retain("disk")
             shutil.rmtree(self.task)
