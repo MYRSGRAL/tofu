@@ -190,3 +190,33 @@ GUI/hardware power PASS, полного P05/P10/Linux acceptance или P04 prom
 Это отдельный missing historical artifact, не FAIL нового actual witness;
 чужие доказательства/paths не подменены. Логи `p11-freshness-check.log` и
 `p11-ledger-check.log` сохранены в новом evidence root.
+
+### Historical missing: original evidence найден, 2026-11-14
+
+Предыдущий ERROR описывает отсутствие в task worktree, а не утрату original.
+Bounded reconciliation по canonical paths #172/#174 нашёл исходные файлы в
+`/home/myrs/.t3/worktrees/yonik/t3-8fef14a4-df61cef1986fac0c/local/validation/desktop-reviewed-integration/`;
+копии по #174 path `t3-4a4c738e-40d1ff75c85cc1eb/local/validation/desktop-reviewed-integration/`
+byte-identical. Root prefix `/home/myrs/projects/yonik/local/validation/desktop-reviewed-integration/`
+отсутствует; широкого поиска не было.
+
+Проверены original source `538ff996507ccc2566d9330e5148e7d4d1767587`, 7 binding
+blobs, 10 historical desktop ledger blobs, ancestry через source172 до accepted
+base и task head. Все 7 обязательных PASS names присутствуют ровно по одному;
+original log: 176 PASS / 0 FAIL / 4 ignored. SHA сверены с manifest #174:
+
+- `source-binding.json`: `58ce5e2f28dc21ae6ba2facb1313202aee5dcbae9c6f5d4984f8325b69eff227`;
+- `desktop-tests.log`: `84ba02851f1662b663b14ea756a0a52efa6c96ea3fc509fcbc83527e8e52aab2`.
+
+Только эти два public sanitized original файла скопированы byte-exact в own
+`local/validation/desktop-reviewed-integration/`, без нового JSON вместо original
+и без изменения logs. Это ignored local evidence, не новые tracked generated
+artifacts. Полный существующий pure-data P11 gate: **6 PASS / 0 FAIL / 0 SKIP**,
+включая missing/stale negative controls. Проверка не ослаблялась.
+
+[Reconciliation receipt](p11-historical-reconciliation.json) содержит exact
+canonical/own paths, hashes и gate log. Historical source_blobs, producer_execution,
+current P05 actual-binding/source freeze не менялись. Новых Rust/SS/native/GUI
+runs/builds нет. Для другого full-history checkout нужно материализовать эти же
+два original файла с проверкой SHA в его local fixture path; новых producer replay
+или claims об исполнении текущего whole backend не требуется.
