@@ -46,6 +46,9 @@ fixtures, без реального registry/cache, сборок и запрос
 
 Пределы: до 128 selected packages, до 64 MiB compressed/decoded на `.crate`,
 до 256 MiB unique retained archives суммарно; source.tar до прежних 512 MiB.
+Отдельный суммарный бюджет выбранных распакованных payloads — 256 MiB.
+Producer и consumer передают остаток между пакетами; размер очередного member
+проверяется до `extractfile/read`, поэтому сильное сжатие не обходит memory cap.
 Probe-only package имеет context proof и пустой units. Только units с exact
 observed compile/origin/record/report/member joins объявляются compiled source;
 headers проходят такой же byte join без утверждения об их компиляции. Probe не

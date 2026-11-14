@@ -112,6 +112,109 @@ class RegistryProofTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MISSING.*registry proof"):
             self.fixture.produce()
 
+    def test_consumer_payload_budget_spans_archives_before_member_read(self) -> None:
+        import io
+        import tarfile
+        from unittest.mock import Mock
+
+        body = b"x" * 4096
+        files = {}
+        packages = {}
+        rows = {}
+        origins = {}
+        sidecar = {
+            "schema": proof.SCHEMA,
+            "source_commit": self.fixture.commit,
+            "source_archive_sha256": "a" * 64,
+            "cargo_lock_sha256": hashlib.sha256(b"lock").hexdigest(),
+            "input_sha256": {name: "b" * 64 for name in proof.INPUTS},
+            "packages": [],
+        }
+        for index in range(2):
+            package = f"package-{index}-1.0.0"
+            cwd = "/registry/" + package
+            unit = {
+                "file_id": f"unit-{index}",
+                "member_path": "src/dummy.cc",
+                "size": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "kind": "sdk-unit",
+            }
+            raw = io.BytesIO()
+            with tarfile.open(fileobj=raw, mode="w:gz") as archive:
+                member = tarfile.TarInfo(package + "/src/dummy.cc")
+                member.size = len(body)
+                archive.addfile(member, io.BytesIO(body))
+            data = raw.getvalue()
+            checksum = hashlib.sha256(data).hexdigest()
+            archive_path = "registry-archives/" + checksum + ".crate"
+            files[archive_path] = data
+            packages[cwd] = {
+                "name": f"package-{index}",
+                "version": "1.0.0",
+                "checksum": checksum,
+            }
+            rows[cwd] = [unit]
+            origins[cwd + "/src/dummy.cc"] = package + "/dummy.cc"
+            sidecar["packages"].append(
+                {
+                    "cwd": cwd,
+                    **packages[cwd],
+                    "archive_path": archive_path,
+                    "archive_size": len(data),
+                    "archive_sha256": checksum,
+                    "units": proof.proof_rows([unit], "sdk-unit"),
+                    "headers": [],
+                }
+            )
+        files["registry-proof.json"] = seam.retained_json(sidecar)
+        pin = hashlib.sha256(files["registry-proof.json"]).hexdigest()
+        pins = {**sidecar["input_sha256"], "source.tar": "a" * 64}
+        reader = Mock()
+        reader.read_file.side_effect = lambda name, limit: (
+            hashlib.sha256(files[name]).hexdigest(),
+            files[name],
+        )
+        observed = {"input_origins": origins}
+        compressed_total = sum(map(len, files.values()))
+        self.assertLess(compressed_total, len(body) * 2 - 1)
+        original_extract = tarfile.TarFile.extractfile
+        for budget in (8192, 8191):
+            with (
+                self.subTest(budget=budget),
+                patch.object(proof, "MAX_ARCHIVES_TOTAL", budget),
+                patch.object(
+                    proof, "inputs", return_value=({}, {}, {}, observed, b"lock")
+                ),
+                patch.object(proof, "selected", return_value=packages),
+                patch.object(
+                    proof, "unit_bindings", side_effect=lambda cwd, *args: rows[cwd]
+                ),
+                patch.object(proof, "probe_members", return_value=set()),
+                patch.object(
+                    tarfile.TarFile,
+                    "extractfile",
+                    autospec=True,
+                    side_effect=original_extract,
+                ) as extract,
+            ):
+                if budget == 8192:
+                    _, payloads = proof.validate(
+                        reader, "registry-proof.json", pin, pins, self.fixture.commit
+                    )
+                    self.assertEqual(sum(map(len, payloads.values())), 8192)
+                    self.assertEqual(extract.call_count, 2)
+                else:
+                    with self.assertRaisesRegex(ValueError, "payload aggregate cap"):
+                        proof.validate(
+                            reader,
+                            "registry-proof.json",
+                            pin,
+                            pins,
+                            self.fixture.commit,
+                        )
+                    self.assertEqual(extract.call_count, 1)
+
     def test_proof_mismatches_rejected(self) -> None:
         value, _ = self.generate()
         fixture = self.fixture

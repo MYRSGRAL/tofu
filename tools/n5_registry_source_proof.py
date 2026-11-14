@@ -300,12 +300,19 @@ def probe_members(cwd: str, observed: dict) -> set[str]:
 
 
 def archive_units(
-    raw: bytes, package: str, units: list[dict], context_members: set[str]
+    raw: bytes,
+    package: str,
+    units: list[dict],
+    context_members: set[str],
+    *,
+    payload_budget: int | None = None,
 ) -> list[dict]:
     """Hash exact regular members после shared bounded archive validation."""
     from _p25_final_profile import _registry_tar
 
     result = []
+    remaining = MAX_ARCHIVES_TOTAL if payload_budget is None else payload_budget
+    require(type(remaining) is int and remaining >= 0, "Registry payload budget")
     expected = {unit["member_path"]: unit for unit in units}
     require(len(expected) == len(units), "Registry duplicate selected member")
     seen = set()
@@ -343,6 +350,8 @@ def archive_units(
                 seen.add(path)
                 if path not in expected:
                     continue
+                require(member.size <= remaining, "Registry payload aggregate cap")
+                remaining -= member.size
                 stream = archive.extractfile(member)
                 require(stream is not None, "Registry archive missing selected bytes")
                 with stream:
@@ -410,6 +419,7 @@ def validate(
     seen = set()
     payloads = {}
     archives = {}
+    payload_bytes = 0
     for item in proof["packages"]:
         exact(
             item,
@@ -477,7 +487,9 @@ def validate(
             Path(cwd).name,
             unit_bindings(cwd, record, report, observed),
             probe_members(cwd, observed),
+            payload_budget=MAX_ARCHIVES_TOTAL - payload_bytes,
         )
+        payload_bytes += sum(len(unit["bytes"]) for unit in units)
         for category, kind in (("units", "sdk-unit"), ("headers", "header")):
             require(
                 item[category] == proof_rows(units, kind),
@@ -515,6 +527,7 @@ def produce(retained: Path, pins: dict[str, str], commit: str) -> tuple[dict, st
         "packages": [],
     }
     archives = {}
+    payload_bytes = 0
     cache = RetainedReader(Path(PROFILE["registry_source_root"]).parent / "cache")
     for cwd, package in sorted(packages.items()):
         checksum = package["checksum"]
@@ -533,7 +546,9 @@ def produce(retained: Path, pins: dict[str, str], commit: str) -> tuple[dict, st
             Path(cwd).name,
             unit_bindings(cwd, record, report, observed),
             probe_members(cwd, observed),
+            payload_budget=MAX_ARCHIVES_TOTAL - payload_bytes,
         )
+        payload_bytes += sum(len(unit["bytes"]) for unit in units)
         result["packages"].append(
             {
                 "cwd": cwd,
