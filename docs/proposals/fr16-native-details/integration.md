@@ -25,8 +25,10 @@ privacy/resource policy с withholding за пределами, не обеща�
 Framing proposed stderr INFO capture (`log.New`, timestamp=false): `INFO[ssss] `
 либо точный source ANSI cyan INFO/reset + `[ssss] `; ssss=4–10 ASCII digits.
 `DisableTimestamp: !logOptions.Timestamp && logFilePath != ""` при stderr без
-файла равно false. Форма `INFO ` либо cyan INFO/reset + space без elapsed
-относится к файловому output с timestamp=false, а не к предлагаемому stderr capture. Не включать общий ANSI-strip и свободный timestamp parser.
+файла равно false. Файловый output с timestamp=false использует только бесцветную форму `INFO `:
+`DisableColors: logOptions.DisableColor || logFilePath != ""`. Цветной prefix без
+elapsed остаётся допускаемой parser grammar, а не утверждением о file output
+через pinned `log.New`. Предлагаемый stderr capture сохраняет elapsed. Не включать общий ANSI-strip и свободный timestamp parser.
 
 Xray `main/run.go:95` вызывает `server.Start()`, `core/xray.go:389–400` после
 успешного запуска features выводит **Warning** `Xray 26.10.31 started`. Warning
