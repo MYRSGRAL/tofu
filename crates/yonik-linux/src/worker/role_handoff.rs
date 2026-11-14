@@ -381,6 +381,7 @@ fn transport_send(
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "Требуется разрешённый uid_map в собственном userns; отдельный runtime gate"]
     fn verified_transport_userns_roundtrip() {
         let result = std::process::Command::new("unshare")
             .args(["-Ur"])
