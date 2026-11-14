@@ -633,6 +633,62 @@
       "en": "The log page was published, but write durability is unconfirmed.",
       "stage": "operation",
       "retryable": false
+    },
+    {
+      "code": "STARTUP_CONFLICT",
+      "message_key": "startup_conflict",
+      "ru": "Настройки изменились. Проверьте актуальные значения и повторите действие.",
+      "en": "Settings changed. Review current values and retry.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP_BINDING",
+      "message_key": "startup_binding",
+      "ru": "Цель или владелец недоступны. При замене БД или владельца перезапустите приложение; выберите сохранённый профиль и подтвердите цель заново.",
+      "en": "Target or owner unavailable. If the database or owner changed, restart the application; select a saved profile and confirm the target again.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP_TIMEOUT",
+      "message_key": "startup_timeout",
+      "ru": "Время ожидания startup истекло. Автоподключение не повторяется в этом запуске.",
+      "en": "Startup timed out. Autoconnect will not retry in this run.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP_ADMISSION",
+      "message_key": "startup_admission",
+      "ru": "Автоподключение заблокировано текущим состоянием. Автоматического unlock или другого режима нет.",
+      "en": "Autoconnect blocked by current state. No automatic unlock or alternative mode.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP_XDG",
+      "message_key": "startup_xdg",
+      "ru": "Настройки сохранены, но применение записи XDG не подтверждено. Чужие файлы сохранены.",
+      "en": "Settings saved, but XDG entry application is unconfirmed. Foreign files are preserved.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "STARTUP_XDG_UNKNOWN",
+      "message_key": "startup_xdg_unknown",
+      "ru": "Запись XDG опубликована, надёжность записи неизвестна. Автоподключение в этом запуске заблокировано.",
+      "en": "XDG entry published; durability unknown. Autoconnect blocked in this run.",
+      "stage": "operation",
+      "retryable": false
+    },
+    {
+      "code": "PREFERENCES_CONFLICT",
+      "message_key": "preferences_conflict",
+      "ru": "Настройки изменены другим writer. Показаны актуальные значения; проверьте их и повторите действие явно.",
+      "en": "Settings changed by another writer. Current values are shown; review them and explicitly retry.",
+      "stage": "operation",
+      "retryable": false
     }
   ]
 }
