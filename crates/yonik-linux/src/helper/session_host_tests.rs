@@ -842,9 +842,10 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
     .unwrap();
     let mut executor = TunExecutor::isolated_fixture(owner).unwrap();
     let (_keep, mut cancel) = crate::Cancellation::new();
-    let baseline = crate::read_topology(&mut cancel, super::DEADLINE)
-        .await
-        .unwrap();
+    let (baseline, baseline_capture) =
+        crate::network::read_topology_captured(&mut cancel, super::DEADLINE)
+            .await
+            .unwrap();
     let plan = crate::helper::SessionNetworkPlan::reserve_for_engine(
         owner,
         &baseline,
@@ -871,6 +872,15 @@ async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
         .retain_canonical_queue(&plan, &executor, &mut cancel)
         .await
         .unwrap();
+    let plan = super::native_owner::check_actual_negative_boundaries(
+        &mut backend,
+        index,
+        &mut cancel,
+        plan,
+        baseline,
+        baseline_capture,
+    )
+    .await;
     assert!(backend.active.is_none());
     assert!(backend.has_session());
     backend.worker_uncertain = true;

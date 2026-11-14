@@ -1116,3 +1116,34 @@ fn owner_link_requires_exact_owner_and_payload_even_with_equal_bytes() {
         0
     );
 }
+
+#[test]
+fn full_owner_validation_keeps_canonical_gate_closed_for_link_fixture() {
+    for case in 0..4 {
+        let (owner, mut result) = authorized_result_fixture();
+        let foreign = RunAuthority::new([2; 16], 7, 9).unwrap();
+        let payload = if case == 1 {
+            binding_test_payload()
+        } else {
+            Arc::clone(&result.lease.binding.payload)
+        };
+        assert_eq!(payload.digest(), result.lease.binding.payload.digest());
+        if case == 2 {
+            owner.revoke();
+        }
+        if case == 3 {
+            result.lease.binding.observation.expires = Instant::now();
+        }
+        assert!(
+            result
+                .validate_owner(if case == 0 { &foreign } else { &owner }, &payload)
+                .is_err()
+        );
+        // Полный метод не легализует link-only fixture даже при правильных Arc.
+        assert!(
+            result
+                .validate_owner(&owner, &result.lease.binding.payload)
+                .is_err()
+        );
+    }
+}
