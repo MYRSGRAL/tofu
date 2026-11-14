@@ -193,9 +193,16 @@ fn invalid_owned_fd_flags_and_types_fail_closed() -> io::Result<()> {
 fn named_fifo_on_disk_is_not_pipefs() -> io::Result<()> {
     let rt = runtime()?;
     let _entered = rt.enter();
+    // Локальный locked root необязателен для малого собственного CI fixture.
     let root = std::env::var_os("FR16_TASK_ROOT")
-        .ok_or_else(|| io::Error::other("нужен locked task root"))?;
-    let path = std::path::PathBuf::from(root).join("carrier-named-fifo");
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let mut nonce = [0; 16];
+    getrandom::getrandom(&mut nonce).map_err(io::Error::other)?;
+    let path = root.join(format!(
+        "carrier-named-fifo-{:032x}",
+        u128::from_ne_bytes(nonce)
+    ));
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
         &path,
