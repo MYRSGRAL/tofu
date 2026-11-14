@@ -5,7 +5,8 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import n5_guest_prepare as n
@@ -28,6 +29,16 @@ class FakeHost:
         )
 
     def until(self, predicate):
+        transient = dict(
+            self.state,
+            maintenance_ack=None,
+            routing_ack=None,
+            ready=False,
+            pending=None,
+            profiles=[],
+            selected_profile=None,
+        )
+        predicate(transient)
         n.require(predicate(self.state))
         return copy.deepcopy(self.state)
 
@@ -118,11 +129,15 @@ class PreparationTests(unittest.TestCase):
             "profile_name": "declared",
             "rules": [
                 {
-                    "id": "owned-rule",
+                    "id": 1,
                     "enabled": True,
                     "executables": [n.DRIVER],
                     "domains": [],
-                    "destinations": [],
+                    "destinations": ["10.0.0.4/32"],
+                    "transport": {
+                        "transport_protocols": ["tcp"],
+                        "destination_ports": [[8000, 8000]],
+                    },
                     "action": "direct",
                 }
             ],
@@ -226,6 +241,192 @@ class PreparationTests(unittest.TestCase):
                     self.prepare()
                 self.assertIsNone(self.backend)
                 self.data = old
+
+    def test_rule_ids_and_transport(self):
+        for bad in (True, False, "1", 0, -1, 9007199254740992):
+            with self.subTest(bad=bad):
+                self.data["rules"][0]["id"] = bad
+                with self.assertRaises(n.Closed):
+                    self.prepare()
+                self.assertIsNone(self.backend)
+        for value in (1, 9007199254740991):
+            self.data["rules"][0]["id"] = value
+            self.prepare().close()
+
+    def test_invalid_destination_transport_before_backend(self):
+        original = copy.deepcopy(self.data["rules"][0])
+        for key, value in (
+            ("destinations", ["10.0.0.1/24"]),
+            ("transport", None),
+            (
+                "transport",
+                {"transport_protocols": ["tcp"], "destination_ports": [[True, 3]]},
+            ),
+            (
+                "transport",
+                {"transport_protocols": ["udp"], "destination_ports": [[2, 4], [4, 5]]},
+            ),
+        ):
+            self.data["rules"][0] = dict(original, **{key: value})
+            with self.subTest(key=key, value=value), self.assertRaises(n.Closed):
+                self.prepare()
+            self.assertIsNone(self.backend)
+
+    def test_matrix_preserves_typed_conditions(self):
+        self.data["rules"] = [
+            dict(
+                self.data["rules"][0],
+                id=index + 1,
+                executables=[executable],
+                action=action,
+                transport={
+                    "transport_protocols": [protocol],
+                    "destination_ports": [[8000 + index, 8000 + index]],
+                },
+            )
+            for index, (executable, protocol, action) in enumerate(
+                (e, p, a)
+                for e in (n.DRIVER, n.PYTHON)
+                for p in ("tcp", "udp")
+                for a in ("direct", "proxy", "block")
+            )
+        ]
+        with self.prepare():
+            actual = [
+                c["rule"]
+                for c in self.backend.commands
+                if c["command"] == "edit_routing"
+            ]
+            self.assertEqual(actual, self.data["rules"])
+        self.assertEqual(n.PYTHON, "/usr/lib/yonik-acceptance/n5-python")
+
+
+class CleanupTests(unittest.TestCase):
+    def child(self):
+        child = n.Child.__new__(n.Child)
+        child.pidfd = 77
+        child.process = MagicMock()
+        child.process.wait.return_value = 0
+        return child
+
+    def test_each_cleanup_trigger_is_sticky_and_reaped(self):
+        for trigger in ("stdin", "signal", "wait", "stdout", "fd"):
+            with self.subTest(trigger=trigger):
+                child = self.child()
+                if trigger == "stdin":
+                    child.process.stdin.close.side_effect = OSError()
+                if trigger == "stdout":
+                    child.process.stdout.close.side_effect = OSError()
+                if trigger == "wait":
+                    child.process.wait.side_effect = [OSError(), 0]
+                with (
+                    patch.object(
+                        n.signal,
+                        "pidfd_send_signal",
+                        side_effect=OSError() if trigger == "signal" else None,
+                    ),
+                    patch.object(
+                        n.os,
+                        "close",
+                        side_effect=OSError() if trigger == "fd" else None,
+                    ),
+                ):
+                    with self.assertRaisesRegex(n.Closed, "UNKNOWN"):
+                        child.close()
+                    self.assertTrue(child.reaped)
+                    with self.assertRaisesRegex(n.Closed, "UNKNOWN"):
+                        child.close()
+
+    def test_failed_reap_retains_pidfd_and_backend_ownership(self):
+        child = self.child()
+        child.process.wait.side_effect = OSError()
+        backend = n.Backend({"caller_uid": 1000, "max_seconds": 10})
+        backend.children = [child]
+        lease = n.PreparedLease(backend, {})
+        with (
+            patch.object(n.signal, "pidfd_send_signal") as send,
+            patch.object(n.os, "close") as close,
+        ):
+            with self.assertRaises(n.Closed):
+                backend.finish(child)
+            self.assertEqual(backend.children, [child])
+            self.assertEqual(child.pidfd, 77)
+            close.assert_not_called()
+            self.assertEqual(send.call_count, 2)
+            with self.assertRaises(n.Closed):
+                lease.close()
+            self.assertFalse(lease.closed)
+            child.process.wait.side_effect = None
+            child.process.wait.return_value = 0
+            with self.assertRaises(n.Closed):
+                lease.close()
+            self.assertFalse(lease.closed)
+            self.assertEqual(backend.children, [child])
+            self.assertIsNone(child.pidfd)
+
+    def test_root_parent_and_bind_gate_before_writes(self):
+        backend = n.Backend({"caller_uid": 1000, "max_seconds": 10})
+        with (
+            patch.object(
+                Path,
+                "lstat",
+                return_value=SimpleNamespace(st_mode=0o40700, st_uid=1000, st_gid=1000),
+            ),
+            patch.object(backend, "spawn") as spawn,
+        ):
+            with self.assertRaises(n.Closed):
+                backend.start()
+            spawn.assert_not_called()
+        root = SimpleNamespace(st_mode=0o40755, st_uid=0, st_gid=0)
+        caller = SimpleNamespace(st_mode=0o40700, st_uid=1000)
+        with (
+            patch.object(Path, "lstat", return_value=root),
+            patch.object(n.os, "open", return_value=88) as opened,
+            patch.object(n.os, "close"),
+            patch.object(n.os, "fstat", return_value=caller),
+            patch.object(
+                Path,
+                "stat",
+                side_effect=[
+                    SimpleNamespace(st_dev=1, st_ino=2),
+                    SimpleNamespace(st_dev=1, st_ino=3),
+                ],
+            ),
+            patch.object(backend, "spawn") as spawn,
+        ):
+            with self.assertRaises(n.Closed):
+                backend.start()
+            spawn.assert_not_called()
+            self.assertFalse(
+                any(call.args[1] & n.os.O_CREAT for call in opened.call_args_list)
+            )
+
+    def test_finish_failed_then_lease_close_never_success(self):
+        child = self.child()
+        child.process.stdin.close.side_effect = OSError()
+        backend = n.Backend({"caller_uid": 1000, "max_seconds": 10})
+        backend.children = [child]
+        with patch.object(n.signal, "pidfd_send_signal"), patch.object(n.os, "close"):
+            with self.assertRaises(n.Closed):
+                backend.finish(child)
+            self.assertEqual(backend.children, [child])
+            child.process.stdin.close.side_effect = None
+            for _ in range(2):
+                with self.assertRaises(n.Closed) as raised:
+                    backend.close()
+                self.assertIs(raised.exception.owner, backend)
+                self.assertEqual(backend.children, [child])
+
+    def test_success_reap_is_idempotent(self):
+        child = self.child()
+        with (
+            patch.object(n.signal, "pidfd_send_signal"),
+            patch.object(n.os, "close") as close,
+        ):
+            child.close()
+            child.close()
+            close.assert_called_once_with(77)
+            child.process.wait.assert_called_once()
 
 
 if __name__ == "__main__":

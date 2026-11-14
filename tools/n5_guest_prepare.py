@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
@@ -17,13 +18,15 @@ from typing import Any
 ROOT = Path("/usr/lib/yonik-acceptance")
 INPUT = ROOT / "n5-prepare.json"
 GRANT = ROOT / "n5-prepare-grant.json"
-HOME = Path("/run/yonik-acceptance")
+PARENT = Path("/run/yonik-acceptance")
+HOME = PARENT / "prepare"
+DATA = PARENT / "data"
 HOST = str(ROOT / "startup-host")
 DRIVER = str(ROOT / "n5-guest-driver")
-PYTHON = "/usr/bin/python3"
-BUS = "/usr/bin/dbus-daemon"
-SS = "/usr/bin/gnome-keyring-daemon"
-BUSCTL = "/usr/bin/busctl"
+PYTHON = str(ROOT / "n5-python")
+BUS = str(ROOT / "prereqs/dbus-daemon")
+SS = str(ROOT / "prereqs/gnome-keyring-daemon")
+BUSCTL = str(ROOT / "prereqs/busctl")
 CONFIG = ROOT / "n5-source.conf"
 ARCHIVE = ROOT / "product-source.tar"
 LIMIT = 262144
@@ -154,23 +157,62 @@ def load(read: Any = sealed, uid: Any = os.getuid) -> dict[str, Any]:
     ids = set()
     for rule in data["rules"]:
         fields(
-            rule, {"id", "enabled", "executables", "domains", "destinations", "action"}
+            rule,
+            {
+                "id",
+                "enabled",
+                "executables",
+                "domains",
+                "destinations",
+                "action",
+                "transport",
+            },
         )
         require(
-            type(rule["id"]) is str
-            and 0 < len(rule["id"]) <= 64
+            type(rule["id"]) is int
+            and 1 <= rule["id"] <= 9_007_199_254_740_991
             and rule["id"] not in ids
         )
         ids.add(rule["id"])
         require(
             rule["enabled"] is True
             and rule["domains"] == []
-            and rule["destinations"] == []
+            and type(rule["destinations"]) is list
+            and 1 <= len(rule["destinations"]) <= 16
         )
         require(
             rule["executables"] in ([DRIVER], [PYTHON])
             and rule["action"] in ("direct", "proxy", "block")
         )
+        for destination in rule["destinations"]:
+            require(type(destination) is str and len(destination) <= 64)
+            try:
+                require(
+                    str(ipaddress.ip_network(destination, strict=True)) == destination
+                )
+            except ValueError as exc:
+                raise Closed("CLOSED: destination CIDR") from exc
+        transport = rule["transport"]
+        fields(transport, {"transport_protocols", "destination_ports"})
+        protocols = transport["transport_protocols"]
+        require(type(protocols) is list and 1 <= len(protocols) <= 2)
+        require(
+            all(p in ("tcp", "udp") for p in protocols)
+            and len(set(protocols)) == len(protocols)
+        )
+        ports = transport["destination_ports"]
+        require(type(ports) is list and 1 <= len(ports) <= 16)
+        previous = 0
+        for pair in ports:
+            require(
+                type(pair) is list
+                and len(pair) == 2
+                and all(type(p) is int for p in pair)
+            )
+        for pair in sorted(ports):
+            first, last = pair
+            require(previous < first <= last <= 65535)
+            previous = last
     return data
 
 
@@ -237,22 +279,53 @@ class Child:
         self.send(json.dumps(command, separators=(",", ":")).encode() + b"\n")
 
     def close(self, graceful: bool = False) -> None:
-        try:
-            if self.process.stdin:
-                self.process.stdin.close()
-            if not graceful and self.process.poll() is None:
-                signal.pidfd_send_signal(self.pidfd, signal.SIGTERM)
+        # Sticky UNKNOWN: даже последующий reap не превращает прошлую ошибку в PASS.
+        failed = getattr(self, "cleanup_failed", False)
+        if not getattr(self, "reaped", False):
             try:
-                code = self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                signal.pidfd_send_signal(self.pidfd, signal.SIGKILL)
-                self.process.wait(timeout=3)
-                raise Closed("UNKNOWN: cleanup timeout") from None
-            require(not graceful or code == 0)
-        finally:
-            if self.process.stdout:
-                self.process.stdout.close()
-            os.close(self.pidfd)
+                if self.process.stdin:
+                    self.process.stdin.close()
+            except Exception:
+                failed = True
+            for sig, timeout in (
+                (None if graceful else signal.SIGTERM, 10),
+                (signal.SIGTERM, 3),
+                (signal.SIGKILL, 3),
+            ):
+                if sig is not None:
+                    try:
+                        signal.pidfd_send_signal(self.pidfd, sig)
+                    except ProcessLookupError:
+                        pass
+                    except Exception:
+                        failed = True
+                try:
+                    code = self.process.wait(timeout=timeout)
+                    self.reaped = True
+                    if graceful and code != 0:
+                        failed = True
+                    break
+                except Exception:
+                    failed = True
+            if not getattr(self, "reaped", False):
+                failed = True
+        if getattr(self, "reaped", False):
+            try:
+                if self.process.stdout:
+                    self.process.stdout.close()
+            except Exception:
+                failed = True
+            if self.pidfd is not None:
+                try:
+                    os.close(self.pidfd)
+                    self.pidfd = None
+                except Exception:
+                    failed = True
+        self.cleanup_failed = failed
+        if failed:
+            error = Closed("UNKNOWN: cleanup")
+            error.owner = self
+            raise error
 
 
 class Backend:
@@ -279,9 +352,17 @@ class Backend:
         return child
 
     def start(self) -> None:
+        parent = PARENT.lstat()
+        require(
+            stat.S_ISDIR(parent.st_mode)
+            and parent.st_uid == 0
+            and parent.st_gid == 0
+            and not parent.st_mode & 0o022
+        )
         for path in (
             self.runtime,
             HOME,
+            DATA,
             HOME / "data",
             HOME / "config",
             HOME / "cache",
@@ -306,6 +387,8 @@ class Backend:
                 )
             finally:
                 os.close(fd)
+        actual, alias = DATA.stat(), (HOME / "data").stat()
+        require((actual.st_dev, actual.st_ino) == (alias.st_dev, alias.st_ino))
         require(not any((HOME / "data").iterdir()))
         require(not any((HOME / "keyring").iterdir()))
         require(not os.path.lexists(HOME / "before-import.sqlite"))
@@ -368,8 +451,8 @@ class Backend:
                 found = strict_json(owner.line())["data"] == [keyring.process.pid]
             except Closed:
                 found = False
-            self.children.remove(owner)
             owner.close()
+            self.children.remove(owner)
             if found:
                 break
             require(keyring.process.poll() is None)
@@ -413,18 +496,22 @@ class Backend:
         return self.spawn([HOST, str(HOME), "/usr/lib/yonik/engines"])
 
     def finish(self, child: Child) -> None:
-        self.children.remove(child)
         child.close(True)
+        self.children.remove(child)
 
     def close(self) -> None:
-        failed = False
-        while self.children:
+        failed = getattr(self, "cleanup_failed", False)
+        for child in reversed(self.children[:]):
             try:
-                self.children.pop().close()
+                child.close()
+                self.children.remove(child)
             except Exception:
                 failed = True
+        self.cleanup_failed = failed
         if failed:
-            raise Closed("UNKNOWN: cleanup")
+            error = Closed("UNKNOWN: cleanup")
+            error.owner = self
+            raise error
 
 
 class PreparedLease:
@@ -472,7 +559,7 @@ def prepare(
         )
         state = host.until(
             lambda s: (
-                s.get("maintenance_ack", {}).get("request_id") == 90
+                (s.get("maintenance_ack") or {}).get("request_id") == 90
                 and s["maintenance_ack"].get("phase") in ("complete", "failed")
             )
         )
@@ -508,7 +595,7 @@ def prepare(
                 }
             )
             state = host.until(
-                lambda s: s.get("routing_ack", {}).get("request_id") == request
+                lambda s: (s.get("routing_ack") or {}).get("request_id") == request
             )
             require(
                 state["routing_ack"].get("error") is None
