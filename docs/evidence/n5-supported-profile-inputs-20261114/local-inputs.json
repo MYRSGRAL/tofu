@@ -1,0 +1,100 @@
+{
+  "captured_utc": "2026-11-13T23:47:46.272688+00:00",
+  "scope": "Локальные metadata и файлы; не attestation invocation/фильтра",
+  "base": "9f02440f1f4c6c05d585a6106c6dd149f8debc48",
+  "commands": [
+    {
+      "argv": [
+        "pacman",
+        "-Qi",
+        "systemd",
+        "libseccomp"
+      ],
+      "exit_code": 0,
+      "stdout": "Installed From  : core\nName            : systemd\nVersion         : 262-1\nDescription     : system and service manager\nArchitecture    : x86_64\nURL             : https://www.github.com/systemd/systemd\nLicenses        : LGPL-2.1-or-later  CC0-1.0  GPL-2.0-or-later  MIT-0\nGroups          : None\nProvides        : nss-myhostname  systemd-tools=262  udev=262\nDepends On      : systemd-libs=262  acl  bash  cryptsetup  dbus  dbus-units  glibc  kbd  kmod  hwdata  libgcrypt  libxcrypt  libidn2  lz4  pam  libelf  libgcc  libseccomp  util-linux  xz  pcre2  audit  openssl\nOptional Deps   : apparmor: additional security features\n                  curl: systemd-journal-upload, machinectl pull-tar and pull-raw [installed]\n                  gnutls: systemd-journal-gatewayd and systemd-journal-remote [installed]\n                  iptables: firewall features [installed]\n                  libarchive: convert DDIs to tarballs [installed]\n                  libbpf: support BPF programs [installed]\n                  libfido2: unlocking LUKS2 volumes with FIDO2 token [installed]\n                  libmicrohttpd: systemd-journal-gatewayd and systemd-journal-remote\n                  libp11-kit: support PKCS#11 [installed]\n                  libpwquality: check password quality [installed]\n                  polkit: allow administration as unprivileged user [installed]\n                  qemu-base: systemd-vmspawn [installed]\n                  qrencode: show QR codes [installed]\n                  quota-tools: kernel-level quota management\n                  systemd-sysvcompat: symlink package to provide sysvinit binaries [installed]\n                  systemd-ukify: combine kernel and initrd into a signed Unified Kernel Image\n                  tpm2-tss: unlocking LUKS2 volumes with TPM2 [installed]\nRequired By     : accountsservice  ananicy-cpp  base  bolt  cachyos-hooks  cachyos-settings  cups  flatpak  mdadm  media-player-info  mkinitcpio  netctl  pacman  phodav  plocate  polkit  python-systemd  steam-devices  systemd-resolvconf  systemd-sysvcompat  vte3  xdg-desktop-portal  zram-generator\nOptional For    : octopi\nConflicts With  : nss-myhostname  systemd-tools  udev\nReplaces        : nss-myhostname  systemd-tools  udev\nInstalled Size  : 40.54 MiB\nPackager        : Christian Hesse <eworm@archlinux.org>\nBuild Date      : Tue Sep 22 16:13:41 2026\nInstall Date    : Mon Oct  5 12:24:42 2026\nInstall Reason  : Installed as a dependency for another package\nInstall Script  : Yes\nValidated By    : Signature\n\nInstalled From  : None\nName            : libseccomp\nVersion         : 2.6.0-1.1\nDescription     : Enhanced seccomp library\nArchitecture    : x86_64_v3\nURL             : https://github.com/seccomp/libseccomp\nLicenses        : LGPL-2.1-only\nGroups          : None\nProvides        : libseccomp.so=2-64\nDepends On      : glibc\nOptional Deps   : None\nRequired By     : docker  file  flatpak  glycin  man-db  qemu-system-x86  runc  scx-scheds  swtpm  systemd  virtiofsd  webkit2gtk-4.1\nOptional For    : None\nConflicts With  : None\nReplaces        : None\nInstalled Size  : 337.54 KiB\nPackager        : CachyOS <admin@cachyos.org>\nBuild Date      : Sun Jan 11 00:50:41 2026\nInstall Date    : Tue Feb 10 22:08:52 2026\nInstall Reason  : Installed as a dependency for another package\nInstall Script  : No\nValidated By    : Signature\n\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "pacman",
+        "-Qo",
+        "/usr/lib/systemd/systemd",
+        "/usr/lib/libseccomp.so.2"
+      ],
+      "exit_code": 0,
+      "stdout": "/usr/lib/systemd/systemd is owned by systemd 262-1\n/usr/lib/libseccomp.so.2 is owned by libseccomp 2.6.0-1.1\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/systemd",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "systemd 262 (262-1-arch)\n+PAM +AUDIT -SELINUX +APPARMOR -IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF +XKBCOMMON +UTMP +LIBARCHIVE\n",
+      "stderr": ""
+    }
+  ],
+  "files": [
+    {
+      "path": "/usr/lib/systemd/systemd",
+      "resolved": "/usr/lib/systemd/systemd",
+      "sha256": "c8d085d92145266342fd60d686d2517fd7cf5f2659483b2cb3d5ad593790811a"
+    },
+    {
+      "path": "/usr/lib/libseccomp.so.2",
+      "resolved": "/usr/lib/libseccomp.so.2.6.0",
+      "sha256": "5cd82027e6ab3dba31ee44200bb07f364a9f8e881d073fefbdf15a65cee8005c"
+    },
+    {
+      "path": "/var/lib/pacman/local/systemd-262-1/desc",
+      "resolved": "/var/lib/pacman/local/systemd-262-1/desc",
+      "sha256": "53c6b02cfe49136a45de9a843adec8df6ae599ca1aa01e5f9a13a3d2ceac8acb"
+    },
+    {
+      "path": "/var/lib/pacman/local/libseccomp-2.6.0-1.1/desc",
+      "resolved": "/var/lib/pacman/local/libseccomp-2.6.0-1.1/desc",
+      "sha256": "b93aa189c2db6053d61187cbac9e907a3745e93a4bc503f8b16af564741c7c8e"
+    },
+    {
+      "path": "packaging/systemd/yonik-worker.service",
+      "resolved": "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/packaging/systemd/yonik-worker.service",
+      "sha256": "a6669a5c1be21b70a5dc950611881e8fa823976660993840724a4b2ae497e3d0"
+    },
+    {
+      "path": "packaging/systemd/yonik-worker.socket",
+      "resolved": "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/packaging/systemd/yonik-worker.socket",
+      "sha256": "80f5d6aaeb742c0da4ab58944a7977ba4c802cbf5e025e98cb46bb8d7a2d02d4"
+    },
+    {
+      "path": "packaging/systemd/yonik-worker-check.service",
+      "resolved": "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/packaging/systemd/yonik-worker-check.service",
+      "sha256": "14966746029044e65691b0529c8a4e849eb04babf4a6185a83c1181047b40424"
+    },
+    {
+      "path": "packaging/systemd/yonik-worker-check.socket",
+      "resolved": "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/packaging/systemd/yonik-worker-check.socket",
+      "sha256": "4c667e20d0ebc738193f3bdd3b1b0beff7d38930d45c8d86deb879b841a4e904"
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/systemd_worker.rs",
+      "resolved": "/home/myrs/.t3/worktrees/yonik/t3-aef0f1a8-4b0e7a90d95fae43/crates/yonik-linux/src/helper/systemd_worker.rs",
+      "sha256": "d147ec7240374df5e3664436df84bf32663a60ed73473ad244a4153a29a0d809"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/orchestration/proposals/n5-minimal-contract/contract.md",
+      "resolved": "/home/myrs/projects/yonik/local/orchestration/proposals/n5-minimal-contract/contract.md",
+      "sha256": "212f351828bd532f7caa4d51048134149fd64ad0724d6f06db56ee30fad228ee"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/orchestration/proposals/kernel-enforcement-probe-v2/README.md",
+      "resolved": "/home/myrs/projects/yonik/local/orchestration/proposals/kernel-enforcement-probe-v2/README.md",
+      "sha256": "e6598a4d1e6fc1e99d50fe1b03026289f00d3addadf87becc354199ab2aac313"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/orchestration/proposals/kernel-enforcement-probe-v2/sources/seccomp-util.c",
+      "resolved": "/home/myrs/projects/yonik/local/orchestration/proposals/kernel-enforcement-probe-v2/sources/seccomp-util.c",
+      "sha256": "0ef3cb61a294b7a9d468892a260403b1e9a93726a2cab87351b617f403966ae8"
+    }
+  ]
+}
