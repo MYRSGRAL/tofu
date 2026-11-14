@@ -157,6 +157,7 @@ def main() -> None:
                                 key="Tab",
                                 expect={
                                     "logsNativeDetails": {"text": {"contains": native}},
+                                    "logsWithheldNotice": {"visible": True},
                                     "logsExportText": {"text": {"contains": native}},
                                 },
                                 capture="native-ru.png",

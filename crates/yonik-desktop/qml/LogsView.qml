@@ -84,6 +84,8 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
+        objectName: "logsWithheldNotice"
+        visible: !!root.page && !root.stale && root.page.rejected !== "0"
         text: root.tr("Неподдерживаемые и неполные сообщения ядра скрываются; исходный текст не сохраняется.", "Unsupported and incomplete core messages are withheld; original input is not stored.")
     }
     ListView {
