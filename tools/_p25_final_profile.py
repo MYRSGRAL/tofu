@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import io
 import os
 import re
 import selectors
 import signal
 import stat
 import subprocess
+import tarfile
 import time
+import tomllib
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -247,6 +250,108 @@ def _reserve(build: Path) -> int:
         os.close(fd)
 
 
+def _identity(path: Path) -> tuple[int, ...]:
+    info = path.lstat()
+    require(not stat.S_ISLNK(info.st_mode), "Registry symlink")
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+@contextmanager
+def registry_package(source: Path, package: Path) -> Iterator[set[str]]:
+    """Один выбранный Cargo package: lock → archive → extracted bytes, без discovery."""
+    base = Path(PROFILE["registry_source_root"])
+    require(
+        package.is_absolute()
+        and ".." not in package.parts
+        and package.parent == base / "index.crates.io-1949cf8c6b5b557f",
+        "Registry cwd не exact canonical package",
+    )
+    with ExitStack() as stack:
+        reader = Reader(
+            {"source": source, "build": base, "sdk": base.parent / "cache"}, stack
+        )
+        identities: dict[Path, tuple[int, ...]] = {}
+
+        def remember(path: Path) -> None:
+            identities.setdefault(path, _identity(path))
+
+        def read(root: str, local: str, limit: int) -> bytes:
+            path = {"source": source, "build": base, "sdk": base.parent / "cache"}[
+                root
+            ] / local
+            for parent in (path, *path.parents):
+                remember(parent)
+                if parent in (source, base, base.parent / "cache"):
+                    break
+            return reader.read(root, local, limit)
+
+        lock = tomllib.loads(read("source", "Cargo.lock", MAX_METADATA).decode())
+        selected = [
+            item
+            for item in lock.get("package", [])
+            if item.get("source")
+            == "registry+https://github.com/rust-lang/crates.io-index"
+            and f"{item.get('name')}-{item.get('version')}" == package.name
+        ]
+        require(len(selected) == 1, "Registry package не выбран frozen Cargo.lock")
+        checksum = selected[0].get("checksum")
+        require(
+            isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum),
+            "Registry lock checksum",
+        )
+        local = package.relative_to(base).as_posix()
+        archive = read("sdk", local + ".crate", MAX_FILE)
+        require(
+            hashlib.sha256(archive).hexdigest() == checksum,
+            "Registry archive checksum mismatch",
+        )
+        members: set[str] = set()
+        total = 0
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+            for index, member in enumerate(tar):
+                require(index < MAX_FILES, "Registry archive member cap")
+                parts = member.name.split("/")
+                require(
+                    parts[0] == package.name
+                    and ".." not in parts
+                    and not member.name.startswith("/"),
+                    "Registry archive path",
+                )
+                if member.isdir():
+                    continue
+                require(
+                    member.isfile() and 0 <= member.size <= MAX_FILE,
+                    "Registry archive member type/cap",
+                )
+                name = relative("/".join(parts[1:]))
+                require(name not in members, "Registry duplicate member")
+                members.add(name)
+                total += member.size
+                require(total <= MAX_FILE, "Registry expanded byte cap")
+                stream = tar.extractfile(member)
+                require(stream is not None, "Registry archive missing member")
+                with stream:
+                    expected = stream.read(member.size + 1)
+                require(
+                    read("build", local + "/" + name, MAX_FILE) == expected,
+                    "Registry extracted member mismatch",
+                )
+        require(bool(members), "Registry empty archive")
+        remember(package)
+        try:
+            yield members
+        finally:
+            for path, identity in identities.items():
+                require(_identity(path) == identity, "Registry input изменился")
+
+
 def compiler_capture(
     config: dict,
     argv: list[str],
@@ -258,13 +363,28 @@ def compiler_capture(
     number = _reserve(build)
     dep = build / "p25capture" / f"{number}.d"
     actual = compile_arguments(argv, dep)
-    require(
-        cwd.is_relative_to(Path(config["source"])) or cwd.is_relative_to(build),
-        "CXX cwd вне frozen roots",
-    )
-    with trusted_tool(PROFILE["compiler"]) as (fd, compiler):
-        command = [PROFILE["compiler"], *actual]
-        code, out, err = runner(fd, command, cwd, env)
+    with ExitStack() as stack:
+        if not (
+            cwd.is_relative_to(Path(config["source"])) or cwd.is_relative_to(build)
+        ):
+            members = stack.enter_context(registry_package(Path(config["source"]), cwd))
+            for arg in argv:
+                if not arg.endswith((".cpp", ".cxx", ".cc", ".C", ".c++")):
+                    continue
+                unit = Path(arg) if Path(arg).is_absolute() else cwd / arg
+                require(".." not in unit.parts, "Registry unit traversal")
+                require(
+                    unit.is_relative_to(build)
+                    or unit.is_relative_to(Path(config["source"]))
+                    or (
+                        unit.is_relative_to(cwd)
+                        and unit.relative_to(cwd).as_posix() in members
+                    ),
+                    "Registry unit вне выбранного package/frozen roots",
+                )
+        with trusted_tool(PROFILE["compiler"]) as (fd, compiler):
+            command = [PROFILE["compiler"], *actual]
+            code, out, err = runner(fd, command, cwd, env)
     row = {
         "schema": 1,
         "config_sha256": env.get("YONIK_P25_CONFIG_SHA256"),
@@ -384,6 +504,7 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
     with ExitStack() as stack:
         reader = Reader(roots, stack)
         external_readers: dict[str, Reader] = {}
+        registry_members: dict[Path, set[str]] = {}
 
         def stage(absolute: Path, kind: str) -> str:
             origin = str(absolute)
@@ -393,6 +514,18 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
             matches = [root for root in allowed if absolute.is_relative_to(root)]
             require(len(matches) == 1, f"Dependency вне fixed input roots: {absolute}")
             base = matches[0]
+            if base == Path(PROFILE["registry_source_root"]):
+                parts = absolute.relative_to(base).parts
+                require(len(parts) >= 3, "Registry input не package member")
+                package = base / parts[0] / parts[1]
+                if package not in registry_members:
+                    registry_members[package] = stack.enter_context(
+                        registry_package(roots["source"], package)
+                    )
+                require(
+                    "/".join(parts[2:]) in registry_members[package],
+                    "Registry input вне archive members",
+                )
             key = str(base)
             if key not in external_readers:
                 external_readers[key] = Reader(
@@ -625,6 +758,15 @@ def enrich(roots: dict[str, Path], record: dict, retained: Path) -> dict:
                     len(units) == 1 and row["unit"] == str(Path(row["cwd"]) / units[0]),
                     "Observed unit binding mismatch",
                 )
+            cwd = Path(row["cwd"])
+            if not (
+                cwd.is_relative_to(roots["source"])
+                or cwd.is_relative_to(roots["build"])
+            ):
+                if cwd not in registry_members:
+                    registry_members[cwd] = stack.enter_context(
+                        registry_package(roots["source"], cwd)
+                    )
             compiler_id = add(
                 row["compiler"]["path"], roots["sdk"], "tool", row["compiler"]["sha256"]
             )

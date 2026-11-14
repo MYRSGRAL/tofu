@@ -12,6 +12,146 @@ import _p25_final_profile as p
 
 
 class FinalProfileTests(unittest.TestCase):
+    def _registry_fixture(self, root: Path) -> tuple[Path, Path]:
+        import hashlib
+        import io
+        import tarfile
+
+        source = root / "source"
+        source.mkdir(parents=True)
+        registry = root / "registry"
+        index = "index.crates.io-1949cf8c6b5b557f"
+        package = registry / "src" / index / "link-cplusplus-1.0.12"
+        (package / "src").mkdir(parents=True)
+        data = b"// fixture unit\n"
+        (package / "src/dummy.cc").write_bytes(data)
+        cache = registry / "cache" / index
+        cache.mkdir(parents=True)
+        archive = cache / (package.name + ".crate")
+        with tarfile.open(archive, "w:gz") as tar:
+            member = tarfile.TarInfo(package.name + "/src/dummy.cc")
+            member.size = len(data)
+            tar.addfile(member, io.BytesIO(data))
+        checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+        (source / "Cargo.lock").write_text(
+            'version = 4\n[[package]]\nname = "link-cplusplus"\n'
+            'version = "1.0.12"\n'
+            'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+            f'checksum = "{checksum}"\n'
+        )
+        return source, package
+
+    def test_registry_cwd_probe_and_source(self) -> None:
+        import json
+        from contextlib import contextmanager
+
+        root = Path(self.enterContext(TemporaryDirectory()))
+        source, package = self._registry_fixture(root)
+        build = root / "build"
+        (build / "p25capture").mkdir(parents=True)
+        probe = build / "probe.cc"
+        probe.write_text("// generated probe\n")
+
+        @contextmanager
+        def tool(alias: str):
+            yield 123, {"path": alias, "sha256": "a" * 64}
+
+        def runner(
+            fd: int, argv: list[str], cwd: Path, env: dict[str, str]
+        ) -> tuple[int, bytes, bytes]:
+            self.assertEqual(cwd, package)
+            if "-MF" in argv:
+                Path(argv[argv.index("-MF") + 1]).write_text("o: src/dummy.cc\n")
+            return 0, b"", b""
+
+        with (
+            patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])}),
+            patch.object(p, "trusted_tool", tool),
+        ):
+            config = {"source": str(source), "build": str(build)}
+            for argv in (["-E", str(probe)], ["-c", "src/dummy.cc"]):
+                p.compiler_capture(config, argv, package, {}, runner)
+        row = json.loads((build / "p25capture/1.json").read_bytes())
+        self.assertEqual(row["cwd"], str(package))
+        self.assertEqual(row["unit"], str(package / "src/dummy.cc"))
+
+    def test_registry_rejects_unselected_unit_before_compiler(self) -> None:
+        from unittest.mock import Mock
+
+        root = Path(self.enterContext(TemporaryDirectory()))
+        source, package = self._registry_fixture(root)
+        build = root / "build"
+        (build / "p25capture").mkdir(parents=True)
+        config = {"source": str(source), "build": str(build)}
+        runner = Mock()
+        with (
+            patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])}),
+            patch.object(p, "trusted_tool") as tool,
+        ):
+            for unit in (
+                str(package.with_name("other-1.0.0") / "src/dummy.cc"),
+                "src/../../other-1.0.0/dummy.cc",
+                "unarchived.cc",
+            ):
+                with self.subTest(unit=unit), self.assertRaises(ValueError):
+                    p.compiler_capture(config, ["-c", unit], package, {}, runner)
+            tool.assert_not_called()
+            runner.assert_not_called()
+
+    def test_registry_rejects_untrusted_inputs_and_mutation(self) -> None:
+        for case in (
+            "unknown",
+            "prefix",
+            "traversal",
+            "symlink",
+            "checksum",
+            "member",
+            "mutation",
+            "lock-mutation",
+            "archive-mutation",
+        ):
+            with self.subTest(case=case), TemporaryDirectory() as temp:
+                root = Path(temp)
+                source, package = self._registry_fixture(root)
+                cwd = package
+                if case == "unknown":
+                    cwd = package.with_name("unknown-1.0.0")
+                elif case == "prefix":
+                    cwd = package.with_name(package.name + "-sibling")
+                elif case == "traversal":
+                    cwd = package / ".." / package.name
+                elif case == "symlink":
+                    original = package.with_name("original")
+                    package.rename(original)
+                    package.symlink_to(original, target_is_directory=True)
+                elif case == "checksum":
+                    archive = (
+                        root
+                        / "registry/cache"
+                        / package.parent.name
+                        / (package.name + ".crate")
+                    )
+                    archive.write_bytes(b"tampered archive")
+                elif case == "member":
+                    (package / "src/dummy.cc").write_bytes(b"tampered")
+                with patch.dict(
+                    p.PROFILE, {"registry_source_root": str(package.parents[1])}
+                ):
+                    with self.assertRaises((ValueError, OSError)):
+                        with p.registry_package(source, cwd):
+                            if case == "mutation":
+                                (package / "src/dummy.cc").write_bytes(b"changed")
+                            elif case == "lock-mutation":
+                                (source / "Cargo.lock").write_text("changed")
+                            elif case == "archive-mutation":
+                                archive = (
+                                    root
+                                    / "registry/cache"
+                                    / package.parent.name
+                                    / (package.name + ".crate")
+                                )
+                                archive.write_bytes(b"changed")
+
     def test_fixed_arch_qt_query_argv_and_receipt(self) -> None:
         import json
         from contextlib import contextmanager
@@ -165,12 +305,13 @@ class FinalProfileTests(unittest.TestCase):
             runner=fake,
         )
         if case == "external-unit":
-            registry = tmp_path / "registry"
-            registry.mkdir()
-            external_unit = registry / "external.cpp"
-            external_unit.write_text("// SPDX-License-Identifier: MIT\n")
+            fixture_source, package = self._registry_fixture(tmp_path / "dependency")
+            (source / "Cargo.lock").write_bytes(
+                (fixture_source / "Cargo.lock").read_bytes()
+            )
+            external_unit = package / "src/dummy.cc"
             patches.enter_context(
-                patch.dict(p.PROFILE, {"registry_source_root": str(registry)})
+                patch.dict(p.PROFILE, {"registry_source_root": str(package.parents[1])})
             )
             p.compiler_capture(
                 p.wrapper_config(env),
