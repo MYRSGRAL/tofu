@@ -75,7 +75,7 @@ fn validate_controlled(
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(storage)?;
-    if !(1..=4).contains(&version) {
+    if !(1..=5).contains(&version) {
         return Err(RepositoryError::UnsupportedVersion);
     }
     validate_schema(connection, version)?;
@@ -721,13 +721,31 @@ pub(super) fn admit_format4(
     id: &[u8; 32],
     backup: Option<&Path>,
 ) -> Result<()> {
+    admit_format(live, key, id, backup, 4)
+}
+
+pub(super) fn admit_format5(
+    live: &Connection,
+    key: &[u8; 32],
+    id: &[u8; 32],
+    backup: Option<&Path>,
+) -> Result<()> {
+    admit_format(live, key, id, backup, 5)
+}
+fn admit_format(
+    live: &Connection,
+    key: &[u8; 32],
+    id: &[u8; 32],
+    backup: Option<&Path>,
+    target: i64,
+) -> Result<()> {
     let version: i64 = live
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(storage)?;
-    if version == 4 {
+    if version >= target {
         return Ok(());
     }
-    if version != 3 {
+    if version < 3 || version >= target {
         return Err(RepositoryError::UnsupportedVersion);
     }
     let path = backup.ok_or(RepositoryError::InvalidInput)?;
@@ -767,7 +785,7 @@ pub(super) fn admit_format4(
     let copy_id: Vec<u8> = copy
         .query_row("SELECT id FROM repository", [], |r| r.get(0))
         .map_err(storage)?;
-    if copy_version != 3 || copy_id != id {
+    if copy_version != version || copy_id != id {
         return Err(RepositoryError::Conflict);
     }
     let mut bytes = 0usize;

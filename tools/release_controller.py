@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import io
 import json
@@ -59,6 +60,9 @@ CONTROLLED_ENV = (
 RUST_REUSE_PRIOR = "linux-controller-rehearsal-14229843-msrv85-2"
 RUST_REUSE_TARGET = "linux-controller-rehearsal-14229843-msrv85-3"
 RUST_REUSE_REVIEW = "969f65b68f9283f81d77d9c6f1f2c00d8f26934e"
+COLLECTED_REUSE_PRIOR = "linux-controller-rehearsal-14229843-msrv85-3"
+COLLECTED_REUSE_TARGET = "linux-controller-rehearsal-14229843-msrv85-mtree4"
+COLLECTED_REUSE_REVIEW = "2599fe70ca93ebd14baaa8932e9de69fc5d66a94"
 TRANSIENT = Path("/var/tmp/codex-myrs/transient")
 JOB_SOURCE = "ce356b452675036fab3388ef64ea03f8f00910ce"
 JOB_BINARIES = {
@@ -619,10 +623,26 @@ def package_files(
 def write_package(
     path: Path, files: dict[str, tuple[int, bytes | Path]], info: bytes
 ) -> dict:
+    # Metadata берутся из тех же TarInfo, которые записываются в архив.
+    # Host stat UID/mtime не участвуют; текущий package contract запрещает links.
+    if len(files) > 4096 or len(info) > 64 * 1024:
+        raise NotReady("Превышен лимит package metadata")
+    for name, (mode, content) in files.items():
+        parts = name.split("/")
+        if (
+            name in (".MTREE", ".PKGINFO")
+            or any(part in ("", ".", "..") for part in parts)
+            or len(name.encode()) > 4096
+            or "\0" in name
+            or mode not in (0o644, 0o755)
+        ):
+            raise NotReady("Недопустимый package path/mode")
     bindings = {}
+    lines = ["#mtree"]
     with tarfile.open(path, "x") as archive:
         for name, (mode, content) in {".PKGINFO": (0o644, info), **files}.items():
             entry = tarfile.TarInfo(name)
+            entry.uid = entry.gid = entry.mtime = 0
             entry.mode = mode
             if isinstance(content, Path):
                 entry.size = content.stat().st_size
@@ -633,7 +653,27 @@ def write_package(
                 entry.size = len(content)
                 checksum = digest(content)
                 archive.addfile(entry, io.BytesIO(content))
+            escaped = "".join(
+                chr(byte)
+                if 33 <= byte <= 126 and byte not in (35, 61, 92)
+                else f"\\{byte:03o}"
+                for byte in ("./" + name).encode()
+            )
+            lines.append(
+                f"{escaped} type=file uid={entry.uid} gid={entry.gid} "
+                f"mode={entry.mode:o} time={entry.mtime} size={entry.size} "
+                f"sha256digest={checksum}"
+            )
             bindings[name] = {"mode": mode, "sha256": checksum}
+        plain = ("\n".join(lines) + "\n").encode("ascii")
+        if len(plain) > 1024 * 1024:
+            raise NotReady("Превышен лимит .MTREE")
+        data = gzip.compress(plain, mtime=0)
+        entry = tarfile.TarInfo(".MTREE")
+        entry.uid = entry.gid = entry.mtime = 0
+        entry.mode, entry.size = 0o644, len(data)
+        archive.addfile(entry, io.BytesIO(data))
+        bindings[".MTREE"] = {"mode": entry.mode, "sha256": digest(data)}
     return bindings
 
 
@@ -898,6 +938,131 @@ def reuse_rust(
         return lineage
 
 
+def collected_reuse_pins(repo: Path) -> dict:
+    rows = json.loads(
+        git(
+            repo,
+            "show",
+            COLLECTED_REUSE_REVIEW
+            + ":docs/evidence/"
+            + COLLECTED_REUSE_PRIOR
+            + "/registry-inventory.json",
+        )
+    )
+    prefix = (
+        "/home/myrs/projects/yonik/local/release-controller/"
+        + COLLECTED_REUSE_PRIOR
+        + "/"
+    )
+    pins = {}
+    for row in rows:
+        if not row["path"].startswith(prefix):
+            raise NotReady("Неверный fixed COLLECTED inventory")
+        name = row["path"][len(prefix) :]
+        if (
+            name in pins
+            or not name
+            or name != PurePosixPath(name).as_posix()
+            or ".." in PurePosixPath(name).parts
+            or name.startswith("/")
+        ):
+            raise NotReady("Неверный COLLECTED inventory path")
+        pins[name] = {"size": row["size"], "sha256": row["sha256"]}
+    return pins
+
+
+def reuse_collected(
+    repo: Path, registry: Path, release: str, record: dict, artifacts: Path, root: Path
+) -> dict:
+    if release != COLLECTED_REUSE_TARGET:
+        raise NotReady("COLLECTED reuse разрешён только fixed root-selected ID")
+    pins = collected_reuse_pins(repo)
+    if (
+        not {"collected.json", "frozen.json", "source.tar", "package.tar", *RUST}
+        <= pins.keys()
+    ):
+        raise NotReady("Неполный COLLECTED inventory")
+    with release_lock(registry, COLLECTED_REUSE_PRIOR, writer=False) as prior:
+        for name, pin in pins.items():
+            read_pinned_partial(prior, name, pin)
+        context = json.loads(
+            read_pinned_partial(prior, "collected.json", pins["collected.json"])
+        )
+        if (
+            context.get("state") != "COLLECTED"
+            or context.get("final_linux_acceptance") is not False
+            or context.get("release_id") != COLLECTED_REUSE_PRIOR
+        ):
+            raise NotReady("Нет prior NONFINAL COLLECTED")
+        if any(
+            context[key] != record[key]
+            for key in ("source", "recipe", "archive_sha256")
+        ):
+            raise NotReady("COLLECTED reuse source/tree/archive/recipe mismatch")
+        for name, checksum in context["tooling_sha256"].items():
+            if (
+                digest(git(repo, "show", COLLECTED_REUSE_REVIEW + ":tools/" + name))
+                != checksum
+            ):
+                raise NotReady("Неверный prior COLLECTED tooling hash")
+        for name, checksum in context["artifact_sha256"].items():
+            if name not in pins or pins[name]["sha256"] != checksum:
+                raise NotReady("Неверный prior COLLECTED artifact binding")
+        validate_payload(prior / "package.tar", root, context)
+        # Копируются только controller-owned artifacts, не prior status/commands.
+        excluded = {
+            "source.tar",
+            "package.tar",
+            "frozen.json",
+            "collected.json",
+            "rust-lineage.json",
+        }
+        for name in pins:
+            if name in excluded or name.startswith("controller-logs/"):
+                continue
+            target = artifacts / name
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with (
+                input_path(prior, name).open("rb") as incoming,
+                target.open("xb") as outgoing,
+            ):
+                shutil.copyfileobj(incoming, outgoing)
+            target.chmod(0o600)
+            if sha(target) != pins[name]["sha256"]:
+                raise NotReady("COLLECTED copy SHA mismatch")
+        for name in RUST:
+            elf_file(artifacts / name)
+        lineage = {
+            "build_performed": False,
+            "prior_release_id": COLLECTED_REUSE_PRIOR,
+            "reviewed_evidence_commit": COLLECTED_REUSE_REVIEW,
+            "source": record["source"],
+            "prior_artifacts": pins,
+        }
+        write_record(artifacts / "collected-lineage.json", lineage)
+        files = package_files(root, artifacts, context["cores"])
+        payload = write_package(artifacts / "package.tar", files, pkginfo(root))
+        result = {
+            **context,
+            **record,
+            "state": "COLLECTED",
+            "commands": [],
+            "controlled_env": {},
+            "payload": payload,
+            "collected_lineage": lineage,
+            "package_sha256": sha(artifacts / "package.tar"),
+            "artifact_sha256": {
+                p.relative_to(artifacts).as_posix(): sha(p)
+                for p in artifacts.rglob("*")
+                if p.is_file()
+            },
+            "final_linux_acceptance": False,
+        }
+        validate_payload(artifacts / "package.tar", root, result)
+        write_record(artifacts / "collected.json", result)
+        return result
+
+
 def _collect(
     repo: Path, registry: Path, release: str, task: Path, runner: TrustedRunner
 ) -> dict:
@@ -914,6 +1079,8 @@ def _collect(
             root = task / "source"
             snapshot(repo, record, input_path(artifacts, "source.tar"), root)
             core_metadata(root)
+            if release == COLLECTED_REUSE_TARGET:
+                return reuse_collected(repo, registry, release, record, artifacts, root)
             env = build_env(task, record["source"]["commit"])
             toolchains = {
                 name: runner.run([name, "--version"], root, env).decode()

@@ -362,6 +362,10 @@ ApplicationWindow {
             domain: ["Некорректный домен", "Invalid domain"], cidr: ["Некорректный IP/CIDR: проверьте биты сети", "Invalid IP/CIDR: check network bits"],
             executable: ["Нужен абсолютный путь без . и ..", "An absolute path without . and .. is required"],
             broad: ["Подтвердите правило для любого трафика", "Confirm matching all traffic"],
+            ports: ["Порты назначения: 1–65535, до 16 непустых диапазонов.", "Destination ports: 1–65535, up to 16 nonempty ranges."],
+            ports_overlap: ["Диапазоны портов пересекаются или повторяются.", "Port ranges overlap or repeat."],
+            protocols: ["Укажите tcp и/или udp без повторов.", "Enter tcp and/or udp without duplicates."],
+            transport_input: ["Проверьте формат протоколов и диапазонов портов.", "Check protocol and port range syntax."],
             id: ["Недопустимый или повторяющийся ID", "Invalid or duplicate ID"],
             limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
         }
@@ -889,11 +893,15 @@ ApplicationWindow {
                 spacing: 12
                 property bool advanced: false
                 property double selectedId: 0
+                property var transport: undefined
                 property var platformSources: undefined
                 function resetPlatformSources() { platformSources = undefined }
                 property int simpleGroup: 0
                 function values(text) { return text.split("\n").map(s => s.trim()).filter(s => s.length > 0) }
                 function load(rule) {
+                    transport = rule.transport === undefined ? undefined : JSON.parse(JSON.stringify(rule.transport))
+                    protocolInput.text = transport && transport.transport_protocols ? transport.transport_protocols.join(",") : ""
+                    portInput.text = transport && transport.destination_ports ? transport.destination_ports.map(p => p[0] === p[1] ? String(p[0]) : p[0] + "-" + p[1]).join(",") : ""
                     platformSources = rule.platform_sources === undefined ? undefined : JSON.parse(JSON.stringify(rule.platform_sources))
                     selectedId = rule.id
                     formRevision = window.state.routing_revision
@@ -960,7 +968,7 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
-                        SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.platform_sources && ruleRow.modelData.platform_sources.length ? window.tr("Платформенный селектор неприменим на Linux", "Platform selector is unsupported on Linux") : (ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules")) }
+                        SmallLabel { Layout.fillWidth: true; text: (ruleRow.modelData.transport ? window.tr("Транспортное условие (активация недоступна) · ", "Transport condition (activation unavailable) · ") : "") + (ruleRow.modelData.platform_sources && ruleRow.modelData.platform_sources.length ? window.tr("Платформенный селектор неприменим на Linux", "Platform selector is unsupported on Linux") : (ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules"))) }
                         RowLayout {
                             ActionButton { objectName: "routingEdit" + ruleRow.modelData.id; text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
                             ActionButton { objectName: "routingUp" + ruleRow.modelData.id; text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
@@ -1000,7 +1008,10 @@ ApplicationWindow {
                 TextArea { visible: editor.advanced || editor.simpleGroup === 1; id: domainInput; objectName: "routingDomain"; Layout.fillWidth: true; placeholderText: "example.org"; wrapMode: TextEdit.Wrap; selectByMouse: true }
                 SmallLabel { visible: editor.advanced || editor.simpleGroup === 2; text: window.tr("IP или канонический CIDR", "IP or canonical CIDR") }
                 TextArea { visible: editor.advanced || editor.simpleGroup === 2; id: cidrInput; objectName: "routingCidr"; Layout.fillWidth: true; placeholderText: "192.0.2.0/24"; wrapMode: TextEdit.Wrap; selectByMouse: true }
-                SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Порты, протоколы, process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Ports, protocols, process names, UID, cgroup and PID are unsupported by the current model.") }
+                SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Process names, UID, cgroup and PID are unsupported by the current model.") }
+                SmallLabel { text: window.tr("Транспорт: tcp,udp; destination порты 1–65535 (до 16 диапазонов). Активация пока недоступна.", "Transport: tcp,udp; destination ports 1–65535 (up to 16 ranges). Activation unavailable.") }
+                TextField { id: protocolInput; objectName: "routingProtocols"; maximumLength: 7; placeholderText: "tcp,udp" }
+                TextField { id: portInput; objectName: "routingPorts"; maximumLength: 191; placeholderText: "443,8000-8080" }
                 ComboBox { id: actionInput; model: ["Proxy", "Direct", "Block"] }
                 CheckBox { id: enabledInput; objectName: "routingEnabled"; checked: true; text: window.tr("Правило включено", "Rule enabled") }
                 CheckBox { id: broadInput; text: window.tr("Подтверждаю правило для любого трафика", "Confirm matching all traffic") }
@@ -1009,10 +1020,16 @@ ApplicationWindow {
                         objectName: "routingSaveRule"
                         text: window.tr("Подтвердить", "Confirm")
                         onClicked: {
+                            const protocols = protocolInput.text.trim()
+                            const ports = portInput.text.trim()
+                            if (protocols.length > 7 || ports.length > 191 || (protocols && !/^(tcp|udp)(,(tcp|udp))?$/.test(protocols)) || (ports && !/^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$/.test(ports))) { editor.saveError = "transport_input"; return }
+                            editor.transport = protocols || ports || editor.transport !== undefined ? {} : undefined
+                            if (protocols) editor.transport.transport_protocols = protocols.split(",")
+                            if (ports) editor.transport.destination_ports = ports.split(",").map(s => { const p = s.split("-").map(Number); return [p[0], p.length === 1 ? p[0] : p[1]] })
                             const rules = window.state.routing.rules
                             const id = editor.selectedId || (rules.reduce((n, r) => Math.max(n, r.id), 0) + 1)
                             editor.saveError = ""
-                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, platform_sources: editor.platformSources, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
+                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, transport: editor.transport, platform_sources: editor.platformSources, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
                             editor.settle()
                         }
                     }

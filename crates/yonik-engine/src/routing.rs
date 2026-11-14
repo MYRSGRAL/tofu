@@ -33,6 +33,7 @@ pub enum PolicyCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyCompileError {
     UnsupportedSelector(u64),
+    UnsupportedTransport(u64),
     Server(CompileError),
     Unsupported(PolicyCapability),
     InvalidPolicy,
@@ -42,6 +43,9 @@ pub enum PolicyCompileError {
 impl fmt::Display for PolicyCompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedTransport(id) => {
+                write!(f, "Транспорт правила {id} не поддержан адаптером")
+            }
             Self::UnsupportedSelector(id) => write!(f, "Неприменимый селектор правила {id}"),
             Self::Server(error) => error.fmt(f),
             Self::Unsupported(PolicyCapability::DnsContract) => f.write_str(
@@ -580,6 +584,9 @@ fn validate_policy(
     mode: PolicyMode,
     tun_sources: bool,
 ) -> Result<(), PolicyCompileError> {
+    if let Some(id) = policy.unsupported_transport() {
+        return Err(PolicyCompileError::UnsupportedTransport(id));
+    }
     if let Some(id) = policy.unsupported_selector() {
         return Err(PolicyCompileError::UnsupportedSelector(id));
     }
