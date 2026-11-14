@@ -79,6 +79,16 @@ fn main() {
         assert!(status.success(), "Не удалось проверить notices");
         println!("cargo:rerun-if-changed=../../packaging/licenses");
         println!("cargo:rerun-if-changed=../../tools/compile_notices.py");
+        std::fs::create_dir_all(&output).expect("Каталог build headers");
+        std::fs::write(
+            output.join("p01_build_guard.h"),
+            if env::var_os("CARGO_FEATURE_TEST_SUPPORT").is_some() {
+                "#define YONIK_P01_TEST_SUPPORT 1\n"
+            } else {
+                "#define YONIK_P01_TEST_SUPPORT 0\n"
+            },
+        )
+        .expect("Build guard P01");
         CxxQtBuilder::new_qml_module(
             QmlModule::new("cloud.highpriority.yonik")
                 .qml_file("qml/Main.qml")
@@ -94,6 +104,7 @@ fn main() {
         .qrc("resources.qrc")
         .qrc(output.join("notices.qrc"))
         .include_dir("src")
+        .include_dir(&output)
         .qt_module("Quick")
         .qt_module("Widgets")
         .qt_module("Network")
@@ -102,6 +113,7 @@ fn main() {
         println!("cargo::rerun-if-changed=src/application.h");
         println!("cargo::rerun-if-changed=src/application.cpp");
         println!("cargo::rerun-if-changed=src/ui_smoke.h");
+        println!("cargo::rerun-if-changed=src/p01_observer.h");
     }
 }
 

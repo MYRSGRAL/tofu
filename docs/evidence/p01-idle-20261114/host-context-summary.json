@@ -1,0 +1,56 @@
+[
+  {
+    "repeat": 1,
+    "load1_min": 0.27,
+    "load1_max": 3.65,
+    "governors": [
+      "powersave"
+    ],
+    "power": {
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "1",
+      "/sys/class/power_supply/AC0/online": "1",
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0"
+    },
+    "power_changed": false,
+    "x86_pkg_temp_C": [
+      43.0,
+      93.0
+    ]
+  },
+  {
+    "repeat": 2,
+    "load1_min": 0.08,
+    "load1_max": 1.89,
+    "governors": [
+      "powersave"
+    ],
+    "power": {
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "1",
+      "/sys/class/power_supply/AC0/online": "1",
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0"
+    },
+    "power_changed": false,
+    "x86_pkg_temp_C": [
+      42.0,
+      93.0
+    ]
+  },
+  {
+    "repeat": 3,
+    "load1_min": 0.29,
+    "load1_max": 2.75,
+    "governors": [
+      "powersave"
+    ],
+    "power": {
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "1",
+      "/sys/class/power_supply/AC0/online": "1",
+      "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0"
+    },
+    "power_changed": false,
+    "x86_pkg_temp_C": [
+      42.0,
+      93.0
+    ]
+  }
+]

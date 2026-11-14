@@ -1,0 +1,17 @@
+{
+  "state": "MEASUREMENTS_SAVED_PENDING_FINAL_REVIEW",
+  "head": "fdeb20a227f05139f723614841c767f03c30e611",
+  "started_epoch": 1794614796.9937832,
+  "old_proofs": "preflight only; not reused for mandatory canary",
+  "physical_plasma_energy": "DEFERRED",
+  "stats": "N_A source-bound; null/not measured",
+  "campaign_pid": 1589770,
+  "audit_pid": 1589771,
+  "campaign_returncode": 0,
+  "scripts_changed": [],
+  "finished_repeats": 3,
+  "wakeup_measurement_available": true,
+  "hidden_cpu_budget_pass": true,
+  "preserved_roots": [],
+  "finished_epoch": 1794621034.8907645
+}
