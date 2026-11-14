@@ -188,3 +188,142 @@ mod tests {
         }
     }
 }
+
+/// Наблюдение реального bus/unique-owner epoch, не permit доступа к ключу.
+/// secret-service 4.0 создаёт собственную connection; guard использует отдельную
+/// connection к той же выбранной шине и устанавливается ДО credential call.
+#[derive(Clone)]
+pub struct CredentialOwnerGuard(std::sync::Arc<CredentialOwnerEpoch>);
+struct CredentialOwnerEpoch {
+    connection: zbus::Connection,
+    address: Option<std::ffi::OsString>,
+    bus_id: String,
+    owner: String,
+    lost: tokio::sync::watch::Receiver<bool>,
+    monitor: tokio::task::JoinHandle<()>,
+}
+impl Drop for CredentialOwnerEpoch {
+    fn drop(&mut self) {
+        self.monitor.abort();
+    }
+}
+impl CredentialOwnerGuard {
+    async fn bus_string(
+        connection: &zbus::Connection,
+        method: &str,
+        args: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+    ) -> Result<String, CredentialError> {
+        connection
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                method,
+                args,
+            )
+            .await
+            .map_err(|_| CredentialError::Unavailable)?
+            .body()
+            .deserialize()
+            .map_err(|_| CredentialError::Unavailable)
+    }
+    async fn owner(connection: &zbus::Connection) -> Result<String, CredentialError> {
+        Self::bus_string(connection, "GetNameOwner", &("org.freedesktop.secrets",)).await
+    }
+    /// Потеря epoch необратима даже если тот же owner снова объявил well-known name.
+    pub fn owner_lost(&self) -> bool {
+        *self.0.lost.borrow()
+            || self.0.lost.has_changed().is_err()
+            || self.0.address != std::env::var_os("DBUS_SESSION_BUS_ADDRESS")
+    }
+    /// Наблюдает текущий реальный session bus; не создаёт credential item.
+    pub async fn observe() -> Result<Self, CredentialError> {
+        use futures_util::StreamExt;
+        use zbus::{MatchRule, MessageStream, message::Type};
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let address = std::env::var_os("DBUS_SESSION_BUS_ADDRESS");
+            let connection = zbus::Connection::session()
+                .await
+                .map_err(|_| CredentialError::Unavailable)?;
+            let rule = MatchRule::builder()
+                .msg_type(Type::Signal)
+                .sender("org.freedesktop.DBus")
+                .map_err(|_| CredentialError::Unavailable)?
+                .interface("org.freedesktop.DBus")
+                .map_err(|_| CredentialError::Unavailable)?
+                .member("NameOwnerChanged")
+                .map_err(|_| CredentialError::Unavailable)?
+                .path("/org/freedesktop/DBus")
+                .map_err(|_| CredentialError::Unavailable)?
+                .add_arg("org.freedesktop.secrets")
+                .map_err(|_| CredentialError::Unavailable)?
+                .build();
+            let mut changes = MessageStream::for_match_rule(rule, &connection, Some(16))
+                .await
+                .map_err(|_| CredentialError::Unavailable)?;
+            let bus_id = Self::bus_string(&connection, "GetId", &()).await?;
+            let owner = Self::owner(&connection).await?;
+            if !owner.starts_with(':') {
+                return Err(CredentialError::Unavailable);
+            }
+            let (tx, lost) = tokio::sync::watch::channel(false);
+            let monitor = tokio::spawn(async move {
+                let _ = changes.next().await;
+                tx.send_replace(true);
+            });
+            Ok(Self(std::sync::Arc::new(CredentialOwnerEpoch {
+                connection,
+                address,
+                bus_id,
+                owner,
+                lost,
+                monitor,
+            })))
+        })
+        .await
+        .map_err(|_| CredentialError::Timeout)?
+    }
+    /// Каждый await завершается новой проверкой необратимого owner fence.
+    pub async fn check(&self) -> Result<(), CredentialError> {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            if self.owner_lost() {
+                return Err(CredentialError::Unavailable);
+            }
+            if Self::owner(&self.0.connection).await? != self.0.owner || self.owner_lost() {
+                return Err(CredentialError::Unavailable);
+            }
+            // Не принимаем подменённый socket по тому же адресу за исходную шину.
+            let selected = zbus::Connection::session()
+                .await
+                .map_err(|_| CredentialError::Unavailable)?;
+            if self.owner_lost() {
+                return Err(CredentialError::Unavailable);
+            }
+            if Self::bus_string(&selected, "GetId", &()).await? != self.0.bus_id
+                || self.owner_lost()
+            {
+                return Err(CredentialError::Unavailable);
+            }
+            if Self::owner(&selected).await? != self.0.owner || self.owner_lost() {
+                return Err(CredentialError::Unavailable);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| CredentialError::Timeout)?
+    }
+}
+
+/// Старые Missing/Locked/create semantics неизменны. Отсутствующий owner guard
+/// не мешает ручной работе host, но запрещает startup dispatch в этом host.
+pub async fn subscription_master_key_with_owner(
+    allow_create: bool,
+) -> Result<(Zeroizing<[u8; 32]>, Option<CredentialOwnerGuard>), CredentialError> {
+    let observed = CredentialOwnerGuard::observe().await.ok();
+    let key = subscription_master_key(allow_create).await?;
+    let owner = match observed {
+        Some(guard) if guard.check().await.is_ok() => Some(guard),
+        _ => None,
+    };
+    Ok((key, owner))
+}

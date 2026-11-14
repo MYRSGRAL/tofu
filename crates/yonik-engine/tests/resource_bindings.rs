@@ -60,6 +60,7 @@ fn single_evaluator_preserves_or_groups_and_app_and_priority() {
         enabled: true,
         action: Action::Block,
         conditions: Conditions {
+            transport: Default::default(),
             platform_sources: vec![],
             executables: vec!["/app".into()],
             domains: vec![DomainPattern::Exact("inline.test".parse().unwrap())],
@@ -262,4 +263,189 @@ fn metadata_format_and_manifest_bounds_refuse() {
         })
         .collect();
     assert!(BoundPolicy::bind(&policy, 1, &identity, &c, Vec::new()).is_err());
+}
+
+#[test]
+fn unadmitted_mixed_data_and_cancellation_do_not_relax_admission() {
+    use std::cell::Cell;
+    use yonik_engine::resource_bundle::{BoundCompileError, compile_bound_data_cancellable};
+    let server = yonik_import::import_bytes(b"socks://127.0.0.1:18081".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    for engine in [Engine::Xray, Engine::SingBox] {
+        let catalog = catalog(engine);
+        let policy = Policy {
+            user_rules: vec![Rule {
+                id: 7,
+                enabled: true,
+                action: Action::Block,
+                conditions: Conditions {
+                    executables: vec!["/opt/fixture/app-0".into()],
+                    ..Conditions::default()
+                },
+            }],
+            ..Policy::default()
+        };
+        let identity = policy_identity(&policy);
+        let bound = BoundPolicy::bind(
+            &policy,
+            1,
+            &identity,
+            &catalog,
+            vec![
+                ResourceBinding {
+                    rule: ResourceRule::User(7),
+                    resource: 0,
+                },
+                ResourceBinding {
+                    rule: ResourceRule::User(7),
+                    resource: 1,
+                },
+            ],
+        )
+        .unwrap();
+        let compile = |revision, proceed: &dyn Fn() -> bool| {
+            compile_bound_data_cancellable(
+                &server,
+                engine,
+                10808.try_into().unwrap(),
+                10809.try_into().unwrap(),
+                &bound,
+                revision,
+                &identity,
+                proceed,
+            )
+        };
+        let calls = Cell::new(0usize);
+        let count = || {
+            calls.set(calls.get() + 1);
+            true
+        };
+        let artifact = compile(1, &count as &dyn Fn() -> bool).unwrap();
+        let total = calls.get();
+        assert_eq!(artifact.manifest(), catalog.manifest());
+        assert_eq!(artifact.revision(), 1);
+        assert_eq!(artifact.policy_identity(), identity);
+        let mut bytes = Vec::new();
+        artifact.write_sensitive(&mut bytes).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        if engine == Engine::SingBox {
+            let rule = &value["route"]["rules"][2];
+            assert_eq!(rule["type"], "logical");
+            assert_eq!(rule["mode"], "and");
+            assert_eq!(rule["rules"][0]["process_path"][0], "/opt/fixture/app-0");
+            assert_eq!(rule["rules"][1]["mode"], "and");
+            assert!(rule.get("process_path").is_none());
+        }
+        for cancel_at in [1, 2, 5, 20, total / 2, total - 1, total] {
+            let calls = Cell::new(0usize);
+            // После единственного false callback снова true: отмена обязана быть sticky.
+            let proceed = || {
+                calls.set(calls.get() + 1);
+                calls.get() != cancel_at
+            };
+            assert!(matches!(
+                compile(1, &proceed as &dyn Fn() -> bool),
+                Err(BoundCompileError::Cancelled)
+            ));
+            assert_eq!(calls.get(), cancel_at);
+            assert!(compile(1, &(|| true) as &dyn Fn() -> bool).is_ok());
+        }
+        assert!(matches!(
+            compile(2, &(|| true) as &dyn Fn() -> bool),
+            Err(BoundCompileError::Policy(PolicyCompileError::InvalidPolicy))
+        ));
+        for mode in [PolicyMode::Names, PolicyMode::IpOnly] {
+            assert!(matches!(
+                compile_bound_policy(
+                    &server,
+                    engine,
+                    10808.try_into().unwrap(),
+                    10809.try_into().unwrap(),
+                    &bound,
+                    1,
+                    &identity,
+                    mode,
+                    &DnsContract::default()
+                ),
+                Err(PolicyCompileError::Unsupported(
+                    PolicyCapability::ProcessAttribution
+                ))
+            ));
+        }
+    }
+}
+
+#[test]
+fn unadmitted_data_rejects_invalid_path_and_actual_four_mib_output() {
+    use yonik_engine::resource_bundle::{BoundCompileError, compile_bound_data_cancellable};
+    let server = yonik_import::import_bytes(b"socks://127.0.0.1:18081".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    for engine in [Engine::Xray, Engine::SingBox] {
+        let catalog = catalog(engine);
+        for oversized in [false, true] {
+            let name = format!(
+                "{}.{}.{}.invalid",
+                "a".repeat(63),
+                "b".repeat(63),
+                "c".repeat(63)
+            );
+            let count = if oversized { 10000 } else { 1 };
+            let conditions = if oversized {
+                Conditions {
+                    domains: vec![DomainPattern::Exact(name.parse().unwrap())],
+                    executables: vec!["/opt/fixture/app".into()],
+                    ..Conditions::default()
+                }
+            } else {
+                Conditions {
+                    executables: vec!["/opt/../invalid".into()],
+                    ..Conditions::default()
+                }
+            };
+            let policy = Policy {
+                user_rules: (0..count)
+                    .map(|id| Rule {
+                        id,
+                        enabled: true,
+                        action: Action::Block,
+                        conditions: Conditions {
+                            transport: Default::default(),
+                            executables: conditions.executables.clone(),
+                            domains: conditions.domains.clone(),
+                            destinations: conditions.destinations.clone(),
+                            platform_sources: vec![],
+                        },
+                    })
+                    .collect(),
+                ..Policy::default()
+            };
+            let identity = policy_identity(&policy);
+            let bindings = (0..count)
+                .flat_map(|id| {
+                    (0..2).map(move |resource| ResourceBinding {
+                        rule: ResourceRule::User(id),
+                        resource,
+                    })
+                })
+                .collect();
+            let bound = BoundPolicy::bind(&policy, 1, &identity, &catalog, bindings).unwrap();
+            assert!(matches!(
+                compile_bound_data_cancellable(
+                    &server,
+                    engine,
+                    10808.try_into().unwrap(),
+                    10809.try_into().unwrap(),
+                    &bound,
+                    1,
+                    &identity,
+                    || true
+                ),
+                Err(BoundCompileError::Policy(PolicyCompileError::InvalidPolicy))
+            ));
+        }
+    }
 }

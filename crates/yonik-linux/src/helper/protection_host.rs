@@ -86,6 +86,7 @@ struct Backend {
     watch: NetworkWatch,
     seed: u64,
     epoch: u64,
+    native_owner: session_host::native_owner::NativeOwnerState,
     bindings: Option<NetworkStamp>,
     supervisor: Option<super::SystemWorkerSupervisor>,
     worker_uncertain: bool,
@@ -101,7 +102,12 @@ enum Operation {
     PrepareProfile(u32, Box<super::service::SystemProfileRequest>),
     PrepareBundle(u32, Box<super::service::SystemBundleRequest>),
     Apply(u32, GuardPlan, NetworkStamp),
-    ApplyProfile(u32, Arc<SessionArtifact>, NetworkStamp),
+    ApplyProfile(
+        u32,
+        Arc<SessionArtifact>,
+        NetworkStamp,
+        Option<crate::output_transport::ValidatedWriters>,
+    ),
     State(u32),
     Stop(u32),
     Unlock(u32),
@@ -169,6 +175,7 @@ impl SystemProtectionHost {
                 watch,
                 seed,
                 epoch: 1,
+                native_owner: session_host::native_owner::NativeOwnerState::fresh(),
                 bindings: None,
                 supervisor: None,
                 worker_uncertain: false,
@@ -316,7 +323,11 @@ impl Backend {
         NftExecutor::open(owner).map_err(unavailable)
     }
     fn invalidate(&mut self) -> Result<(), ServiceError> {
-        self.epoch = self.epoch.checked_add(1).ok_or(ServiceError::Unavailable)?;
+        self.native_owner.revoke();
+        self.epoch = self.epoch.checked_add(1).ok_or_else(|| {
+            self.native_owner.close();
+            ServiceError::Unavailable
+        })?;
         Ok(())
     }
     fn ensure_owner(&mut self, uid: u32) -> Result<Ownership, ServiceError> {
@@ -387,8 +398,8 @@ impl Backend {
                 .prepare_profile(uid, *request, &mut cancel)
                 .await
                 .map(Reply::Prepared),
-            Operation::ApplyProfile(uid, artifact, stamp) => self
-                .apply_profile(uid, artifact, stamp, &mut cancel)
+            Operation::ApplyProfile(uid, artifact, stamp, output) => self
+                .apply_profile(uid, artifact, stamp, output, &mut cancel)
                 .await
                 .map(Reply::State),
             Operation::Prepare(uid, allow_lan) => {
@@ -627,7 +638,7 @@ impl ProtectionHost for SystemProtectionHost {
         if let Some(session) = &artifact.session {
             return match self
                 .job(
-                    Operation::ApplyProfile(uid, Arc::clone(session), artifact.stamp),
+                    Operation::ApplyProfile(uid, Arc::clone(session), artifact.stamp, None),
                     cancel,
                 )
                 .await?
@@ -640,6 +651,25 @@ impl ProtectionHost for SystemProtectionHost {
             serde_json::from_slice(&artifact.bytes).map_err(|_| ServiceError::InvalidRequest)?;
         match self
             .job(Operation::Apply(uid, plan, artifact.stamp), cancel)
+            .await?
+        {
+            Reply::State(state) => Ok(state),
+            _ => Err(ServiceError::Unavailable),
+        }
+    }
+    async fn apply_output(
+        &mut self,
+        uid: u32,
+        artifact: &GuardArtifact,
+        output: crate::output_transport::ValidatedWriters,
+        cancel: Cancellation,
+    ) -> Result<ProtectionState, ServiceError> {
+        let session = artifact.session.as_ref().ok_or(ServiceError::Unsupported)?;
+        match self
+            .job(
+                Operation::ApplyProfile(uid, Arc::clone(session), artifact.stamp, Some(output)),
+                cancel,
+            )
             .await?
         {
             Reply::State(state) => Ok(state),

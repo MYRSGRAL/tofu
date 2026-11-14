@@ -1,0 +1,123 @@
+{
+  "merge": "11557271eb57ede0e9aa527278a2271fd6c1de6c",
+  "parents": [
+    "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+    "0bb3e86e22d7bf6709c90453e9f8619b60a59ee4"
+  ],
+  "base": "c079e9dea02cd34376d7103dc765c0ab43c71802",
+  "fr16_review": "R1 1c7a98b4 scoped CLEAN frozen4d98; not merged-source review",
+  "root213_accepted": false,
+  "new_runtime_pass": false,
+  "new_rust_build": false,
+  "p11_gate": "pending root review; old reviewed blobs retained; freshness expected RED",
+  "verified_parent_blob_count": 534,
+  "combined_paths": [
+    "crates/yonik-desktop/src/backend.rs"
+  ],
+  "fr16_paths": [
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "blob": "3dd9b2f8736e8f96318a07e18c63a3c480f4beee",
+      "unchanged_parent": null,
+      "needs_union_review": true
+    },
+    {
+      "path": "crates/yonik-desktop/src/system_session.rs",
+      "blob": "1ac8de560eb525ddd89ea5e2766ddd20cdf142ff",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/mod.rs",
+      "blob": "e864fdaa375eec6b709699452a8a51546a8c8824",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/output_bus.rs",
+      "blob": "b1072c9121f081db948fe00d18d29f93b260307e",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/protection_host.rs",
+      "blob": "42efe4a3da19872f3f0ad7b080c3f06a5359aa27",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/service.rs",
+      "blob": "7183a65862d1264ab4f6248a77e8fdfb3030ff0f",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/service_tests.rs",
+      "blob": "b690bba7261664bba66acf6c510532f466042a4d",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/session_host.rs",
+      "blob": "be3b0ed09adfbf88045d2cd4538fd0a175ebb924",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/helper/systemd_worker.rs",
+      "blob": "0924421a804baf723a267688e5be6052f370c8ca",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/lib.rs",
+      "blob": "746246dd67b55e130b8f6ae7713022b896e9b55e",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/output_transport.rs",
+      "blob": "f4caa0747eef245c31baaa665e3e8f022231d91b",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/system_client.rs",
+      "blob": "0b03c798c419a71b6d1cad994a70f54acc489218",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/system_client/output.rs",
+      "blob": "e650e9ab55cfd0b865dfe0ae44c262f299243456",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/system_client/output/tests.rs",
+      "blob": "f0b983d61e0e68b98a695ad8083a7314b42f3574",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/worker.rs",
+      "blob": "367cbed979f780a5f05afb545da7eda57c65a291",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/src/worker/output_transport/compatibility.rs",
+      "blob": "587ed5a0cdbeaf5517050178a9eab7f4110fa816",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    },
+    {
+      "path": "crates/yonik-linux/tests/system_client.rs",
+      "blob": "a1fcdad5dcde089151c358bb0dc75d6f902d7152",
+      "unchanged_parent": "4d98b6ef2e05b822085b55b07d4ca7028adc3394",
+      "needs_union_review": false
+    }
+  ],
+  "all_paths_evidence_sha256": "17329d1e2fd5dc0e321284fcd807ac4ea6056fb867ba2620d4857c50fdca54ff",
+  "all_paths_evidence": "/home/myrs/projects/yonik/local/orchestration/evidence/fr16-pr211-root-union/all-paths-union.json"
+}

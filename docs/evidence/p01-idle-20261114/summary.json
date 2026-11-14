@@ -1,0 +1,859 @@
+{
+  "kind": "P01 observer ELF/private VM",
+  "stats_gate": "N_A-not-measured",
+  "repeats": [
+    {
+      "repeat": 1,
+      "phases": [
+        {
+          "phase": "hidden",
+          "duration": 900.002679149,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 85690,
+                  "median": 85700,
+                  "max": 85708
+                },
+                "Private_Dirty": {
+                  "min": 29404,
+                  "median": 29412,
+                  "max": 29420
+                }
+              },
+              "scheduler_wakeups": 43,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1119,
+                  "median": 1135,
+                  "max": 1146
+                },
+                "Private_Dirty": {
+                  "min": 352,
+                  "median": 352,
+                  "max": 352
+                }
+              },
+              "scheduler_wakeups": 3,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5210,
+                  "median": 5213,
+                  "max": 5213
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32494,
+                  "median": 32496,
+                  "max": 32496
+                },
+                "Private_Dirty": {
+                  "min": 12440,
+                  "median": 12440,
+                  "max": 12440
+                }
+              },
+              "scheduler_wakeups": 22,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 11129,
+                  "median": 11152,
+                  "max": 11152
+                },
+                "Private_Dirty": {
+                  "min": 5036,
+                  "median": 5036,
+                  "max": 5036
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.14,
+              "cpu_percent_one_cpu": 0.015555509249414392,
+              "memory_kib": {
+                "Pss": {
+                  "min": 12936,
+                  "median": 12938,
+                  "max": 12938
+                },
+                "Private_Dirty": {
+                  "min": 4396,
+                  "median": 4396,
+                  "max": 4396
+                }
+              },
+              "scheduler_wakeups": 973,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 98626,
+            "median": 98638,
+            "max": 98646
+          },
+          "gui_tray_cpu_percent": 0.015555509249414392
+        },
+        {
+          "phase": "static-open",
+          "duration": 900.0046612400001,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 85708,
+                  "median": 85708,
+                  "max": 85708
+                },
+                "Private_Dirty": {
+                  "min": 29420,
+                  "median": 29420,
+                  "max": 29420
+                }
+              },
+              "scheduler_wakeups": 2,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1132,
+                  "median": 1146,
+                  "max": 1146
+                },
+                "Private_Dirty": {
+                  "min": 352,
+                  "median": 352,
+                  "max": 352
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5212,
+                  "median": 5212,
+                  "max": 5213
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.01,
+              "cpu_percent_one_cpu": 0.001111105356523631,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32496,
+                  "median": 32496,
+                  "max": 32496
+                },
+                "Private_Dirty": {
+                  "min": 12440,
+                  "median": 12440,
+                  "max": 12440
+                }
+              },
+              "scheduler_wakeups": 17,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 11311,
+                  "median": 11312,
+                  "max": 11312
+                },
+                "Private_Dirty": {
+                  "min": 5196,
+                  "median": 5196,
+                  "max": 5196
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.14,
+              "cpu_percent_one_cpu": 0.015555474991330833,
+              "memory_kib": {
+                "Pss": {
+                  "min": 13002,
+                  "median": 13002,
+                  "max": 13002
+                },
+                "Private_Dirty": {
+                  "min": 4460,
+                  "median": 4460,
+                  "max": 4460
+                }
+              },
+              "scheduler_wakeups": 976,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 98710,
+            "median": 98710,
+            "max": 98710
+          },
+          "gui_tray_cpu_percent": 0.015555474991330833
+        }
+      ]
+    },
+    {
+      "repeat": 2,
+      "phases": [
+        {
+          "phase": "hidden",
+          "duration": 900.004503718,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.01,
+              "cpu_percent_one_cpu": 0.0011111055509932556,
+              "memory_kib": {
+                "Pss": {
+                  "min": 86254,
+                  "median": 86263,
+                  "max": 86275
+                },
+                "Private_Dirty": {
+                  "min": 29400,
+                  "median": 29408,
+                  "max": 29420
+                }
+              },
+              "scheduler_wakeups": 57,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1231,
+                  "median": 1248,
+                  "max": 1249
+                },
+                "Private_Dirty": {
+                  "min": 356,
+                  "median": 356,
+                  "max": 356
+                }
+              },
+              "scheduler_wakeups": 3,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5280,
+                  "median": 5281,
+                  "max": 5281
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.01,
+              "cpu_percent_one_cpu": 0.0011111055509932556,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32192,
+                  "median": 32193,
+                  "max": 32193
+                },
+                "Private_Dirty": {
+                  "min": 12196,
+                  "median": 12196,
+                  "max": 12196
+                }
+              },
+              "scheduler_wakeups": 22,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 10979,
+                  "median": 10996,
+                  "max": 10997
+                },
+                "Private_Dirty": {
+                  "min": 5036,
+                  "median": 5036,
+                  "max": 5036
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.14,
+              "cpu_percent_one_cpu": 0.015555477713905579,
+              "memory_kib": {
+                "Pss": {
+                  "min": 12660,
+                  "median": 12661,
+                  "max": 12661
+                },
+                "Private_Dirty": {
+                  "min": 4396,
+                  "median": 4396,
+                  "max": 4396
+                }
+              },
+              "scheduler_wakeups": 972,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 98914,
+            "median": 98924,
+            "max": 98936
+          },
+          "gui_tray_cpu_percent": 0.016666583264898834
+        },
+        {
+          "phase": "static-open",
+          "duration": 900.01366087,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 86275,
+                  "median": 86275,
+                  "max": 86275
+                },
+                "Private_Dirty": {
+                  "min": 29420,
+                  "median": 29420,
+                  "max": 29420
+                }
+              },
+              "scheduler_wakeups": 3,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1247,
+                  "median": 1248,
+                  "max": 1249
+                },
+                "Private_Dirty": {
+                  "min": 356,
+                  "median": 356,
+                  "max": 356
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5281,
+                  "median": 5281,
+                  "max": 5281
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32193,
+                  "median": 32193,
+                  "max": 32193
+                },
+                "Private_Dirty": {
+                  "min": 12196,
+                  "median": 12196,
+                  "max": 12196
+                }
+              },
+              "scheduler_wakeups": 18,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 11155,
+                  "median": 11156,
+                  "max": 11157
+                },
+                "Private_Dirty": {
+                  "min": 5196,
+                  "median": 5196,
+                  "max": 5196
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.18,
+              "cpu_percent_one_cpu": 0.019999696429718928,
+              "memory_kib": {
+                "Pss": {
+                  "min": 12725,
+                  "median": 12725,
+                  "max": 12725
+                },
+                "Private_Dirty": {
+                  "min": 4460,
+                  "median": 4460,
+                  "max": 4460
+                }
+              },
+              "scheduler_wakeups": 981,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 99000,
+            "median": 99000,
+            "max": 99000
+          },
+          "gui_tray_cpu_percent": 0.019999696429718928
+        }
+      ]
+    },
+    {
+      "repeat": 3,
+      "phases": [
+        {
+          "phase": "hidden",
+          "duration": 900.0039953,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.01,
+              "cpu_percent_one_cpu": 0.0011111061786638714,
+              "memory_kib": {
+                "Pss": {
+                  "min": 86134,
+                  "median": 86148,
+                  "max": 86152
+                },
+                "Private_Dirty": {
+                  "min": 29352,
+                  "median": 29364,
+                  "max": 29368
+                }
+              },
+              "scheduler_wakeups": 53,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1209,
+                  "median": 1231,
+                  "max": 1232
+                },
+                "Private_Dirty": {
+                  "min": 352,
+                  "median": 352,
+                  "max": 352
+                }
+              },
+              "scheduler_wakeups": 3,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5141,
+                  "median": 5143,
+                  "max": 5143
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32544,
+                  "median": 32546,
+                  "max": 32546
+                },
+                "Private_Dirty": {
+                  "min": 12432,
+                  "median": 12432,
+                  "max": 12432
+                }
+              },
+              "scheduler_wakeups": 21,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 10990,
+                  "median": 11012,
+                  "max": 11012
+                },
+                "Private_Dirty": {
+                  "min": 5040,
+                  "median": 5040,
+                  "max": 5040
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.14,
+              "cpu_percent_one_cpu": 0.015555486501294203,
+              "memory_kib": {
+                "Pss": {
+                  "min": 12966,
+                  "median": 12969,
+                  "max": 12969
+                },
+                "Private_Dirty": {
+                  "min": 4396,
+                  "median": 4396,
+                  "max": 4396
+                }
+              },
+              "scheduler_wakeups": 972,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 99100,
+            "median": 99117,
+            "max": 99121
+          },
+          "gui_tray_cpu_percent": 0.016666592679958073
+        },
+        {
+          "phase": "static-open",
+          "duration": 900.018174301,
+          "groups": {
+            "gui": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 86152,
+                  "median": 86152,
+                  "max": 86152
+                },
+                "Private_Dirty": {
+                  "min": 29368,
+                  "median": 29368,
+                  "max": 29368
+                }
+              },
+              "scheduler_wakeups": 1,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "bus": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 1231,
+                  "median": 1232,
+                  "max": 1233
+                },
+                "Private_Dirty": {
+                  "min": 352,
+                  "median": 352,
+                  "max": 352
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "keyring": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 5143,
+                  "median": 5143,
+                  "max": 5143
+                },
+                "Private_Dirty": {
+                  "min": 1032,
+                  "median": 1032,
+                  "max": 1032
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "xvfb": {
+              "cpu_seconds": 0.01,
+              "cpu_percent_one_cpu": 0.0011110886741555535,
+              "memory_kib": {
+                "Pss": {
+                  "min": 32546,
+                  "median": 32546,
+                  "max": 32546
+                },
+                "Private_Dirty": {
+                  "min": 12432,
+                  "median": 12432,
+                  "max": 12432
+                }
+              },
+              "scheduler_wakeups": 18,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "wm": {
+              "cpu_seconds": 0.0,
+              "cpu_percent_one_cpu": 0.0,
+              "memory_kib": {
+                "Pss": {
+                  "min": 11172,
+                  "median": 11172,
+                  "max": 11173
+                },
+                "Private_Dirty": {
+                  "min": 5200,
+                  "median": 5200,
+                  "max": 5200
+                }
+              },
+              "scheduler_wakeups": 0,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            },
+            "tray": {
+              "cpu_seconds": 0.18,
+              "cpu_percent_one_cpu": 0.01999959613479996,
+              "memory_kib": {
+                "Pss": {
+                  "min": 13033,
+                  "median": 13033,
+                  "max": 13033
+                },
+                "Private_Dirty": {
+                  "min": 4460,
+                  "median": 4460,
+                  "max": 4460
+                }
+              },
+              "scheduler_wakeups": 964,
+              "wakeup_threads_stable": true,
+              "wakeup_source": "/proc/PID/task/TID/sched nr_wakeups; guest sched_schedstats=1"
+            }
+          },
+          "frames_delta": 0,
+          "gui_tray_pss_kib": {
+            "min": 99185,
+            "median": 99185,
+            "max": 99185
+          },
+          "gui_tray_cpu_percent": 0.01999959613479996
+        }
+      ]
+    }
+  ],
+  "variance": {
+    "hidden": {
+      "cpu_percent": {
+        "min": 0.015555509249414392,
+        "max": 0.016666592679958073,
+        "median": 0.016666583264898834
+      },
+      "pss_median_kib": {
+        "min": 98638,
+        "max": 99117,
+        "median": 98924
+      },
+      "frames": {
+        "min": 0,
+        "max": 0,
+        "median": 0
+      },
+      "gui_wakeups": {
+        "min": 43,
+        "max": 57,
+        "median": 53
+      },
+      "gui_private_dirty_median_kib": {
+        "min": 29364,
+        "max": 29412,
+        "median": 29408
+      },
+      "tray_wakeups": {
+        "min": 972,
+        "max": 973,
+        "median": 972
+      },
+      "tray_private_dirty_median_kib": {
+        "min": 4396,
+        "max": 4396,
+        "median": 4396
+      }
+    },
+    "static-open": {
+      "cpu_percent": {
+        "min": 0.015555474991330833,
+        "max": 0.019999696429718928,
+        "median": 0.01999959613479996
+      },
+      "pss_median_kib": {
+        "min": 98710,
+        "max": 99185,
+        "median": 99000
+      },
+      "frames": {
+        "min": 0,
+        "max": 0,
+        "median": 0
+      },
+      "gui_wakeups": {
+        "min": 1,
+        "max": 3,
+        "median": 2
+      },
+      "gui_private_dirty_median_kib": {
+        "min": 29368,
+        "max": 29420,
+        "median": 29420
+      },
+      "tray_wakeups": {
+        "min": 964,
+        "max": 981,
+        "median": 976
+      },
+      "tray_private_dirty_median_kib": {
+        "min": 4460,
+        "max": 4460,
+        "median": 4460
+      }
+    }
+  }
+}

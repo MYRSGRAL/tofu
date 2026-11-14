@@ -1,6 +1,6 @@
 //! Владелец двух фиксированных systemd worker, с подтверждением пустой cgroup.
 //! Accepted подтверждает передачу FD, но не готовность сети и не Applied.
-use super::run_authorization::{RunAuthorization, RunRevocationGuard};
+use super::run_authorization::{RunAuthority, RunAuthorization, RunRevocationGuard};
 use crate::{
     Cancellation,
     worker::{WorkerAck, WorkerMode, WorkerPayload, WorkerStatus},
@@ -108,9 +108,42 @@ pub(crate) struct AuthorizedRun {
 }
 #[allow(dead_code)]
 impl AuthorizedRun {
+    pub(super) fn validate_owner(
+        &self,
+        owner: &RunAuthority,
+        payload: &Arc<WorkerPayload>,
+    ) -> Result<()> {
+        self.ticket()?;
+        self.lease.binding.validate_owner(owner, payload)
+    }
+    // Только retention/link unit boundary: намеренно не заменяет validate_owner.
+    #[cfg(test)]
+    pub(super) fn unit_validate_owner_link(
+        &self,
+        owner: &RunAuthority,
+        payload: &Arc<WorkerPayload>,
+    ) -> Result<()> {
+        if self
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .map(|kernel| kernel.retained_namespace_count())
+            != Some(2)
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.lease.binding.validate_owner(owner, payload)
+    }
     /// Ticket не является admission; доступ требует живого retained binding.
     pub(crate) fn ticket(&self) -> Result<&WorkerTicket> {
         self.lease.binding.validate()?;
+        if self.ticket.pid != self.lease.binding.observation.pid
+            || self.ticket.invocation != self.lease.binding.observation.invocation
+        {
+            return Err(WorkerSupervisorError::Stale);
+        }
+
         if self
             .lease
             .binding
@@ -139,6 +172,39 @@ pub struct BootstrapUnitObservation {
     invocation: [u8; 16],
     expires: Instant,
     pidfd: std::os::fd::OwnedFd,
+    #[cfg(test)]
+    fixture_io: Option<FixtureIdentityIo>,
+}
+// Единственный parser/predicate path для production и instance-scoped unit IO.
+trait RawIdentityIo {
+    fn now(&self) -> Instant;
+    fn read(&self, path: &str) -> Result<String>;
+}
+struct RealIdentityIo;
+impl RawIdentityIo for RealIdentityIo {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn read(&self, path: &str) -> Result<String> {
+        std::fs::read_to_string(path).map_err(unavailable)
+    }
+}
+#[cfg(test)]
+struct FixtureIdentityIo {
+    now: Instant,
+    files: std::collections::BTreeMap<String, String>,
+}
+#[cfg(test)]
+impl RawIdentityIo for FixtureIdentityIo {
+    fn now(&self) -> Instant {
+        self.now
+    }
+    fn read(&self, path: &str) -> Result<String> {
+        self.files
+            .get(path)
+            .cloned()
+            .ok_or(WorkerSupervisorError::Untrusted)
+    }
 }
 impl BootstrapUnitObservation {
     /// Только transport observation: NS_GET_NSTYPE/kernel attestation обязательны
@@ -186,22 +252,26 @@ impl BootstrapUnitObservation {
         Ok(())
     }
     fn validate_identity(&self) -> Result<()> {
-        if Instant::now() >= self.expires {
+        let io: &dyn RawIdentityIo = &RealIdentityIo;
+        #[cfg(test)]
+        let io: &dyn RawIdentityIo = self.fixture_io.as_ref().map_or(io, |fixture| fixture);
+        self.validate_identity_io(io)
+    }
+    fn validate_identity_io(&self, io: &dyn RawIdentityIo) -> Result<()> {
+        if io.now() >= self.expires {
             return Err(WorkerSupervisorError::UnitProofGap);
         }
         use std::os::fd::AsRawFd;
-        let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))
-            .map_err(unavailable)?;
+        let info = io.read(&format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))?;
         if info.lines().find_map(|line| {
             line.strip_prefix("Pid:")
                 .and_then(|v| v.trim().parse::<u32>().ok())
         }) != Some(self.pid)
-            || bootstrap_start(self.pid)? != self.start
+            || parse_bootstrap_start(&io.read(&format!("/proc/{}/stat", self.pid))?)? != self.start
         {
             return Err(WorkerSupervisorError::Stale);
         }
-        let status =
-            std::fs::read_to_string(format!("/proc/{}/status", self.pid)).map_err(unavailable)?;
+        let status = io.read(&format!("/proc/{}/status", self.pid))?;
         let uids = status
             .lines()
             .find_map(|line| line.strip_prefix("Uid:"))
@@ -222,7 +292,7 @@ impl BootstrapUnitObservation {
             .map_err(unavailable)?;
         if uids != [self.uid; 4]
             || gids != [self.gid; 4]
-            || std::fs::read_to_string(format!("/proc/{}/cgroup", self.pid)).map_err(unavailable)?
+            || io.read(&format!("/proc/{}/cgroup", self.pid))?
                 != format!("0::{}\n", WorkerMode::Run.cgroup())
         {
             return Err(WorkerSupervisorError::Stale);
@@ -232,6 +302,9 @@ impl BootstrapUnitObservation {
 }
 fn bootstrap_start(pid: u32) -> Result<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(unavailable)?;
+    parse_bootstrap_start(&stat)
+}
+fn parse_bootstrap_start(stat: &str) -> Result<u64> {
     stat.rsplit_once(')')
         .and_then(|(_, tail)| tail.split_whitespace().nth(19))
         .and_then(|v| v.parse().ok())
@@ -256,6 +329,15 @@ impl InvocationBinding {
             return Err(WorkerSupervisorError::Stale);
         }
         self.observation.validate_identity()
+    }
+    fn validate_owner(&self, owner: &RunAuthority, payload: &Arc<WorkerPayload>) -> Result<()> {
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| WorkerSupervisorError::Stale)?;
+        if !Arc::ptr_eq(&self.payload, payload) {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        Ok(())
     }
     fn validate_state(&self, state: &WorkerState) -> Result<()> {
         self.observation.validate_state(state)
@@ -530,6 +612,8 @@ impl SystemWorkerSupervisor {
                 rustix::process::Pid::from_raw(i32::try_from(state.pid).map_err(unavailable)?)
                     .ok_or(WorkerSupervisorError::Untrusted)?;
             let observation = BootstrapUnitObservation {
+                #[cfg(test)]
+                fixture_io: None,
                 pid: state.pid,
                 uid,
                 gid,
@@ -569,7 +653,17 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         cancel: &mut Cancellation,
     ) -> Result<WorkerTicket> {
-        self.start_inner(payload, None, cancel)
+        self.start_inner(payload, None, None, cancel)
+            .await
+            .map(|(ticket, _)| ticket)
+    }
+    pub(crate) async fn start_output(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        output: Option<crate::output_transport::ValidatedWriters>,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        self.start_inner(payload, None, output, cancel)
             .await
             .map(|(ticket, _)| ticket)
     }
@@ -582,7 +676,7 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
     ) -> Result<AuthorizedRun> {
         let (ticket, lease) = self
-            .start_inner(payload, Some(authorization), cancel)
+            .start_inner(payload, Some(authorization), None, cancel)
             .await?;
         Ok(AuthorizedRun {
             ticket,
@@ -593,6 +687,7 @@ impl SystemWorkerSupervisor {
         &mut self,
         payload: Arc<WorkerPayload>,
         authorization: Option<RunAuthorization>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<(WorkerTicket, Option<AuthorizedLease>)> {
         // Guard живёт в future, а не в blocking task: drop отзывает поздний ACK.
@@ -600,7 +695,14 @@ impl SystemWorkerSupervisor {
         let deadline = Instant::now() + DEADLINE;
         self.begin(WorkerMode::Run, cancel, deadline).await?;
         let (ack, binding) = self
-            .send_inner(payload, WorkerMode::Run, authorization, cancel, deadline)
+            .send_inner(
+                payload,
+                WorkerMode::Run,
+                authorization,
+                output,
+                cancel,
+                deadline,
+            )
             .await?;
         if ack.status != WorkerStatus::Accepted {
             return Err(WorkerSupervisorError::Protocol);
@@ -709,7 +811,7 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<WorkerAck> {
-        self.send_inner(payload, mode, None, cancel, deadline)
+        self.send_inner(payload, mode, None, None, cancel, deadline)
             .await
             .map(|(ack, _)| ack)
     }
@@ -718,10 +820,13 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         mode: WorkerMode,
         authorization: Option<RunAuthorization>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> TransferResult {
-        if authorization.is_some() && mode != WorkerMode::Run {
+        if (authorization.is_some() && mode != WorkerMode::Run)
+            || (output.is_some() && (mode != WorkerMode::Run || authorization.is_some()))
+        {
             return Err(WorkerSupervisorError::Protocol);
         }
         if payload.needs_tmpfs_assets() {
@@ -791,7 +896,7 @@ impl SystemWorkerSupervisor {
                     .map(|(ack, binding)| (ack, Some(binding)))
             } else {
                 payload
-                    .send(&stream, mode)
+                    .send_output(&stream, mode, output)
                     .map(|ack| (ack, None))
                     .map_err(|_| WorkerSupervisorError::Protocol)
             }
@@ -1392,3 +1497,84 @@ fn empty_events(contents: &str) -> Result<bool> {
 #[cfg(test)]
 #[path = "systemd_worker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn unit_owner_result(
+    owner: &RunAuthority,
+    payload: Arc<WorkerPayload>,
+) -> AuthorizedRun {
+    let authorization = owner.authorize([4; 32]).unwrap();
+    let (_, session, generation) = authorization.challenge_context().unwrap();
+    let guard = authorization.guard();
+    let kernel = crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation(
+        session, generation,
+    );
+    authorization.bind_custody(&kernel).unwrap();
+    let binding = InvocationBinding {
+        authorization,
+        observation: BootstrapUnitObservation {
+            fixture_io: None,
+            pid: 42,
+            uid: 0,
+            gid: 0,
+            start: 1,
+            invocation: [3; 16],
+            expires: Instant::now() + DEADLINE,
+            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
+        },
+        digest: payload.digest(),
+        payload,
+        kernel: Some(kernel),
+    };
+    // Только ownership fixture: не имитирует successful canonical verification/mint.
+    AuthorizedRun {
+        ticket: WorkerTicket {
+            pid: 42,
+            invocation: [3; 16],
+        },
+        lease: AuthorizedLease {
+            binding,
+            _guard: guard,
+        },
+    }
+}
+
+#[cfg(test)]
+pub(super) fn unit_raw_identity_result(
+    owner: &RunAuthority,
+    payload: Arc<WorkerPayload>,
+) -> AuthorizedRun {
+    use std::os::fd::AsRawFd;
+    let mut run = unit_owner_result(owner, payload);
+    let observation = &mut run.lease.binding.observation;
+    let mut fields = vec!["0"; 20];
+    fields[19] = "1";
+    observation.fixture_io = Some(FixtureIdentityIo {
+        now: Instant::now(),
+        files: [
+            (
+                format!("/proc/self/fdinfo/{}", observation.pidfd.as_raw_fd()),
+                "Pid:\t42\n".into(),
+            ),
+            (
+                "/proc/42/stat".into(),
+                format!("42 (unit raw fixture) {}", fields.join(" ")),
+            ),
+            (
+                "/proc/42/status".into(),
+                "Uid:\t0 0 0 0\nGid:\t0 0 0 0\n".into(),
+            ),
+            (
+                "/proc/42/cgroup".into(),
+                format!("0::{}\n", WorkerMode::Run.cgroup()),
+            ),
+        ]
+        .into(),
+    });
+    run
+}
+
+#[cfg(test)]
+pub(super) fn unit_owner_payload() -> Arc<WorkerPayload> {
+    tests::binding_test_payload()
+}

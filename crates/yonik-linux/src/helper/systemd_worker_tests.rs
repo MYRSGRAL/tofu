@@ -878,7 +878,7 @@ fn concurrent_authorization_has_exactly_one_winner() {
     });
 }
 
-fn binding_test_payload() -> Arc<WorkerPayload> {
+pub(super) fn binding_test_payload() -> Arc<WorkerPayload> {
     use sha2::Digest;
     let path = std::path::Path::new("/usr/bin/true");
     let bytes = std::fs::read(path).unwrap();
@@ -967,38 +967,7 @@ fn duplicate_kernel_report_revokes_all_custody() {
 
 fn authorized_result_fixture() -> (RunAuthority, AuthorizedRun) {
     let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
-    let authorization = owner.authorize([4; 32]).unwrap();
-    let guard = authorization.guard();
-    let kernel =
-        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
-    authorization.bind_custody(&kernel).unwrap();
-    let payload = binding_test_payload();
-    let binding = InvocationBinding {
-        authorization,
-        observation: BootstrapUnitObservation {
-            pid: 42,
-            uid: 0,
-            gid: 0,
-            start: 1,
-            invocation: [3; 16],
-            expires: Instant::now() + DEADLINE,
-            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
-        },
-        digest: payload.digest(),
-        payload,
-        kernel: Some(kernel),
-    };
-    // Только ownership fixture: не имитирует successful canonical verification/mint.
-    let result = AuthorizedRun {
-        ticket: WorkerTicket {
-            pid: 42,
-            invocation: [3; 16],
-        },
-        lease: AuthorizedLease {
-            binding,
-            _guard: guard,
-        },
-    };
+    let result = unit_owner_result(&owner, binding_test_payload());
     (owner, result)
 }
 
@@ -1095,4 +1064,173 @@ fn accepted_binding_rejects_expiry_and_identity_drift() {
         }),
         Err(WorkerSupervisorError::UnitProofGap)
     ));
+}
+
+#[test]
+fn owner_link_requires_exact_owner_and_payload_even_with_equal_bytes() {
+    let (owner, result) = authorized_result_fixture();
+    let payload = Arc::clone(&result.lease.binding.payload);
+    let equal_payload = binding_test_payload();
+    assert_eq!(payload.digest(), equal_payload.digest());
+    assert!(!Arc::ptr_eq(&payload, &equal_payload));
+    let foreign_owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    // Unit link boundary: fixture не проходит canonical cgroup identity.
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &payload)
+            .is_ok()
+    );
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&foreign_owner, &payload)
+            .is_err()
+    );
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &equal_payload)
+            .is_err()
+    );
+    assert!(result.validate_owner(&owner, &payload).is_err());
+    owner.revoke();
+    assert!(
+        result
+            .lease
+            .binding
+            .validate_owner(&owner, &payload)
+            .is_err()
+    );
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        0
+    );
+}
+
+#[test]
+fn full_owner_validation_keeps_canonical_gate_closed_for_link_fixture() {
+    for case in 0..4 {
+        let (owner, mut result) = authorized_result_fixture();
+        let foreign = RunAuthority::new([2; 16], 7, 9).unwrap();
+        let payload = if case == 1 {
+            binding_test_payload()
+        } else {
+            Arc::clone(&result.lease.binding.payload)
+        };
+        assert_eq!(payload.digest(), result.lease.binding.payload.digest());
+        if case == 2 {
+            owner.revoke();
+        }
+        if case == 3 {
+            result.lease.binding.observation.expires = Instant::now();
+        }
+        assert!(
+            result
+                .validate_owner(if case == 0 { &foreign } else { &owner }, &payload)
+                .is_err()
+        );
+        // Полный метод не легализует link-only fixture даже при правильных Arc.
+        assert!(
+            result
+                .validate_owner(&owner, &result.lease.binding.payload)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn raw_identity_fixture_uses_every_full_validation_predicate() {
+    use std::os::fd::AsRawFd;
+    for case in 0..15 {
+        let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+        let payload = binding_test_payload();
+        let mut run = unit_raw_identity_result(&owner, Arc::clone(&payload));
+        run.validate_owner(&owner, &payload).unwrap();
+        let observation = &mut run.lease.binding.observation;
+        let fdinfo = format!("/proc/self/fdinfo/{}", observation.pidfd.as_raw_fd());
+        let fixture = observation.fixture_io.as_mut().unwrap();
+        match case {
+            0 => fixture.now = observation.expires,
+            1 => {
+                fixture.files.remove(&fdinfo);
+            }
+            2 => {
+                fixture.files.insert(fdinfo, "Pid: 43\n".into());
+            }
+            3 => {
+                fixture.files.insert(fdinfo, "Pid: invalid\n".into());
+            }
+            4 => {
+                fixture
+                    .files
+                    .insert("/proc/42/stat".into(), "malformed".into());
+            }
+            5 => {
+                fixture.files.get_mut("/proc/42/stat").unwrap().push('2');
+            }
+            6 => {
+                fixture
+                    .files
+                    .insert("/proc/42/status".into(), "Gid: 0 0 0 0\n".into());
+            }
+            7 => {
+                fixture
+                    .files
+                    .insert("/proc/42/status".into(), "Uid: 0 0 0 0\n".into());
+            }
+            8 => {
+                fixture.files.insert(
+                    "/proc/42/status".into(),
+                    "Uid: 0 0 x 0\nGid: 0 0 0 0\n".into(),
+                );
+            }
+            9 => {
+                fixture.files.insert(
+                    "/proc/42/status".into(),
+                    "Uid: 0 0 1 0\nGid: 0 0 0 0\n".into(),
+                );
+            }
+            10 => {
+                fixture.files.insert(
+                    "/proc/42/status".into(),
+                    "Uid: 0 0 0 0\nGid: 0 0 0 1\n".into(),
+                );
+            }
+            11 => {
+                fixture
+                    .files
+                    .insert("/proc/42/cgroup".into(), "0::/wrong.service\n".into());
+            }
+            12 => run.ticket.pid += 1,
+            13 => run.ticket.invocation = [8; 16],
+            14 => owner.revoke(),
+            _ => unreachable!(),
+        }
+        assert!(
+            run.validate_owner(&owner, &payload).is_err(),
+            "raw predicate {case}"
+        );
+    }
+}
+
+#[test]
+fn raw_identity_fixture_is_scoped_to_one_retained_observation() {
+    let first = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let second = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let payload = binding_test_payload();
+    let raw = unit_raw_identity_result(&first, Arc::clone(&payload));
+    let real = unit_owner_result(&second, Arc::clone(&payload));
+    raw.validate_owner(&first, &payload).unwrap();
+    assert!(real.validate_owner(&second, &payload).is_err());
+    raw.validate_owner(&first, &payload).unwrap();
 }

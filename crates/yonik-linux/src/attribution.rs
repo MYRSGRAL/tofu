@@ -99,6 +99,10 @@ impl PeerProcess {
         }
         self.verify_pidfd()
     }
+    pub(crate) fn verified_uid(&self) -> Result<u32, AttributionFailure> {
+        self.verify_identity()?;
+        Ok(self.uid)
+    }
     fn verify_pidfd(&self) -> Result<(), AttributionFailure> {
         use std::os::fd::AsRawFd;
         let file = fs::File::open(format!("/proc/self/fdinfo/{}", self.pidfd.as_raw_fd()))

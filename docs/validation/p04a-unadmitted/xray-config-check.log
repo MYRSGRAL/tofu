@@ -1,0 +1,4 @@
+Xray 26.10.31 (Xray, Penetrates Everything.) a4a3dff (go1.27.3 linux/amd64)
+A unified platform for anti-censorship.
+2026/11/14 03:59:34.441582 [Info] infra/conf/serial: Reading config: &{Name:/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture/xray-data/config.json Format:json}
+Configuration OK.

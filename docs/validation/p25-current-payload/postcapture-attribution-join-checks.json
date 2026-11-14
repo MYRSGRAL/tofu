@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "scope": "new private pure attribution helper only; local commit, no push",
+  "base": "04444a3fc3f444cff136d2f0a52bc1e9ef7fe061",
+  "pr215_local_branch_preserved_at": "04444a3fc3f444cff136d2f0a52bc1e9ef7fe061",
+  "api": "_p25_attribution_join.attribute_capture",
+  "new_helper_tests": {
+    "methods": 15,
+    "successful_subtests": 35
+  },
+  "scoped_normal_and_optimized": {
+    "unittest_methods": 52,
+    "successful_subtests": 68,
+    "normal_exit": 0,
+    "optimized_exit": 0,
+    "command": "python -S [-O] -m unittest discover -s tools/tests -p test_p25_*.py -v"
+  },
+  "ruff": {
+    "version": "0.17.4",
+    "check_tools": 0,
+    "format_check_tools": 0
+  },
+  "evidence": {
+    "normal.log": {
+      "path": "local/evidence/p25-attribution-join/normal.log",
+      "sha256": "8cc27a5db836355410808c7f98820c0fe91138d82fba3017e909943c733d9af1"
+    },
+    "optimized.log": {
+      "path": "local/evidence/p25-attribution-join/optimized.log",
+      "sha256": "c2a29671a46e83ddbd89a0740af86eaebf216e82e0bd3c048f1196f589e08464"
+    },
+    "synthetic-example.json": {
+      "path": "local/evidence/p25-attribution-join/synthetic-example.json",
+      "sha256": "a6ec4b4603414c129cfaa37345fde17eb78afb464573835866082bedf656cf2c"
+    }
+  },
+  "test_fixture_capture_api_exercised": true,
+  "synthetic_example_is_actual_build_evidence": false,
+  "source_capsule": "MISSING",
+  "preserved_paths": [
+    "tools/release_controller.py",
+    "tools/_p25_capture_producer.py",
+    "tools/_p25_final_profile.py",
+    "tools/p25_cxx_capture_wrapper.py",
+    "tools/p25_capture_build_closure.py",
+    "tools/tests/test_p25_capture_producer.py",
+    "tools/tests/test_p25_final_profile.py",
+    "docs/validation/p25-current-payload/qt-file-attribution-candidate"
+  ],
+  "actual_compiler_query_build_download_install": false,
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false
+}

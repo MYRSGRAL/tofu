@@ -1,0 +1,25 @@
+{
+  "sha256": {
+    "local/validation/p03-lifecycle/source.tar.gz": "19a0bc187cc789581aa62698910d6c0ec512b6ddbca81573bacf9008b2922549",
+    "local/validation/p03-lifecycle/p03_lifecycle": "b3e6eeddbed04864a34fa56d75300a891847532a4563ce1f44c1e0a215d14eb1",
+    "local/validation/p03-lifecycle/final/observer.so": "8ae93dbed9f2e400e169818eb359e85e59adb79e43cbe32b4aacdd08c88c8642",
+    "local/validation/p03-lifecycle/final/results.json": "5f101a569e3dd87749928b18f38fe965b816ecc3fbddccd7cebd98d303c9dd61",
+    "local/validation/p03-lifecycle/build.log": "23dfae325078aa1ff00f0bcedad0fc1525226a7b40b1e47875d8363ad3b306e5",
+    "local/validation/p03-lifecycle/clippy-final.log": "3069e8ed3b1fc918014f47419a106217c9dd80f594fce4bb46cfc89364816a94",
+    "local/validation/p03-lifecycle/final/positive-0/qt.log": "7a18c809ba1f37b0ce7ce3a813087e95bcf2e23aa99391cef79b6a391cc3f2a9",
+    "local/validation/p03-lifecycle/final/positive-1/qt.log": "21b72a373ec447e18f809dadc02daf6f30487abd76c48c6d588e5b8f20f39ae4",
+    "local/validation/p03-lifecycle/final/positive-2/qt.log": "ad15086c9e16ecc22fa3cc366dd93956431d50cdd404d212077f45a4bb6e3051",
+    "local/validation/p03-lifecycle/final/negative-disconnected/qt.log": "d525923f2f5129c6d7209103b3ee093e5a1298c9af1356a198467f642f75524c",
+    "local/validation/p03-lifecycle/final/negative-duplicate/qt.log": "b24e561fb0136fc9fc7323e5014c71f8eee9a7cc7d056513d29a826c26be5695",
+    "local/validation/p03-lifecycle/final/negative-retained/qt.log": "d57871a89edbc90ecfbfc6c066d0eca1407981657276b980cc2c2da7d4ba93ad"
+  },
+  "checks": {
+    "build": "PASS Rust1.85.1",
+    "clippy": "PASS focused example -D warnings",
+    "positive": "3x100 PASS",
+    "negative": "3 expected failures",
+    "ruff": "PASS",
+    "rustfmt": "PASS"
+  },
+  "base": "7e909c754ea2798a2c5615702224391b19e82ee1"
+}

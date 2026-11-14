@@ -251,6 +251,141 @@ class ControllerTest(unittest.TestCase):
             os.stat(self.registry / "unit/frozen.json").st_mode & 0o777, 0o600
         )
 
+    def test_capture_retained_before_clean(self) -> None:
+        self.freeze()
+        original = self.runner.run
+
+        def checked(argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+            if argv[:3] == [c.SLOT, "cargo", "clean"]:
+                manifest = json.loads(
+                    (self.registry / "unit/build-capture-manifest.json").read_bytes()
+                )
+                self.assertEqual(manifest["status"], "MISSING")
+                self.assertIn(
+                    "qt:observed-query-and-tool", manifest["producer_missing"]
+                )
+            return original(argv, cwd, env)
+
+        self.runner.run = checked
+        self.collect()
+
+    def test_retention_failure_preserves_target(self) -> None:
+        self.freeze()
+        with patch.object(
+            c, "retain_build_capture", side_effect=OSError("fixture retention")
+        ):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+
+    def test_retained_source_and_elfs_synced_before_capture(self) -> None:
+        self.freeze()
+        synced = set()
+        original_sync = os.fsync
+        original_retain = c.retain_build_capture
+
+        def sync(fd: int) -> None:
+            name = Path(os.readlink(f"/proc/self/fd/{fd}")).name
+            synced.add(name)
+            original_sync(fd)
+
+        def retain(*args, **kwargs) -> dict:
+            self.assertTrue({"source.tar", *c.RUST}.issubset(synced))
+            return original_retain(*args, **kwargs)
+
+        with (
+            patch.object(c.os, "fsync", side_effect=sync),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            self.collect()
+
+    def test_retained_elf_sync_failure_preserves_target(self) -> None:
+        self.freeze()
+        original_sync = os.fsync
+
+        def sync(fd: int) -> None:
+            if Path(os.readlink(f"/proc/self/fd/{fd}")).name == "yonik-worker":
+                raise OSError("fixture ELF fsync failure")
+            original_sync(fd)
+
+        with patch.object(c.os, "fsync", side_effect=sync):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(
+            any(
+                row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                for row in self.runner.commands
+            )
+        )
+        self.assertFalse((self.registry / "unit/build-capture-manifest.json").exists())
+
+    def test_final_profile_freeze_and_hash_rejection(self) -> None:
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture tooling")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        original_recipe = json.dumps(c.RECIPE, sort_keys=True)
+        frozen = c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        self.assertTrue(c.verify_final_profile(frozen))
+        self.assertEqual(json.dumps(c.RECIPE, sort_keys=True), original_recipe)
+        self.assertIn("sha256", frozen["final_profile"])
+        frozen["final_profile"]["sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            c.verify_final_profile(frozen)
+        with self.assertRaises(ValueError):
+            c._freeze(
+                self.repo,
+                self.registry,
+                c.RUST_REUSE_TARGET,
+                commit,
+                "p25-final-cxx-v1",
+            )
+
+    def test_final_profile_cannot_be_added_to_old_source(self) -> None:
+        with self.assertRaises(subprocess.CalledProcessError):
+            c._freeze(self.repo, self.registry, "unit", self.commit, "p25-final-cxx-v1")
+        self.assertFalse((self.registry / "unit").exists())
+
+    def test_final_profile_invokes_only_selected_prepare_and_retain(self) -> None:
+        import _p25_final_profile as profile
+
+        for name in c.final_capture_profile()["tooling_sha256"]:
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        (self.repo / "tools/p25_cxx_capture_wrapper.py").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-m", "fixture final profile")
+        commit = self.git("rev-parse", "HEAD").decode().strip()
+        c._freeze(self.repo, self.registry, "unit", commit, "p25-final-cxx-v1")
+        events = []
+
+        def prepare(source: Path, build: Path, env: dict[str, str]) -> None:
+            events.append("prepare")
+            self.assertFalse((build / "release").exists())
+
+        def retain(*args, **kwargs) -> dict:
+            events.append("retain")
+            self.assertTrue((self.task / "target/release/yonik-desktop").exists())
+            self.assertTrue(kwargs["final_profile"])
+            return {"status": "MISSING", "positive_metadata": {"fixture": True}}
+
+        with (
+            patch.object(profile, "prepare", side_effect=prepare),
+            patch.object(c, "retain_build_capture", side_effect=retain),
+        ):
+            result = self.collect()
+        self.assertEqual(events, ["prepare", "retain"])
+        self.assertEqual(result["final_profile"], c.final_capture_profile())
+        self.assertEqual(result["build_capture"]["status"], "MISSING")
+
     def test_uncollected_and_fabricated_context(self) -> None:
         self.freeze()
         with self.assertRaises(ValueError):
@@ -707,3 +842,140 @@ class ControlledProfileTests(unittest.TestCase):
                 record["controlled_env"]["CARGO_TARGET_DIR"], env["CARGO_TARGET_DIR"]
             )
             self.assertNotIn("PRIVATE_UNRELATED_SECRET", record["controlled_env"])
+
+
+class CollectedReuseTests(ControllerTest):
+    def test_collected_reuse_never_builds_and_preserves_prior(self) -> None:
+        for name in c.tooling_hashes():
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture controller")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+        self.freeze()
+        prior = self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        c._freeze(self.repo, self.registry, "next", self.commit)
+        shutil.rmtree(self.task)
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            patch.object(c, "COLLECTED_REUSE_REVIEW", self.commit),
+        ):
+            result = c._collect(
+                self.repo, self.registry, "next", self.task, self.runner
+            )
+        self.assertEqual(result["collected_lineage"]["build_performed"], False)
+        self.assertEqual(result["commands"], [])
+        self.assertIn(".MTREE", result["payload"])
+        self.assertEqual(
+            c.sha(folder / "collected.json"), pins["collected.json"]["sha256"]
+        )
+        self.assertEqual(result["source"], prior["source"])
+
+    def test_collected_reuse_changed_input_rejected(self) -> None:
+        for name in c.tooling_hashes():
+            shutil.copyfile(TOOLS / name, self.repo / "tools" / name)
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture controller")
+        self.commit = self.git("rev-parse", "HEAD").decode().strip()
+        self.freeze()
+        self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        (folder / "yonik-desktop").write_bytes(b"tampered")
+        c._freeze(self.repo, self.registry, "next", self.commit)
+        shutil.rmtree(self.task)
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            self.assertRaises(c.NotReady),
+        ):
+            c._collect(self.repo, self.registry, "next", self.task, self.runner)
+
+    def test_collected_reuse_source_mismatch_rejected(self) -> None:
+        self.freeze()
+        context = self.collect()
+        folder = self.registry / "unit"
+        for directory in folder.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        pins = {
+            p.relative_to(folder).as_posix(): {
+                "size": p.stat().st_size,
+                "sha256": c.sha(p),
+            }
+            for p in folder.rglob("*")
+            if p.is_file()
+        }
+        wrong = {**context, "source": {**context["source"], "commit": "b" * 40}}
+        with (
+            patch.object(c, "COLLECTED_REUSE_TARGET", "next"),
+            patch.object(c, "COLLECTED_REUSE_PRIOR", "unit"),
+            patch.object(c, "collected_reuse_pins", return_value=pins),
+            self.assertRaisesRegex(c.NotReady, "source/tree"),
+        ):
+            c.reuse_collected(
+                self.repo, self.registry, "next", wrong, folder, self.repo
+            )
+
+
+class PackageMtreeTests(unittest.TestCase):
+    def test_mtree_matches_archive_metadata_and_escaped_paths(self) -> None:
+        import gzip
+
+        with tempfile.TemporaryDirectory() as folder:
+            package = Path(folder) / "package.tar"
+            c.write_package(
+                package, {"usr/share/test space#=\\é": (0o644, b"payload")}, b"info"
+            )
+            with tarfile.open(package) as archive:
+                self.assertIn(".MTREE", archive.getnames())
+                stream = archive.extractfile(".MTREE")
+                self.assertIsNotNone(stream)
+                text = gzip.decompress(stream.read()).decode("ascii")
+                self.assertNotIn("./.MTREE ", text)
+                self.assertIn(
+                    "./.PKGINFO type=file uid=0 gid=0 mode=644 time=0 size=4 sha256digest=",
+                    text,
+                )
+                self.assertIn(r"./usr/share/test\040space\043\075\134\303\251 ", text)
+                for member in archive:
+                    self.assertEqual((member.uid, member.gid, member.mtime), (0, 0, 0))
+
+    def test_builder_rejects_unsafe_and_reserved_names(self) -> None:
+        for name in (
+            "../escape",
+            "/absolute",
+            "usr//bad",
+            ".MTREE",
+            ".PKGINFO",
+            "usr/../bad",
+        ):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                with self.assertRaises(ValueError):
+                    c.write_package(
+                        Path(folder) / "package.tar", {name: (0o644, b"x")}, b"info"
+                    )

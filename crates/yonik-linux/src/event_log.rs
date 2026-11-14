@@ -8,6 +8,7 @@ use std::{
 };
 
 mod disk;
+pub(crate) mod native_details;
 pub use disk::{DiskLogGuard, DiskLogStats, DiskLogStatus};
 
 pub const MAX_EVENTS: usize = 2_000;
@@ -37,6 +38,10 @@ pub enum EventCode {
     CleanupConfirmed,
     CleanupFailed,
     ProcessExited,
+    NativeSingStarted,
+    NativeSingMissingInterface,
+    NativeXrayStarted,
+    NativeXrayLocalDns,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LogEvent {
@@ -130,13 +135,25 @@ impl EventLog {
     }
     /// Producer никогда не ждёт consumer. Переполнение счётчиков насыщается.
     pub(crate) fn record(&self, source: EventSource, code: EventCode, value: Option<i32>) {
+        self.try_record(source, code, value);
+    }
+    fn try_record(&self, source: EventSource, code: EventCode, value: Option<i32>) -> bool {
+        if code.is_native()
+            && (native_details::project(source, code, value).is_none()
+                || !self
+                    .1
+                    .is_some_and(|c| c.session_id != 0 && c.generation != 0))
+        {
+            self.reject();
+            return false;
+        }
         let Ok(mut ring) = self.0.ring.try_lock() else {
             self.reject();
-            return;
+            return false;
         };
         if ring.next == u64::MAX {
             self.reject();
-            return;
+            return false;
         }
         let event = LogEvent {
             id: ring.next,
@@ -155,6 +172,15 @@ impl EventLog {
         if let Some(disk) = &self.0.disk {
             disk.record(event, self.1);
         }
+        true
+    }
+    fn reject_count(&self, count: u64) {
+        let _ = self
+            .0
+            .rejected
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_add(count))
+            });
     }
     pub(crate) fn reject(&self) {
         let _ = self
@@ -211,6 +237,23 @@ impl EventLog {
         Some(ScopedPage { page, contexts })
     }
 }
+impl EventCode {
+    pub fn is_native(self) -> bool {
+        matches!(
+            self,
+            Self::NativeSingStarted
+                | Self::NativeSingMissingInterface
+                | Self::NativeXrayStarted
+                | Self::NativeXrayLocalDns
+        )
+    }
+}
+impl LogEvent {
+    /// Единственная проверенная проекция body для UI и экспорта; raw input недоступен.
+    pub fn technical_details(&self) -> Option<String> {
+        native_details::project(self.source, self.code, self.value).map(|d| d.body())
+    }
+}
 impl LogPage {
     /// Экспорт одной ограниченной страницы. Только статические коды и числа.
     pub fn export(&self) -> String {
@@ -220,11 +263,17 @@ impl LogPage {
         );
         for event in self.events.iter().take(MAX_PAGE) {
             use std::fmt::Write;
+            if event.code.is_native() && event.technical_details().is_none() {
+                continue;
+            }
             let _ = writeln!(
                 text,
                 "{} {:?} {:?} {:?}",
                 event.id, event.source, event.code, event.value
             );
+            if let Some(body) = event.technical_details() {
+                let _ = writeln!(text, "technical event={} {}", event.id, body);
+            }
         }
         text
     }
@@ -344,3 +393,6 @@ mod context_tests {
         );
     }
 }
+
+#[cfg(any(test, feature = "test-support"))]
+pub use disk::test_support::DiskFixture;

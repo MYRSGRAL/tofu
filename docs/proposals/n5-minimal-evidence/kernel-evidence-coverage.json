@@ -1,0 +1,453 @@
+{
+  "status": "COVERAGE_MAP_NOT_RUNTIME_EVIDENCE",
+  "cases": [
+    {
+      "id": "revoked-and-malformed",
+      "expected": "Cancelled/Revoked",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "epoch-change-during-await",
+      "expected": "Cancelled/Revoked",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "drop-pending-late-result",
+      "expected": "Cancelled/Revoked",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "health-failure-before-consume",
+      "expected": "Cancelled/Revoked",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "exact-deadline",
+      "expected": "Expired",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "late-report",
+      "expected": "Expired",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "expired-and-wrong-binding",
+      "expected": "Expired",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "length-511",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "length-513",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "MSG_TRUNC",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "MSG_CTRUNC",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "missing-credentials",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "duplicate-credentials",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-uid",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-pid",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "unexpected-fd",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-channel",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "dead-pidfd",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "reused-task-pid",
+      "expected": "Transport",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "old-v3",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "unknown-version",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "nonzero-reserved-a",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "nonzero-reserved-b",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "nonzero-reserved-c",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "nonzero-tail",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "errno-zero",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "errno-4096",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "duplicate-report",
+      "expected": "Protocol",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "little-endian-generation",
+      "expected": "Binding",
+      "permit_count": 0,
+      "wire_patch": {
+        "offset": 88,
+        "hex": "0100000000000000"
+      },
+      "trusted_context": {
+        "generation": 1
+      },
+      "decoded_generation": 72057594037927936,
+      "precondition": "All other fields valid, canonical pending context current; endian intent is not detectable by framing.",
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-nonce",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-digest",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-session",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-generation",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-epoch",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-invocation",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-task-start",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-server-start",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "role-challenge-mismatch",
+      "expected": "Binding",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "unknown-tuple",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "hash-only-without-actual-used-binding",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "unsigned-provenance",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "wrong-unit-properties-after-await",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "unknown-namespace-bit",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "native-property-without-abi-semantics",
+      "expected": "Profile",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "no-receipt-and-no-sufficient-reviewed-combined-evidence",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "precondition": "No sufficient evidence path is available; optional receipt absence alone is not a failure.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "worker-boolean-receipt",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "signed-declared-profile",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "journal-silence-only",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "count-max-without-inventory",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "v3-plus-count-only",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "fixed16-compiled-only",
+      "expected": "EvidenceUnavailable",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "clone3-rule-skip-with-full-count",
+      "expected": "IncompleteApplication",
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "namespace-load-skip",
+      "expected": "IncompleteApplication",
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "native-load-skip",
+      "expected": "IncompleteApplication",
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "missing-operation",
+      "expected": "IncompleteApplication",
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "receipt-other-invocation",
+      "expected": "IncompleteApplication",
+      "permit_count": 0,
+      "evidence_path": "receipt-alternative",
+      "precondition": "Independently authenticated retained installation record establishes the skip/incompleteness; count alone does not.",
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "fixed16-reordered",
+      "expected": "ObservationMismatch",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "old3-wrong-errno",
+      "expected": "ObservationMismatch",
+      "permit_count": 0,
+      "coverage": "DATA parser unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "second-consume",
+      "expected": "Consumed",
+      "permit_count": 0,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0
+    },
+    {
+      "id": "two-concurrent-consumers",
+      "expected": "one-success-one-Consumed",
+      "permit_count": 1,
+      "coverage": "DATA lifetime unit",
+      "kernel_permit_count": 0,
+      "label_clarification": "legacy permit_count=1 означает ровно один ConsumedRecord DATA, не ProductionPermit"
+    },
+    {
+      "id": "synthetic-complete-trusted-context",
+      "expected": "unit-only-verified-transaction-no-production-permit",
+      "permit_count": 0,
+      "coverage": "EXTERNAL: не проверено; transport/runtime/profile context отсутствует",
+      "kernel_permit_count": 0
+    }
+  ]
+}

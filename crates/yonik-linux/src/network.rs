@@ -217,6 +217,32 @@ impl NetworkPublisher {
     }
 }
 
+// Синтетические source-availability inputs, НЕ наблюдения real service monitor.
+#[cfg(test)]
+pub(crate) fn unit_source_publisher() -> (NetworkPublisher, NetworkWatch) {
+    let (tx, rx) = watch::channel(NetworkSnapshot {
+        stamp: NetworkStamp {
+            instance: [0x73; 16],
+            generation: 0,
+        },
+        coverage: NetworkCoverage::default(),
+        exhausted: false,
+    });
+    (NetworkPublisher(tx), NetworkWatch(rx))
+}
+#[cfg(test)]
+impl NetworkPublisher {
+    pub(crate) fn unit_ready(&self, source: NetworkSource) {
+        self.ready(source);
+    }
+    pub(crate) fn unit_changed(&self, source: NetworkSource) {
+        self.changed(source);
+    }
+    pub(crate) fn unit_lost(&self, source: NetworkSource) {
+        self.lost(source);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]

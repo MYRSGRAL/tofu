@@ -1,0 +1,8 @@
+{
+  "root": "/var/tmp/codex-myrs/transient/p04a-mixed-red-186",
+  "active_refs_before_cleanup": [],
+  "size_before_bytes": 3946708223,
+  "cargo_clean_exit": 0,
+  "removed": true,
+  "retained": "local/p04a-mixed-red (ELFs, source archives, raw logs outside TTL)"
+}

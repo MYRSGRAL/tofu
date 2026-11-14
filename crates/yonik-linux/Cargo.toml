@@ -43,4 +43,4 @@ name = "yonik-worker"
 path = "src/worker_main.rs"
 
 [features]
-test-support = []
+test-support = ["yonik-nsfs/test-support"]

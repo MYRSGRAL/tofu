@@ -525,6 +525,24 @@ mod job_tests {
     }
     #[tokio::test]
     async fn cancel_after_install_entry_before_index_publication_preserves_current() {
+        if std::env::var_os("YONIK_PRESET_CANCEL_ISOLATED").is_none() {
+            let child = std::process::Command::new(std::env::current_exe().expect("libtest"))
+                .args([
+                    "--exact",
+                    "backend::presets::job_tests::cancel_after_install_entry_before_index_publication_preserves_current",
+                    "--test-threads=1",
+                ])
+                .env("YONIK_PRESET_CANCEL_ISOLATED", "1")
+                .output()
+                .expect("isolated preset fixture");
+            assert!(
+                child.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+            return;
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listen");
@@ -678,6 +696,7 @@ mod host_gate {
             ..Default::default()
         };
         draft.rules.push(crate::editor::RuleInput {
+            transport: None,
             platform_sources: None,
             id: 1,
             enabled: true,

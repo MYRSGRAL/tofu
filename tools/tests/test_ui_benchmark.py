@@ -302,6 +302,11 @@ class ChildTests(unittest.TestCase):
             with self.assertRaisesRegex(bench.BenchmarkError, message):
                 child.ack(2)
 
+    def test_observed_partial_duplicate_ack_is_rejected(self) -> None:
+        child = self.spawn('import os,time\nos.write(1,b"{}\\n{")\ntime.sleep(20)')
+        with self.assertRaisesRegex(bench.BenchmarkError, "одного ack"):
+            child.ack(2)
+
     def test_stderr_flood_is_drained_but_file_is_bounded(self) -> None:
         child = self.spawn(
             'import os,time\nos.write(2,b"x"*2000000)\nprint("{}",flush=True)\ntime.sleep(2)'

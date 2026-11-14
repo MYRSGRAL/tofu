@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "parent": "cfa8bc12090eb4b2f6eca973024991b8aa93c53a",
+  "installed_elf": {
+    "path": "/usr/lib/libseccomp.so.2.6.0",
+    "sha256": "5cd82027e6ab3dba31ee44200bb07f364a9f8e881d073fefbdf15a65cee8005c",
+    "signed_provenance": "libseccomp-delta-manifest.json"
+  },
+  "sources": [
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/api.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/api.c",
+      "sha256": "849fcc1715adf669de601ce35e6dd4335f28acd58669d32f54473d24a37ea419",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/arch-x32.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch-x32.c",
+      "sha256": "2081e0d6bf4599c6f94be28d052df90d752e2d36a45489139598a0269b9c79e8",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/arch-x86_64.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch-x86_64.c",
+      "sha256": "ccc0f124cd1356c17a445099b9b16d9ca050683f6dbf9e0b477083cbc32e9e35",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/arch.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch.c",
+      "sha256": "e740e021558dc6ddaca36615a0c6192bf64e698e8e843ae364ca53bda195f5b2",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/db.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/db.c",
+      "sha256": "3389c497200f38361eb28f65e8fdaaf1b3d750aa58921f9c0b497d6e95a28ba4",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/gen_bpf.c",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/gen_bpf.c",
+      "sha256": "f11d76ca84b058b3955e1e999afac45e7fb068a6659d042d9dda137140b0e1e0",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/arch.h",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch.h",
+      "sha256": "8ca36abd3c19c2aa229d0d30351ad75bec89da2d022810efa48b19a1f1dfbc8f",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-emitter-source/db.h",
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/db.h",
+      "sha256": "96a1f5fb03c294699d68e7636b5929181661f874ce78a6ab27b8bfc2c6f7d15d",
+      "authority": "primary upstream reference only; no downstream source equivalence asserted"
+    }
+  ],
+  "retrieval": [
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/gen_bpf.c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/db.c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/db.h",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch.c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch.h",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch-x86_64.c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/arch-x32.c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "url": "https://raw.githubusercontent.com/seccomp/libseccomp/v2.6.0/src/api.c",
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "records_sha256": "0d87a27e2fc8d8499efb017b921f24f5eb9a9d682c3df119c75643106625bdf8",
+  "supported_universe": {
+    "abi": "native x86-64 little endian; i386/x32 are exclusion cases only",
+    "namespace_flags": [
+      "0x02000000",
+      "0x08000000",
+      "0x40000000",
+      "0x00020000",
+      "0x20000000",
+      "0x10000000",
+      "0x04000000",
+      "0x80"
+    ],
+    "retain": 0,
+    "architectures": [
+      "native"
+    ],
+    "namespace_default": "ALLOW",
+    "arch_filter_default": "ALLOW",
+    "badarch_default": "KILL_THREAD (0)"
+  },
+  "covered_edges": [
+    "mask/value split and datum &= mask at db_rule_add native64 path",
+    "arg0 low/high offsets 16/20",
+    "emitter accumulator reload subset condition, AND K and JEQ K",
+    "known one-bit rules share tautological high node and retain distinct low predicates at source/selected binary comparisons",
+    "native-only no i386/x32 added; native arch definition and badarch default construction",
+    "x32 guard: JGE 0x40000000 then JEQ -1; badarch symbolic target for other high syscall numbers",
+    "final instruction pack requires immediate targets and copies opcode/k; unresolved target fails",
+    "generation/load errors propagate at libseccomp boundary while systemd skips selected failures"
+  ],
+  "remaining_static_condition": "Complete profile-specialized symbolic linking invariant: db branch/hash targets and accumulator block elimination must preserve all eight OR predicates and badarch targets through _gen_bpf_chain_lvl_res and gen_bpf_generate 0x7dc5..0x8176. No generated program or execution used to discharge it.",
+  "runtime_gates": [
+    "loaded PID1/executor/library bytes",
+    "authenticated complete successful filter load in exact pending invocation",
+    "production owner/issuer/factory admission"
+  ],
+  "runtime_executed": false,
+  "frozen_evidence_modified": false
+}

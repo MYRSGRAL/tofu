@@ -1,0 +1,14 @@
+=== RUN   TestP04AActualCodecAND
+=== RUN   TestP04AActualCodecAND/match
+=== RUN   TestP04AActualCodecAND/wrongapp
+=== RUN   TestP04AActualCodecAND/wrongname
+=== RUN   TestP04AActualCodecAND/wrongCIDR
+=== RUN   TestP04AActualCodecAND/wronginbound
+--- PASS: TestP04AActualCodecAND (0.00s)
+    --- PASS: TestP04AActualCodecAND/match (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongapp (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongname (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongCIDR (0.00s)
+    --- PASS: TestP04AActualCodecAND/wronginbound (0.00s)
+PASS
+ok  	github.com/sagernet/sing-box/route/rule	0.004s

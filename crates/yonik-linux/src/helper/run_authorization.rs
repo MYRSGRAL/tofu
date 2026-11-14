@@ -122,6 +122,21 @@ impl RunAuthorization {
         }
         Ok(())
     }
+    /// Числовое совпадение не заменяет владение тем же revocation object.
+    pub(super) fn validate_owner(&self, owner: &RunAuthority) -> Result<(), RunAuthorizationError> {
+        self.validate()?;
+        if owner.revoked.load(Ordering::Acquire) {
+            return Err(RunAuthorizationError::Revoked);
+        }
+        if !Arc::ptr_eq(&self.revoked, &owner.revoked)
+            || self.session != owner.session
+            || self.generation != owner.generation
+            || self.network_epoch != owner.network_epoch
+        {
+            return Err(RunAuthorizationError::InvalidContext);
+        }
+        Ok(())
+    }
     pub(crate) fn challenge_context(
         &self,
     ) -> Result<([u8; 32], [u8; 16], u64), RunAuthorizationError> {
@@ -171,5 +186,44 @@ pub(super) struct RunRevocationGuard(Arc<RunRevocation>);
 impl Drop for RunRevocationGuard {
     fn drop(&mut self) {
         self.0.revoke();
+    }
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    #[test]
+    fn exact_owner_rejects_equal_numbers_foreign_arc_and_revocation() {
+        let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+        let other = RunAuthority::new([1; 16], 7, 9).unwrap();
+        let mut token = owner.authorize([2; 32]).unwrap();
+        assert_eq!(token.validate_owner(&owner), Ok(()));
+        assert_eq!(
+            token.validate_owner(&other),
+            Err(RunAuthorizationError::InvalidContext)
+        );
+        token.session = [9; 16];
+        assert_eq!(
+            token.validate_owner(&owner),
+            Err(RunAuthorizationError::InvalidContext)
+        );
+        token.session = [1; 16];
+        token.generation += 1;
+        assert_eq!(
+            token.validate_owner(&owner),
+            Err(RunAuthorizationError::InvalidContext)
+        );
+        token.generation -= 1;
+        token.network_epoch += 1;
+        assert_eq!(
+            token.validate_owner(&owner),
+            Err(RunAuthorizationError::InvalidContext)
+        );
+        token.network_epoch -= 1;
+        owner.revoke();
+        assert_eq!(
+            token.validate_owner(&owner),
+            Err(RunAuthorizationError::Revoked)
+        );
     }
 }

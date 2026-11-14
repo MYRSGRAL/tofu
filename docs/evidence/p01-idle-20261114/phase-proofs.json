@@ -1,0 +1,398 @@
+[
+  {
+    "repeat": 1,
+    "gui_pid": 5442,
+    "tracked_pids": {
+      "gui": 5442,
+      "bus": 5408,
+      "keyring": 5410,
+      "xvfb": 5411,
+      "wm": 5417,
+      "tray": 5418
+    },
+    "frame_canary": {
+      "before": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 6,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      },
+      "after": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 7,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      }
+    },
+    "reaped": true,
+    "returncode": 0,
+    "fixture_audit": {
+      "guest_elf_sha256": "cde85b5bea18ba4cd54a37e8fc437b8a44ec355cda5721513f5c06926efe6d32",
+      "host_elf_matches": true,
+      "secret_service": {
+        "owner_pid_matches": true,
+        "items": [
+          [
+            "/org/freedesktop/secrets/collection/login/1"
+          ],
+          []
+        ],
+        "count": 1
+      },
+      "audit_epoch": 1794614932.5156643
+    },
+    "clock_ticks": 100,
+    "phases": [
+      {
+        "phase": "hidden",
+        "duration": 900.002679149,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 7,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 7,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        }
+      },
+      {
+        "phase": "static-open",
+        "duration": 900.0046612400001,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 9,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 9,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        }
+      }
+    ]
+  },
+  {
+    "repeat": 2,
+    "gui_pid": 5445,
+    "tracked_pids": {
+      "gui": 5445,
+      "bus": 5411,
+      "keyring": 5413,
+      "xvfb": 5414,
+      "wm": 5420,
+      "tray": 5421
+    },
+    "frame_canary": {
+      "before": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 5,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      },
+      "after": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 6,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      }
+    },
+    "reaped": true,
+    "returncode": 0,
+    "fixture_audit": {
+      "guest_elf_sha256": "cde85b5bea18ba4cd54a37e8fc437b8a44ec355cda5721513f5c06926efe6d32",
+      "host_elf_matches": true,
+      "secret_service": {
+        "owner_pid_matches": true,
+        "items": [
+          [
+            "/org/freedesktop/secrets/collection/login/1"
+          ],
+          []
+        ],
+        "count": 1
+      },
+      "audit_epoch": 1794617028.0001018
+    },
+    "clock_ticks": 100,
+    "phases": [
+      {
+        "phase": "hidden",
+        "duration": 900.004503718,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 6,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 6,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        }
+      },
+      {
+        "phase": "static-open",
+        "duration": 900.01366087,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 8,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 8,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        }
+      }
+    ]
+  },
+  {
+    "repeat": 3,
+    "gui_pid": 5444,
+    "tracked_pids": {
+      "gui": 5444,
+      "bus": 5410,
+      "keyring": 5412,
+      "xvfb": 5413,
+      "wm": 5419,
+      "tray": 5420
+    },
+    "frame_canary": {
+      "before": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 6,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      },
+      "after": {
+        "can_stop": false,
+        "command": "Snapshot",
+        "error": null,
+        "frames": 7,
+        "ok": true,
+        "ready": true,
+        "schema": 1,
+        "statistics_poll": null,
+        "stats_support": "unsupported-source-has-no-statistics-path",
+        "status": "Disconnected",
+        "ui_stats_delivery": null,
+        "visibility_events": 0,
+        "visible": true
+      }
+    },
+    "reaped": true,
+    "returncode": 0,
+    "fixture_audit": {
+      "guest_elf_sha256": "cde85b5bea18ba4cd54a37e8fc437b8a44ec355cda5721513f5c06926efe6d32",
+      "host_elf_matches": true,
+      "secret_service": {
+        "owner_pid_matches": true,
+        "items": [
+          [
+            "/org/freedesktop/secrets/collection/login/1"
+          ],
+          []
+        ],
+        "count": 1
+      },
+      "audit_epoch": 1794619108.548123
+    },
+    "clock_ticks": 100,
+    "phases": [
+      {
+        "phase": "hidden",
+        "duration": 900.0039953,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 7,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 7,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 1,
+          "visible": false
+        }
+      },
+      {
+        "phase": "static-open",
+        "duration": 900.018174301,
+        "start": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 9,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        },
+        "end": {
+          "can_stop": false,
+          "command": "Snapshot",
+          "error": null,
+          "frames": 9,
+          "ok": true,
+          "ready": true,
+          "schema": 1,
+          "statistics_poll": null,
+          "stats_support": "unsupported-source-has-no-statistics-path",
+          "status": "Disconnected",
+          "ui_stats_delivery": null,
+          "visibility_events": 2,
+          "visible": true
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,16 @@
+=== RUN   TestP04AActualCodecAND
+2026/11/14 03:59:35.369211 [Debug] common/geodata: geodata geoip matcher cache MISS r-29980c2bda0b65420157a997402fcb0057d1523b98845c5d2920d1fb022df621.dat:YONIK,
+2026/11/14 03:59:35.372170 [Debug] common/geodata: geodata mph domain matcher cache MISS for 1 rules
+=== RUN   TestP04AActualCodecAND/match
+=== RUN   TestP04AActualCodecAND/wrongapp
+=== RUN   TestP04AActualCodecAND/wrongname
+=== RUN   TestP04AActualCodecAND/wrongCIDR
+=== RUN   TestP04AActualCodecAND/wronginbound
+--- PASS: TestP04AActualCodecAND (0.01s)
+    --- PASS: TestP04AActualCodecAND/match (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongapp (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongname (0.00s)
+    --- PASS: TestP04AActualCodecAND/wrongCIDR (0.00s)
+    --- PASS: TestP04AActualCodecAND/wronginbound (0.00s)
+PASS
+ok  	github.com/xtls/xray-core/app/router	0.015s

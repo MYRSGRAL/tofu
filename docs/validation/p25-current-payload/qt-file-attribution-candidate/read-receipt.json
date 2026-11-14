@@ -1,0 +1,420 @@
+{
+  "schema": 1,
+  "observed_at_utc": "2026-11-14T10:37:53.664587+00:00",
+  "inputs": [
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-0c2dd19d-819707564223d776/docs/validation/p25-current-payload/ledger.json",
+      "bytes": 184603,
+      "sha256": "8caa78975b45764ad8a4bf045c9570f4466bfd49636d7d3aaf6152f9c20573fe",
+      "role": "retained-offer-pin"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/source.tar",
+      "bytes": 17223680,
+      "sha256": "d2aa23f29622280fbc2c826e200ae3d99ed1067391aabc854808b8062770f74c",
+      "role": "known-source-offer"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-0c2dd19d-819707564223d776/packaging/licenses/composition/qt-sources.json",
+      "bytes": 52243,
+      "sha256": "9424021d3a969e4ce78c47b9c09db4f370766d31ac0aa02b38226bec588c21de",
+      "role": "historical-6.12-index"
+    },
+    {
+      "path": "/home/myrs/.t3/worktrees/yonik/t3-0c2dd19d-819707564223d776/packaging/licenses/linux-inventory.json",
+      "bytes": 173423,
+      "sha256": "f78438ae321b0c8b222de7cd391a7c20c285ab06ec4330a85f5e52d4b1e70194",
+      "role": "retained-CXX-primary-metadata"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-base-6.11.2-3.1/desc",
+      "bytes": 1144,
+      "sha256": "f4147b3dbcdb3b9af4e0e84ac0104276e916b202826cd74f1906c1b16925b3a6",
+      "role": "current-package-desc"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-base-6.11.2-3.1/files",
+      "bytes": 266318,
+      "sha256": "afae9f536267e27cf358a8f1181385261626da8d1db74fb76b2fed72ce734fb3",
+      "role": "ownership-metadata"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-base-6.11.2-3.1/mtree",
+      "bytes": 221225,
+      "sha256": "1aed151cf1b2f7dc742e105b6546d6a2a23e942250d7fe2afbeead079a452643",
+      "role": "package-file-hashes"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-declarative-6.11.2-2.1/desc",
+      "bytes": 554,
+      "sha256": "be9b20de21ca228f6c8d2dbbbc28bf9b4711ffd3c9e07cf191b41a1c5554f4aa",
+      "role": "current-package-desc"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-declarative-6.11.2-2.1/files",
+      "bytes": 392972,
+      "sha256": "a6d2ede709a780e4169e0120180f33035dfd41bc625f8a6ea332e70c512c3e73",
+      "role": "ownership-metadata"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-declarative-6.11.2-2.1/mtree",
+      "bytes": 229799,
+      "sha256": "97d111cce1cc32f805d793714b5d386567548af4cb229777688a1cb8df939445",
+      "role": "package-file-hashes"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-svg-6.11.2-1.1/desc",
+      "bytes": 483,
+      "sha256": "bcd7be5fda21ab1d25dd623dfe56b79eef259cfe09c2fa9d48464a501f51f1d3",
+      "role": "current-package-desc"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-svg-6.11.2-1.1/files",
+      "bytes": 6208,
+      "sha256": "fd84576dc5d83b885d6167493f4c2e413445f998eca9d0f920cdea41b0725daf",
+      "role": "ownership-metadata"
+    },
+    {
+      "path": "/var/lib/pacman/local/qt6-svg-6.11.2-1.1/mtree",
+      "bytes": 5764,
+      "sha256": "07d1d6e38fc14040bc549c24fdd45b772a457ff5c2c8cbf5bb4eb11240e22ff5",
+      "role": "package-file-hashes"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/GPL-3.0-only.txt",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/LGPL-3.0-only.txt",
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/GPL-2.0-only.txt",
+      "bytes": 18092,
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/Qt-GPL-exception-1.0.txt",
+      "bytes": 965,
+      "sha256": "40678d338ce53cd93f8b22b281a2ecbcaa3ee65ce60b25ffb0c462b0530846b2",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/MIT.txt",
+      "bytes": 1111,
+      "sha256": "d040359701c01996a017d5c515678929cd1b0625e64cb86db44025fbb6cdf1fc",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/Apache-2.0.txt",
+      "bytes": 10398,
+      "sha256": "e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/share/licenses/qt6-base/BSD-3-Clause.txt",
+      "bytes": 1469,
+      "sha256": "9f0490f18656c6f2435bd14f603ef0c96434d1825615363dce43abb42ed1dcce",
+      "role": "selected-canonical-package-license"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qconfig.h",
+      "bytes": 2526,
+      "sha256": "4c9e75b22d53ab33b0670b00d1902e29299fb3bf4a2eafa6949c1df552ab391d",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qtversion.h",
+      "bytes": 1106,
+      "sha256": "66e210aa12ac2da18916b58b0b78db18488557b80454a9c3a42e8503a6c06d34",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qstring.h",
+      "bytes": 76366,
+      "sha256": "aabc85822ff3cc98f359eed78538c9b8faabf2c5881c7b6a98c62305f3eb510a",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qhashfunctions.h",
+      "bytes": 20296,
+      "sha256": "8ae56403b5e804fa5f65ca1f56d85f01c32def4c54f16e63f9994c95086bf459",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qlist.h",
+      "bytes": 40579,
+      "sha256": "951e1ab06b388db0c5e2b84fab90d34288bd0acbf7ec94adcbd17699149c8b92",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qstringlist.h",
+      "bytes": 9287,
+      "sha256": "ab13597c8ca0c5665297c253cbb658e8a6552c9f42a970e3f070a0a23026caa8",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/QStringList",
+      "bytes": 55,
+      "sha256": "0491588f1124b5fbee928f082998542afae60578dc3fff0d6e86328a594fa4b1",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qchar.h",
+      "bytes": 26634,
+      "sha256": "d9ab78a92f47a29edb19816c1860f95817454a05dc6c58706c5d299cdad71627",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qcomparehelpers.h",
+      "bytes": 65976,
+      "sha256": "1505aaec73980c40ac0fd7062c5f84e13aa22a92a51f97b7c01d16bebe1dfc26",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qcompare.h",
+      "bytes": 39440,
+      "sha256": "2897a4a6ee9fbfff247fcf1fad4115952748c114c8a818c3dd51e07586a626a9",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qnamespace.h",
+      "bytes": 62415,
+      "sha256": "43c32a2caa2d98011e878b986f16e1f943d23dbdff471d05b8d0eac7d174b73d",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qbytearray.h",
+      "bytes": 33358,
+      "sha256": "a66bbc048a4de55f9fba8677ede009a80b880bbaeecbc8463b994d1db598b086",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/QByteArray",
+      "bytes": 54,
+      "sha256": "d76530e19a740cbe7dc807ce9fcfb5f1da4423cf825732219edd07cfdb727078",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qmetatype.h",
+      "bytes": 94361,
+      "sha256": "fd0920bbbb34b4692c7d17b1975c82d15fc4c8b678d7d1655385559927317628",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qobjectdefs.h",
+      "bytes": 32157,
+      "sha256": "68c7065f0a09d621977a14bd11b6afe5bc9deac6c09f55707d7cfdc27e946724",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqml.h",
+      "bytes": 39972,
+      "sha256": "5b8d760914cea8f632a2865ec8c5f0534ad8b7493906f89d4f960e9d8d560b70",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqmlengine.h",
+      "bytes": 5153,
+      "sha256": "5adb9ef0b6df8895de915b9f2e7710d049dd36432159eecca2e83a8616c03f02",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqmlregistration.h",
+      "bytes": 446,
+      "sha256": "0be47b736b766da719ea5afee43fec01eb5300e47c8ba256616466ca885d8251",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtQuick/qquickitem.h",
+      "bytes": 19386,
+      "sha256": "b7b4572da9003bd9df9c988941b286ce4b756287d98cd7b8aaa0a490a7df015a",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtWidgets/qwidget.h",
+      "bytes": 31013,
+      "sha256": "88a4d05392ccdd46c683fca1ae0735ed1026c5261ee62ad84bd2e325a1301c6d",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtNetwork/qnetworkaccessmanager.h",
+      "bytes": 6393,
+      "sha256": "65895339ce09601a14a95fa9906ae6804102b986284b5507f910ccbe38f31c99",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtDBus/qdbusconnection.h",
+      "bytes": 6849,
+      "sha256": "2087aee9fb1695a20e1646168e8917c9650ef40ddde1ce4f966382aaf6eb6e14",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtSvg/qsvgrenderer.h",
+      "bytes": 2712,
+      "sha256": "282715c52738a91732f86ce3c9ad90700ede2a32c55c1962600aec3ef87b88a4",
+      "role": "finite-header-candidate"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qconfig.h",
+      "bytes": 2526,
+      "sha256": "4c9e75b22d53ab33b0670b00d1902e29299fb3bf4a2eafa6949c1df552ab391d",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qtversion.h",
+      "bytes": 1106,
+      "sha256": "66e210aa12ac2da18916b58b0b78db18488557b80454a9c3a42e8503a6c06d34",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qstring.h",
+      "bytes": 76366,
+      "sha256": "aabc85822ff3cc98f359eed78538c9b8faabf2c5881c7b6a98c62305f3eb510a",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qhashfunctions.h",
+      "bytes": 20296,
+      "sha256": "8ae56403b5e804fa5f65ca1f56d85f01c32def4c54f16e63f9994c95086bf459",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qlist.h",
+      "bytes": 40579,
+      "sha256": "951e1ab06b388db0c5e2b84fab90d34288bd0acbf7ec94adcbd17699149c8b92",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qstringlist.h",
+      "bytes": 9287,
+      "sha256": "ab13597c8ca0c5665297c253cbb658e8a6552c9f42a970e3f070a0a23026caa8",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/QStringList",
+      "bytes": 55,
+      "sha256": "0491588f1124b5fbee928f082998542afae60578dc3fff0d6e86328a594fa4b1",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qchar.h",
+      "bytes": 26634,
+      "sha256": "d9ab78a92f47a29edb19816c1860f95817454a05dc6c58706c5d299cdad71627",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qcomparehelpers.h",
+      "bytes": 65976,
+      "sha256": "1505aaec73980c40ac0fd7062c5f84e13aa22a92a51f97b7c01d16bebe1dfc26",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qcompare.h",
+      "bytes": 39440,
+      "sha256": "2897a4a6ee9fbfff247fcf1fad4115952748c114c8a818c3dd51e07586a626a9",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qnamespace.h",
+      "bytes": 62415,
+      "sha256": "43c32a2caa2d98011e878b986f16e1f943d23dbdff471d05b8d0eac7d174b73d",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qbytearray.h",
+      "bytes": 33358,
+      "sha256": "a66bbc048a4de55f9fba8677ede009a80b880bbaeecbc8463b994d1db598b086",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/QByteArray",
+      "bytes": 54,
+      "sha256": "d76530e19a740cbe7dc807ce9fcfb5f1da4423cf825732219edd07cfdb727078",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qmetatype.h",
+      "bytes": 94361,
+      "sha256": "fd0920bbbb34b4692c7d17b1975c82d15fc4c8b678d7d1655385559927317628",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtCore/qobjectdefs.h",
+      "bytes": 32157,
+      "sha256": "68c7065f0a09d621977a14bd11b6afe5bc9deac6c09f55707d7cfdc27e946724",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqml.h",
+      "bytes": 39972,
+      "sha256": "5b8d760914cea8f632a2865ec8c5f0534ad8b7493906f89d4f960e9d8d560b70",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqmlengine.h",
+      "bytes": 5153,
+      "sha256": "5adb9ef0b6df8895de915b9f2e7710d049dd36432159eecca2e83a8616c03f02",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtQml/qqmlregistration.h",
+      "bytes": 446,
+      "sha256": "0be47b736b766da719ea5afee43fec01eb5300e47c8ba256616466ca885d8251",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtQuick/qquickitem.h",
+      "bytes": 19386,
+      "sha256": "b7b4572da9003bd9df9c988941b286ce4b756287d98cd7b8aaa0a490a7df015a",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtWidgets/qwidget.h",
+      "bytes": 31013,
+      "sha256": "88a4d05392ccdd46c683fca1ae0735ed1026c5261ee62ad84bd2e325a1301c6d",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtNetwork/qnetworkaccessmanager.h",
+      "bytes": 6393,
+      "sha256": "65895339ce09601a14a95fa9906ae6804102b986284b5507f910ccbe38f31c99",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtDBus/qdbusconnection.h",
+      "bytes": 6849,
+      "sha256": "2087aee9fb1695a20e1646168e8917c9650ef40ddde1ce4f966382aaf6eb6e14",
+      "role": "pinned-header-source-fragment-retention"
+    },
+    {
+      "path": "/usr/include/qt6/QtSvg/qsvgrenderer.h",
+      "bytes": 2712,
+      "sha256": "282715c52738a91732f86ce3c9ad90700ede2a32c55c1962600aec3ef87b88a4",
+      "role": "pinned-header-source-fragment-retention"
+    }
+  ],
+  "read_total_bytes": 20066317,
+  "caps": {
+    "read_total": 100663296,
+    "source_archive": 33554432,
+    "archive_entries": 8192,
+    "archive_declared_total": 33554432,
+    "selected_member": 4194304,
+    "file": 4194304,
+    "mtree_decompressed": 4194304,
+    "retained_header_fragments_total": 1048576
+  },
+  "archive_entries_checked": 2062,
+  "archive_selected_members_read": 184,
+  "archive_declared_bytes": 15647414,
+  "archive_extract_to_filesystem": false,
+  "executed_compiler_qt_query_network": false,
+  "read_correction": "license alias traversal refused; canonical qt6-base texts read, aliases documented from mtree only",
+  "retained_header_fragment_bytes": 616534
+}

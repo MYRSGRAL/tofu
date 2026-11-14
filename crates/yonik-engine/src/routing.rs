@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use yonik_domain::{Action, DomainPattern, Policy};
 use yonik_import::ParsedServer;
 
+use crate::resource_bundle::{BoundCompileError, Checkpoint};
 use crate::{CompileError, CompiledConfig, Engine, compile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub enum PolicyCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyCompileError {
     UnsupportedSelector(u64),
+    UnsupportedTransport(u64),
     Server(CompileError),
     Unsupported(PolicyCapability),
     InvalidPolicy,
@@ -41,6 +43,9 @@ pub enum PolicyCompileError {
 impl fmt::Display for PolicyCompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedTransport(id) => {
+                write!(f, "Транспорт правила {id} не поддержан адаптером")
+            }
             Self::UnsupportedSelector(id) => write!(f, "Неприменимый селектор правила {id}"),
             Self::Server(error) => error.fmt(f),
             Self::Unsupported(PolicyCapability::DnsContract) => f.write_str(
@@ -289,6 +294,81 @@ fn compile_policy_resources_inner(
             }
         }
     }
+    let checkpoint = Checkpoint::new(&|| true);
+    emit_policy(
+        server,
+        engine,
+        port,
+        probe_port,
+        policy,
+        mode,
+        tun_sources,
+        resources,
+        false,
+        &checkpoint,
+    )
+    .map_err(|error| match error {
+        BoundCompileError::Policy(error) => error,
+        BoundCompileError::Cancelled => PolicyCompileError::InvalidPolicy,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compile_unadmitted_data(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+    resources: &dyn crate::resource_bundle::ResourceRoutes,
+    checkpoint: &Checkpoint<'_>,
+) -> Result<CompiledConfig, BoundCompileError> {
+    checkpoint.check()?;
+    if port == probe_port {
+        return Err(PolicyCompileError::ProbePort.into());
+    }
+    // Структура и пути сохраняют bounds; admission/DNS gates здесь не authority.
+    let validation = crate::resource_bundle::validate_policy_bounds_checked(policy, &|| {
+        checkpoint.check().map_err(std::io::Error::other)
+    });
+    checkpoint.check()?;
+    validation.map_err(|_| PolicyCompileError::InvalidPolicy)?;
+    crate::source_selectors::validate_data(policy, checkpoint)?;
+    if policy.private_networks.iter().any(|n| n.available)
+        || policy.private_domains.iter().any(|n| n.available)
+    {
+        return Err(
+            PolicyCompileError::Unsupported(PolicyCapability::PrivateNetworkBinding).into(),
+        );
+    }
+    emit_policy(
+        server,
+        engine,
+        port,
+        probe_port,
+        policy,
+        PolicyMode::Names,
+        false,
+        Some(resources),
+        true,
+        checkpoint,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_policy(
+    server: &ParsedServer,
+    engine: Engine,
+    port: NonZeroU16,
+    probe_port: NonZeroU16,
+    policy: &Policy,
+    mode: PolicyMode,
+    tun_sources: bool,
+    resources: Option<&dyn crate::resource_bundle::ResourceRoutes>,
+    data_only: bool,
+    checkpoint: &Checkpoint<'_>,
+) -> Result<CompiledConfig, BoundCompileError> {
+    checkpoint.check()?;
     crate::validate_listener(server, probe_port).map_err(PolicyCompileError::Server)?;
     let mut config = compile(server, engine, port).map_err(PolicyCompileError::Server)?;
     let auth = ProbeCredentials::random()?;
@@ -326,6 +406,7 @@ fn compile_policy_resources_inner(
         None,
     ));
     for private in &policy.private_networks {
+        checkpoint.check()?;
         rules.push(route_rule(
             engine,
             Action::Block,
@@ -334,6 +415,7 @@ fn compile_policy_resources_inner(
         ));
     }
     for zone in &policy.private_domains {
+        checkpoint.check()?;
         rules.push(route_rule(
             engine,
             Action::Block,
@@ -361,21 +443,39 @@ fn compile_policy_resources_inner(
         )
         .filter(|(rule, _)| rule.enabled)
     {
+        checkpoint.check()?;
         let domains = (!rule.conditions.domains.is_empty())
-            .then(|| rule.conditions.domains.iter().map(xray_domain).collect());
-        let cidrs = (!rule.conditions.destinations.is_empty()).then(|| {
-            rule.conditions
-                .destinations
-                .iter()
-                .map(ToString::to_string)
-                .collect()
-        });
+            .then(|| {
+                rule.conditions
+                    .domains
+                    .iter()
+                    .map(|domain| {
+                        checkpoint.check()?;
+                        Ok(xray_domain(domain))
+                    })
+                    .collect::<Result<Vec<_>, BoundCompileError>>()
+            })
+            .transpose()?;
+        let cidrs = (!rule.conditions.destinations.is_empty())
+            .then(|| {
+                rule.conditions
+                    .destinations
+                    .iter()
+                    .map(|cidr| {
+                        checkpoint.check()?;
+                        Ok(cidr.to_string())
+                    })
+                    .collect::<Result<Vec<_>, BoundCompileError>>()
+            })
+            .transpose()?;
         let mut native = if let Some(resources) = resources {
             resource_rule(engine, rule.action, domains, cidrs, key, resources)
         } else {
             route_rule(engine, rule.action, domains, cidrs)
         };
-        if tun_sources {
+        if data_only {
+            crate::source_selectors::apply_data(engine, &mut native, &rule.conditions.executables);
+        } else if tun_sources {
             crate::source_selectors::apply(engine, &mut native, &rule.conditions.executables);
         }
         rules.push(native);
@@ -415,6 +515,7 @@ fn compile_policy_resources_inner(
             .map(|domain| domain.domain.clone())
             .collect(),
     };
+    checkpoint.check()?;
     Ok(config)
 }
 
@@ -483,6 +584,9 @@ fn validate_policy(
     mode: PolicyMode,
     tun_sources: bool,
 ) -> Result<(), PolicyCompileError> {
+    if let Some(id) = policy.unsupported_transport() {
+        return Err(PolicyCompileError::UnsupportedTransport(id));
+    }
     if let Some(id) = policy.unsupported_selector() {
         return Err(PolicyCompileError::UnsupportedSelector(id));
     }

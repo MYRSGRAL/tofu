@@ -7,6 +7,12 @@ use std::{
     os::fd::AsRawFd,
     path::{Component, Path, PathBuf},
 };
+mod observer;
+#[cfg(feature = "test-support")]
+pub use observer::{
+    Event as CatalogEvent, Observer as CatalogObserver, ReadClass as CatalogReadClass,
+};
+use observer::{Io, ReadClass};
 const DIR: OFlags = OFlags::RDONLY
     .union(OFlags::DIRECTORY)
     .union(OFlags::NOFOLLOW)
@@ -70,6 +76,8 @@ pub struct Catalog {
     proc_root: PathBuf,
     locale: String,
     limits: Limits,
+    #[cfg(feature = "test-support")]
+    observer: Option<CatalogObserver>,
 }
 impl Catalog {
     pub fn new(
@@ -107,7 +115,24 @@ impl Catalog {
             proc_root,
             locale,
             limits,
+            #[cfg(feature = "test-support")]
+            observer: None,
         })
+    }
+    #[cfg(feature = "test-support")]
+    pub fn with_observer(mut self, observer: Option<CatalogObserver>) -> Self {
+        self.observer = observer;
+        self
+    }
+    fn io(&self, _processes: bool) -> Io {
+        #[cfg(feature = "test-support")]
+        {
+            Io::new(self.observer.as_ref(), _processes)
+        }
+        #[cfg(not(feature = "test-support"))]
+        {
+            Io::default()
+        }
     }
     pub fn desktop_snapshot(&self) -> io::Result<Snapshot<DesktopApplication>> {
         self.desktop_snapshot_with(|dir, name| openat(dir, name, DIR, Mode::empty()))
@@ -116,6 +141,7 @@ impl Catalog {
         &self,
         mut open_child: impl FnMut(&File, &str) -> rustix::io::Result<std::os::fd::OwnedFd>,
     ) -> io::Result<Snapshot<DesktopApplication>> {
+        let io = self.io(false);
         let mut out = Snapshot {
             items: Vec::new(),
             incomplete: false,
@@ -128,7 +154,7 @@ impl Catalog {
                 out.incomplete = true;
                 break;
             }
-            let dir = match directory(root) {
+            let dir = match directory(root, &io) {
                 Ok(d) => d,
                 Err(_) => {
                     out.incomplete = true;
@@ -140,12 +166,14 @@ impl Catalog {
             while let Some((dir, prefix, depth)) = stack.pop() {
                 for name in names(
                     &dir,
+                    &io,
                     self.limits.max_files.saturating_sub(files),
                     &mut out.incomplete,
                 )? {
                     files += 1;
                     let relative = format!("{prefix}{name}");
                     // statat не открывает каталог: ожидающие в stack уже входят в dirs.
+                    io.read(ReadClass::Stat);
                     match rustix::fs::statat(
                         &dir,
                         name.as_str(),
@@ -159,6 +187,7 @@ impl Catalog {
                                 out.incomplete = true;
                                 continue;
                             }
+                            io.read(ReadClass::Dir);
                             match open_child(&dir, name.as_str()) {
                                 Ok(sub) => {
                                     dirs += 1;
@@ -184,14 +213,15 @@ impl Catalog {
                     if !seen.insert(id.clone()) {
                         continue;
                     }
-                    let text = match read(&dir, &name, self.limits.max_bytes) {
-                        Ok(t) => t,
-                        Err(_) => {
-                            out.incomplete = true;
-                            continue;
-                        }
-                    };
-                    if let Some(app) = parse(&text, id, &self.locale) {
+                    let text =
+                        match read(&dir, &name, self.limits.max_bytes, &io, ReadClass::Desktop) {
+                            Ok(t) => t,
+                            Err(_) => {
+                                out.incomplete = true;
+                                continue;
+                            }
+                        };
+                    if let Some(app) = parse(&text, id, &self.locale, &io) {
                         if out.items.len() >= self.limits.max_entries {
                             out.incomplete = true;
                             return Ok(out);
@@ -205,12 +235,13 @@ impl Catalog {
         Ok(out)
     }
     pub fn process_snapshot(&self) -> io::Result<Snapshot<ProcessCandidate>> {
-        let root = directory(&self.proc_root)?;
+        let io = self.io(true);
+        let root = directory(&self.proc_root, &io)?;
         let mut out = Snapshot {
             items: Vec::new(),
             incomplete: false,
         };
-        for name in names(&root, self.limits.max_files, &mut out.incomplete)? {
+        for name in names(&root, &io, self.limits.max_files, &mut out.incomplete)? {
             let Ok(pid) = name.parse::<u32>() else {
                 continue;
             };
@@ -221,7 +252,7 @@ impl Catalog {
                 out.incomplete = true;
                 break;
             }
-            match process(&root, &name, self.limits.max_bytes) {
+            match process(&root, &name, self.limits.max_bytes, &io) {
                 Ok(p) => {
                     out.incomplete |= p.exe.is_none();
                     out.items.push(p);
@@ -233,8 +264,16 @@ impl Catalog {
         Ok(out)
     }
     pub fn process_is_current(&self, candidate: &ProcessCandidate) -> bool {
-        directory(&self.proc_root)
-            .and_then(|root| process(&root, &candidate.pid.to_string(), self.limits.max_bytes))
+        let io = self.io(true);
+        directory(&self.proc_root, &io)
+            .and_then(|root| {
+                process(
+                    &root,
+                    &candidate.pid.to_string(),
+                    self.limits.max_bytes,
+                    &io,
+                )
+            })
             .is_ok_and(|p| p.start_time == candidate.start_time && p.exe == candidate.exe)
     }
 }
@@ -244,12 +283,14 @@ fn safe_absolute(p: &Path) -> bool {
             .skip(1)
             .all(|c| matches!(c, Component::Normal(_)))
 }
-fn directory(p: &Path) -> io::Result<File> {
+fn directory(p: &Path, io: &Io) -> io::Result<File> {
+    io.read(ReadClass::Dir);
     let mut fd = File::from(open("/", DIR, Mode::empty())?);
     for c in p.components().skip(1) {
         let Component::Normal(n) = c else {
             return Err(io::ErrorKind::InvalidInput.into());
         };
+        io.read(ReadClass::Dir);
         fd = File::from(openat(&fd, n, DIR, Mode::empty())?);
     }
     Ok(fd)
@@ -257,8 +298,9 @@ fn directory(p: &Path) -> io::Result<File> {
 fn fd_path(dir: &File) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}", dir.as_raw_fd()))
 }
-fn names(dir: &File, limit: usize, incomplete: &mut bool) -> io::Result<Vec<String>> {
+fn names(dir: &File, io: &Io, limit: usize, incomplete: &mut bool) -> io::Result<Vec<String>> {
     let mut result = Vec::new();
+    io.read(ReadClass::Dir);
     for e in fs::read_dir(fd_path(dir))?.take(limit.saturating_add(1)) {
         if result.len() == limit {
             *incomplete = true;
@@ -274,7 +316,8 @@ fn names(dir: &File, limit: usize, incomplete: &mut bool) -> io::Result<Vec<Stri
     result.sort();
     Ok(result)
 }
-fn read(dir: &File, name: &str, limit: usize) -> io::Result<String> {
+fn read(dir: &File, name: &str, limit: usize, io: &Io, class: ReadClass) -> io::Result<String> {
+    io.read(class);
     let file = File::from(openat(dir, name, READ, Mode::empty())?);
     if !file.metadata()?.is_file() {
         return Err(io::ErrorKind::InvalidData.into());
@@ -305,7 +348,7 @@ fn unescape(s: &str) -> Option<String> {
     }
     Some(out)
 }
-fn parse(text: &str, id: String, locale: &str) -> Option<DesktopApplication> {
+fn parse(text: &str, id: String, locale: &str, io: &Io) -> Option<DesktopApplication> {
     let mut values = BTreeMap::new();
     let mut active = false;
     for line in text.lines() {
@@ -349,7 +392,7 @@ fn parse(text: &str, id: String, locale: &str) -> Option<DesktopApplication> {
     let executable = if values.get("DBusActivatable") == Some(&"true") {
         Err(Unsupported::PackageFormat)
     } else {
-        selector(values.get("Exec").copied())
+        selector(values.get("Exec").copied(), io)
     };
     Some(DesktopApplication {
         id,
@@ -359,7 +402,7 @@ fn parse(text: &str, id: String, locale: &str) -> Option<DesktopApplication> {
         executable,
     })
 }
-fn selector(exec: Option<&str>) -> Result<PathBuf, Unsupported> {
+fn selector(exec: Option<&str>, io: &Io) -> Result<PathBuf, Unsupported> {
     let exec = exec.ok_or(Unsupported::MissingExec)?;
     // Только однозначный поднабор Exec. Аргументы не исполняются и не сохраняются.
     if exec.chars().any(|c| "\"'\\`$;|&<>=\n\r".contains(c)) {
@@ -402,8 +445,9 @@ fn selector(exec: Option<&str>) -> Result<PathBuf, Unsupported> {
     if !safe_absolute(path) || first.contains('%') {
         return Err(Unsupported::UnresolvedPath);
     }
-    let parent = directory(path.parent().ok_or(Unsupported::UnresolvedPath)?)
+    let parent = directory(path.parent().ok_or(Unsupported::UnresolvedPath)?, io)
         .map_err(|_| Unsupported::UnverifiedExecutable)?;
+    io.read(ReadClass::Header);
     let fd = File::from(
         openat(
             &parent,
@@ -445,13 +489,16 @@ fn stat(text: &str) -> io::Result<(u32, String, u64)> {
         start,
     ))
 }
-fn process(root: &File, name: &str, limit: usize) -> io::Result<ProcessCandidate> {
+fn process(root: &File, name: &str, limit: usize, io: &Io) -> io::Result<ProcessCandidate> {
+    io.read(ReadClass::Dir);
     let dir = File::from(openat(root, name, DIR, Mode::empty())?);
-    let before = stat(&read(&dir, "stat", limit)?)?;
+    let before = stat(&read(&dir, "stat", limit, io, ReadClass::Stat)?)?;
+    io.read(ReadClass::Exe);
     let exe = fs::read_link(fd_path(&dir).join("exe"))
         .ok()
         .filter(|p| safe_absolute(p) && !p.as_os_str().as_encoded_bytes().ends_with(b" (deleted)"));
-    let after = stat(&read(&dir, "stat", limit)?)?;
+    let after = stat(&read(&dir, "stat", limit, io, ReadClass::Stat)?)?;
+    io.read(ReadClass::Exe);
     let exe_after = fs::read_link(fd_path(&dir).join("exe"))
         .ok()
         .filter(|p| safe_absolute(p) && !p.as_os_str().as_encoded_bytes().ends_with(b" (deleted)"));

@@ -11,12 +11,14 @@ mod desktop_schedule;
 mod logs;
 #[path = "presets.rs"]
 mod presets;
+#[path = "startup_application.rs"]
+mod startup_application;
 use crate::maintenance;
 use backend_startup::StartupObserver;
 pub use backend_startup::StartupPhase;
 #[path = "maintenance_job.rs"]
 mod maintenance_job;
-use crate::preferences::{Preferences, SaveOutcome, Store};
+use crate::preferences::{Preferences, SaveError, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
@@ -47,7 +49,7 @@ use yonik_linux::{
     NetworkWatch, PendingRefresh, ProbeResult, ProbeTarget, ProfileQuery, RefreshResult,
     ResolvedProfile, SubscriptionError, SubscriptionIdentity, SubscriptionService,
     SubscriptionSource, TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget,
-    check_tcp_series, subscription_master_key,
+    check_tcp_series,
 };
 use zeroize::Zeroizing;
 
@@ -60,15 +62,29 @@ pub struct HostConfig {
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
     startup_observer: StartupObserver,
+    startup_xdg_root: Option<PathBuf>,
+    start_hidden: bool,
+    startup_custody: Option<yonik_linux::CredentialOwnerGuard>,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
+    #[cfg(feature = "test-support")]
+    lifecycle_gate: Option<yonik_linux::LifecycleGate>,
+    #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
     #[cfg(feature = "test-support")]
     scheduler_owner_seed: Option<u64>,
     #[cfg(feature = "test-support")]
     scheduler_interval: Option<Duration>,
+    #[cfg(feature = "test-support")]
+    test_subscription_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    #[cfg(feature = "test-support")]
+    schedule_trace: Option<(
+        std::sync::mpsc::SyncSender<serde_json::Value>,
+        Arc<AtomicBool>,
+    )>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -80,15 +96,67 @@ impl HostConfig {
             system_subscription_policy: true,
             schedule_observer: None,
             startup_observer: StartupObserver::default(),
+            startup_xdg_root: crate::startup_xdg::config_root(),
+            start_hidden: false,
+            startup_custody: None,
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
+            #[cfg(feature = "test-support")]
+            lifecycle_gate: None,
+            #[cfg(feature = "test-support")]
+            catalog_observer: None,
             #[cfg(feature = "test-support")]
             scheduler_capacity: None,
             #[cfg(feature = "test-support")]
             scheduler_owner_seed: None,
             #[cfg(feature = "test-support")]
             scheduler_interval: None,
+            #[cfg(feature = "test-support")]
+            test_subscription_fetch: None,
+            #[cfg(feature = "test-support")]
+            schedule_trace: None,
         }
+    }
+    /// Только hint окна; не меняет preferences и не разрешает Connect.
+    pub fn with_start_hidden(mut self, hidden: bool) -> Self {
+        self.start_hidden = hidden;
+        self
+    }
+    /// Только собственный fixture root; normal host использует XDG config root.
+    #[cfg(feature = "test-support")]
+    pub fn with_startup_fixture_config(mut self, root: PathBuf) -> Self {
+        self.startup_xdg_root = Some(root);
+        self
+    }
+    #[cfg(feature = "test-support")]
+    pub fn with_lifecycle_gate(mut self, gate: yonik_linux::LifecycleGate) -> Self {
+        self.lifecycle_gate = Some(gate);
+        self
+    }
+    /// Concrete socket transport отдельного subscription fixture; не native authority.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_subscription_fetch(mut self, fetch: Arc<yonik_linux::FetchHost>) -> Self {
+        self.test_subscription_fetch = Some(fetch);
+        self
+    }
+    /// Bounded read-only trace; overflow/disconnect запрещают acceptance fixture.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_schedule_trace(
+        mut self,
+        sender: std::sync::mpsc::SyncSender<serde_json::Value>,
+        overflow: Arc<AtomicBool>,
+    ) -> Self {
+        self.schedule_trace = Some((sender, overflow));
+        self
+    }
+    /// Только наблюдение реального producer в отдельном test-support стенде.
+    #[cfg(feature = "test-support")]
+    pub fn with_catalog_observer(
+        mut self,
+        observer: yonik_linux::applications::CatalogObserver,
+    ) -> Self {
+        self.catalog_observer = Some(observer);
+        self
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
     #[cfg(feature = "test-support")]
@@ -269,6 +337,8 @@ enum Command {
         target: String,
     },
     RoutingCatalog {
+        #[serde(default)]
+        request_id: u64,
         processes: bool,
         query: String,
         offset: usize,
@@ -374,6 +444,16 @@ enum Command {
     SelectProfile {
         id: i64,
         revision: i64,
+    },
+    StartupPreferencesSet {
+        request_id: String,
+        expected_revision: String,
+        autostart_into_tray: bool,
+        autoconnect: bool,
+    },
+    AutoconnectTargetSet {
+        request_id: String,
+        expected_revision: String,
     },
     SetSubscriptionSchedule {
         interval_seconds: u32,
@@ -554,10 +634,57 @@ pub struct DesktopHost {
     commands: mpsc::Sender<Envelope>,
     control: Arc<Control>,
 }
+#[cfg(any(test, feature = "test-support"))]
+struct DiskTestInput {
+    sink: (
+        yonik_linux::event_log::EventLog,
+        yonik_linux::event_log::DiskLogGuard,
+    ),
+    #[cfg(test)]
+    proxy: Option<ProxyLeaseFixture>,
+}
+#[cfg(test)]
+#[derive(Clone)]
+struct ProxyLeaseFixture {
+    endpoint: SocketAddr,
+    observer: std::sync::mpsc::Sender<(watch::Receiver<ProxyLease>, Arc<DesktopFetch>)>,
+}
 impl DesktopHost {
     pub fn start(
         config: HostConfig,
         callback: impl Fn(String) + Send + Sync + 'static,
+    ) -> Result<Self> {
+        Self::start_inner(
+            config,
+            callback,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_start_with_disk(
+        config: HostConfig,
+        fixture: &mut yonik_linux::event_log::DiskFixture,
+        callback: impl Fn(String) + Send + Sync + 'static,
+    ) -> Result<Self> {
+        if config.data_dir != fixture.path() {
+            return Err(DesktopError("invalid_input"));
+        }
+        let sink = fixture.take_sink().ok_or(DesktopError("invalid_input"))?;
+        Self::start_inner(
+            config,
+            callback,
+            Some(DiskTestInput {
+                sink,
+                #[cfg(test)]
+                proxy: None,
+            }),
+        )
+    }
+    fn start_inner(
+        config: HostConfig,
+        callback: impl Fn(String) + Send + Sync + 'static,
+        #[cfg(any(test, feature = "test-support"))] disk_fixture: Option<DiskTestInput>,
     ) -> Result<Self> {
         let (commands, receiver) = mpsc::channel(128);
         let (priority, priority_rx) = watch::channel(Priority::default());
@@ -589,6 +716,8 @@ impl DesktopHost {
                         priority_rx,
                         worker_control,
                         callback,
+                        #[cfg(any(test, feature = "test-support"))]
+                        disk_fixture,
                     )),
                     Err(_) => {
                         let mut snapshot = Snapshot::new(config.ephemeral_key.is_some());
@@ -803,6 +932,18 @@ fn validate(command: &Command) -> Result<()> {
         | Command::DeleteSource { id }
         | Command::CancelRefresh { id, .. } => *id > 0,
         Command::SelectProfile { id, revision } => *id > 0 && *revision > 0,
+        Command::StartupPreferencesSet {
+            request_id,
+            expected_revision,
+            ..
+        }
+        | Command::AutoconnectTargetSet {
+            request_id,
+            expected_revision,
+        } => {
+            startup_application::number(request_id).is_some_and(|id| id > 0)
+                && startup_application::number(expected_revision).is_some()
+        }
         _ => true,
     };
     if valid {
@@ -943,6 +1084,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    startup: startup_application::View,
     presets: presets::Status,
     maintenance_available: bool,
     maintenance_ack: Option<maintenance::Ack>,
@@ -1028,6 +1170,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            startup: startup_application::View::default(),
             presets: presets::Status::default(),
             maintenance_available: false,
             maintenance_ack: None,
@@ -1201,6 +1344,24 @@ impl Snapshot {
                 .set_generation(Slot::Source, cause, generation);
         }
     }
+    fn schedule_replacement(
+        &mut self,
+        replacement: std::result::Result<DesktopSchedule, desktop_schedule::ScheduleFailure>,
+        previous_generation: u64,
+    ) -> Option<DesktopSchedule> {
+        match replacement {
+            Ok(schedule) => Some(schedule),
+            Err(failure) => {
+                // При отказе initialize новое поколение ещё не выделено.
+                let generation = failure
+                    .cause
+                    .filter(|cause| cause.needs_generation())
+                    .map(|_| previous_generation);
+                self.schedule_error(failure, generation);
+                None
+            }
+        }
+    }
     fn session_error(&mut self, cause: Cause, generation: u64) {
         self.contextual_error(false, ContextFailure::new(cause));
         self.error_contexts
@@ -1371,20 +1532,25 @@ async fn open(
     config.startup_observer.emit(StartupPhase::Credential);
     let key = match config.ephemeral_key.take() {
         Some(key) => key,
-        None => subscription_master_key(!path.exists())
-            .await
-            .map_err(|error| {
-                ContextFailure::new(match error {
-                    CredentialError::Missing => Cause::KeyringMissing,
-                    CredentialError::Locked => Cause::KeyringLocked,
-                    CredentialError::Unavailable => Cause::KeyringUnavailable,
-                    CredentialError::Ambiguous => Cause::KeyringAmbiguous,
-                    CredentialError::InvalidKey => Cause::KeyringInvalidKey,
-                    CredentialError::Random => Cause::KeyringRandom,
-                    CredentialError::Timeout => Cause::KeyringTimeout,
-                    CredentialError::Busy => Cause::KeyringBusy,
-                })
-            })?,
+        None => async {
+            let (key, owner) =
+                yonik_linux::subscription_master_key_with_owner(!path.exists()).await?;
+            config.startup_custody = owner;
+            Ok::<_, CredentialError>(key)
+        }
+        .await
+        .map_err(|error| {
+            ContextFailure::new(match error {
+                CredentialError::Missing => Cause::KeyringMissing,
+                CredentialError::Locked => Cause::KeyringLocked,
+                CredentialError::Unavailable => Cause::KeyringUnavailable,
+                CredentialError::Ambiguous => Cause::KeyringAmbiguous,
+                CredentialError::InvalidKey => Cause::KeyringInvalidKey,
+                CredentialError::Random => Cause::KeyringRandom,
+                CredentialError::Timeout => Cause::KeyringTimeout,
+                CredentialError::Busy => Cause::KeyringBusy,
+            })
+        })?,
     };
     config.startup_observer.emit(StartupPhase::RepositoryOpen);
     let repo = EncryptedSubscriptionRepository::open(path, key)
@@ -1408,7 +1574,51 @@ async fn open(
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
+fn catalog_response(request_id: u64, mut page: serde_json::Value) -> serde_json::Value {
+    if request_id != 0 {
+        page["request_id"] = request_id.into();
+    }
+    page
+}
+
+#[cfg(test)]
+mod catalog_correlation_tests {
+    #[test]
+    fn legacy_shape_and_positive_reply_identity() {
+        let page = serde_json::json!({"items":[],"offset":0,"total":0,"incomplete":false});
+        assert_eq!(super::catalog_response(0, page.clone()), page);
+        let reply = super::catalog_response(9_007_199_254_740_991, page.clone());
+        assert_eq!(reply["request_id"], 9_007_199_254_740_991_u64);
+        let mut restored = reply;
+        restored
+            .as_object_mut()
+            .expect("catalog object")
+            .remove("request_id");
+        assert_eq!(restored, page);
+    }
+    #[test]
+    fn missing_id_remains_legacy_and_invalid_ids_are_rejected() {
+        let legacy = r#"{"command":"routing_catalog","processes":false,"query":"","offset":0}"#;
+        assert!(matches!(
+            serde_json::from_str::<super::Command>(legacy),
+            Ok(super::Command::RoutingCatalog { request_id: 0, .. })
+        ));
+        for id in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("text"),
+            serde_json::Value::Null,
+        ] {
+            let mut input: serde_json::Value = serde_json::from_str(legacy).expect("legacy JSON");
+            input["request_id"] = id;
+            assert!(serde_json::from_value::<super::Command>(input).is_err());
+        }
+    }
+}
+
 struct Actor {
+    #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     presets: Option<Arc<presets::Controller>>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
@@ -1530,7 +1740,15 @@ impl Actor {
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
-        let revision = if candidate.version == 2 {
+        let revision = if candidate.version == 3 {
+            self.routing_repository()
+                .save_routing_draft_v3(
+                    expected,
+                    candidate.json().into_bytes(),
+                    self.format4_backup.clone(),
+                )
+                .await
+        } else if candidate.version == 2 {
             self.routing_repository()
                 .save_routing_draft_v2(
                     expected,
@@ -1666,24 +1884,47 @@ impl Actor {
     }
 
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        let outcome = self.preferences_store.save(&preferences).map_err(|error| {
-            let cause = match error.kind() {
-                std::io::ErrorKind::PermissionDenied => Some(Cause::PreferencesIoPermissionDenied),
-                std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
-                std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
-                std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
-                std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
-                _ => None,
-            };
-            if let Some(cause) = cause {
-                self.state.error_contexts.set_generation(
-                    Slot::Error,
-                    cause,
-                    Some(self.state.command_generation),
-                );
+        let outcome = match self.preferences_store.save(&preferences) {
+            Ok(outcome) => outcome,
+            Err(SaveError::Conflict(current)) => {
+                self.preferences = *current;
+                // Старый apply receipt не подтверждает перечитанную ревизию.
+                // Unknown/error не снимаются чтением без нового explicit apply.
+                if self.state.startup.xdg == "applied" {
+                    self.state.startup.xdg = "unchanged";
+                }
+                // Read refresh не переключает текущие engine/port/probe inputs,
+                // не перепривязывает target/owner и не повторяет запись/Connect.
+                self.state.language = self.preferences.language.clone();
+                self.state.subscription_interval_seconds =
+                    self.preferences.subscription_interval_seconds;
+                self.state.subscription_background = self.preferences.subscription_background;
+                self.state.proxy_fetch_dns = self.preferences.proxy_fetch_dns;
+                self.startup_view();
+                return Err(DesktopError("preferences_conflict"));
             }
-            DesktopError("preferences_write")
-        })?;
+            Err(SaveError::Io(error)) => {
+                self.state.preferences_warning |= self.preferences_store.blocked();
+                let cause = match error.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        Some(Cause::PreferencesIoPermissionDenied)
+                    }
+                    std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
+                    std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
+                    std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
+                    std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
+                    _ => None,
+                };
+                if let Some(cause) = cause {
+                    self.state.error_contexts.set_generation(
+                        Slot::Error,
+                        cause,
+                        Some(self.state.command_generation),
+                    );
+                }
+                return Err(DesktopError("preferences_write"));
+            }
+        };
         self.state.preferences_durability_warning =
             outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
@@ -1780,6 +2021,7 @@ impl Actor {
         );
     }
     fn emit(&mut self) {
+        self.startup_view();
         if self.state.presets.stopping
             && matches!(self.state.status, "Disconnected" | "NoManagedPolicy")
         {
@@ -2364,12 +2606,22 @@ impl Actor {
                 result.map(|_| ())
             }
             Command::RoutingCatalog {
+                request_id,
                 processes,
                 query,
                 offset,
             } => {
+                #[cfg(feature = "test-support")]
+                let observer = self.catalog_observer.clone();
                 self.state.routing_catalog = tokio::task::spawn_blocking(move || {
-                    crate::editor::catalog(processes, &query, offset)
+                    crate::editor::catalog(
+                        processes,
+                        &query,
+                        offset,
+                        #[cfg(feature = "test-support")]
+                        observer,
+                    )
+                    .map(|page| catalog_response(request_id, page))
                 })
                 .await
                 .map_err(|_| {
@@ -2897,6 +3149,8 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            #[cfg(feature = "test-support")]
+            catalog_observer: None,
             presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
                 .ok()
                 .map(Arc::new),
@@ -2966,6 +3220,53 @@ mod settings_tests {
             .expect("команда настройки");
         actor.command(command).await.expect("сессия освобождена");
         assert_eq!(actor.state.port, 18889);
+        actor.state.startup.xdg_root = Some(directory.0.clone());
+        let control = super::Control {
+            generation: std::sync::atomic::AtomicU64::new(0),
+            priority: tokio::sync::watch::channel(super::Priority::default()).0,
+            tcp_priority: tokio::sync::watch::channel(0).0,
+            subscription_policy: tokio::sync::watch::channel(Default::default()).0,
+            subscription_override: std::sync::atomic::AtomicBool::new(false),
+            subscription_visible: tokio::sync::watch::channel(false).0,
+            closed: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        };
+        let attempt = actor.state.startup.attempt;
+        actor.state.startup.xdg = "applied";
+        let (mut external_store, _, _) = Store::open(&directory.0);
+        let (mut external, _) = external_store
+            .save_startup(0, true, false, None)
+            .expect("cooperating writer");
+        external.language = "en".into();
+        external_store
+            .save(&external)
+            .expect("mixed external prefs");
+        let published = fs::read(directory.0.join("preferences.json")).expect("published");
+        let conflict = actor
+            .startup_save("1".into(), "0".into(), Some((false, true)), &control, 0)
+            .await
+            .expect_err("stale writer");
+        assert_eq!(conflict.key(), "startup_conflict");
+        assert_eq!(actor.state.startup.revision, "1");
+        assert_eq!(actor.state.startup.xdg, "unchanged");
+        assert!(actor.state.startup.autostart_into_tray && !actor.state.startup.autoconnect);
+        assert_eq!(actor.preferences.language, "en");
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(actor.preferences.repository_identity.is_none());
+        assert!(actor.selected.is_none());
+        assert!(!actor.state.can_stop);
+        assert!(!directory.0.join("autostart").exists());
+        assert_eq!(
+            fs::read(directory.0.join("preferences.json")).expect("no auto retry"),
+            published
+        );
+        actor
+            .startup_save("2".into(), "1".into(), Some((false, true)), &control, 0)
+            .await
+            .expect("explicit retry");
+        assert_eq!(actor.state.startup.revision, "2");
+        assert!(!actor.state.startup.autostart_into_tray && actor.state.startup.autoconnect);
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(!actor.state.can_stop);
         actor.preferences_store.sync_directory =
             |_| Err(std::io::Error::other("инъекция dir fsync"));
         actor
@@ -2979,6 +3280,21 @@ mod settings_tests {
         assert_eq!(actor.preferences.language, "en");
         assert!(actor.state.preferences_durability_warning);
         assert_eq!(Store::open(&directory.0).1.language, "en");
+        actor.state.startup.xdg_root = Some(directory.0.clone());
+
+        actor
+            .startup_save("3".into(), "2".into(), Some((true, true)), &control, 0)
+            .await
+            .expect("published");
+        assert_eq!(actor.state.startup.save, "durability_unknown");
+        assert_eq!(actor.state.startup.xdg, "not_applied");
+        assert!(!directory.0.join("autostart").exists());
+        assert!(
+            super::startup_application::prepare(&mut actor, &control, 0)
+                .await
+                .0
+                .is_none()
+        );
         actor
             .service
             .take()
@@ -3285,6 +3601,52 @@ type RefreshTask = (
     String,
 );
 
+#[cfg(feature = "test-support")]
+#[derive(Default)]
+struct ScheduleTrace {
+    window_origin: Option<Duration>,
+    drain_id: u64,
+    previous: Option<serde_json::Value>,
+}
+#[cfg(feature = "test-support")]
+impl ScheduleTrace {
+    fn emit(
+        &mut self,
+        config: &HostConfig,
+        scheduled: &DesktopSchedule,
+        lease: ProxyLease,
+        now: Duration,
+        phase: &'static str,
+    ) {
+        let Some((sender, overflow)) = &config.schedule_trace else {
+            return;
+        };
+        if scheduled.window_until.is_none() {
+            self.window_origin = None;
+        }
+        let row = serde_json::json!({"phase":phase,"window_origin_ns":self.window_origin.map(|d| d.as_nanos()),"window_deadline_ns":scheduled.window_until.map(|d|d.as_nanos()),"scheduled_generation":scheduled.generation,"lease_generation":lease.map(|l|l.0),"drain_id":self.drain_id,"fetching":scheduled.fetching});
+        if self.previous.as_ref() == Some(&row) {
+            return;
+        }
+        self.previous = Some(row.clone());
+        let mut event = row;
+        event["at_ns"] = serde_json::json!(now.as_nanos());
+        if sender.try_send(event).is_err() {
+            overflow.store(true, Ordering::Release);
+        }
+    }
+    fn begin_drain(&mut self, config: &HostConfig) {
+        match self.drain_id.checked_add(1) {
+            Some(id) => self.drain_id = id,
+            None => {
+                if let Some((_, overflow)) = &config.schedule_trace {
+                    overflow.store(true, Ordering::Release);
+                }
+            }
+        }
+    }
+}
+
 type ProxyLease = Option<(u64, SocketAddr)>;
 
 /// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
@@ -3293,18 +3655,39 @@ struct DesktopFetch {
     proxy_fetch_dns: Option<SocketAddr>,
     current: watch::Receiver<ProxyLease>,
     proxy_used: AtomicBool,
+    #[cfg(feature = "test-support")]
+    test_fetch: Option<Arc<yonik_linux::FetchHost>>,
 }
 impl DesktopFetch {
     fn new(current: &watch::Sender<ProxyLease>, proxy_fetch_dns: Option<SocketAddr>) -> Arc<Self> {
+        Self::subscription(
+            current,
+            proxy_fetch_dns,
+            #[cfg(feature = "test-support")]
+            None,
+        )
+    }
+    fn subscription(
+        current: &watch::Sender<ProxyLease>,
+        proxy_fetch_dns: Option<SocketAddr>,
+        #[cfg(feature = "test-support")] test_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             lease: *current.borrow(),
             proxy_fetch_dns,
             current: current.subscribe(),
             proxy_used: AtomicBool::new(false),
+            #[cfg(feature = "test-support")]
+            test_fetch,
         })
     }
     fn stale(&self) -> bool {
-        self.proxy_used.load(Ordering::Acquire) && *self.current.borrow() != self.lease
+        let revoked = *self.current.borrow() != self.lease;
+        // Stop уведомляет тот же watch даже при None→None: fixture не теряет revoke.
+        #[cfg(feature = "test-support")]
+        let revoked =
+            revoked || (self.test_fetch.is_some() && self.current.has_changed().unwrap_or(true));
+        self.proxy_used.load(Ordering::Acquire) && revoked
     }
 }
 impl yonik_linux::SubscriptionFetch for DesktopFetch {
@@ -3323,6 +3706,23 @@ impl yonik_linux::SubscriptionFetch for DesktopFetch {
         >,
     > {
         Box::pin(async move {
+            #[cfg(feature = "test-support")]
+            if let Some(host) = &self.test_fetch {
+                if route == FetchRoute::Proxy {
+                    self.proxy_used.store(true, Ordering::Release);
+                }
+                if self.stale() {
+                    return Err(FetchError::Cancelled);
+                }
+                let mut current = self.current.clone();
+                return tokio::select! {
+                    biased;
+                    _ = current.changed() => Err(FetchError::Cancelled),
+                    result = host.fetch(source, route, validators, cancel) => {
+                        if self.stale() { Err(FetchError::Cancelled) } else { result }
+                    }
+                };
+            }
             let mut host = yonik_linux::FetchHost::new(Duration::from_secs(30))?;
             if route == FetchRoute::Direct {
                 return host.fetch(source, route, validators, cancel).await;
@@ -3642,6 +4042,14 @@ fn reject_unavailable_command(
     cause: Cause,
     generation: u64,
 ) {
+    if let Command::StartupPreferencesSet { request_id, .. }
+    | Command::AutoconnectTargetSet { request_id, .. } = command
+    {
+        state.startup.request_id = Some(request_id.clone());
+        state.startup.save = "error";
+        state.startup.error = Some(error);
+    }
+
     state.maintenance_available = false;
     if let Some(request_id) = command.preset_request_id() {
         state.presets.ack = Some(presets::Ack {
@@ -3724,8 +4132,12 @@ async fn run(
     mut priority: watch::Receiver<Priority>,
     control: Arc<Control>,
     callback: Callback,
+    #[cfg(any(test, feature = "test-support"))] disk_fixture: Option<DiskTestInput>,
 ) {
+    // Host generation начинается с default Priority. Даже Stop до worker закрывает startup.
+    let startup_generation = Priority::default().generation;
     let mut state = Snapshot::new(config.ephemeral_key.is_some());
+    state.startup.start_hidden = config.start_hidden;
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
@@ -3811,9 +4223,20 @@ async fn run(
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
+    #[cfg(test)]
+    let proxy_fixture = disk_fixture
+        .as_ref()
+        .and_then(|fixture| fixture.proxy.clone());
+    #[cfg(any(test, feature = "test-support"))]
+    let (event_log, disk_log) = disk_fixture
+        .map(|fixture| fixture.sink)
+        .unwrap_or_else(|| yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone()));
+    #[cfg(not(any(test, feature = "test-support")))]
     let (event_log, disk_log) =
         yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
+        #[cfg(feature = "test-support")]
+        catalog_observer: config.catalog_observer.clone(),
         presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
             .ok()
             .map(Arc::new),
@@ -3836,7 +4259,13 @@ async fn run(
     if let Some(controller) = &actor.presets {
         actor.state.presets = controller.status();
     }
-    match actor.routing_repository().routing_draft().await {
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        actor.routing_repository().routing_draft(),
+    )
+    .await
+    .unwrap_or(Err(yonik_linux::RepositoryError::Storage))
+    {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
             .ok()
@@ -3864,14 +4293,34 @@ async fn run(
             actor.state.error = Some("routing_storage");
         }
     }
+    actor.state.startup.custody = config.startup_custody.take();
+    actor.state.startup.xdg_root = config.startup_xdg_root.clone();
+    actor.state.startup.owner = tokio::time::timeout(
+        Duration::from_secs(5),
+        actor.routing_repository().database_identity(),
+    )
+    .await
+    .ok()
+    .and_then(|result| result.ok())
+    .and_then(|id| crate::startup_identity::Identity::capture(&config.data_dir, id).ok());
     actor.state.routing_diagnostics = actor.state.routing.diagnostics();
     actor.state.routing_revision = actor.routing_revision;
-    if let Err(error) = actor.reload().await {
-        actor.state.command_error(true, error.key());
+    match tokio::time::timeout(Duration::from_secs(5), actor.reload()).await {
+        Ok(Ok(())) => (),
+        Ok(Err(error)) => {
+            actor.state.startup.initialization_failed = true;
+            actor.state.command_error(true, error.key());
+        }
+        Err(_) => {
+            actor.state.startup.initialization_failed = true;
+            actor.state.startup.error = Some("startup_timeout");
+        }
     }
     actor.emit();
     let (updates, mut events) = mpsc::channel::<SessionUpdate>(16);
-    let mut system_session: Option<SystemSession> = None;
+    let (mut startup_command, mut system_session) =
+        startup_application::prepare(&mut actor, &control, startup_generation).await;
+    actor.emit();
     let mut system_flight: Option<Flight> = None;
     let mut system_stop = false;
     let mut system_active = false;
@@ -3951,11 +4400,33 @@ async fn run(
         schedule_loaded = true;
     }
     let (proxy_session, _) = watch::channel::<ProxyLease>(None);
+    #[cfg(test)]
+    if let Some(fixture) = &proxy_fixture {
+        // Тот же канал, который отзывается production priority-веткой Stop.
+        proxy_session.send_replace(Some((17, fixture.endpoint)));
+        let fetch = DesktopFetch::new(&proxy_session, None);
+        let _observed = fixture.observer.send((proxy_session.subscribe(), fetch));
+    }
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
-    let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+    let mut schedule_host = DesktopFetch::subscription(
+        &proxy_session,
+        actor.preferences.proxy_fetch_dns,
+        #[cfg(feature = "test-support")]
+        config.test_subscription_fetch.clone(),
+    );
     let mut maintenance_controller = maintenance::Controller::default();
+    #[cfg(feature = "test-support")]
+    let mut schedule_trace = ScheduleTrace::default();
     loop {
+        #[cfg(feature = "test-support")]
+        schedule_trace.emit(
+            &config,
+            &scheduled,
+            *proxy_session.borrow(),
+            origin.elapsed(),
+            "state",
+        );
         let interval = Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
         #[cfg(feature = "test-support")]
@@ -3974,7 +4445,31 @@ async fn run(
                     || policy.metered
                     || policy.battery_saver))
         {
-            if let Err(error) = scheduled.close_window(actor.service(), now).await {
+            #[cfg(feature = "test-support")]
+            {
+                schedule_trace.begin_drain(&config);
+                schedule_trace.emit(
+                    &config,
+                    &scheduled,
+                    *proxy_session.borrow(),
+                    origin.elapsed(),
+                    "window_drain_begin",
+                );
+            }
+            let closed = scheduled.close_window(actor.service(), now).await;
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                if closed.is_ok() {
+                    "window_closed"
+                } else {
+                    "window_close_failed"
+                },
+            );
+            if let Err(error) = closed {
                 actor
                     .state
                     .schedule_error(error, Some(scheduled.generation));
@@ -3991,14 +4486,27 @@ async fn run(
                     && !session.task.is_finished()
             })
             .map(|session| session.lease);
-        proxy_session.send_if_modified(|current| {
+        // Без native Running fixture сохраняет только уже опубликованный lease.
+        // Production Stop по-прежнему единственный источник его отзыва.
+        #[cfg(test)]
+        let lease = lease.or_else(|| proxy_fixture.as_ref().and_then(|_| *proxy_session.borrow()));
+        if proxy_session.send_if_modified(|current| {
             if *current == lease {
                 false
             } else {
                 *current = lease;
                 true
             }
-        });
+        }) {
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                "lease_published",
+            );
+        }
         if manual_host.as_ref().is_some_and(|host| host.stale()) {
             actor.pending = None;
             if scheduled.review.is_none() {
@@ -4018,7 +4526,10 @@ async fn run(
                     .state
                     .schedule_error(error, Some(scheduled.generation));
             }
-            if let Ok(mut replacement) = scheduled.replacement() {
+            if let Some(mut replacement) = actor
+                .state
+                .schedule_replacement(scheduled.replacement(), scheduled.generation)
+            {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor
                         .state
@@ -4027,7 +4538,12 @@ async fn run(
                 actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
             }
-            schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+            schedule_host = DesktopFetch::subscription(
+                &proxy_session,
+                actor.preferences.proxy_fetch_dns,
+                #[cfg(feature = "test-support")]
+                config.test_subscription_fetch.clone(),
+            );
         }
         let allowed = !quitting
             && local_task.is_none()
@@ -4044,6 +4560,8 @@ async fn run(
         tokio::select! {
             biased;
             changed = priority.changed() => {
+                startup_command = None;
+                if actor.state.startup.attempt == "dispatched" { actor.state.startup.attempt = "cancelled"; }
                 if let Some((_, cancel, task)) = local_task.take() { cancel.send_replace(true); let _ = task.await; actor.state.busy = false; }
                 if local_pending.take().is_some() { actor.state.pending = None; }
 
@@ -4065,13 +4583,15 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if let Err(error) = scheduled.shutdown(origin.elapsed()).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
+                #[cfg(feature = "test-support")]
+                { schedule_trace.begin_drain(&config); schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), "stop_drain_begin"); }
+                let shutdown = scheduled.shutdown(origin.elapsed()).await;
+                #[cfg(feature = "test-support")]
+                schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), if shutdown.is_ok() { "stop_drain_complete" } else { "stop_drain_failed" });
+                if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
-                    let policy = scheduled.policy;
-                    let visible = scheduled.visible;
-                    if let Ok(mut replacement) = DesktopSchedule::new() {
-                        replacement.policy = policy; replacement.visible = visible;
+                    if let Some(mut replacement) = actor.state.schedule_replacement(scheduled.replacement(), scheduled.generation) {
                         if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
                         actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
@@ -4149,7 +4669,7 @@ async fn run(
                     record_system(&mut actor.state, SystemState::Unknown); actor.emit();
                 }
                 let generation = control.generation.load(Ordering::SeqCst);
-                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation));
+                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation, actor.event_log.clone()));
                 actor.state.system_busy = true; actor.emit();
             }
             _ = &mut provider => {},
@@ -4197,9 +4717,17 @@ async fn run(
             } => {
                 // На границе окна сначала closing ACK в начале следующей итерации.
                 if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
-                    schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+                    schedule_host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone());
                     let host = &schedule_host;
-                    scheduled.open_window(origin.elapsed());
+                    let window_now = origin.elapsed();
+                    #[cfg(feature = "test-support")]
+                    let was_closed = scheduled.window_until.is_none();
+                    scheduled.open_window(window_now);
+                    #[cfg(feature = "test-support")]
+                    {
+                        if was_closed && scheduled.window_until.is_some() { schedule_trace.window_origin = Some(window_now); }
+                        schedule_trace.emit(&config, &scheduled, *proxy_session.borrow(), origin.elapsed(), "dispatch");
+                    }
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
@@ -4304,6 +4832,10 @@ async fn run(
                 actor.emit();
             }
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
+                #[cfg(feature = "test-support")]
+                if matches!(&result, Ok(Ok(()))) {
+                    if let Some(gate) = &config.lifecycle_gate { gate.confirm_stopped(session_generation); }
+                }
                 running = None;
                 if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 if failed_session.is_none() && !preset_stopping { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
@@ -4383,9 +4915,21 @@ async fn run(
                 if preset_stopping { actor.state.status = "Stopping"; actor.state.can_stop = true; }
                 actor.emit();
             }
-            command = commands.recv(), if !quitting => {
-                let Some(envelope) = command else { control.interrupt(true); continue; };
+            command = async { if let Some(envelope) = startup_command.take() { Some((envelope, true)) } else { commands.recv().await.map(|envelope| (envelope, false)) } }, if !quitting => {
+                let Some((envelope, from_startup)) = command else { control.interrupt(true); continue; };
+                if from_startup {
+                    let validation = tokio::time::timeout(Duration::from_secs(5), actor.startup_revalidate(&control, envelope.generation)).await;
+                    if !matches!(validation, Ok(Ok(()))) {
+                        actor.state.startup.attempt = "blocked";
+                        actor.state.startup.error = Some(match validation { Ok(Err(error)) => error.key(), _ => "startup_timeout" });
+                        actor.emit(); continue;
+                    }
+                    actor.state.startup.attempt = "attempted";
+                }
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Command::StartupPreferencesSet { request_id, .. } | Command::AutoconnectTargetSet { request_id, .. } = &envelope.command {
+                        actor.state.startup.request_id = Some(request_id.clone()); actor.state.startup.save = "error"; actor.state.startup.error = Some("cancelled"); actor.emit();
+                    }
                     if let Some(request_id) = envelope.command.preset_request_id() {
                         actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("cancelled") });
                         actor.emit();
@@ -4630,6 +5174,8 @@ async fn run(
                 }
                 let local_is_file = matches!(&envelope.command, Command::ImportFile { .. });
                 let outcome: SourceResult<()> = match envelope.command {
+                    Command::StartupPreferencesSet { request_id, expected_revision, autostart_into_tray, autoconnect } => actor.startup_save(request_id, expected_revision, Some((autostart_into_tray, autoconnect)), &control, envelope.generation).await.map_err(Into::into),
+                    Command::AutoconnectTargetSet { request_id, expected_revision } => actor.startup_save(request_id, expected_revision, None, &control, envelope.generation).await.map_err(Into::into),
                     Command::ImportText { name, text } | Command::ImportFile { name, path: text } => {
                         if refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || scheduled.review.is_some() || actor.pending.is_some() || actor.state.can_stop { Err(DesktopError("busy").into()) }
                         else {
@@ -4737,7 +5283,7 @@ async fn run(
                             match actor.source_command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -4750,7 +5296,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
                         else {
                             match actor.source_command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -4804,7 +5350,7 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
-                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
@@ -4817,13 +5363,13 @@ async fn run(
                         if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy").into()) }
                         else {
                             let operation = if matches!(envelope.command, Command::SystemUnlock) { Operation::Unlock } else { Operation::State };
-                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation));
+                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation, actor.event_log.clone()));
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
                     Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage").into()),
                     Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage").into()),
-                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option").into()),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector().or_else(|| p.unsupported_transport())).is_some() => Err(DesktopError("unsupported_option").into()),
                     command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
                         let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
                         if let Err(error) = actor.check_routing_apply(&command).await { Err(error.into()) }
@@ -4832,7 +5378,7 @@ async fn run(
                         else if let Some(profile) = actor.selected.as_ref() {
                             match yonik_import::ServerIntent::from_server(&profile.server).map_err(|_| DesktopError("engine_config")).and_then(|server| actor.current_inline_policy().map(|(policy, revision)| (server, policy, revision))) {
                                 Ok((server, policy, routing_revision)) => {
-                                    system_flight = Some(Flight::start(system_session.take(), Operation::PolicyConnect(Box::new(server), actor.state.engine.engine(), Box::new(policy), routing_revision), system_revision(&actor), envelope.generation));
+                                    system_flight = Some(Flight::start(system_session.take(), Operation::PolicyConnect(Box::new(server), actor.state.engine.engine(), Box::new(policy), routing_revision), system_revision(&actor), envelope.generation, actor.event_log.clone()));
                                     if let Some(flight) = &mut system_flight { flight.request_id = request_id; flight.source_generation = actor.state.source_generation; }
                                     actor.state.system_tun_available = false;
                                     actor.state.routing_ack = None;
@@ -4859,6 +5405,8 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1); actor.state.error_generation = session_generation;
+                                        #[cfg(feature = "test-support")]
+                                        let receiver = if let Some(gate) = config.lifecycle_gate.clone() { receiver.with_lifecycle_gate(gate, session_generation) } else { receiver };
                                         let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone(), session_generation), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);
@@ -4987,6 +5535,7 @@ async fn run(
                 Operation::Stop,
                 system_revision(&actor),
                 generation,
+                actor.event_log.clone(),
             ));
             actor.state.system_busy = true;
             actor.emit();
@@ -5038,12 +5587,17 @@ async fn run(
     } else {
         true
     };
+    let output_closed = match system_session.as_mut() {
+        Some(session) => session.drain_output().await,
+        None => true,
+    };
     disk_log.request_shutdown();
     // Guard остаётся здесь до Done; actor не выполняет файловые операции и join.
     while !disk_log.wait_closed(Duration::ZERO) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let closed = service_closed && routing_closed && provider_closed && network_closed;
+    let closed =
+        service_closed && routing_closed && provider_closed && network_closed && output_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
@@ -5096,6 +5650,8 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                #[cfg(feature = "test-support")]
+                catalog_observer: None,
                 presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),
@@ -5865,6 +6421,7 @@ impl Flight {
         operation: Operation,
         revision: ProfileRevision,
         generation: u64,
+        log: yonik_linux::event_log::EventLog,
     ) -> Self {
         let connecting = matches!(operation, Operation::PolicyConnect(..));
         let routing_revision = match &operation {
@@ -5876,9 +6433,17 @@ impl Flight {
         let task = tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
             let mut session = match session {
-                Some(session) if !session.owner_lost() => session,
-                _ => match SystemClient::system(deadline, cancellation.clone()).await {
-                    Ok(client) => SystemSession::new(client, revision),
+                Some(mut session) => {
+                    if session.owner_lost() {
+                        match SystemClient::system(deadline, cancellation.clone()).await {
+                            Ok(client) => session.replace_client(client),
+                            Err(error) => return (Some(session), Err(error)),
+                        }
+                    }
+                    session
+                }
+                None => match SystemClient::system(deadline, cancellation.clone()).await {
+                    Ok(client) => SystemSession::new(client, revision, log),
                     Err(error) => return (None, Err(error)),
                 },
             };
@@ -5974,10 +6539,17 @@ mod inline_policy_conversion {
     use yonik_engine::policy_wire::SystemPolicy;
     use yonik_linux::system_policy::InlinePolicy;
     pub(crate) fn inline_policy(policy: &Policy) -> Result<InlinePolicy, ClientError> {
-        if policy.unsupported_selector().is_some() {
+        if policy.unsupported_selector().is_some() || policy.unsupported_transport().is_some() {
             return Err(ClientError::Unsupported);
         }
         let version = if policy
+            .user_rules
+            .iter()
+            .chain(&policy.preset_rules)
+            .any(|r| r.conditions.transport.constrained())
+        {
+            3
+        } else if policy
             .user_rules
             .iter()
             .chain(&policy.preset_rules)
@@ -5994,6 +6566,8 @@ mod inline_policy_conversion {
         }
         #[derive(Serialize)]
         struct WireRule<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            transport: Option<yonik_engine::transport::TransportInput>,
             id: u64,
             enabled: bool,
             action: &'static str,
@@ -6021,6 +6595,9 @@ mod inline_policy_conversion {
                 }
             }
             WireRule {
+                transport: value.conditions.transport.constrained().then(|| {
+                    yonik_engine::transport::TransportInput::from_typed(&value.conditions.transport)
+                }),
                 id: value.id,
                 enabled: value.enabled,
                 action: action(value.action),
@@ -6033,7 +6610,7 @@ mod inline_policy_conversion {
                     .map(ToString::to_string)
                     .collect(),
                 executable_paths: &value.conditions.executables,
-                platform_sources: (version == 2).then(|| {
+                platform_sources: (version >= 2).then(|| {
                     value
                         .conditions
                         .platform_sources
@@ -6130,6 +6707,7 @@ mod inline_policy_conversion {
                     enabled: true,
                     action: Action::Block,
                     conditions: Conditions {
+                        transport: Default::default(),
                         platform_sources: Vec::new(),
                         executables: vec!["/usr/bin/browser".into()],
                         destinations: vec!["192.0.2.0/24".parse().unwrap()],
@@ -6627,3 +7205,7 @@ mod probe_context_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "disk_host_acceptance.rs"]
+mod disk_host_acceptance;
