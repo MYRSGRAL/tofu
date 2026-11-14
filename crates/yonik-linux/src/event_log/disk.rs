@@ -46,6 +46,8 @@ pub struct DiskLogStats {
 }
 #[derive(Default)]
 struct State {
+    #[cfg(any(test, feature = "test-support"))]
+    after_open: Option<Arc<test_support::AfterOpen>>,
     stop: AtomicBool,
     admission: Mutex<()>,
     status: AtomicU8,
@@ -129,6 +131,10 @@ impl DiskLogGuard {
 }
 impl Drop for DiskLogGuard {
     fn drop(&mut self) {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(barrier) = &self.state.after_open {
+            barrier.release();
+        }
         self.request_shutdown();
         // Join разрешён только после завершения, Drop не подтверждает drain.
         if self.thread.as_ref().is_some_and(JoinHandle::is_finished) {
@@ -139,8 +145,22 @@ impl Drop for DiskLogGuard {
     }
 }
 pub(super) fn start(path: PathBuf) -> (Producer, DiskLogGuard) {
+    start_inner(
+        path,
+        #[cfg(any(test, feature = "test-support"))]
+        None,
+    )
+}
+fn start_inner(
+    path: PathBuf,
+    #[cfg(any(test, feature = "test-support"))] after_open: Option<Arc<test_support::AfterOpen>>,
+) -> (Producer, DiskLogGuard) {
     let (tx, rx) = mpsc::sync_channel(128);
-    let state = Arc::new(State::default());
+    let state = Arc::new(State {
+        #[cfg(any(test, feature = "test-support"))]
+        after_open,
+        ..State::default()
+    });
     let worker = Arc::clone(&state);
     let thread = thread::Builder::new()
         .name("yonik-event-log".into())
@@ -411,6 +431,10 @@ fn consume(path: &Path, rx: Receiver<Option<Record>>, state: &State) {
         }
     };
     state.status.store(1, Ordering::Release);
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(barrier) = &state.after_open {
+        barrier.enter();
+    }
     #[cfg(test)]
     acceptance::checkpoint(path, acceptance::Phase::Opened);
     let result = drain(&mut sink, &rx, state);
@@ -758,3 +782,6 @@ mod tests {
 
 #[cfg(test)]
 mod acceptance;
+
+#[cfg(any(test, feature = "test-support"))]
+pub(super) mod test_support;

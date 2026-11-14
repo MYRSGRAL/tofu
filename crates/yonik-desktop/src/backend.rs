@@ -554,10 +554,57 @@ pub struct DesktopHost {
     commands: mpsc::Sender<Envelope>,
     control: Arc<Control>,
 }
+#[cfg(any(test, feature = "test-support"))]
+struct DiskTestInput {
+    sink: (
+        yonik_linux::event_log::EventLog,
+        yonik_linux::event_log::DiskLogGuard,
+    ),
+    #[cfg(test)]
+    proxy: Option<ProxyLeaseFixture>,
+}
+#[cfg(test)]
+#[derive(Clone)]
+struct ProxyLeaseFixture {
+    endpoint: SocketAddr,
+    observer: std::sync::mpsc::Sender<(watch::Receiver<ProxyLease>, Arc<DesktopFetch>)>,
+}
 impl DesktopHost {
     pub fn start(
         config: HostConfig,
         callback: impl Fn(String) + Send + Sync + 'static,
+    ) -> Result<Self> {
+        Self::start_inner(
+            config,
+            callback,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_start_with_disk(
+        config: HostConfig,
+        fixture: &mut yonik_linux::event_log::DiskFixture,
+        callback: impl Fn(String) + Send + Sync + 'static,
+    ) -> Result<Self> {
+        if config.data_dir != fixture.path() {
+            return Err(DesktopError("invalid_input"));
+        }
+        let sink = fixture.take_sink().ok_or(DesktopError("invalid_input"))?;
+        Self::start_inner(
+            config,
+            callback,
+            Some(DiskTestInput {
+                sink,
+                #[cfg(test)]
+                proxy: None,
+            }),
+        )
+    }
+    fn start_inner(
+        config: HostConfig,
+        callback: impl Fn(String) + Send + Sync + 'static,
+        #[cfg(any(test, feature = "test-support"))] disk_fixture: Option<DiskTestInput>,
     ) -> Result<Self> {
         let (commands, receiver) = mpsc::channel(128);
         let (priority, priority_rx) = watch::channel(Priority::default());
@@ -589,6 +636,8 @@ impl DesktopHost {
                         priority_rx,
                         worker_control,
                         callback,
+                        #[cfg(any(test, feature = "test-support"))]
+                        disk_fixture,
                     )),
                     Err(_) => {
                         let mut snapshot = Snapshot::new(config.ephemeral_key.is_some());
@@ -3724,6 +3773,7 @@ async fn run(
     mut priority: watch::Receiver<Priority>,
     control: Arc<Control>,
     callback: Callback,
+    #[cfg(any(test, feature = "test-support"))] disk_fixture: Option<DiskTestInput>,
 ) {
     let mut state = Snapshot::new(config.ephemeral_key.is_some());
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
@@ -3811,6 +3861,15 @@ async fn run(
     synchronize_network(&mut state, network.as_ref().map(NetworkWatch::current));
     let automatic_port = preferences.port.is_none();
     let probe_url = Zeroizing::new(preferences.probe_url.clone());
+    #[cfg(test)]
+    let proxy_fixture = disk_fixture
+        .as_ref()
+        .and_then(|fixture| fixture.proxy.clone());
+    #[cfg(any(test, feature = "test-support"))]
+    let (event_log, disk_log) = disk_fixture
+        .map(|fixture| fixture.sink)
+        .unwrap_or_else(|| yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone()));
+    #[cfg(not(any(test, feature = "test-support")))]
     let (event_log, disk_log) =
         yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
@@ -3951,6 +4010,13 @@ async fn run(
         schedule_loaded = true;
     }
     let (proxy_session, _) = watch::channel::<ProxyLease>(None);
+    #[cfg(test)]
+    if let Some(fixture) = &proxy_fixture {
+        // Тот же канал, который отзывается production priority-веткой Stop.
+        proxy_session.send_replace(Some((17, fixture.endpoint)));
+        let fetch = DesktopFetch::new(&proxy_session, None);
+        let _observed = fixture.observer.send((proxy_session.subscribe(), fetch));
+    }
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
     let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
@@ -3991,6 +4057,10 @@ async fn run(
                     && !session.task.is_finished()
             })
             .map(|session| session.lease);
+        // Без native Running fixture сохраняет только уже опубликованный lease.
+        // Production Stop по-прежнему единственный источник его отзыва.
+        #[cfg(test)]
+        let lease = lease.or_else(|| proxy_fixture.as_ref().and_then(|_| *proxy_session.borrow()));
         proxy_session.send_if_modified(|current| {
             if *current == lease {
                 false
@@ -6627,3 +6697,7 @@ mod probe_context_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "disk_host_acceptance.rs"]
+mod disk_host_acceptance;

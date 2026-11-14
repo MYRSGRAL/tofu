@@ -344,3 +344,6 @@ mod context_tests {
         );
     }
 }
+
+#[cfg(any(test, feature = "test-support"))]
+pub use disk::test_support::DiskFixture;
