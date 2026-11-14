@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator, Protocol
 from urllib.parse import urlsplit
 
+from _p25_capture_producer import retain as retain_build_capture
 from check_package_provenance import (
     NotReady,
     _private_directory,
@@ -224,6 +225,8 @@ def tooling_hashes() -> dict[str, str]:
         name: sha(base / name)
         for name in (
             "release_controller.py",
+            "_p25_capture_producer.py",
+            "p25_capture_build_closure.py",
             "check_package_provenance.py",
             "check_arch_package.py",
             "compile_notices.py",
@@ -1087,6 +1090,8 @@ def _collect(
                 for name in ("rustc", "cargo")
             }
             try:
+                capture_pending = False
+                build_capture = None
                 rust_lineage = None
                 if release == RUST_REUSE_TARGET:
                     rust_lineage = reuse_rust(
@@ -1094,6 +1099,8 @@ def _collect(
                     )
                     elf_records = rust_lineage["elf"]
                 else:
+                    capture_pending = True
+                    command_start = len(runner.commands)
                     for command in RECIPE["rust_commands"]:
                         runner.run([SLOT, *command], root, env)
                     elf_records = {}
@@ -1101,6 +1108,16 @@ def _collect(
                         binary = input_path(task / "target/release", name)
                         elf_records[name] = elf_file(binary)
                         shutil.copyfile(binary, artifacts / name)
+                    build_capture = retain_build_capture(
+                        root,
+                        task / "target",
+                        artifacts,
+                        record,
+                        runner.commands[command_start:],
+                        list(RUST),
+                        RECIPE["target"],
+                    )
+                    capture_pending = False
                 cores = {}
                 for engine in VERSIONS:
                     build = task / engine
@@ -1222,6 +1239,7 @@ def _collect(
                     "payload": payload,
                     "trusted_native_job": accepted,
                     "rust_lineage": rust_lineage,
+                    "build_capture": build_capture,
                     "artifact_sha256": {
                         path.relative_to(artifacts).as_posix(): sha(path)
                         for path in artifacts.rglob("*")
@@ -1232,7 +1250,7 @@ def _collect(
                 }
                 validate_payload(artifacts / "package.tar", root, context)
             finally:
-                if (task / "target").exists():
+                if not capture_pending and (task / "target").exists():
                     runner.run(
                         [SLOT, "cargo", "clean", "--target-dir", str(task / "target")],
                         root,

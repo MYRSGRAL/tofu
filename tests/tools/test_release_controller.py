@@ -251,6 +251,31 @@ class ControllerTest(unittest.TestCase):
             os.stat(self.registry / "unit/frozen.json").st_mode & 0o777, 0o600
         )
 
+    def test_capture_retained_before_clean(self) -> None:
+        self.freeze()
+        original = self.runner.run
+
+        def checked(argv: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+            if argv[:3] == [c.SLOT, "cargo", "clean"]:
+                manifest = json.loads(
+                    (self.registry / "unit/build-capture-manifest.json").read_bytes()
+                )
+                self.assertEqual(manifest["status"], "MISSING")
+                self.assertIn("qt:observed-query-and-tool", manifest["producer_missing"])
+            return original(argv, cwd, env)
+
+        self.runner.run = checked
+        self.collect()
+
+    def test_retention_failure_preserves_target(self) -> None:
+        self.freeze()
+        with patch.object(c, "retain_build_capture", side_effect=OSError("fixture retention")):
+            with self.assertRaises(OSError):
+                self.collect()
+        self.assertTrue((self.task / "target").exists())
+        self.assertFalse(any(row["argv"][:3] == [c.SLOT, "cargo", "clean"]
+                             for row in self.runner.commands))
+
     def test_uncollected_and_fabricated_context(self) -> None:
         self.freeze()
         with self.assertRaises(ValueError):
