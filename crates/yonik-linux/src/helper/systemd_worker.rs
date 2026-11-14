@@ -25,7 +25,9 @@ use zbus::{
 };
 
 mod lookup_leaf;
-pub(crate) use lookup_leaf::{LookupLeafLease, VerifiedLookupLeaf};
+pub(crate) use lookup_leaf::{
+    LookupLeafLease, PeerVerifierLease, VerifiedLookupLeaf, VerifiedPeerVerifier,
+};
 const BUS: &str = "unix:path=/run/dbus/system_bus_socket";
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER: &str = "/org/freedesktop/systemd1";

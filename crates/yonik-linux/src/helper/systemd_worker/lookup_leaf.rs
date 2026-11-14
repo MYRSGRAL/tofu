@@ -24,6 +24,58 @@ pub(crate) struct VerifiedLookupLeaf {
     channel: OwnedFd,
     lease: LookupLeafLease,
 }
+/// Наблюдение preparation: тип не принимается runtime Run/Session factory.
+pub(crate) struct VerifiedPeerVerifier {
+    channel: OwnedFd,
+    lease: PeerVerifierLease,
+}
+struct PeerObservation {
+    identity: Arc<LeafIdentity>,
+    revoked: AtomicBool,
+}
+pub(crate) struct PeerVerifierLease(Arc<PeerObservation>);
+impl VerifiedPeerVerifier {
+    pub(crate) fn into_parts(self) -> (OwnedFd, PeerVerifierLease) {
+        (self.channel, self.lease)
+    }
+}
+impl PeerVerifierLease {
+    pub(crate) fn pid(&self) -> u32 {
+        self.0.identity.pid
+    }
+    pub(crate) fn uid(&self) -> u32 {
+        self.0.identity.uid
+    }
+    pub(crate) fn start(&self) -> u64 {
+        self.0.identity.start
+    }
+    pub(crate) fn invocation(&self) -> [u8; 16] {
+        self.0.identity.invocation
+    }
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.0.revoked.load(Ordering::Acquire) {
+            return Err(WorkerSupervisorError::Stale);
+        }
+        self.0.identity.validate()
+    }
+    pub(crate) fn verify_image(&self, image: &File) -> Result<()> {
+        self.validate()?;
+        verify_identity_image(&self.0.identity, image)
+    }
+    pub(crate) fn revoke(&self) {
+        self.0.revoked.store(true, Ordering::Release);
+    }
+    pub(crate) fn same_observer(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+fn verify_identity_image(identity: &LeafIdentity, image: &File) -> Result<()> {
+    same_image(&identity.image, image)?;
+    if image_stamp(image)? != identity.image_stamp || image_hash(image)? != identity.image_sha256 {
+        return Err(WorkerSupervisorError::Stale);
+    }
+    Ok(())
+}
 impl VerifiedLookupLeaf {
     pub(crate) fn into_parts(self) -> (OwnedFd, LookupLeafLease) {
         (self.channel, self.lease)
@@ -43,11 +95,7 @@ impl LookupLeafLease {
         self.0.invocation
     }
     pub(crate) fn verify_image(&self, image: &File) -> Result<()> {
-        same_image(&self.0.image, image)?;
-        if image_stamp(image)? != self.0.image_stamp || image_hash(image)? != self.0.image_sha256 {
-            return Err(WorkerSupervisorError::Stale);
-        }
-        Ok(())
+        verify_identity_image(&self.0, image)
     }
     pub(crate) fn validate(&self) -> Result<()> {
         self.0.validate()
