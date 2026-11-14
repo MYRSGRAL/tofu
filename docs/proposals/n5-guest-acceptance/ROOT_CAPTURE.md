@@ -129,3 +129,45 @@ packet-policy PASS и весь cleanup этим инструментом не о
 Проверки: Ruff 0.17.4, `python -B -m unittest discover -s
  docs/proposals/n5-guest-acceptance -p test_collect_observations.py` и тот же
 запуск с `python -B -O`. Все OS/child операции тестов только mocked.
+
+## SOURCE producer unit closure
+
+`unit_closure_capture.collect_unit_closure(nonce, case, backend=None)` возвращает
+exact `N5_UNIT_CLOSURE_V1` consumer из Git
+`41e572805e044323ae462bab8d78660994e2a297`:
+успех содержит только `schema`, `provenance`, `units`, `helper` (без `status`).
+Отказ: `{"schema":"N5_UNIT_CLOSURE_V1","status":"UNAVAILABLE"}`; consumer
+не принимает его за успешный capture. Это SOURCE API будущего root guest fixture,
+не выполненное измерение и не grant. Outer writer атомарно сохраняет успешный
+результат в `/run/yonik-acceptance/unit-closure.json`, root-owned 0444,
+с доверенными предками. CLI и автоматической записи нет.
+
+Общий private `_authorize` сохраняет исходный gate `collect`: root, exact sealed
+USER_GRANTED_GUEST_CAPTURE authorization/input, input SHA, source/manifest,
+nonce/case/stages проверяются до любых runtime-чтений/queries. Grant/input
+перечитываются перед возвратом. Пять canonical unit queries используют ровно CSV
+consumer (COMMON + SERVICE/SOCKET), `--system --no-pager --all show`, fixed system
+bus и очищенную среду. Каждый stdout ограничен 64 KiB и deadline 3 s; finally
+завершает и reap только собственного child. Missing/duplicate/unknown properties,
+reload/dropins/transient или неидентичные два manager snapshots дают отказ.
+Детальная проверка всего effective canonical context и manifest ELF binding
+остаётся обязательной частью consumer; успешный producer JSON сам по себе не PASS.
+
+Между snapshots root читает фактический helper image через удерживаемые pidfd и
+trusted `/proc/<canonical MainPID>` directory FD. Единственное намеренное
+magic-link исключение — literal `exe` после проверки PID/start и всех четырёх
+UID=0. Все обычные filesystem inputs обходятся с NOFOLLOW на каждом компоненте.
+Hash streaming ограничен 64 MiB и deadline; проверяются размер и pre/post stamps,
+повторный executable FD, start/UID и живой pidfd. Не читается installed helper
+вместо executing image; denied read означает UNAVAILABLE без appUID fallback,
+SYS_PTRACE, активации helper или сигналов чужим tasks. Это snapshots, а не
+атомарная транзакция; изменения с возвратом между наблюдениями не исключены.
+
+Provenance содержит ровно source/manifest/nonce/case/boot/collector/auth/manager
+SHA. `collector_sha256` всегда хеширует существующий root collector
+`/usr/lib/yonik-acceptance/collect_observations.py`, как `controls.collector_sha256`,
+а не новый модуль. Outer fixture отдельно связывает reviewed implementation
+`unit_closure_capture.py` с исходниками/архивом trusted capture toolchain;
+подмена модуля не предотвращается одним collector pin. Manager client хешируется
+по root-trusted NOFOLLOW пути `/usr/bin/systemctl`, mode 0755 (owner write разрешён,
+group/other write запрещён); это отдельный режим от readonly sealed inputs.

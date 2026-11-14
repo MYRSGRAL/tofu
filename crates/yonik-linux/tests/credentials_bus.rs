@@ -82,7 +82,9 @@ async fn startup_owner_guard_child() {
     let guard = observed.expect("реальный SS owner");
     guard.check().await.expect("начальный owner");
     use std::io::Write;
-    println!("guard_ready");
+    // При одном потоке libtest пишет status-prefix без перевода строки.
+    // Readiness остаётся отдельным frame независимо от режима harness.
+    println!("\nguard_ready");
     std::io::stdout().flush().unwrap();
     tokio::task::spawn_blocking(|| {
         let mut line = String::new();

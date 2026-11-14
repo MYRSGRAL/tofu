@@ -18,19 +18,20 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from fixture import preflight
+from fixture import preflight, validate_receipt
 
 PACKAGE = Path(__file__).parent
 DRIVER = "/usr/lib/yonik-acceptance/n5-guest-driver"
 DRIVER_ARGV = (DRIVER, "--receipt-protocol=n5-v1")
 FIXTURE = Path("/usr/lib/yonik-acceptance/sealed-guest-fixture-v1.json")
+LAUNCH = Path("/usr/lib/yonik-acceptance/n5-trusted-launch.json")
 GRANT = Path("/usr/lib/yonik-acceptance/n5-user-grant.json")
 SOURCE = "7000c59bca687a53cfa35e45137d0299cd1440f0"
 MAX_JSON = 65536
-MAX_FRAME = 4096
-MAX_TOTAL = 1048576
-CASE_SECONDS = 60
-CLEANUP_SECONDS = 15
+MAX_FRAME = 4194304
+MAX_TOTAL = 8388608
+CASE_SECONDS = 180
+CLEANUP_SECONDS = 45
 CAMPAIGN_SECONDS = 900
 CORES = ("xray", "sing-box")
 COUNTERS = {
@@ -140,9 +141,9 @@ def decode(data: bytes, limit: int = MAX_JSON) -> dict[str, Any]:
     return value
 
 
-def read_json(path: Path) -> dict[str, Any]:
+def read_json(path: Path, limit: int = MAX_JSON) -> dict[str, Any]:
     with path.open("rb") as stream:
-        return decode(stream.read(MAX_JSON + 1))
+        return decode(stream.read(limit + 1), limit)
 
 
 def sha_file(path: Path, limit: int = 512 * 1024 * 1024) -> str:
@@ -184,7 +185,7 @@ def authorize(
         raise Refused("EXECUTION_CLOSED")
     if authorization.get("source_blockers") != []:
         raise Refused("SOURCE_BLOCKED")
-    for name in ("runner_sha256", "fixture_sha256", "grant_sha256"):
+    for name in ("runner_sha256", "fixture_sha256", "grant_sha256", "launch_sha256"):
         if not digest(authorization.get(name)):
             raise Refused("MISSING_PINS")
     # Строгая DATA-схема fixture.py не допускает status/n5_acceptance.
@@ -201,16 +202,14 @@ def authorize(
     ):
         raise Refused("GRANT_BINDING")
     if (
-        fixture.get("source_commit") != SOURCE
-        or authorization.get("source_commit") != SOURCE
-        or grant.get("source_commit") != SOURCE
+        not digest(authorization.get("source_commit"), 40)
+        or fixture.get("source_commit") != authorization["source_commit"]
+        or grant.get("source_commit") != authorization["source_commit"]
+        or grant.get("launch_sha256") != authorization["launch_sha256"]
     ):
         raise Refused("SOURCE_BINDING")
     if grant.get("cases") != [f"{core}:{case}" for core in CORES for case in CASES]:
         raise Refused("CASE_GRANT")
-    # READY DATA не доказывает after-setup closure и actual observer provenance.
-    # Совместимого sealed driver/control binding пока нет; не изобретаем extension.
-    raise Refused("MISSING_ACTUAL_DRIVER_AND_FIXTURE")
 
 
 def environment(uid: int) -> dict[str, str]:
@@ -220,7 +219,7 @@ def environment(uid: int) -> dict[str, str]:
         "PATH": "/usr/bin",
         "XDG_RUNTIME_DIR": f"/run/user/{uid}",
         "WAYLAND_DISPLAY": "wayland-0",
-        "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus",
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/yonik-n5-private-bus",
     }
 
 
@@ -248,7 +247,7 @@ class ProcessDriver:
         except OSError:
             self.process.kill()
             self.process.wait(timeout=5)
-            raise Refused("PIDFD_REQUIRED") from None
+            raise RuntimeFailure("PIDFD_REQUIRED_AFTER_LAUNCH") from None
         assert self.process.stdin is not None and self.process.stdout is not None
         os.set_blocking(self.process.stdin.fileno(), False)
         os.set_blocking(self.process.stdout.fileno(), False)
@@ -262,7 +261,7 @@ class ProcessDriver:
         request = (
             json.dumps(
                 {
-                    "schema": 1,
+                    "schema": 2,
                     "seq": self.seq,
                     "core": core,
                     "case": case,
@@ -324,139 +323,231 @@ class ProcessDriver:
                 self.process.stdout.close()
 
 
-def check_receipt(
-    receipt: dict[str, Any],
-    stage: str,
-    previous: dict[str, Any] | None,
-    expected: dict[str, Any],
-) -> dict[str, Any] | None:
+# Исторические CASES/PREFIX выше сохраняют исходные IDs proposal, не runtime gate.
+ACTUAL = {
+    "desktop_system_connected",
+    "trusted_execution_tuple",
+    "tcp_udp_policy",
+    "app_owner_policy",
+    "worker_reaped",
+    "cgroup_empty",
+    "network_restored",
+    "foreign_resources_preserved",
+}
+INFERRED = {"full_v4_report", "custody_roles_attach_ack"}
+UNAVAILABLE = {"tampered_internal_report", "revoke_between_internal_stages"}
+
+
+def _check_receipt(receipt: dict[str, Any], expected: dict[str, Any]) -> None:
+    """v2: evidence class не взаимозаменяемы; legacy counters отвергаются.
+
+    expected поступает от отдельно доверенного sealed capture verifier. Совпадение
+    JSON само по себе не аутентифицирует capture и не открывает execute().
+    """
     if (
         set(receipt)
-        != {
-            "schema",
-            "seq",
-            "core",
-            "case",
-            "stage",
-            "facts",
-            "binding",
-            "coverage",
-            "artifacts",
-            "kernel_build_id",
-        }
+        != {"schema", "seq", "core", "case", "stage", "claims", "observations"}
         or type(receipt["schema"]) is not int
-        or receipt["schema"] != 1
-        or receipt["stage"] != stage
+        or receipt["schema"] != 2
+        or type(receipt["seq"]) is not int
+        or not 0 < receipt["seq"] < 2**64
+        or type(receipt["core"]) is not str
+        or type(receipt["case"]) is not str
+        or receipt["core"] not in CORES
+        or receipt["case"] not in CASES
+        or receipt["stage"] != "witness"
     ):
-        raise Refused("STAGE_PROTOCOL")
-    facts = receipt["facts"]
-    if (
-        not isinstance(facts, dict)
-        or set(facts) != COUNTERS
-        or any(type(v) is not int or v not in (0, 1) for v in facts.values())
-    ):
-        raise Refused("COUNTER_PROTOCOL")
-    if facts["health"] and (
-        not facts["ack"] or not facts["admitted"] or facts["revoked"]
-    ):
-        raise Refused("FALSE_READINESS")
-    if (
-        facts["ack"]
-        and not facts["role_sends"]
-        or facts["role_sends"]
-        and not facts["admitted"]
-    ):
-        raise Refused("ROLE_ORDER")
-    if facts["admitted"] and facts["apply_sends"] != 1:
-        raise Refused("APPLY_ORDER")
-    binding = receipt["binding"]
-    if binding is not None:
-        if not isinstance(binding, dict) or set(binding) != BINDING:
-            raise Refused("BINDING_PROTOCOL")
-        for key, value in binding.items():
-            if key in {"worker_pid", "server_pid", "owner_uid"}:
-                valid = type(value) is int and 0 < value < 2**32
-            elif key in {"worker_start", "server_start", "generation", "epoch"}:
-                valid = type(value) is int and 0 < value < 2**64
+        raise Refused("V2_PROTOCOL")
+    observations = receipt["observations"]
+    if type(observations) is not dict or set(observations) != {
+        "flows",
+        "root_captures",
+    }:
+        raise Refused("WITNESS_OBSERVATIONS")
+    witness_sha256 = hashlib.sha256(
+        json.dumps(
+            observations, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+    ).hexdigest()
+    claims = receipt["claims"]
+    if type(claims) is not dict or set(claims) != ACTUAL | INFERRED | UNAVAILABLE:
+        raise Refused("CLAIM_SET")
+    capture = expected.get("trusted_capture_sha256")
+    source = expected.get("executing_source_sha256")
+    if not digest(capture) or not digest(source):
+        raise Refused("MISSING_TRUSTED_PROVENANCE")
+    for name, claim in claims.items():
+        if type(claim) is not dict:
+            raise Refused("CLAIM_PROTOCOL")
+        if name in ACTUAL:
+            if (
+                set(claim) != {"class", "capture_sha256", "observation"}
+                or claim["class"] != "ACTUAL"
+                or claim["capture_sha256"] != capture
+            ):
+                raise Refused("MISSING_ACTUAL_OBSERVATION")
+            observation = claim["observation"]
+            if name == "desktop_system_connected":
+                if (
+                    type(observation) is not dict
+                    or observation.get("status") != "Connected"
+                    or observation.get("connection_mode") != "system"
+                    or observation.get("policy_requires_attribution") is not True
+                    or observation.get("selected_profile")
+                    != expected["controls"]["profile_id"]
+                    or observation.get("source_id") != expected["controls"]["source_id"]
+                    or observation.get("engine") != receipt["core"]
+                ):
+                    raise Refused("NOT_SYSTEM_TUN")
+            elif name == "trusted_execution_tuple":
+                if observation != {
+                    "source_sha256": source,
+                    "launch_sha256": capture,
+                    "live_verified": True,
+                }:
+                    raise Refused("PROVENANCE_MISMATCH")
+            elif name in {"tcp_udp_policy", "app_owner_policy"}:
+                if observation != {"witness_sha256": witness_sha256}:
+                    raise Refused("FLOW_COMMITMENT")
+                check_flows(observations["flows"], expected["controls"])
             else:
-                valid = digest(value, 32 if key == "invocation" else 64)
-            if not valid:
-                raise Refused("BINDING_PROTOCOL")
-        if (
-            previous is not None
-            and previous != binding
-            or binding["owner_uid"] != expected["caller_uid"]
-        ):
-            raise Refused("CANONICAL_CHANGED")
-    elif previous is not None or facts["admitted"]:
-        raise Refused("MISSING_CUSTODY")
-    if stage in PREFIX:
-        if (
-            binding is None
-            or receipt["artifacts"] != expected["artifacts"]
-            or receipt["kernel_build_id"] != expected["kernel_build_id"]
-        ):
-            raise Refused("ACTUAL_ARTIFACT_BINDING")
-    if stage in PREFIX:
-        index = PREFIX.index(stage)
-        for key, minimum in (
-            ("admitted", 2),
-            ("role_sends", 3),
-            ("ack", 4),
-            ("health", 5),
-        ):
-            if facts[key] != int(index >= minimum):
-                raise Refused("STAGE_FACTS")
-    if stage in PREFIX[1:]:
-        coverage = receipt["coverage"]
-        if not isinstance(coverage, dict) or set(coverage) != {
-            "baseline",
-            "current",
-            "errno",
-            "receipt_sha256",
-            "report_sha256",
-        }:
-            raise Refused("COVERAGE_PROTOCOL")
-        b, c = coverage["baseline"], coverage["current"]
-        if (
-            type(b) is not int
-            or type(c) is not int
-            or not 0 <= b < 2**32 - 1
-            or c != b + 1
-            or not isinstance(coverage["errno"], list)
-            or any(type(value) is not int for value in coverage["errno"])
-            or coverage["errno"] != [1, 1, 38] + [1] * 16
-            or any(not digest(coverage[k]) for k in ("receipt_sha256", "report_sha256"))
-        ):
-            raise Refused("COVERAGE_MISMATCH")
-    if stage in {"profile_unavailable", "profile_rejected", "report_rejected"} and any(
-        facts[k] for k in ("admitted", "role_sends", "ack", "health")
-    ):
-        raise Refused("DENIAL_BYPASS")
-    if stage in {"revoked", "cancelled", "host_lost", "unknown"} and (
-        not facts["revoked"]
-        or facts["health"]
-        or not facts["retained"]
-        or facts["empty"]
-        or facts["closed"]
-    ):
-        raise Refused("EARLY_RELEASE")
+                if observation != {"witness_sha256": witness_sha256}:
+                    raise Refused("CLEANUP_COMMITMENT")
+                check_cleanup(
+                    {"class": "ACTUAL", "root_captures": observations["root_captures"]},
+                    expected,
+                )
+        elif name in INFERRED:
+            if (
+                set(claim) != {"class", "source_sha256", "anchor_sha256"}
+                or claim["class"] != "SOURCE_INVARIANT"
+                or claim["source_sha256"] != source
+                or claim["anchor_sha256"] != capture
+            ):
+                raise Refused("INFERENCE_BINDING")
+        elif claim != {"class": "UNAVAILABLE", "reason": "SOURCE_ONLY"}:
+            raise Refused("UNAVAILABLE_PROTOCOL")
+
+
+def check_receipt(receipt: dict[str, Any], expected: dict[str, Any]) -> None:
+    try:
+        _check_receipt(receipt, expected)
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError) as error:
+        raise Refused("V2_PROTOCOL") from error
+
+
+def check_cleanup(observation: Any, expected: dict[str, Any]) -> None:
     if (
-        stage == "healthy"
-        and facts["health"] != 1
-        or stage == "attach_ack"
-        and facts["ack"] != 1
+        type(observation) is not dict
+        or set(observation) != {"class", "root_captures"}
+        or observation["class"] != "ACTUAL"
     ):
-        raise Refused("MISSING_ACK_HEALTH")
-    if stage == "closed" and (
-        not facts["empty"]
-        or not facts["reaped"]
-        or not facts["closed"]
-        or facts["retained"]
-        or facts["health"]
+        raise Refused("MISSING_ROOT_CAPTURE")
+    captures = observation["root_captures"]
+    if type(captures) is not list or len(captures) != 3:
+        raise Refused("ROOT_CAPTURE_SET")
+    controls = expected["controls"]
+    for capture, stage in zip(
+        captures, ("baseline", "connected", "stopped"), strict=True
     ):
-        raise Refused("UNCERTAIN_CLEANUP")
-    return binding
+        provenance = capture.get("provenance", {})
+        if (
+            capture.get("schema") != 1
+            or capture.get("status") != "ACTUAL"
+            or provenance.get("source") != expected["source_commit"]
+            or provenance.get("manifest_sha256") != expected["manifest_sha256"]
+            or provenance.get("stage") != stage
+            or provenance.get("nonce") != controls["capture_nonce"]
+            or provenance.get("authorization_sha256")
+            != controls["capture_authorization_sha256"]
+            or provenance.get("case")
+            != expected["core"].replace("-", "_") + "_positive"
+            or capture.get("observations", {}).get("artifacts") != expected["artifacts"]
+        ):
+            raise Refused("ROOT_CAPTURE_PROVENANCE")
+    before, live, after = [c["observations"] for c in captures]
+    network_keys = {"links", "addresses", "routes", "rules", "routes6", "rules6", "nft"}
+    for item in (before, live, after):
+        network = item.get("network")
+        if type(network) is not dict or set(network) != network_keys:
+            raise Refused("MISSING_IPV4_IPV6_CAPTURE")
+        if any(
+            type(values) is not list or any(not digest(value) for value in values)
+            for values in network.values()
+        ):
+            raise Refused("NETWORK_HASH_PROTOCOL")
+    if before["network"] != after["network"] or before["network"] == live["network"]:
+        raise Refused("ROOT_NETWORK_NOT_RESTORED")
+    worker = after["units"]["yonik-worker.service"]
+    if (
+        worker["main"] is not None
+        or worker["members"] != []
+        or type(worker["populated"]) is not int
+        or worker["populated"] != 0
+    ):
+        raise Refused("WORKER_NONEMPTY")
+    if (
+        before["units"]["yonik-helper.service"]
+        != after["units"]["yonik-helper.service"]
+    ):
+        raise Refused("HELPER_NOT_PRESERVED")
+    members = live["units"]["yonik-worker.service"]["members"]
+    if not members or any(
+        not any(
+            p.get("pid") == m["pid"]
+            and p.get("start_ticks") == m["start_ticks"]
+            and p.get("absent") is True
+            for p in after["tracked_processes"]
+        )
+        for m in members
+    ):
+        raise Refused("MISSING_PROCESS_REAP")
+
+
+def check_flows(observations: Any, controls: dict[str, Any]) -> None:
+    flows = controls["flows"]
+    if type(observations) is not list or len(observations) != len(flows):
+        raise Refused("FLOW_MATRIX")
+    for observed, flow in zip(observations, flows, strict=True):
+        if (
+            type(observed) is not dict
+            or observed.get("flow") != flow
+            or observed.get("class") != "ACTUAL"
+            or observed.get("child_reaped") is not True
+            or type(observed.get("pid")) is not int
+            or observed["pid"] <= 0
+            or type(observed.get("start")) is not int
+            or observed["start"] <= 0
+            or observed.get("uid") != controls["caller_uid"]
+        ):
+            raise Refused("APP_OWNER_OBSERVATION")
+        capture, client = observed.get("endpoint_capture"), observed.get("client")
+        if type(capture) is not dict or type(client) is not dict:
+            raise Refused("FLOW_CAPTURE")
+        token = capture.get("token")
+        if (
+            type(token) is not str
+            or not token.startswith(flow["token"] + ":")
+            or not digest(token[len(flow["token"]) + 1 :], 32)
+            or capture.get("transport") != flow["transport"]
+            or capture.get("endpoint") != flow["endpoint"]
+            or client.get("remote") != flow["endpoint"]
+            or client.get("transport") != flow["transport"]
+        ):
+            raise Refused("FLOW_BINDING")
+        if type(capture.get("seen")) is not int:
+            raise Refused("FLOW_COUNTER")
+        if flow["action"] == "block":
+            if capture["seen"] != 0 or client.get("received") is not False:
+                raise Refused("BLOCK_REACHED_ENDPOINT")
+        elif (
+            capture["seen"] != 1
+            or capture.get("server") != flow["response"]
+            or capture.get("peer_ip") != flow["expected_peer_ip"]
+            or client.get("received") is not True
+            or client.get("reply") != token + ":" + flow["response"]
+        ):
+            raise Refused("FLOW_PATH")
 
 
 def run_case(
@@ -466,49 +557,62 @@ def run_case(
     expected: dict[str, Any],
     campaign_deadline: float,
 ) -> dict[str, Any]:
-    deadline = min(campaign_deadline - CLEANUP_SECONDS, time.monotonic() + CASE_SECONDS)
-    binding = None
+    # Недоступные interleaving controls не заменяются synthetic PASS.
+    if core not in CORES or case not in CASES:
+        raise Refused("CASE_NOT_ALLOWED")
+    if case != "positive":
+        return {
+            "core": core,
+            "case": case,
+            "status": "UNAVAILABLE",
+            "reason": "SOURCE_ONLY",
+        }
+    deadline = min(campaign_deadline, time.monotonic() + CASE_SECONDS)
     if deadline <= time.monotonic():
         return {"core": core, "case": case, "status": "BLOCKED", "reason": "DEADLINE"}
-    failure = None
+    # Полный witness обязан включать actual cleanup; Disconnected не empty fence.
+    failure = False
     stopped = False
     try:
-        for action, stage in CASES[case]:
+        for action in ("start", "await", "stop"):
             stopped |= action == "stop"
-            binding = check_receipt(
-                driver.exchange(core, case, action, deadline), stage, binding, expected
-            )
-    except (Refused, OSError) as error:
-        failure = str(error) if isinstance(error, Refused) else "TRANSPORT_FAILURE"
+            progress = driver.exchange(core, case, action, deadline)
+            if (
+                progress
+                != {
+                    "schema": 2,
+                    "seq": progress.get("seq"),
+                    "core": core,
+                    "case": case,
+                    "stage": action,
+                }
+                or type(progress.get("seq")) is not int
+                or progress["seq"] <= 0
+            ):
+                raise Refused("PROGRESS_PROTOCOL")
+    except (Refused, OSError):
+        failure = True
     cleanup_deadline = min(campaign_deadline, time.monotonic() + CLEANUP_SECONDS)
     try:
-        # Stop ровно один раз. Unknown не разрешает новый Apply или release owner.
         if not stopped:
             stopped = True
-            check_receipt(
-                driver.exchange(core, case, "stop", cleanup_deadline),
-                "stopping",
-                binding,
-                expected,
-            )
-        check_receipt(
-            driver.exchange(core, case, "cleanup", cleanup_deadline),
-            "closed",
-            binding,
-            expected,
-        )
+            driver.exchange(core, case, "stop", cleanup_deadline)
+        receipt = driver.exchange(core, case, "cleanup", cleanup_deadline)
+        if receipt.get("core") != core or receipt.get("case") != case:
+            raise Refused("RECEIPT_BINDING")
+        check_receipt(receipt, expected)
     except (Refused, OSError):
         return {
             "core": core,
             "case": case,
             "status": "QUARANTINED",
-            "reason": failure or "UNCERTAIN_CLEANUP",
+            "reason": "MISSING_ACTUAL_WITNESS",
         }
     return {
         "core": core,
         "case": case,
         "status": "FAIL" if failure else "PASS",
-        "reason": failure,
+        "reason": "DRIVER_FAILURE" if failure else None,
     }
 
 
@@ -529,7 +633,43 @@ def execute(
     ):
         if sha_file(path) != authorization[key]:
             raise Refused("SEALED_INPUT_CHANGED")
-    raise Refused("MISSING_ACTUAL_DRIVER_AND_FIXTURE")
+    launch = read_json(LAUNCH, 4 * 1024 * 1024)
+    if sha_file(LAUNCH) != authorization["launch_sha256"]:
+        raise Refused("LAUNCH_CHANGED")
+    if (
+        launch.get("schema") != "N5_TRUSTED_LAUNCH_V1"
+        or validate_receipt(fixture, launch.get("after_setup")).status != "READY"
+    ):
+        raise Refused("UNTRUSTED_AFTER_SETUP")
+    controls = launch["controls"]
+    expected = {
+        "trusted_capture_sha256": authorization["launch_sha256"],
+        "executing_source_sha256": fixture["source_archive_sha256"],
+        "controls": controls,
+        "source_commit": fixture["source_commit"],
+        "manifest_sha256": launch["manifest_sha256"],
+        "core": core,
+        "artifacts": {
+            a["installed_path"]: {"sha256": a["sha256"], "size": a["size"]}
+            for a in fixture["artifacts"].values()
+        },
+    }
+    if case != "positive":
+        return [
+            {
+                "core": core,
+                "case": case,
+                "status": "UNAVAILABLE",
+                "reason": "SOURCE_ONLY",
+            }
+        ]
+    driver = ProcessDriver(controls["caller_uid"])
+    try:
+        return [
+            run_case(driver, core, case, expected, time.monotonic() + CAMPAIGN_SECONDS)
+        ]
+    finally:
+        driver.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -540,7 +680,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.execute and (args.core is None or args.case is None):
         parser.error("--execute требует --core и --case")
-    authorization = read_json(PACKAGE / "authorization.json")
+    try:
+        authorization = read_json(
+            Path("/usr/lib/yonik-acceptance/n5-authorization.json")
+            if args.execute
+            else PACKAGE / "authorization.json"
+        )
+    except (Refused, OSError):
+        print(json.dumps({"status": "BLOCKED", "executed": False}))
+        return 2
     if not args.execute:
         print(
             json.dumps(

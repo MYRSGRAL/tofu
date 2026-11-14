@@ -94,7 +94,14 @@ class SystemBackend:
     def pid(self) -> int:
         return os.getpid()
 
-    def read(self, path: str, *, sealed: bool = False, cap: int = LIMIT) -> bytes:
+    def read(
+        self,
+        path: str,
+        *,
+        sealed: bool = False,
+        cap: int = LIMIT,
+        trusted: bool = False,
+    ) -> bytes:
         require(path.startswith("/") and ".." not in path.split("/"))
         fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
         try:
@@ -107,10 +114,12 @@ class SystemBackend:
                 os.close(fd)
                 fd = child
                 info = os.fstat(fd)
-                if sealed:
+                if sealed or trusted:
                     require(info.st_uid == 0 and not info.st_mode & 0o022)
             before = os.fstat(fd)
             require(stat.S_ISREG(before.st_mode))
+            if trusted:
+                require(stat.S_IMODE(before.st_mode) == 0o755)
             if sealed:
                 require(not before.st_mode & 0o222 and before.st_nlink == 1)
             raw = bytearray()
@@ -143,18 +152,24 @@ class SystemBackend:
 
     def command(self, name: str) -> bytes:
         require(name in COMMANDS)
+        cap = 65536 if name.startswith("closure:") else LIMIT
         child = subprocess.Popen(
             COMMANDS[name],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env={"PATH": "/usr/bin", "LC_ALL": "C"},
+            env={
+                "PATH": "/usr/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/run/dbus/system_bus_socket",
+            },
             close_fds=True,
         )
         try:
             require(child.stdout is not None)
             output = bytearray()
-            end = time.monotonic() + DEADLINE
+            end = time.monotonic() + (3.0 if name.startswith("closure:") else DEADLINE)
             with selectors.DefaultSelector() as selector:
                 selector.register(child.stdout, selectors.EVENT_READ)
                 while True:
@@ -162,12 +177,12 @@ class SystemBackend:
                     require(remaining > 0)
                     require(bool(selector.select(remaining)))
                     chunk = os.read(
-                        child.stdout.fileno(), min(65536, LIMIT + 1 - len(output))
+                        child.stdout.fileno(), min(65536, cap + 1 - len(output))
                     )
                     if not chunk:
                         break
                     output.extend(chunk)
-                    require(len(output) <= LIMIT)
+                    require(len(output) <= cap)
             require(child.wait(timeout=max(0.001, end - time.monotonic())) == 0)
             return bytes(output)
         finally:
@@ -263,6 +278,41 @@ def network(backend: SystemBackend) -> dict[str, list[str]]:
     return result
 
 
+def _authorize(
+    backend: SystemBackend, nonce: str, case: str
+) -> tuple[bytes, bytes, dict[str, Any]]:
+    """Общий закрытый gate до любых runtime-наблюдений."""
+    require(re.fullmatch(r"[0-9a-f]{64}", nonce) is not None)
+    require(re.fullmatch(r"[A-Za-z0-9_-]{1,96}", case) is not None)
+    require(backend.uid() == 0)
+    auth_raw = backend.read(ROOT + "/authorization.json", sealed=True)
+    auth = decode(auth_raw)
+    require(
+        type(auth) is dict
+        and set(auth)
+        == {"schema", "execution", "nonce", "case", "stages", "input_sha256"}
+    )
+    require(
+        auth["schema"] == "ROOT_CAPTURE_AUTH_V1"
+        and auth["execution"] == "USER_GRANTED_GUEST_CAPTURE"
+    )
+    require(
+        auth["nonce"] == nonce
+        and auth["case"] == case
+        and auth["stages"] == list(STAGES)
+    )
+    input_raw = backend.read(ROOT + "/input.json", sealed=True)
+    require(hashlib.sha256(input_raw).hexdigest() == auth["input_sha256"])
+    inputs = decode(input_raw)
+    require(
+        type(inputs) is dict and set(inputs) == {"schema", "source", "manifest_sha256"}
+    )
+    require(inputs["schema"] == "ROOT_CAPTURE_INPUT_V1")
+    require(re.fullmatch(r"[0-9a-f]{40}", inputs["source"]) is not None)
+    require(re.fullmatch(r"[0-9a-f]{64}", inputs["manifest_sha256"]) is not None)
+    return auth_raw, input_raw, inputs
+
+
 def collect(
     stage: str, nonce: str, case: str, *, backend: SystemBackend | None = None
 ) -> dict[str, Any]:
@@ -270,35 +320,8 @@ def collect(
     backend = backend if backend is not None else SystemBackend()
     failure = {"schema": 1, "status": "UNAVAILABLE"}
     try:
-        require(stage in STAGES and re.fullmatch(r"[0-9a-f]{64}", nonce) is not None)
-        require(re.fullmatch(r"[A-Za-z0-9_-]{1,96}", case) is not None)
-        require(backend.uid() == 0)
-        auth_raw = backend.read(ROOT + "/authorization.json", sealed=True)
-        auth = decode(auth_raw)
-        require(
-            type(auth) is dict
-            and set(auth)
-            == {"schema", "execution", "nonce", "case", "stages", "input_sha256"}
-        )
-        require(
-            auth["schema"] == "ROOT_CAPTURE_AUTH_V1"
-            and auth["execution"] == "USER_GRANTED_GUEST_CAPTURE"
-        )
-        require(
-            auth["nonce"] == nonce
-            and auth["case"] == case
-            and auth["stages"] == list(STAGES)
-        )
-        input_raw = backend.read(ROOT + "/input.json", sealed=True)
-        require(hashlib.sha256(input_raw).hexdigest() == auth["input_sha256"])
-        inputs = decode(input_raw)
-        require(
-            type(inputs) is dict
-            and set(inputs) == {"schema", "source", "manifest_sha256"}
-        )
-        require(inputs["schema"] == "ROOT_CAPTURE_INPUT_V1")
-        require(re.fullmatch(r"[0-9a-f]{40}", inputs["source"]) is not None)
-        require(re.fullmatch(r"[0-9a-f]{64}", inputs["manifest_sha256"]) is not None)
+        require(stage in STAGES)
+        auth_raw, input_raw, inputs = _authorize(backend, nonce, case)
         # До этой точки запрещены proc, systemd, netlink и subprocess.
         observations = {
             "collector": process(backend, backend.pid()),
