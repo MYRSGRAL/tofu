@@ -1,6 +1,6 @@
 # План завершения yonik
 
-Актуальная принятая delta до main `d74e618`: [реестр 14 ноября](validation/2026-11-14-linux-accepted-delta.md). Полные статусы не повышены.
+Готовность исходных P06/P22 на принятом main `3247e6c`: [решение и границы доказательств](validation/2026-11-14-linux-p06-p22-readiness.md). Историческая delta до `d74e618` сохранена в [реестре 14 ноября](validation/2026-11-14-linux-accepted-delta.md).
 
 Начальная инвентаризация: 10 ноября 2026, UI `85b2a8e`. Принятые срезы актуализированы 12 ноября 2026 по main `cceede520842a17e4ef548807f63f64b2be19226`; полные статусы требуют итогового аудита. Цель — пройти весь порядок из
 [спецификации](specs/validation-and-roadmap.md): рабочий Linux-продукт,
@@ -9,8 +9,8 @@
 
 ## Как считаем готовность
 
-Всего **26 пунктов**: **3 готовы**, **21 частично выполнен**, **2 отложены (Android)**.
-Остаётся полностью закрыть **23 пункта**, включая отложенные Android P03/P26.
+Всего **26 пунктов**: **5 готовы**, **19 частично выполнены**, **2 отложены (Android)**.
+Остаётся полностью закрыть **21 пункт**, включая отложенные Android P03/P26.
 Это учёт полных критериев, а не процент реализации Linux: частичные пункты
 различаются по объёму и не пересчитываются в процент готовности продукта.
 Частичные результаты учитываются в описаниях, но не получают условные 50–90%.
@@ -31,7 +31,9 @@
 результаты на main `cceede520842a17e4ef548807f63f64b2be19226` и их границы.
 Он уточняет текущие срезы; полный перечень исходных критериев сохраняется в
 [историческом индексе](validation/2026-11-11-linux-acceptance-index.md).
-Количество полностью готовых пунктов выше не повышено по одному CI или merge.
+Этот исторический срез сам по себе не повышал число готовых пунктов. Последующее
+решение по P06/P22 приведено в начале документа; оно основано на runtime evidence
+и проверке исходных критериев, а не на одном CI или merge.
 Production issuer/BoundTun, foreign-UID и mixed-policy Linux-приёмка,
 финальная поставка и итоговая сверка всех критериев остаются открытыми.
 Android и физические G-UI/G-POWER отложены без PASS.
@@ -152,7 +154,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P03 | Технический Android-host / G-ANDROID | Отложен | Оба engine через FFI, TUN FD/protect, TCP/UDP, stop/revoke, lifecycle и package callbacks; закреплённые wrappers. Остаток — runtime-host и измеренные результаты. [Контракт](specs/platforms.md). |
 | P04 | Импорт URI/JSON/Base64 и ручной ввод | Частично | Приняты text/file import → review/approve, сохранение original, format4 barrier и bounded robustness campaign. Ручная форма и её native traffic/reopen находятся в отдельном проверенном stack #135/#139/#140; local lifecycle #137 ещё вне main этого среза. Остаток — интеграция stack и короткий witness итогового дерева. Spec не требует полного protocol × transport × UDP произведения. [Импорт](validation/2026-11-12-desktop-local-import.md), [robustness](validation/2026-11-12-import-robustness.md). |
 | P05 | Подписки, обновления и идентичность профилей | Частично | CAS, rename/delete, отмена, HWID и последний snapshot реализованы. Завершить proxy-загрузку без скрытого DIRECT и полную матрицу изменения credentials/пустого/частичного ответа. Плановые обновления — P10. [Snapshots](validation/2026-11-09-subscription-snapshots.md), [identity](validation/2026-11-09-profile-identities.md). |
-| P06 | Зашифрованное хранение, миграции и восстановление | Частично | Приняты encrypted repository/CAS, format4 backup barrier, maintenance backup/restore и настоящий gnome-keyring VM lifecycle без ephemeral key. Новый GUI format4/reopen с production key custody и требуемые recovery/fault boundaries ещё проверяются; аппаратный login/PAM не доказан. [Настоящий Secret Service](validation/2026-11-11-real-secret-service.md), [backup](validation/2026-11-10-storage-backup.md), [format4](validation/2026-11-12-p07-linux-v2.md). |
+| P06 | Зашифрованное хранение, миграции и восстановление | Готов | Исходный storage-критерий покрыт encrypted repository/CAS, migration/fault/Missing/Locked evidence и normal Backup → Restore NEW → fresh normal Host с тем же private Secret Service item. Проверены original/metadata/revision, missing-source refusal и неизменность live DB. [Actual restore](validation/2026-11-14-p06-real-restore.md), [решение о готовности и source bounds](validation/2026-11-14-linux-p06-p22-readiness.md). Final A5, physical login/PAM и reboot/autoconnect не объявлены выполненными. |
 | P07 | Общая модель политик и семантика представлений | Частично | Приняты закрытые Linux selector/Draft V2, сохранение disabled, отказ enabled до активации, атомарный format4 CAS с verified backup3 и old-reader preservation. PolicyApply bridge сохраняет selector semantics. Actual process/domain/CIDR enforcement и полная интегрированная матрица редакторов остаются. [P07 V2](validation/2026-11-12-p07-linux-v2.md), [Apply](validation/2026-11-12-p07-policy-apply-integration.md). |
 | P08 | Capabilities и компиляторы обоих ядер | Частично | Есть config-check закреплённых ядер и явные отказы для части опций. Закрыть весь заявленный набор профилей/правил, включая ограничения смешанного DNS, без игнорирования параметров. [Evidence](validation/2026-11-09-engine-compiler.md), [routing](../crates/yonik-engine/src/routing.rs). |
 | P09 | Lifecycle сессии и PreparedPlan | Частично | Приняты reducer/generations, actual LocalSession cancellation обоих pinned cores и health cancellation с terminal process-group oracle, учитывающим zombie. DesktopHost Stop имеет actual Disconnected snapshot; это не request-ID ACK health cancellation. Полный production system lifecycle и связанные cleanup/recovery gates остаются. [Native cancellation](validation/2026-11-12-native-cancel-matrix.md), [health](validation/2026-11-12-health-probe-cancellation.md). |
@@ -178,7 +180,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P19 | Продуктовые экраны и системное подключение | Частично | Приняты PolicyApply, product import и P17 wiring с revision/generation/cancel fences. Полный production GUI/TUN run, recovery и итоговая проверка пользовательских путей остаются. [PolicyApply](validation/2026-11-11-inline-policy-apply.md), [import](validation/2026-11-12-desktop-local-import.md), [контракт](specs/ui-backend-contract.md). |
 | P20 | Два редактора правил и каталог приложений | Частично | Редакторы, каталог и диагностика имеют component evidence; [L15](validation/2026-11-11-editor-policy-diagnostics.md). Осталось доказать атомарный actual Apply одного поколения и полную приёмку A-04/A-07/A-08 без потери семантики. [Спецификация](specs/routing-and-tray.md). |
 | P21 | Трей и desktop lifecycle | Частично | Принят настоящий private Plasma restart для обоих pinned cores × RU/EN: hidden traffic с peer-sensitive oracle, сохранение процесса, повторная SNI регистрация, Stop/Connect/active Quit и cleanup. Перезапускались plasmashell/kded, KWin сохранялся. Это изолированная desktop-приёмка; физические G-UI/G-POWER остаются отложенными. [Plasma evidence](validation/2026-11-12-fr19-private-plasma.md). |
-| P22 | Пакетные проверки серверов и диагностика | Частично | Есть HTTPS, три TCP-пробы и bounded API до 10 000 целей. Нужны пакетный GUI, endpoint/ошибки/ограничения и полная привязка результатов к поколению сети. [TCP series](validation/2026-11-09-tcp-series.md), [batch](validation/2026-11-09-tcp-batch.md). |
+| P22 | Пакетные проверки серверов и диагностика | Готов | Исходный критерий покрыт HTTPS/TLS/refusal, тремя TCP-пробами, bounded API до 10 000 целей, actual GUI/CancelBatch/Stop и source/revision/network/generation fences. Сохраняются source bounds исторических runtime proofs; перенос на принятый код проверен по связанным producer-инвариантам. [GUI evidence](validation/2026-11-14-p07-production-gui.md), [решение и границы](validation/2026-11-14-linux-p06-p22-readiness.md). Новый current merged-runtime PASS и final A5 не заявлены. |
 | P23 | Выбор toolkit, G-UI и G-POWER | Частично | Qt UI и отдельный стенд есть. Нужны реальные замеры Qt/GTK4/Slint в разблокированной сессии, продуктовая приёмка ввода/clipboard/масштабов/трея и P-01…P-08 с idle/hidden/attribution. [Стенд](../bench/ui/README.md), [бюджеты](specs/performance.md). Физические G-UI/G-POWER пока отложены пользователем, без waiver/PASS; критерии и статус частичного выполнения сохранены. Экран блокировки и питание без согласования не менять. |
 | P24 | Arch-поставка, обновления и откат | Частично | PR119 принят в main: source package и изолированные old→new→old/uninstall/userdata проверки подтверждают свои frozen refs. Они не заменяют итоговый package из конечного source freeze с production helper/ядрами. Host install не выполняется. [Arch source](validation/2026-11-11-arch-source-6cf65a4.md), [production custody](validation/2026-11-11-arch-production-custody.md). |
 | P25 | Открытая Linux-поставка и release-приёмка | Частично | GPL и README RU/EN есть. Нужны notices/SPDX и аудит условий зависимостей, пользовательские инструкции, зелёные проверки, evidence всех FR и явные ограничения. Релиз/публикация выполняются только в разрешённом объёме. [Лицензия](../LICENSE), [приёмка](specs/validation-and-roadmap.md). |

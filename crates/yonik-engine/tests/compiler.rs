@@ -343,3 +343,33 @@ fn json_reality_spider_path_preserves_query_and_defaults() {
         }
     }
 }
+
+#[test]
+fn shadowsocks_2022_preserves_exact_method_and_key() {
+    let method = "2022-blake3-aes-128-gcm";
+    let key = STANDARD.encode(b"0123456789abcdef");
+    for engine in [Engine::Xray, Engine::SingBox] {
+        let value = config(engine, &format!("ss://{method}:{key}@secret.example:443")).unwrap();
+        let outbound = &value["outbounds"][0];
+        let credentials = if engine == Engine::Xray {
+            &outbound["settings"]["servers"][0]
+        } else {
+            outbound
+        };
+        assert_eq!(credentials["method"], method);
+        assert_eq!(credentials["password"], key);
+        let wrong = STANDARD.encode(b"0123456789abcde");
+        assert_eq!(
+            config(engine, &format!("ss://{method}:{wrong}@secret.example:443")),
+            Err(CompileError::InvalidCredentials)
+        );
+    }
+    let key = STANDARD.encode([0_u8; 32]);
+    assert_eq!(
+        config(
+            Engine::Xray,
+            &format!("ss://2022-blake3-chacha20-poly1305:{key}@secret.example:443")
+        ),
+        Err(CompileError::UnsupportedOption)
+    );
+}

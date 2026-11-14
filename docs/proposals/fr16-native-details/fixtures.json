@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "base": "61cfa0f69134bcfe286a44506b5191f4bd3c9d9e",
+  "status": "proposal_only_NOT_FR16_PASS",
+  "cores": [
+    {
+      "engine": "sing-box",
+      "version": "1.14.4",
+      "source_commit": "c005f35300ce76427dc285481ec5695f5b179cd2",
+      "source_lock": "adapters/sing-box/v1.14.4/source-lock.json",
+      "evidence": "docs/validation/full-pinned-builders-158/sing-box-logs/24-build-native-adapter-sing-box.stdout.log",
+      "line": 1,
+      "exact_template": "sing-box version 1.14.4",
+      "scope": "retained build/version stdout; runtime availability unproven"
+    },
+    {
+      "engine": "xray",
+      "version": "26.10.31",
+      "source_commit": "a4a3dff5b20c2faae567b742c172c7b95e75c083",
+      "source_lock": "adapters/xray/v26.10.31/source-lock.json",
+      "evidence": "docs/validation/full-pinned-builders-158/xray-logs/16-build-native-adapter-xray.stdout.log",
+      "line": 1,
+      "exact_template": "Xray 26.10.31 (Xray, Penetrates Everything.) Custom (go1.27.1-X:nodwarf5 linux/amd64)",
+      "scope": "retained build/version stdout; runtime availability unproven"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "sing-box-version-positive",
+      "engine": "sing-box",
+      "input": "sing-box version 1.14.4",
+      "expected": "accept_exact_version_template",
+      "provenance": "docs/validation/full-pinned-builders-158/sing-box-logs/24-build-native-adapter-sing-box.stdout.log:1"
+    },
+    {
+      "id": "xray-version-positive",
+      "engine": "xray",
+      "input": "Xray 26.10.31 (Xray, Penetrates Everything.) Custom (go1.27.1-X:nodwarf5 linux/amd64)",
+      "expected": "accept_exact_version_template",
+      "provenance": "docs/validation/full-pinned-builders-158/xray-logs/16-build-native-adapter-xray.stdout.log:1"
+    },
+    {
+      "id": "secret-suffix",
+      "construction": "append synthetic canary to valid template",
+      "expected": "withheld_unknown_grammar"
+    },
+    {
+      "id": "secret-prefix",
+      "construction": "prepend synthetic canary",
+      "expected": "withheld_unknown_grammar"
+    },
+    {
+      "id": "secret-field",
+      "construction": "replace version with synthetic canary",
+      "expected": "withheld_unknown_grammar"
+    },
+    {
+      "id": "control",
+      "construction": "insert each ESC/NUL/CR/TAB/DEL/C1/bidi or invalid UTF-8",
+      "expected": "withheld_control_or_encoding"
+    },
+    {
+      "id": "markup",
+      "construction": "append synthetic HTML-like text",
+      "expected": "withheld_unknown_grammar"
+    },
+    {
+      "id": "unknown-version",
+      "construction": "same text under non-pinned identity",
+      "expected": "withheld_version"
+    },
+    {
+      "id": "unknown-runtime",
+      "construction": "ordinary non-version native message without approved grammar",
+      "expected": "withheld_unknown_grammar"
+    },
+    {
+      "id": "oversize",
+      "construction": "4097 bytes without LF, then valid next line",
+      "expected": "withheld_oversize_then_resync"
+    },
+    {
+      "id": "queue-full",
+      "construction": "128 pending records then one candidate",
+      "expected": "disk_dropped_increment_no_wait"
+    },
+    {
+      "id": "ring-full",
+      "construction": "2000 records then candidate",
+      "expected": "oldest_evicted_counter_increment"
+    },
+    {
+      "id": "stale-scope",
+      "construction": "old generation sends after next generation created",
+      "expected": "retain_original_context_or_reject_no_retag"
+    },
+    {
+      "id": "stop",
+      "construction": "unterminated stream on Stop",
+      "expected": "cancel_reader_no_wait_no_partial_publish"
+    },
+    {
+      "id": "wrong-root",
+      "construction": "candidate from different application log root",
+      "expected": "withheld_scope"
+    },
+    {
+      "id": "page",
+      "construction": "257 matching records",
+      "expected": "at_most_256_partial_cursor_and_loss_counters"
+    },
+    {
+      "id": "sing-network-missing-v1-positive-retained",
+      "template": "sing-network-missing-v1",
+      "case": "positive-retained",
+      "expected": "accept_closed_template",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-secret-prefix",
+      "template": "sing-network-missing-v1",
+      "case": "secret-prefix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-secret-suffix",
+      "template": "sing-network-missing-v1",
+      "case": "secret-suffix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-control-in-body",
+      "template": "sing-network-missing-v1",
+      "case": "control-in-body",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-unknown-version",
+      "template": "sing-network-missing-v1",
+      "case": "unknown-version",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-oversize",
+      "template": "sing-network-missing-v1",
+      "case": "oversize",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "sing-network-missing-v1-loss",
+      "template": "sing-network-missing-v1",
+      "case": "loss",
+      "expected": "count_drop_no_wait",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-positive-retained",
+      "template": "xray-local-dns-created-v1",
+      "case": "positive-retained",
+      "expected": "accept_closed_template",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-secret-prefix",
+      "template": "xray-local-dns-created-v1",
+      "case": "secret-prefix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-secret-suffix",
+      "template": "xray-local-dns-created-v1",
+      "case": "secret-suffix",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-control-in-body",
+      "template": "xray-local-dns-created-v1",
+      "case": "control-in-body",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-unknown-version",
+      "template": "xray-local-dns-created-v1",
+      "case": "unknown-version",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-oversize",
+      "template": "xray-local-dns-created-v1",
+      "case": "oversize",
+      "expected": "withhold",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    },
+    {
+      "id": "xray-local-dns-created-v1-loss",
+      "template": "xray-local-dns-created-v1",
+      "case": "loss",
+      "expected": "count_drop_no_wait",
+      "scope": "conditional grammar; current generated config emits no matching frame"
+    }
+  ],
+  "sources": [
+    {
+      "path": "docs/specs/data-and-contracts.md",
+      "sha256": "04da7e0430748c8c59976f69156fa8e9c44d4fbd325d9d0bd7d6edb124f3ff19"
+    },
+    {
+      "path": "docs/specs/requirements.md",
+      "sha256": "bb7c3280a997e603cc2eea7c630ab11b3af30b96238038aaa143be70f619162f"
+    },
+    {
+      "path": "docs/specs/validation-and-roadmap.md",
+      "sha256": "d4f70873439a3f10f007e66d9b2702eea59274e698760c9444cdbd91762b3c93"
+    },
+    {
+      "path": "docs/validation/2026-11-14-linux-delta-302f8bf.md",
+      "sha256": "667d4086cb073371a5b9be8b3c738e6c525fe36c839db7546a9f43928ff50785"
+    },
+    {
+      "path": "crates/yonik-linux/src/worker.rs",
+      "sha256": "628c688a34ad9b1a7dcfb1c5f61aa3927440348f2e2091faca72a8a9cc69f5eb"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log.rs",
+      "sha256": "86c25e730726fd569ac7fcfc4b4de87af4c42c1dcd70a38fb3141d361029b10b"
+    },
+    {
+      "path": "crates/yonik-linux/src/event_log/disk.rs",
+      "sha256": "e0b300f1a42862e70b1a74553b50f9463a2ecb2696fa67b034ec92dd8710dceb"
+    },
+    {
+      "path": "crates/yonik-linux/src/host/session.rs",
+      "sha256": "a9618a83a26aba5d210094860e60152fec17af465e9e1e85abbcf04737493a8a"
+    },
+    {
+      "path": "crates/yonik-linux/src/host/process.rs",
+      "sha256": "b4a61316d6794fcbd2b2b75da9f2383f9bfeb56385d0ba709bbf2d35cc3c066f"
+    },
+    {
+      "path": "crates/yonik-desktop/src/logs.rs",
+      "sha256": "53bc8be202c3414532dc441b3b390bc85acccb2dfa6b9d779ab739164c1e0f6e"
+    },
+    {
+      "path": "crates/yonik-desktop/qml/LogsView.qml",
+      "sha256": "f2c9a36721777f104c46f3da641df0932435665846ebe3e8d83e50435ad6850f"
+    },
+    {
+      "path": "adapters/sing-box/v1.14.4/source-lock.json",
+      "sha256": "1e15c9286753c38c7aa00feab2d27ebbc87ade667517c53f25938f16d4169944"
+    },
+    {
+      "path": "docs/validation/full-pinned-builders-158/sing-box-logs/24-build-native-adapter-sing-box.stdout.log",
+      "sha256": "526f621f922deb3db629fc7a371d94499a77640af53df3c0cdc66b134f5be49b"
+    },
+    {
+      "path": "adapters/xray/v26.10.31/source-lock.json",
+      "sha256": "2c93f708f4ad92ad7d503f90cfe91f65d38981b5c78b00a8dd34830c7130692e"
+    },
+    {
+      "path": "docs/validation/full-pinned-builders-158/xray-logs/16-build-native-adapter-xray.stdout.log",
+      "sha256": "827b679a8ba7e1c4cc0e7eeeced73768670505a723236e65f27b2242d8d1c47c"
+    }
+  ],
+  "runtime": {
+    "status": "source_safe_conditional_grammar_NOT_current_runtime_PASS",
+    "templates": [
+      {
+        "id": "sing-network-missing-v1",
+        "engine": "sing-box",
+        "version": "1.14.4",
+        "body": "missing default interface",
+        "prefix": "ERROR[ssss] network: ",
+        "source": "route/network.go:512",
+        "current_generated_config_emits": false,
+        "reason": "log.disabled=true; also requires interface monitor with absent default interface",
+        "grammar": "(?:ERROR|\\x1b\\[31mERROR\\x1b\\[0m)\\[[0-9]{4,10}\\] network: missing default interface\\n"
+      },
+      {
+        "id": "xray-local-dns-created-v1",
+        "engine": "xray",
+        "version": "26.10.31",
+        "body": "DNS: created localhost client",
+        "prefix": "YYYY/MM/DD hh:mm:ss.uuuuuu [Info] app/dns: ",
+        "source": "app/dns/nameserver_local.go:44",
+        "current_generated_config_emits": false,
+        "reason": "loglevel=none; requires local DNS construction while Info output enabled",
+        "grammar": "[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6} \\[Info\\] app/dns: DNS: created localhost client\\n"
+      }
+    ],
+    "retained": [
+      {
+        "engine": "sing-box",
+        "path": "/home/myrs/projects/yonik/local/evidence/pipeline-e5a27/sing.log",
+        "sha256": "6ea5efd779b176eff91b5fb8f057426b26c94c43b979f9c2db63cd22e1e6406c",
+        "line": 6,
+        "exact_frame": "\u001b[31mERROR\u001b[0m[0000] network: missing default interface\n",
+        "scope": "historical native test log; not current integrated producer/config witness; build identity not newly established"
+      },
+      {
+        "engine": "xray",
+        "path": "/home/myrs/projects/yonik/local/evidence/tun-e5a27/xray-final-tests.log",
+        "sha256": "08247cd72ae2957a3110448a6f26fe05a8645b09a1879d1027ccaa44eb8b15d6",
+        "line": 237,
+        "exact_frame": "2026/11/12 01:12:49.716889 [Info] app/dns: DNS: created localhost client\n",
+        "scope": "historical native test log; not current integrated producer/config witness; build identity not newly established"
+      }
+    ],
+    "source_excerpts": "runtime-source.json",
+    "new_identity_gate": false,
+    "new_policy_direction": "normal INFO approved as direction; production enable deferred to scoped review"
+  },
+  "classifier_implementation": "crates/yonik-linux/src/event_log/native_details.rs",
+  "source_snapshot_note": "sources section hashes describe accepted base 61cfa0f; event_log.rs now has only private mod wire",
+  "startup": [
+    {
+      "engine": "sing-box",
+      "path": "/home/myrs/projects/yonik/local/evidence/pipeline-e5a27/sing.log",
+      "sha256": "6ea5efd779b176eff91b5fb8f057426b26c94c43b979f9c2db63cd22e1e6406c",
+      "line": 7,
+      "frame": "\u001b[36mINFO\u001b[0m[0000] sing-box started (0.00s)\n",
+      "projection_code": 7,
+      "status": "historical retained; pure classifier positive; not integrated producer proof"
+    },
+    {
+      "engine": "xray",
+      "path": "/home/myrs/projects/yonik/local/evidence/dns-downstream-e5a27/xray-final.log",
+      "sha256": "fa0a62d884bffa3e722d81aefd239c0fae300c8543101896d2c0ac1dd472f23f",
+      "line": 4,
+      "frame": "2026/11/12 04:47:51.265312 [Warning] core: Xray 26.10.31 started\n",
+      "projection_code": 9,
+      "status": "historical retained; pure classifier positive; not integrated producer proof"
+    }
+  ]
+}

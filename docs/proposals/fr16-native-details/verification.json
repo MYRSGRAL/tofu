@@ -1,0 +1,33 @@
+{
+  "status": "PASS_focused_classifier_only",
+  "base": "26db09103f77254ff7f3443e23b0d8653c1d3f64",
+  "toolchain": "1.85.1",
+  "build": "standalone rustc --test module harness -D warnings; no dependencies built",
+  "clippy": "clippy-driver --test -D warnings; all isolated classifier test targets; not cargo whole-crate all-targets",
+  "tests_passed": 9,
+  "slots": "existing with-rust-slot + shared task-root flock; CARGO_BUILD_JOBS=1",
+  "checks": [
+    "archive+member SHA256/excerpts",
+    "4 retained frame provenance",
+    "JSON",
+    "links",
+    "rustfmt 1.85.1",
+    "git diff --check"
+  ],
+  "limits": [
+    "No production INFO/capture/disk/UI integration",
+    "No native execution/build/download",
+    "Worker FD transport scope remains for Root review",
+    "No full FR16 PASS"
+  ],
+  "files": {
+    "crates/yonik-linux/src/event_log/native_details.rs": "e9d79f48908d49b2e869d29519c58ae205d59c40dfa014a7188e51cf135bd116",
+    "crates/yonik-linux/src/event_log.rs": "f7971488a1b89f9a017680fef421a9fd032c4447d527116d89dd994775d8db49",
+    "docs/proposals/fr16-native-details/runtime-source.json": "51d980070d2bfe80d7d634686cd2556a2a12f3a3f956f18f8f6658b28d3fe766",
+    "docs/proposals/fr16-native-details/fixtures.json": "90b8eb123fd8c8af57865fb55b94b560ced049fdf83a175e24bcf3cf99c09898",
+    "docs/proposals/fr16-native-details/integration.md": "36dd7fff4570f6cc77e06fb49f6c777d00e1a41649eef6eec5459594acae5cda",
+    "docs/proposals/fr16-native-details/checks/green.log": "5bcadb40a2ed6ca4fbe88edfaaa97caa13286aa934f8045ce23c1d53b7554235",
+    "docs/proposals/fr16-native-details/checks/clippy.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "evidence_note": "green.log trailing whitespace normalized; clippy.log empty on successful exit"
+}
