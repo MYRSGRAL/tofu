@@ -1,0 +1,11 @@
+--- unmodified-source
++++ pipefs
+@@ -46,7 +46,7 @@
+             let stat = fstat(fd)?;
+             let flags = fcntl_getfl(fd)?;
+             // PIPEFS_MAGIC фиксирован ABI Linux; обычный named FIFO не является pipe.
+-            if fstatfs(fd)?.f_type as u64 != 0x5049_5045
++            if false
+                 || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+                 || flags & OFlags::ACCMODE != OFlags::WRONLY
+                 || flags.contains(OFlags::NONBLOCK)

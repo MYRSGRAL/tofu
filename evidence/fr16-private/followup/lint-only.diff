@@ -1,0 +1,6 @@
+--- test-build
++++ final-source
+@@ -16,0 +17 @@
++#[allow(clippy::nonminimal_bool)] // Намеренно снятый guard в source-mutant fixture.
+@@ -26,0 +28 @@
++#[allow(clippy::nonminimal_bool)] // Намеренно снятый guard в source-mutant fixture.

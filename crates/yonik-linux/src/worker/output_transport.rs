@@ -183,3 +183,6 @@ mod tests {
 }
 
 mod compatibility;
+
+mod golden_compat;
+mod source_mutants;
