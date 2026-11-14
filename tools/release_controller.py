@@ -1137,12 +1137,22 @@ def sync_retained_build_inputs(artifacts: Path, elfs: list[str]) -> None:
 
 
 def _collect(
-    repo: Path, registry: Path, release: str, task: Path, runner: TrustedRunner
+    repo: Path,
+    registry: Path,
+    release: str,
+    task: Path,
+    runner: TrustedRunner,
+    *,
+    rust_capture_only: bool = False,
 ) -> dict:
     with release_lock(registry, release, writer=True) as artifacts:
         record = _read_request(registry, release)
         if (artifacts / "collected.json").exists():
             raise NotReady("Release уже collected; перезапись запрещена")
+        if (artifacts / "rust-captured-only.json").exists():
+            raise NotReady("Release уже partial; используйте новый release-id")
+        if rust_capture_only and release in (RUST_REUSE_TARGET, COLLECTED_REUSE_TARGET):
+            raise NotReady("MISSING: reuse не доказывает полную Rust capture closure")
         if record["tooling_sha256"] != tooling_hashes():
             raise NotReady("Controller tooling изменился после freeze")
         final_profile = verify_final_profile(record)
@@ -1200,137 +1210,159 @@ def _collect(
                         final_profile=final_profile,
                     )
                     capture_pending = False
-                cores = {}
-                for engine in VERSIONS:
-                    build = task / engine
-                    source = build / f"build-source-{engine}"
-                    try:
-                        accepted = _read_request(
-                            registry, release, "trusted-core-job.json"
-                        )
-                    except FileNotFoundError:
-                        accepted = None
-                    if accepted is None:
-                        runner.run(
-                            [
-                                sys.executable,
-                                str(root / "tools/build_native_adapter.py"),
-                                "--engine",
-                                engine,
-                                "--native-codec",
-                                "--build-root",
-                                str(build),
-                                "--output-dir",
-                                str(artifacts / engine),
-                            ],
-                            root,
-                            env,
-                        )
-                    else:
-                        if (
-                            accepted["source_review_commit"] != JOB_SOURCE
-                            or accepted["binary_sha256"] != JOB_BINARIES
-                        ):
-                            raise NotReady("Неверный controller-ingested native job")
-                        output = artifacts / engine
-                        output.mkdir(mode=0o700)
-                        for name in (engine, "manifest.json", "prebuild.json"):
-                            incoming = input_path(
-                                artifacts / "accepted-cores" / engine, name
+                if rust_capture_only:
+                    context = {
+                        **record,
+                        "state": "RUST_CAPTURED_ONLY",
+                        "producer": "local-release-controller-v1",
+                        "toolchains": toolchains,
+                        "controlled_env": {key: env[key] for key in CONTROLLED_ENV},
+                        "commands": runner.commands,
+                        "elf": elf_records,
+                        "build_capture": build_capture,
+                        "rust_lineage": None,
+                        "final_linux_acceptance": False,
+                    }
+                else:
+                    cores = {}
+                    for engine in VERSIONS:
+                        build = task / engine
+                        source = build / f"build-source-{engine}"
+                        try:
+                            accepted = _read_request(
+                                registry, release, "trusted-core-job.json"
                             )
-                            with (
-                                incoming.open("rb") as stream,
-                                (output / name).open("xb") as target,
+                        except FileNotFoundError:
+                            accepted = None
+                        if accepted is None:
+                            runner.run(
+                                [
+                                    sys.executable,
+                                    str(root / "tools/build_native_adapter.py"),
+                                    "--engine",
+                                    engine,
+                                    "--native-codec",
+                                    "--build-root",
+                                    str(build),
+                                    "--output-dir",
+                                    str(artifacts / engine),
+                                ],
+                                root,
+                                env,
+                            )
+                        else:
+                            if (
+                                accepted["source_review_commit"] != JOB_SOURCE
+                                or accepted["binary_sha256"] != JOB_BINARIES
                             ):
-                                shutil.copyfileobj(stream, target)
-                        manifest = json.loads((output / "manifest.json").read_text())
-                        restore_job_source(root, source, engine, manifest, runner, env)
-                    cores[engine] = check_core(
-                        root, engine, artifacts / engine, source, runner, env
-                    )
-                    data = runner.run(
-                        [
-                            "git",
-                            "archive",
-                            "--format=tar",
-                            cores[engine]["manifest"]["source_commit"],
-                        ],
-                        source,
-                        env,
-                    )
-                    if (
-                        digest(data)
-                        != core_metadata(root)[engine]["lock"]["archive_sha256"]
-                    ):
-                        lock = core_metadata(root)[engine]["lock"]
-                        url = lock.get("archive_url")
-                        if not url:
-                            raise NotReady("Upstream source archive hash mismatch")
-                        runner.run(
+                                raise NotReady(
+                                    "Неверный controller-ingested native job"
+                                )
+                            output = artifacts / engine
+                            output.mkdir(mode=0o700)
+                            for name in (engine, "manifest.json", "prebuild.json"):
+                                incoming = input_path(
+                                    artifacts / "accepted-cores" / engine, name
+                                )
+                                with (
+                                    incoming.open("rb") as stream,
+                                    (output / name).open("xb") as target,
+                                ):
+                                    shutil.copyfileobj(stream, target)
+                            manifest = json.loads(
+                                (output / "manifest.json").read_text()
+                            )
+                            restore_job_source(
+                                root, source, engine, manifest, runner, env
+                            )
+                        cores[engine] = check_core(
+                            root, engine, artifacts / engine, source, runner, env
+                        )
+                        data = runner.run(
                             [
-                                "curl",
-                                "--fail",
-                                "--location",
-                                "--output",
-                                str(artifacts / engine / "upstream.tar"),
-                                url,
+                                "git",
+                                "archive",
+                                "--format=tar",
+                                cores[engine]["manifest"]["source_commit"],
                             ],
-                            root,
+                            source,
                             env,
                         )
-                    else:
-                        (artifacts / engine / "upstream.tar").write_bytes(data)
-                    if (
-                        sha(artifacts / engine / "upstream.tar")
-                        != core_metadata(root)[engine]["lock"]["archive_sha256"]
-                    ):
-                        raise NotReady("Pinned source archive hash mismatch")
-                    archive_tree(source, artifacts / engine / "patched.tar")
-                    logs = build / "build-native-adapter-logs"
-                    if logs.exists():
-                        shutil.copytree(logs, artifacts / engine / "builder-logs")
-                (artifacts / "go-sources").mkdir(mode=0o700)
-                for row in required_offers(root, cores):
-                    target = artifacts / "go-sources" / (row["zip_sha256"] + ".zip")
-                    if not target.exists():
-                        runner.run(
-                            [
-                                "curl",
-                                "--fail",
-                                "--location",
-                                "--output",
-                                str(target),
-                                row["zip_url"],
-                            ],
-                            root,
-                            env,
-                        )
-                    if sha(target) != row["zip_sha256"]:
-                        raise NotReady("Go source offer hash mismatch")
-                files = package_files(root, artifacts, cores)
-                payload = write_package(artifacts / "package.tar", files, pkginfo(root))
-                context = {
-                    **record,
-                    "state": "COLLECTED",
-                    "producer": "local-release-controller-v1",
-                    "toolchains": toolchains,
-                    "controlled_env": {key: env[key] for key in CONTROLLED_ENV},
-                    "commands": runner.commands,
-                    "elf": elf_records,
-                    "cores": cores,
-                    "payload": payload,
-                    "trusted_native_job": accepted,
-                    "rust_lineage": rust_lineage,
-                    "build_capture": build_capture,
-                    "artifact_sha256": {
-                        path.relative_to(artifacts).as_posix(): sha(path)
-                        for path in artifacts.rglob("*")
-                        if path.is_file()
-                    },
-                    "package_sha256": sha(artifacts / "package.tar"),
-                    "final_linux_acceptance": False,
-                }
-                validate_payload(artifacts / "package.tar", root, context)
+                        if (
+                            digest(data)
+                            != core_metadata(root)[engine]["lock"]["archive_sha256"]
+                        ):
+                            lock = core_metadata(root)[engine]["lock"]
+                            url = lock.get("archive_url")
+                            if not url:
+                                raise NotReady("Upstream source archive hash mismatch")
+                            runner.run(
+                                [
+                                    "curl",
+                                    "--fail",
+                                    "--location",
+                                    "--output",
+                                    str(artifacts / engine / "upstream.tar"),
+                                    url,
+                                ],
+                                root,
+                                env,
+                            )
+                        else:
+                            (artifacts / engine / "upstream.tar").write_bytes(data)
+                        if (
+                            sha(artifacts / engine / "upstream.tar")
+                            != core_metadata(root)[engine]["lock"]["archive_sha256"]
+                        ):
+                            raise NotReady("Pinned source archive hash mismatch")
+                        archive_tree(source, artifacts / engine / "patched.tar")
+                        logs = build / "build-native-adapter-logs"
+                        if logs.exists():
+                            shutil.copytree(logs, artifacts / engine / "builder-logs")
+                    (artifacts / "go-sources").mkdir(mode=0o700)
+                    for row in required_offers(root, cores):
+                        target = artifacts / "go-sources" / (row["zip_sha256"] + ".zip")
+                        if not target.exists():
+                            runner.run(
+                                [
+                                    "curl",
+                                    "--fail",
+                                    "--location",
+                                    "--output",
+                                    str(target),
+                                    row["zip_url"],
+                                ],
+                                root,
+                                env,
+                            )
+                        if sha(target) != row["zip_sha256"]:
+                            raise NotReady("Go source offer hash mismatch")
+                    files = package_files(root, artifacts, cores)
+                    payload = write_package(
+                        artifacts / "package.tar", files, pkginfo(root)
+                    )
+                    context = {
+                        **record,
+                        "state": "COLLECTED",
+                        "producer": "local-release-controller-v1",
+                        "toolchains": toolchains,
+                        "controlled_env": {key: env[key] for key in CONTROLLED_ENV},
+                        "commands": runner.commands,
+                        "elf": elf_records,
+                        "cores": cores,
+                        "payload": payload,
+                        "trusted_native_job": accepted,
+                        "rust_lineage": rust_lineage,
+                        "build_capture": build_capture,
+                        "artifact_sha256": {
+                            path.relative_to(artifacts).as_posix(): sha(path)
+                            for path in artifacts.rglob("*")
+                            if path.is_file()
+                        },
+                        "package_sha256": sha(artifacts / "package.tar"),
+                        "final_linux_acceptance": False,
+                    }
+                    validate_payload(artifacts / "package.tar", root, context)
             finally:
                 if not capture_pending and (task / "target").exists():
                     runner.run(
@@ -1338,7 +1370,13 @@ def _collect(
                         root,
                         env,
                     )
-            write_record(artifacts / "collected.json", context)
+            write_record(
+                artifacts
+                / (
+                    "rust-captured-only.json" if rust_capture_only else "collected.json"
+                ),
+                context,
+            )
             return context
         finally:
             os.close(task_fd)
@@ -1416,7 +1454,7 @@ def _verify(
         raise NotReady(f"Неполный trusted release context: {error}") from error
 
 
-def collect_release(release: str) -> dict:
+def collect_release(release: str, *, rust_capture_only: bool = False) -> dict:
     """Production runner не принимает commands, manifests или outputs от caller."""
     repo = canonical_repo()
     registry = repo / "local/release-controller"
@@ -1427,7 +1465,9 @@ def collect_release(release: str) -> dict:
         runner = LocalRunner(artifacts / "controller-logs")
     preexisting = task.exists()
     try:
-        result = _collect(repo, registry, release, task, runner)
+        result = _collect(
+            repo, registry, release, task, runner, rust_capture_only=rust_capture_only
+        )
     except Exception as error:
         if not preexisting and task.exists():
             size = sum(path.lstat().st_size for path in task.rglob("*"))
@@ -1457,7 +1497,10 @@ def main() -> None:
     parser.add_argument("--release-id", required=True)
     parser.add_argument("--commit")
     parser.add_argument("--final-profile", choices=("p25-final-cxx-v1",))
+    parser.add_argument("--rust-capture-only", action="store_true")
     args = parser.parse_args()
+    if args.rust_capture_only and args.operation != "collect":
+        parser.error("--rust-capture-only разрешён только для collect")
     try:
         if args.operation == "freeze":
             if not args.commit:
@@ -1470,7 +1513,9 @@ def main() -> None:
                 ingest_core_job(args.release_id)
                 result = {"state": "CORES_INGESTED"}
             else:
-                result = collect_release(args.release_id)
+                result = collect_release(
+                    args.release_id, rust_capture_only=args.rust_capture_only
+                )
     except (ValueError, OSError, subprocess.SubprocessError, tarfile.TarError) as error:
         sys.stdout.write(
             json.dumps(
