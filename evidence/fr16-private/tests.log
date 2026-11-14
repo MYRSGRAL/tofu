@@ -1,0 +1,100 @@
+   Compiling yonik-linux v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-linux)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.42s
+     Running unittests src/lib.rs (/var/tmp/codex-myrs/transient/fr16-private-821c/target/debug/deps/yonik_linux-4c77bcb15db33bfc)
+
+running 81 tests
+test helper::systemd_worker::tests::authority_rejects_zero_context_and_nonce ... ok
+test helper::systemd_worker::tests::actual_controlled_bootstrap_transport_without_ptrace ... ok
+test helper::systemd_worker::tests::accepted_binding_rejects_expiry_and_identity_drift ... ok
+test helper::systemd_worker::tests::authorized_result_retains_guard_binding_and_custody_until_drop ... ok
+test helper::systemd_worker::tests::actual_payload_transfer_rejects_late_ack_after_revocation ... ok
+test helper::systemd_worker::tests::cgroup_events_requires_a_single_zero_populated_field ... ok
+test helper::systemd_worker::tests::bootstrap_observation_requires_fresh_untransferred_run ... ok
+test helper::systemd_worker::tests::concurrent_authorization_has_exactly_one_winner ... ok
+test helper::systemd_worker::tests::closed_cancellation_source_preserves_dirty_state ... ok
+test helper::systemd_worker::tests::custody_rejects_owner_nonce_mismatch ... ok
+test helper::systemd_worker::tests::dropping_attempt_guard_revokes_outstanding_token ... ok
+test helper::systemd_worker::tests::dropping_pending_authorized_future_revokes_token ... ok
+test helper::systemd_worker::tests::dropping_run_owner_revokes_token ... ok
+test helper::systemd_worker::tests::duplicate_kernel_report_revokes_all_custody ... ok
+test helper::systemd_worker::tests::failed_systemd_job_is_not_readiness ... ok
+test helper::systemd_worker::tests::fixed_units_have_no_client_supplied_names ... ok
+test helper::systemd_worker::tests::full_owner_validation_keeps_canonical_gate_closed_for_link_fixture ... ok
+test helper::systemd_worker::tests::activation_waits_for_delayed_job_before_connect ... ok
+test helper::systemd_worker::tests::identity_never_accepts_a_replacement_or_unbound_pid ... ok
+test helper::systemd_worker::tests::held_authorized_result_observes_owner_revoke ... ok
+test helper::systemd_worker::tests::kernel_report_shares_run_epoch_revocation ... ok
+test helper::systemd_worker::tests::loaded_service_contract_rejects_privilege_and_command_changes ... ok
+test helper::systemd_worker::tests::missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown ... ok
+test helper::systemd_worker::tests::namespace_filter_requires_typed_full_ban_and_native_abi ... ok
+test helper::systemd_worker::tests::owner_link_requires_exact_owner_and_payload_even_with_equal_bytes ... ok
+test helper::systemd_worker::tests::private_asset_mount_requires_bounded_controlled_tmpfs_options ... ok
+test helper::systemd_worker::tests::raw_identity_fixture_is_scoped_to_one_retained_observation ... ok
+test helper::systemd_worker::tests::cancelled_cleanup_retains_transfer_until_recovery_waits_for_it ... ok
+test helper::systemd_worker::tests::replacement_ticket_never_stops_a_service ... ok
+test helper::systemd_worker::tests::run_authority_cannot_issue_after_revoke ... ok
+test helper::systemd_worker::tests::run_authority_is_single_use_and_revokes_outstanding_token ... ok
+test worker::anchor_exchange::tests::actual_foreign_bootstrap_releases_mount_before_payload ... ok
+test worker::anchor_exchange::tests::actual_foreign_forgery_rejections_close_all_received_fds ... ok
+
+running 1 test
+test worker::anchor_exchange::tests::actual_v3_bound_report_channel ... test helper::systemd_worker::tests::cleanup_stops_both_sockets_before_services_and_confirms_empty ... ok
+test worker::anchor_exchange::tests::authorized_challenge_uses_owner_nonce_and_rejects_revoke ... ok
+test worker::anchor_exchange::tests::bootstrap_fixture_child ... ok
+test worker::anchor_exchange::tests::check_rejects_v2_before_accepting_descriptors ... ok
+test helper::systemd_worker::tests::copy_reservation_survives_cancel_and_populated_cgroup_until_empty ... ok
+test worker::anchor_exchange::tests::legacy_bytes_are_not_consumed ... ok
+test worker::anchor_exchange::tests::legacy_rights_remain_queued_after_bootstrap_peek ... ok
+test worker::anchor_exchange::tests::observation_custody_expiry_and_revoke_close_descriptors ... ok
+test worker::anchor_exchange::tests::unbound_challenge_is_rejected ... ok
+test worker::anchor_exchange::tests::v3_report_exact_binding_and_closed_errno_set ... ok
+test worker::native_assets::actual_guard_tests::actual_owned_cleanup_foreign_sentinel_and_budget ... ignored, Только private bounded tmpfs controlled fixture unit в disposable VM
+test helper::systemd_worker::tests::raw_identity_fixture_uses_every_full_validation_predicate ... ok
+test worker::native_assets::cleanup_regressions::same_inode_same_size_rewrite_retains_custody ... ok
+test worker::native_assets::cleanup_regressions::same_inode_size_change_retains_custody ... ok
+test worker::native_assets::tests::shared_host_shm_is_not_private_unit_evidence ... ok
+test worker::native_resources::native_gate::actual_fixed_fd_native_config_gate ... ignored, Требуются pinned binaries и изолированный user/net namespace
+
+running 1 test
+test worker::native_resources::slot_tests::occupied_slot_is_preserved_in_isolated_test_process ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 589 filtered out; finished in 0.00s
+
+test worker::native_resources::slot_tests::occupied_slot_is_preserved_in_isolated_test_process ... ok
+test worker::native_resources::tests::owned_native_copy_has_exact_bytes_and_readonly_seals ... ok
+test worker::output_transport::compatibility::codec_bounds_roles_scope_and_legacy_rejection ... ok
+test worker::output_transport::compatibility::fixed_golden_vectors ... ok
+test worker::output_transport::compatibility::late_bytes_and_eof_keep_original_context ... ok
+test worker::output_transport::compatibility::named_fifo_is_not_an_anonymous_pipe ... ok
+test worker::output_transport::compatibility::resource_validation_reuses_v2 ... ok
+test worker::output_transport::tests::failure_and_drop_close_owned_writers ... ok
+test worker::output_transport::tests::fixed_flags_identity_and_stdio_eof ... ok
+test worker::output_transport::tests::rejects_invalid_descriptors_and_role_counts ... ok
+test worker::role_handoff::tests::actual_exact_two_fd_roundtrip_and_cleanup ... ok
+test worker::role_handoff::tests::cleanup_child ... ok
+test worker::role_handoff::tests::every_binding_byte_is_fenced ... ok
+test worker::role_handoff::tests::frozen_offsets_and_failclosed_mint ... ok
+test helper::systemd_worker::tests::inactive_state_cannot_confirm_cleanup_of_populated_cgroup ... ok
+test worker::role_handoff::tests::run_gate_refuses_before_reading_roles ... ok
+test worker::role_handoff::tests::run_record_is_bound_to_closed_challenge_and_helper ... ok
+test worker::role_handoff::tests::verified_transport_child ... ok
+test worker::role_handoff::tests::verified_transport_userns_roundtrip ... ignored, Требуется разрешённый uid_map в собственном userns; отдельный runtime gate
+test worker::tests::bundle_v2_header_has_closed_ordered_roles_and_engine ... ok
+test worker::tests::canonical_worker_process_check_and_run ... ignored, Нужны canonical ELF, собранный yonik-worker и собственный user namespace
+test worker::tests::header_rejects_every_truncation_and_unknown_discriminants ... ok
+test worker::tests::protocol_rejects_missing_extra_unsealed_and_mismatched_mode ... ok
+test worker::role_handoff::tests::rejected_fd_packets_do_not_leak ... ok
+test worker::tests::source_config_memfd_is_private_before_write_and_after_seal ... ok
+test worker::tests::received_descriptors_are_cloexec_and_executable_is_copied ... ok
+test worker::tests::unsealed_and_bad_hash_descriptors_are_rejected ... ok
+test worker::tests::worker_owned_config_preserves_bytes_cursor_seals_and_budget ... ok
+test worker::tests::streaming_config_bounds_hash_and_seals_the_only_plaintext_copy ... ok
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 589 filtered out; finished in 1.03s
+
+test worker::anchor_exchange::tests::actual_v3_bound_report_channel ... ok
+test worker::native_assets::cleanup_regressions::direct_reap_does_not_authorize_issued_asset_cleanup ... ok
+test worker::anchor_exchange::tests::kernel_report_expiry_discards_evidence_and_descriptors ... ok
+
+test result: ok. 77 passed; 0 failed; 4 ignored; 0 measured; 509 filtered out; finished in 1.18s
