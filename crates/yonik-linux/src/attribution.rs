@@ -56,6 +56,99 @@ pub fn probe_process(pid: u32) -> Result<(), AttributionFailure> {
     Ok(())
 }
 
+/// Initial bus credential capture, не attested PeerProcess и не native authority.
+pub(crate) struct CapturedBusPeer(std::sync::Arc<CapturedBusScope>);
+pub(crate) struct CapturedBusScope {
+    bus: crate::helper::service::BusPeerIdentity,
+    pidfd: std::os::fd::OwnedFd,
+    pid: u32,
+    uid: u32,
+    start: u64,
+    nonce: [u8; 32],
+}
+impl CapturedBusScope {
+    pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
+        if !self.bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        let info = broker::bounded(&format!(
+            "/proc/self/fdinfo/{}",
+            std::os::fd::AsRawFd::as_raw_fd(&self.pidfd)
+        ))
+        .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        if info.lines().find_map(|line| {
+            line.strip_prefix("Pid:")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+        }) != Some(self.pid)
+            || start_time(self.pid)? != self.start
+            || fs::metadata(format!("/proc/{}", self.pid))
+                .map_err(|_| AttributionFailure::ProcUnavailable)?
+                .uid()
+                != self.uid
+        {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        if !self.bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        Ok(())
+    }
+    pub(crate) fn same_peer(&self, other: &Self) -> bool {
+        self.pid == other.pid
+            && self.uid == other.uid
+            && self.start == other.start
+            && self.bus.same_owner(&other.bus)
+    }
+}
+impl CapturedBusPeer {
+    pub(crate) fn capture(
+        bus: crate::helper::service::BusPeerIdentity,
+    ) -> Result<Self, AttributionFailure> {
+        if !bus.validate() {
+            return Err(AttributionFailure::ProcessChanged);
+        }
+        let pid = bus.pid();
+        let uid = bus.uid();
+        let start = start_time(pid)?;
+        let id = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .ok_or(AttributionFailure::ProcessChanged)?;
+        let pidfd = rustix::process::pidfd_open(id, rustix::process::PidfdFlags::NONBLOCK)
+            .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        let mut nonce = [0; 32];
+        getrandom::getrandom(&mut nonce).map_err(|_| AttributionFailure::ProcUnavailable)?;
+        let scope = CapturedBusScope {
+            bus,
+            pidfd,
+            pid,
+            uid,
+            start,
+            nonce,
+        };
+        scope.validate()?;
+        Ok(Self(std::sync::Arc::new(scope)))
+    }
+    pub(crate) fn uid(&self) -> u32 {
+        self.0.uid
+    }
+    pub(crate) fn pid(&self) -> u32 {
+        self.0.pid
+    }
+    pub(crate) fn start(&self) -> u64 {
+        self.0.start
+    }
+    pub(crate) fn nonce(&self) -> [u8; 32] {
+        self.0.nonce
+    }
+    pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
+        self.0.validate()
+    }
+    pub(crate) fn retained_scope(&self) -> std::sync::Arc<CapturedBusScope> {
+        std::sync::Arc::clone(&self.0)
+    }
+}
+
 /// Идентичность поступает только от canonical bus daemon после авторизации.
 pub(crate) struct PeerProcess {
     pid: u32,
@@ -160,13 +253,31 @@ impl PeerProcess {
     }
 }
 
+/// Prepare classification, не actual Apply/Session/Ready authority.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PreflightStage {
+    NotRequired,
+    StaticInputsVerified,
+}
+fn static_stage(
+    required: bool,
+    verify: impl FnOnce() -> Result<(), crate::helper::WorkerSupervisorError>,
+) -> Result<PreflightStage, AttributionFailure> {
+    if !required {
+        return Ok(PreflightStage::NotRequired);
+    }
+    verify()
+        .map(|()| PreflightStage::StaticInputsVerified)
+        .map_err(|_| AttributionFailure::NativeMechanismUnverified)
+}
+
 pub(crate) async fn preflight(
     required: bool,
     peer: Option<&PeerProcess>,
     worker_uid: u32,
-) -> Result<(), AttributionFailure> {
+) -> Result<PreflightStage, AttributionFailure> {
     if !required {
-        return Ok(());
+        return Ok(PreflightStage::NotRequired);
     }
     let peer = peer.ok_or(AttributionFailure::ProcUnavailable)?;
     peer.verify_pidfd()?;
@@ -194,11 +305,15 @@ pub(crate) async fn preflight(
     if worker_uid == peer.uid {
         return Err(AttributionFailure::WorkerIsCaller);
     }
-    // Единственная точка будущего helper issuer; raw caller credentials выше
-    // остаются лишь отрицательными проверками, а не bootstrap authority.
-    let _session = native_session::Session::verified_helper_bootstrap()
-        .map_err(|_| AttributionFailure::NativeMechanismUnverified)?;
-    Err(AttributionFailure::NativeMechanismUnverified)
+    // Production callers уже выполняются внутри tracked blocking actor job
+    // (protection_host::execute_job), с FIFO/operation lease до завершения.
+    // Никакого nested detached spawn и никакого permit из static результата.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let stage = static_stage(true, || {
+        crate::helper::native_bootstrap::verify_preflight(deadline)
+    })?;
+    peer.verify_identity()?;
+    Ok(stage)
 }
 
 #[cfg(test)]
@@ -214,7 +329,10 @@ mod tests {
     }
     #[tokio::test]
     async fn no_app_policy_preserves_admission() {
-        assert_eq!(preflight(false, None, 1002).await, Ok(()));
+        assert_eq!(
+            preflight(false, None, 1002).await,
+            Ok(PreflightStage::NotRequired)
+        );
         assert!(preflight(true, None, 1002).await.is_err());
         let mut peer =
             PeerProcess::capture(std::process::id(), rustix::process::getuid().as_raw()).unwrap();
@@ -238,3 +356,41 @@ pub mod native_wire;
 
 /// Закрытая сессия frozen native ABI.
 pub mod native_session;
+
+#[cfg(test)]
+mod static_preflight_tests {
+    use super::*;
+    #[test]
+    fn pure_static_preflight_not_required_skips_all_installed_input_io() {
+        assert_eq!(
+            static_stage(false, || panic!("не читать profile")),
+            Ok(PreflightStage::NotRequired)
+        );
+    }
+    #[test]
+    fn pure_static_preflight_missing_profile_defaults_unverified() {
+        assert_eq!(
+            static_stage(true, || Err(
+                crate::helper::WorkerSupervisorError::Unavailable
+            )),
+            Err(AttributionFailure::NativeMechanismUnverified)
+        );
+    }
+    #[test]
+    fn pure_static_preflight_valid_inputs_only_classify_prepare_not_ready_or_session() {
+        assert_eq!(
+            static_stage(true, || Ok(())),
+            Ok(PreflightStage::StaticInputsVerified)
+        );
+        for error in [
+            crate::helper::WorkerSupervisorError::Untrusted,
+            crate::helper::WorkerSupervisorError::Stale,
+            crate::helper::WorkerSupervisorError::Timeout,
+        ] {
+            assert_eq!(
+                static_stage(true, || Err(error)),
+                Err(AttributionFailure::NativeMechanismUnverified)
+            );
+        }
+    }
+}

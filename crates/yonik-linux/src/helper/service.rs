@@ -16,6 +16,11 @@ use super::{
 };
 use crate::Cancellation;
 
+#[path = "service_peer.rs"]
+mod peer_presence;
+pub(crate) use peer_presence::BusPeerIdentity;
+use peer_presence::PeerTracker;
+
 pub const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
 pub const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
 pub const SERVICE_INTERFACE: &str = SERVICE_NAME;

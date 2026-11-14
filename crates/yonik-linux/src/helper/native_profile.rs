@@ -70,7 +70,7 @@ fn fixed_file(directory: &File, name: &str) -> Result<File> {
     immutable(&f)?;
     Ok(f)
 }
-fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
+fn hash(file: &File, limit: u64, elf: bool, deadline: std::time::Instant) -> Result<[u8; 32]> {
     let before = stamp(file)?;
     if before.len == 0 || before.len > limit {
         return Err(Error::Untrusted);
@@ -80,6 +80,7 @@ fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
     let mut digest = Sha256::new();
     let mut total = 0u64;
     loop {
+        static_deadline(deadline)?;
         let n = reader.read(&mut buf).map_err(|_| Error::Unavailable)?;
         if n == 0 {
             break;
@@ -96,6 +97,7 @@ fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
     if total != before.len || stamp(file)? != before {
         return Err(Error::Stale);
     }
+    static_deadline(deadline)?;
     Ok(digest.finalize().into())
 }
 fn parse(file: &File) -> Result<Deployment> {
@@ -144,19 +146,23 @@ struct InstalledContract {
     deployment: Deployment,
 }
 impl InstalledContract {
-    fn verify() -> Result<Self> {
+    fn verify(deadline: std::time::Instant) -> Result<Self> {
+        static_deadline(deadline)?;
         verify_installed()?;
         let directory = child(&child(&child(&root()?, "usr")?, "lib")?, "yonik")?;
         let metadata = fixed_file(&directory, "native-profile-v1.json")?;
         let deployment = parse(&metadata)?;
+        if deployment.policy_sha256 != yonik_nsfs::fixed_self_fence::PROFILE_DIGEST {
+            return Err(Error::Untrusted);
+        }
         let image = fixed_file(&directory, "yonik-worker")?;
         if image.metadata().map_err(|_| Error::Unavailable)?.mode() & 0o111 == 0
-            || hash(&image, MAX_ELF, true)? != deployment.worker_sha256
+            || hash(&image, MAX_ELF, true, deadline)? != deployment.worker_sha256
         {
             return Err(Error::Untrusted);
         }
         let source = fixed_file(&directory, "native-source-v1.tar")?;
-        if hash(&source, MAX_SOURCE, false)? != deployment.source_archive_sha256 {
+        if hash(&source, MAX_SOURCE, false, deadline)? != deployment.source_archive_sha256 {
             return Err(Error::Untrusted);
         }
         let kernel = child(&child(&root()?, "sys")?, "kernel")?;
@@ -175,6 +181,7 @@ impl InstalledContract {
         if release != format!("{}\n", deployment.kernel_release) {
             return Err(Error::Untrusted);
         }
+        static_deadline(deadline)?;
         Ok(Self {
             _metadata: metadata,
             _source: source,
@@ -190,6 +197,7 @@ impl ExecutableIdentity {
     fn verify(
         observation: &BootstrapUnitObservation,
         installed: &InstalledContract,
+        deadline: std::time::Instant,
     ) -> Result<Self> {
         observation.validate_identity()?;
         // Единственная намеренная proc magic-link: actual exe canonical pidfd/start.
@@ -198,7 +206,7 @@ impl ExecutableIdentity {
             .map_err(|_| Error::Unavailable)?;
         immutable(&actual)?;
         if stamp(&actual)? != stamp(&installed.image)?
-            || hash(&actual, MAX_ELF, true)? != installed.deployment.worker_sha256
+            || hash(&actual, MAX_ELF, true, deadline)? != installed.deployment.worker_sha256
         {
             return Err(Error::Untrusted);
         }
@@ -224,8 +232,8 @@ impl VerifiedInstalledProfile {
         supervisor
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
-        let installed = InstalledContract::verify()?;
-        let executable = ExecutableIdentity::verify(&observation, &installed)?;
+        let installed = InstalledContract::verify(deadline.into_std())?;
+        let executable = ExecutableIdentity::verify(&observation, &installed, deadline.into_std())?;
         supervisor
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
@@ -258,6 +266,48 @@ impl VerifiedInstalledProfile {
     }
     pub(super) fn observation(&self) -> &BootstrapUnitObservation {
         &self.observation
+    }
+}
+
+impl VerifiedInstalledProfile {
+    pub(super) fn verify_lookup_image(
+        &self,
+        image: &File,
+        deadline: std::time::Instant,
+    ) -> Result<()> {
+        use std::os::unix::fs::FileExt;
+        immutable(image)?;
+        let before = stamp(image)?;
+        if before != stamp(&self.installed.image)? || before.len == 0 || before.len > MAX_ELF {
+            return Err(Error::Untrusted);
+        }
+        // read_at не зависит от offset shared FD и не меняет его у owner.
+        let mut offset = 0u64;
+        let mut digest = Sha256::new();
+        let mut bytes = [0u8; 16384];
+        while offset < before.len {
+            let count = image
+                .read_at(&mut bytes, offset)
+                .map_err(|_| Error::Unavailable)?;
+            if count == 0
+                || offset
+                    .checked_add(count as u64)
+                    .is_none_or(|v| v > before.len)
+            {
+                return Err(Error::Stale);
+            }
+            if offset == 0 && (count < 4 || &bytes[..4] != b"\x7fELF") {
+                return Err(Error::Untrusted);
+            }
+            digest.update(&bytes[..count]);
+            offset += count as u64;
+        }
+        let actual: [u8; 32] = digest.finalize().into();
+        static_deadline(deadline)?;
+        if stamp(image)? != before || actual != self.installed.deployment.worker_sha256 {
+            return Err(Error::Stale);
+        }
+        Ok(())
     }
 }
 
@@ -297,6 +347,106 @@ fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
     }
     found.ok_or(Error::Unavailable)
 }
+struct StaticIdentity {
+    installed: InstalledContract,
+    stamps: [FileStamp; 3],
+}
+#[derive(Clone)]
+pub(crate) struct VerifiedStaticInstalledImage {
+    inner: std::sync::Arc<StaticIdentity>,
+    deadline: std::time::Instant,
+}
+impl VerifiedStaticInstalledImage {
+    pub(crate) fn deadline(&self) -> std::time::Instant {
+        self.deadline
+    }
+    pub(crate) fn revalidate(&self) -> Result<()> {
+        self.validate()
+    }
+    pub(crate) fn validate(&self) -> Result<()> {
+        let dir = child(&child(&child(&root()?, "usr")?, "lib")?, "yonik")?;
+        for ((name, retained), expected) in [
+            ("native-profile-v1.json", &self.inner.installed._metadata),
+            ("native-source-v1.tar", &self.inner.installed._source),
+            ("yonik-worker", &self.inner.installed.image),
+        ]
+        .into_iter()
+        .zip(&self.inner.stamps)
+        {
+            if stamp(retained)? != *expected || stamp(&fixed_file(&dir, name)?)? != *expected {
+                return Err(Error::Stale);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn same_source(&self, other: &Self) -> bool {
+        self.inner.stamps == other.inner.stamps
+            && self.inner.installed.deployment.worker_sha256
+                == other.inner.installed.deployment.worker_sha256
+            && self.inner.installed.deployment.source_archive_sha256
+                == other.inner.installed.deployment.source_archive_sha256
+            && self.inner.installed.deployment.policy_sha256
+                == other.inner.installed.deployment.policy_sha256
+            && self.inner.installed.deployment.kernel_build_id
+                == other.inner.installed.deployment.kernel_build_id
+    }
+    pub(crate) fn verify_image(&self, image: &File) -> Result<()> {
+        use std::os::unix::fs::FileExt;
+        self.validate()?;
+        immutable(image)?;
+        let before = stamp(image)?;
+        if before != self.inner.stamps[2] {
+            return Err(Error::Untrusted);
+        }
+        let mut offset = 0u64;
+        let mut hash = Sha256::new();
+        let mut buf = [0u8; 16384];
+        while offset < before.len {
+            static_deadline(self.deadline)?;
+            let n = image
+                .read_at(&mut buf, offset)
+                .map_err(|_| Error::Unavailable)?;
+            if n == 0 || offset.checked_add(n as u64).is_none_or(|v| v > before.len) {
+                return Err(Error::Stale);
+            }
+            hash.update(&buf[..n]);
+            offset += n as u64;
+        }
+        let actual: [u8; 32] = hash.finalize().into();
+        if actual != self.inner.installed.deployment.worker_sha256 || stamp(image)? != before {
+            return Err(Error::Untrusted);
+        }
+        static_deadline(self.deadline)
+    }
+}
+pub(super) fn load_static_image(
+    deadline: std::time::Instant,
+) -> Result<VerifiedStaticInstalledImage> {
+    let installed = InstalledContract::verify(deadline)?;
+    let stamps = [
+        stamp(&installed._metadata)?,
+        stamp(&installed._source)?,
+        stamp(&installed.image)?,
+    ];
+    static_deadline(deadline)?;
+    Ok(VerifiedStaticInstalledImage {
+        inner: std::sync::Arc::new(StaticIdentity { installed, stamps }),
+        deadline,
+    })
+}
+
+fn static_deadline(deadline: std::time::Instant) -> Result<()> {
+    if std::time::Instant::now() >= deadline {
+        return Err(Error::Timeout);
+    }
+    Ok(())
+}
+/// Static contract data для Prepare. Никакой Session/permit/Ready не выдаётся.
+pub(super) fn verify_static_preflight(deadline: std::time::Instant) -> Result<()> {
+    let _installed = InstalledContract::verify(deadline)?;
+    static_deadline(deadline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
