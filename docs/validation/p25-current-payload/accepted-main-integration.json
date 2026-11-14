@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "merge": "2a7595b786945eaaaa6579c10072e7a8a478a5a1",
+  "parents": [
+    "c2e70b99de9c2e489fe6b580242d61139e9be8b1",
+    "b25ed1184d917a4ba9465b000b4bec080cfcaa3e"
+  ],
+  "tree": "b7cb6a686cba64fbf06d188eb9a84ece05c483db",
+  "capture_leaf": "c2e70b99de9c2e489fe6b580242d61139e9be8b1",
+  "capture_leaf_blobs": {
+    "docs/validation/p25-current-payload/post-build-capture-checks.json": "326de0d32f65bc135ff675a2b683e792c931623c",
+    "docs/validation/p25-current-payload/post-build-capture-tool.md": "e7fd6bf7046a5cbadae5213b0d0f915ecdf34e68",
+    "tools/p25_capture_build_closure.py": "e51da036fb6fb7f50b4fe89368342783b6161e62",
+    "tools/tests/test_p25_capture_build_closure.py": "b214ab34a5ab75222963b49a6b4a9f357292d34c"
+  },
+  "new_runtime_pass": false,
+  "new_build": false,
+  "root_checks": [
+    "capture 22 tests PASS",
+    "diff --check PASS"
+  ],
+  "readiness_delta": "2026-11-14-linux-p04-p08-readiness.md",
+  "limits": [
+    "P25 not ready; final file-level Qt/source/legal closure open",
+    "PLAN changes concern accepted original P04/P08 only"
+  ]
+}
