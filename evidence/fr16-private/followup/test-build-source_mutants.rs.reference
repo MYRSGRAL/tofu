@@ -1,0 +1,54 @@
+//! Изолированные копии одного frozen source; EventLog остаётся настоящим API.
+//! should_panic требует конкретный assertion, а не произвольную ошибку setup.
+#[allow(dead_code, unused_imports, unused_variables)]
+mod baseline {
+    include!("fixtures/baseline.rs.fixture");
+    #[test]
+    fn unmodified_source_green() -> std::io::Result<()> {
+        compatibility::codec_bounds_roles_scope_and_legacy_rejection();
+        compatibility::resource_validation_reuses_v2();
+        compatibility::late_bytes_and_eof_keep_original_context()?;
+        compatibility::named_fifo_is_not_an_anonymous_pipe()?;
+        Ok(())
+    }
+}
+
+#[allow(dead_code, unused_imports, unused_variables)]
+mod pipefs {
+    include!("fixtures/mutant_pipefs.rs.fixture");
+    #[test]
+    #[should_panic(expected = "assertion failed: OutputWriters { roles }.validate().is_err()")]
+    fn guard_mutant_reaches_named_fifo_assertion() {
+        compatibility::named_fifo_is_not_an_anonymous_pipe().expect("setup должен пройти");
+    }
+}
+
+#[allow(dead_code, unused_imports, unused_variables)]
+mod roles {
+    include!("fixtures/mutant_roles.rs.fixture");
+    #[test]
+    #[should_panic(expected = "offset 96")]
+    fn guard_mutant_reaches_role_assertion() {
+        compatibility::codec_bounds_roles_scope_and_legacy_rejection();
+    }
+}
+
+#[allow(dead_code, unused_imports, unused_variables)]
+mod resources {
+    include!("fixtures/mutant_resources.rs.fixture");
+    #[test]
+    #[should_panic(expected = "assertion failed: decode(&bad).is_err()")]
+    fn bypass_mutant_reaches_resource_assertion() {
+        compatibility::resource_validation_reuses_v2();
+    }
+}
+
+#[allow(dead_code, unused_imports, unused_variables)]
+mod lifetime {
+    include!("fixtures/mutant_lifetime.rs.fixture");
+    #[test]
+    #[should_panic(expected = "assertion `left == right` failed")]
+    fn rebind_mutant_reaches_context_assertion() {
+        compatibility::late_bytes_and_eof_keep_original_context().expect("setup должен пройти");
+    }
+}

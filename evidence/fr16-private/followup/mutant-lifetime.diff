@@ -1,0 +1,11 @@
+--- unmodified-source
++++ lifetime
+@@ -170,7 +170,7 @@
+                 log: log
+                     .session_scope()
+                     .ok_or_else(|| io::Error::other("исчерпан session id"))?
+-                    .with_generation(generation),
++                    .with_generation(2),
+             })
+         }
+         pub(super) fn consume(self) -> ConsumedOutput {
