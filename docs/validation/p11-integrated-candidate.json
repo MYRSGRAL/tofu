@@ -489,11 +489,11 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
-      "source": "11557271eb57ede0e9aa527278a2271fd6c1de6c",
-      "blob": "3dd9b2f8736e8f96318a07e18c63a3c480f4beee",
-      "scope": "FR16 default output carrier integration; P11 typed causes/publication/generation/render/export preserved. Historical execution not rebound.",
-      "review": "R1 f8c980d8 CLEAN exact 4bb1f1d ordinary root union and P11 links; prior R1 1c7a98b4 CLEAN complete carrier default software path.",
-      "review_pending": false,
+      "source": "37756cc6ce59234a34fc459e7deba6ed6c6ddbb1",
+      "blob": "ea8f42a0d545c7b6c25d3e66ace68e3d144f002e",
+      "scope": "Принятый P09 test-support lifecycle gate объединён с reviewed FR16 output; новые P11 causes и IDs отсутствуют. Historical executions не перепривязаны.",
+      "review": "Root exact backend delta 7d99126→37756cc equals accepted P09 test-support hooks only; reviewed FR16 union R1 f8c980d8 and P09 R1 6c7b0ad8 preserved. Independent combined integration recheck pending before merge.",
+      "review_pending": true,
       "new_runtime_pass": false
     },
     "crates/yonik-desktop/qml/Main.qml": {
@@ -607,6 +607,15 @@
       "blob": "61e4901ca5a06aa8b6b871f5d07d41f9cdc4404f",
       "scope": "P09 cancellation test-support only; exact original cancellation delta over preserved root P11/ports union. Historical execution remains bound to 8e138f7.",
       "review": "Root: exact backend delta 0bb3e86→e3f0add is cfg(test-support) lifecycle gate only, P11 publication/context/render unchanged; original P09 R1 6c7b0ad8 scoped CLEAN. Historical runtime binding preserved.",
+      "review_pending": false,
+      "new_runtime_pass": false
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "11557271eb57ede0e9aa527278a2271fd6c1de6c",
+      "blob": "3dd9b2f8736e8f96318a07e18c63a3c480f4beee",
+      "scope": "FR16 default output carrier integration; P11 typed causes/publication/generation/render/export preserved. Historical execution not rebound.",
+      "review": "R1 f8c980d8 CLEAN exact 4bb1f1d ordinary root union and P11 links; prior R1 1c7a98b4 CLEAN complete carrier default software path.",
       "review_pending": false,
       "new_runtime_pass": false
     }
