@@ -1,10 +1,11 @@
 //! Реальные normal Host команды. Вход остаётся недостижим до sealed grant binding.
 use super::{protocol::Core, sealed::VerifiedFixture};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     time::{Duration, Instant},
 };

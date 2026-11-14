@@ -1,7 +1,7 @@
 //! Fresh loaded-manager closure перед Host; root capture не заменяет live query.
-use super::{canonical, root_file, Result, VerifiedFixture};
+use super::{Result, VerifiedFixture, canonical, root_file};
 use crate::{hash::sha256, protocol::strict_json};
-use rustix::process::{pidfd_open, pidfd_send_signal, Pid, PidfdFlags, Signal};
+use rustix::process::{Pid, PidfdFlags, Signal, pidfd_open, pidfd_send_signal};
 use serde::Deserialize;
 use serde_json::json;
 use std::{
@@ -510,7 +510,11 @@ mod tests {
         }
     }
     fn command(args: &[&str]) -> String {
-        format!("{{ path={} ; argv[]={} ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}",args[0],args.join(" "))
+        format!(
+            "{{ path={} ; argv[]={} ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}",
+            args[0],
+            args.join(" ")
+        )
     }
     fn live() -> Manager {
         let mut units = Manager::new();
@@ -697,15 +701,17 @@ mod tests {
             "DropInPaths".into(),
             "/etc/systemd/system/yonik-helper.service.d/override.conf".into(),
         );
-        assert!(validate(
-            &capture,
-            &f,
-            "xray_positive",
-            &"c".repeat(64),
-            &current,
-            &fragments(&f)
-        )
-        .is_err());
+        assert!(
+            validate(
+                &capture,
+                &f,
+                "xray_positive",
+                &"c".repeat(64),
+                &current,
+                &fragments(&f)
+            )
+            .is_err()
+        );
     }
     #[test]
     fn pending_daemon_reload_and_changed_effective_exec_rejected() {
@@ -716,29 +722,33 @@ mod tests {
             .get_mut("yonik-helper.service")
             .unwrap()
             .insert("NeedDaemonReload".into(), "yes".into());
-        assert!(validate(
-            &capture,
-            &f,
-            "xray_positive",
-            &"c".repeat(64),
-            &current,
-            &fragments(&f)
-        )
-        .is_err());
+        assert!(
+            validate(
+                &capture,
+                &f,
+                "xray_positive",
+                &"c".repeat(64),
+                &current,
+                &fragments(&f)
+            )
+            .is_err()
+        );
         let mut current = live();
         current.get_mut("yonik-helper.service").unwrap().insert(
             "ExecStart".into(),
             command(&["/usr/lib/yonik/yonik-helper", "--unexpected"]),
         );
-        assert!(validate(
-            &capture,
-            &f,
-            "xray_positive",
-            &"c".repeat(64),
-            &current,
-            &fragments(&f)
-        )
-        .is_err());
+        assert!(
+            validate(
+                &capture,
+                &f,
+                "xray_positive",
+                &"c".repeat(64),
+                &current,
+                &fragments(&f)
+            )
+            .is_err()
+        );
     }
     #[test]
     fn actual_helper_wrong_exe_or_reused_invocation_rejected() {
@@ -759,15 +769,17 @@ mod tests {
         );
         capture.helper.exe_sha256 = "7".repeat(64);
         capture.helper.invocation = "e".repeat(32);
-        assert!(validate(
-            &capture,
-            &f,
-            "xray_positive",
-            &"c".repeat(64),
-            &current,
-            &fragments(&f)
-        )
-        .is_err());
+        assert!(
+            validate(
+                &capture,
+                &f,
+                "xray_positive",
+                &"c".repeat(64),
+                &current,
+                &fragments(&f)
+            )
+            .is_err()
+        );
     }
     #[test]
     fn matching_capture_with_wrong_effective_context_is_not_source_closure() {
@@ -778,15 +790,17 @@ mod tests {
             .unwrap()
             .insert("Environment".into(), "YONIK_OVERRIDE=1".into());
         let capture = capture(&f, current.clone());
-        assert!(validate(
-            &capture,
-            &f,
-            "xray_positive",
-            &"c".repeat(64),
-            &current,
-            &fragments(&f)
-        )
-        .is_err());
+        assert!(
+            validate(
+                &capture,
+                &f,
+                "xray_positive",
+                &"c".repeat(64),
+                &current,
+                &fragments(&f)
+            )
+            .is_err()
+        );
     }
     #[test]
     fn complete_canonical_property_reply_round_trips_without_queries() {

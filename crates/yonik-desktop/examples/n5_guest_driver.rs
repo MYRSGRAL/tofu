@@ -13,7 +13,7 @@ mod sealed;
 #[path = "n5_guest_driver/session.rs"]
 mod session;
 use sealed::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, Read, Write},
     sync::mpsc,

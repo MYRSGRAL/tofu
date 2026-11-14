@@ -4,7 +4,7 @@ use super::{
     protocol::strict_json,
     sealed::{self, Result, VerifiedFixture},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub fn now() -> u128 {
     SystemTime::now()
@@ -286,16 +286,18 @@ mod tests {
     use super::*;
     #[test]
     fn echo_without_root_observations_rejected() {
-        assert!(validate(
-            &json!({"schema":1,"status":"ACTUAL"}),
-            "baseline",
-            "xray_positive",
-            "n",
-            "s",
-            "m",
-            "a"
-        )
-        .is_err());
+        assert!(
+            validate(
+                &json!({"schema":1,"status":"ACTUAL"}),
+                "baseline",
+                "xray_positive",
+                "n",
+                "s",
+                "m",
+                "a"
+            )
+            .is_err()
+        );
     }
     #[test]
     fn empty_cgroup_alone_cannot_prove_cleanup() {

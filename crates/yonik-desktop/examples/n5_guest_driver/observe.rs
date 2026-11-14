@@ -1,10 +1,10 @@
 //! Actual kernel/process/network observations; вызываются только после sealed verifier.
 use super::sealed::{Flow, Result, VerifiedFixture};
 use rustix::{
-    fs::{fstatfs, open, openat, Mode, OFlags},
-    process::{pidfd_open, pidfd_send_signal, Pid, PidfdFlags, Signal},
+    fs::{Mode, OFlags, fstatfs, open, openat},
+    process::{Pid, PidfdFlags, Signal, pidfd_open, pidfd_send_signal},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     fs::{self, File},
     io::{Read, Write},
@@ -503,11 +503,13 @@ mod framing_tests {
         });
         assert_eq!(result, Ok(b"{\"seen\":0}".to_vec()));
         assert!(read_observer_frame(|_| Ok(0)).is_err());
-        assert!(read_observer_frame(|buffer| {
-            buffer.fill(b'x');
-            Ok(buffer.len())
-        })
-        .is_err());
+        assert!(
+            read_observer_frame(|buffer| {
+                buffer.fill(b'x');
+                Ok(buffer.len())
+            })
+            .is_err()
+        );
     }
     #[tokio::test]
     async fn tcp_response_frame_supports_fragmented_memory_stream() {

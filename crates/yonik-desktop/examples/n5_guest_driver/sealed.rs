@@ -2,9 +2,9 @@
 #[path = "unit_closure.rs"]
 mod unit_closure;
 use super::hash::sha256;
-use rustix::fs::{open, openat, Mode, OFlags};
+use rustix::fs::{Mode, OFlags, open, openat};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{fs::File, io::Read, os::unix::fs::MetadataExt, path::PathBuf};
 pub type Result<T> = std::result::Result<T, &'static str>;
 pub const DRIVER: &str = "/usr/lib/yonik-acceptance/n5-guest-driver";

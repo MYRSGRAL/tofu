@@ -87,8 +87,8 @@ mod tests {
 
 pub fn strict_json(bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
     use serde::{
-        de::{Error, MapAccess, SeqAccess, Visitor},
         Deserializer,
+        de::{Error, MapAccess, SeqAccess, Visitor},
     };
     use serde_json::Value;
     struct Unique(Value);
