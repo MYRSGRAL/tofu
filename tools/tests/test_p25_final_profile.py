@@ -12,6 +12,55 @@ import _p25_final_profile as p
 
 
 class FinalProfileTests(unittest.TestCase):
+    def test_fixed_arch_qt_query_argv_and_receipt(self) -> None:
+        import json
+        from contextlib import contextmanager
+        from unittest.mock import Mock
+
+        tmp_path = Path(self.enterContext(TemporaryDirectory()))
+        expected = ["/usr/lib/qt6/bin/qtpaths", "--qt-version"]
+        identity = {"path": expected[0], "sha256": "a" * 64}
+
+        @contextmanager
+        def fake_tool(alias: str):
+            self.assertEqual(alias, expected[0])
+            yield 123, identity
+
+        runner = Mock(return_value=(0, b"6.11.2\n", b""))
+        env = {"PATH": "/untrusted", "QT_HOST_BINS": "/untrusted"}
+        with patch.object(p, "trusted_tool", side_effect=fake_tool) as tool:
+            p.prepare(tmp_path, tmp_path / "build", env, runner=runner)
+        tool.assert_called_once_with(expected[0])
+        runner.assert_called_once_with(123, expected, tmp_path, env)
+        receipt = json.loads(
+            (tmp_path / "build/p25capture/qt-observed.json").read_bytes()
+        )
+        self.assertEqual(receipt["query_argv"], expected)
+        self.assertEqual(receipt["tool"], identity)
+
+    def test_missing_fixed_qt_tool_never_falls_back(self) -> None:
+        from unittest.mock import Mock
+
+        tmp_path = Path(self.enterContext(TemporaryDirectory()))
+        runner = Mock()
+        with patch.object(
+            p, "trusted_tool", side_effect=FileNotFoundError("fixed Qt tool")
+        ) as tool:
+            with self.assertRaises(FileNotFoundError):
+                p.prepare(tmp_path, tmp_path / "build", {}, runner=runner)
+        tool.assert_called_once_with("/usr/lib/qt6/bin/qtpaths")
+        runner.assert_not_called()
+        self.assertFalse((tmp_path / "build/p25capture/qt-observed.json").exists())
+
+    def test_qt_tool_rejects_other_aliases_before_filesystem_access(self) -> None:
+        with patch.object(p.Path, "resolve") as resolve:
+            for alias in ("qtpaths", "qtpaths6", "/usr/bin/qtpaths6"):
+                with self.subTest(alias=alias):
+                    with self.assertRaisesRegex(ValueError, "fixed tool"):
+                        with p.trusted_tool(alias):
+                            self.fail("Недоверенный Qt tool принят")
+            resolve.assert_not_called()
+
     def test_make_escaping(self) -> None:
         self.assertEqual(
             p.dependencies(

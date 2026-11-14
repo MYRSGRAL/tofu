@@ -30,7 +30,7 @@ from p25_capture_build_closure import (
 PROFILE = {
     "id": "p25-final-cxx-v1",
     "compiler": "/usr/bin/g++",
-    "qt_query": ["/usr/bin/qtpaths6", "--qt-version"],
+    "qt_query": ["/usr/lib/qt6/bin/qtpaths", "--qt-version"],
     "sdk_root": "/usr",
     "registry_source_root": "/home/myrs/.cargo/registry/src",
     "dependency_flags": ["-MD", "-MF"],
