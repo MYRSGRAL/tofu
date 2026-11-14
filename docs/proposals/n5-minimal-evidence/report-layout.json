@@ -1,0 +1,136 @@
+{
+  "status": "PROPOSED_NOT_IMPLEMENTED",
+  "version": 4,
+  "frame_bytes": 512,
+  "endian": "big",
+  "extra_fds": 0,
+  "new_roundtrips": 0,
+  "fields": [
+    {
+      "name": "magic",
+      "offset": 0,
+      "bytes": 8,
+      "encoding": "ASCII YNKNS004"
+    },
+    {
+      "name": "nonce",
+      "offset": 8,
+      "bytes": 32,
+      "encoding": "challenge bytes"
+    },
+    {
+      "name": "payload_digest",
+      "offset": 40,
+      "bytes": 32,
+      "encoding": "SHA256"
+    },
+    {
+      "name": "session",
+      "offset": 72,
+      "bytes": 16,
+      "encoding": "challenge bytes"
+    },
+    {
+      "name": "generation",
+      "offset": 88,
+      "bytes": 8,
+      "encoding": "u64 nonzero"
+    },
+    {
+      "name": "invocation",
+      "offset": 96,
+      "bytes": 16,
+      "encoding": "challenge bytes"
+    },
+    {
+      "name": "network_epoch",
+      "offset": 112,
+      "bytes": 8,
+      "encoding": "u64 nonzero"
+    },
+    {
+      "name": "task_pid",
+      "offset": 120,
+      "bytes": 4,
+      "encoding": "u32 nonzero"
+    },
+    {
+      "name": "reserved_a",
+      "offset": 124,
+      "bytes": 4,
+      "encoding": "zero"
+    },
+    {
+      "name": "task_start",
+      "offset": 128,
+      "bytes": 8,
+      "encoding": "u64 nonzero"
+    },
+    {
+      "name": "server_pid",
+      "offset": 136,
+      "bytes": 4,
+      "encoding": "u32 nonzero"
+    },
+    {
+      "name": "reserved_b",
+      "offset": 140,
+      "bytes": 4,
+      "encoding": "zero"
+    },
+    {
+      "name": "server_start",
+      "offset": 144,
+      "bytes": 8,
+      "encoding": "u64 nonzero"
+    },
+    {
+      "name": "profile_digest",
+      "offset": 152,
+      "bytes": 32,
+      "encoding": "SHA256 allowlist manifest"
+    },
+    {
+      "name": "receipt_digest",
+      "offset": 184,
+      "bytes": 32,
+      "encoding": "SHA256 retained trusted completion record"
+    },
+    {
+      "name": "seccomp_mode",
+      "offset": 216,
+      "bytes": 4,
+      "encoding": "u32 exactly 2"
+    },
+    {
+      "name": "baseline_filters",
+      "offset": 220,
+      "bytes": 4,
+      "encoding": "u32 diagnostic only"
+    },
+    {
+      "name": "current_filters",
+      "offset": 224,
+      "bytes": 4,
+      "encoding": "u32 diagnostic only"
+    },
+    {
+      "name": "reserved_c",
+      "offset": 228,
+      "bytes": 4,
+      "encoding": "zero"
+    },
+    {
+      "name": "observations",
+      "offset": 232,
+      "bytes": 76,
+      "encoding": "19 x u32 errno 1..4095"
+    },
+    {
+      "name": "reserved_tail",
+      "offset": 308,
+      "bytes": 204,
+      "encoding": "zero"
+    }
+  ]
+}
