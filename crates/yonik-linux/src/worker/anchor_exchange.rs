@@ -1099,6 +1099,128 @@ mod tests {
             assert!(result.is_ok());
         }
     }
+    fn production_v4_peer(stream: UnixStream, attack: &str) {
+        let mut marker = [0; 8];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+        let message = recvmsg(
+            &stream,
+            &mut [IoSliceMut::new(&mut marker)],
+            &mut ancillary,
+            RecvFlags::CMSG_CLOEXEC,
+        )
+        .unwrap();
+        assert_eq!(message.bytes, 8);
+        assert_eq!(&marker, b"YNKANC04");
+        let mut sockets = Vec::new();
+        for part in ancillary.drain() {
+            if let RecvAncillaryMessage::ScmRights(fds) = part {
+                sockets.extend(fds);
+            } else {
+                panic!("Неожиданный ancillary");
+            }
+        }
+        assert_eq!(sockets.len(), 1);
+        let socket = sockets.pop().unwrap();
+        let deadline = Instant::now() + DEADLINE;
+        let (request, extra, _) = receive(&socket, deadline).unwrap();
+        assert!(extra.is_empty());
+        assert_eq!(&request[..8], b"YNKCH004");
+        assert_eq!(&request[112..120], &9u64.to_be_bytes());
+        assert_eq!(&request[120..], &[0; 8]);
+        let mut report = [0; 512];
+        report[..120].copy_from_slice(&request[..120]);
+        report[..8].copy_from_slice(b"YNKNS004");
+        let image = File::open(if attack == "wrongtype" {
+            "/dev/null"
+        } else {
+            "/proc/self/exe"
+        })
+        .unwrap();
+        let rights = match attack {
+            "zero" => vec![],
+            "multiple" => vec![image.as_fd(), image.as_fd()],
+            _ => vec![image.as_fd()],
+        };
+        send(&socket, &report, &rights).unwrap();
+        if attack != "valid" {
+            return;
+        }
+        let namespaces =
+            ["net", "pid", "mnt"].map(|name| File::open(format!("/proc/self/ns/{name}")).unwrap());
+        send(
+            &socket,
+            &request,
+            &namespaces.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+        )
+        .unwrap();
+        drop(namespaces);
+        let mut closed = request;
+        closed[..8].copy_from_slice(b"YNKCLOSE");
+        send(&socket, &closed, &[]).unwrap();
+        let (ack, extra, _) = receive(&socket, deadline).unwrap();
+        assert_eq!(ack, closed);
+        assert!(extra.is_empty());
+    }
+    #[test]
+    fn production_v4_receiver_requires_one_executable_and_canonical_credentials() {
+        for attack in ["zero", "multiple", "wrongtype", "pid", "uid"] {
+            let (helper, peer) = UnixStream::pair().unwrap();
+            let task = std::thread::spawn(move || production_v4_peer(peer, attack));
+            let result = Challenge::new([1; 32], [2; 16], 7, [3; 16])
+                .unwrap()
+                .exchange_v4_bound(
+                    &helper,
+                    std::process::id() + u32::from(attack == "pid"),
+                    rustix::process::getuid()
+                        .as_raw()
+                        .wrapping_add(u32::from(attack == "uid")),
+                    Instant::now() + DEADLINE,
+                    9,
+                );
+            assert!(result.is_err(), "{attack}");
+            drop(helper);
+            task.join().unwrap();
+        }
+    }
+    #[test]
+    fn production_v4_positive_owning_executable_survives_revoke_and_cancel_drop() {
+        use std::os::fd::AsRawFd;
+        let (helper, peer) = UnixStream::pair().unwrap();
+        let task = std::thread::spawn(move || production_v4_peer(peer, "valid"));
+        let (observation, report) = Challenge::new([1; 32], [2; 16], 7, [3; 16])
+            .unwrap()
+            .exchange_v4_bound(
+                &helper,
+                std::process::id(),
+                rustix::process::getuid().as_raw(),
+                Instant::now() + DEADLINE,
+                9,
+            )
+            .unwrap();
+        task.join().unwrap();
+        assert_eq!(&report[..8], b"YNKNS004");
+        assert_eq!(observation.retained_namespace_count(), 2);
+        let image = observation.take_executable().unwrap();
+        assert!(image.metadata().unwrap().is_file());
+        assert!(observation.take_executable().is_err());
+        drop(image);
+        let fd = observation
+            .custody
+            .retained_executable
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_raw_fd();
+        let retention = observation.retention();
+        observation.revoke();
+        assert!(observation.take_executable().is_err());
+        drop(observation);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        drop(retention);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_err());
+    }
     #[test]
     fn authorized_challenge_uses_owner_nonce_and_rejects_revoke() {
         let owner = crate::helper::run_authorization::RunAuthority::new([2; 16], 7, 9).unwrap();
