@@ -1,4 +1,4 @@
-# Текущая готовность и оставшаяся очередь — accepted cfcb457
+# Текущая готовность и оставшаяся очередь — accepted 48ce743
 
 Это компактный source-bound реестр 26 пунктов, не новый test framework и не
 замена исторических 256 строк. Исторический счёт **3/21/2**, знаменатель **26**
@@ -10,7 +10,8 @@ Linux done, final A5 и release PASS не заявлены.
 
 ## Принятая база и источник утверждений
 
-Авторитетный MAIN по handoff root — `cfcb4576dd0ead9cbf65a5bed95ff4f008813ba9`
+Авторитетный MAIN — `48ce74304a3fb7263ccc7e2c06d96394113a687d` (PR187);
+source transfer P05 ограничен `cfcb4576dd0ead9cbf65a5bed95ff4f008813ba9`
 (PR191), предыдущий accepted217 — `a3f609e66e5a95b978c0bf3da34ade4f1445e219`.
 Read-only GitHub API подтвердил PR191 MERGED, exact head
 `b8c7380586472d396b5a60b49bd349fc5c96d80f`, merge SHA выше и parents:
