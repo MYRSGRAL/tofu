@@ -29,8 +29,19 @@ fn receive(
     deadline: Instant,
     cancel: &AtomicBool,
 ) -> Result<Vec<u8>, Unavailable> {
+    receive_inner(socket, Some(deadline), cancel)
+}
+fn receive_inner(
+    socket: &OwnedFd,
+    deadline: Option<Instant>,
+    cancel: &AtomicBool,
+) -> Result<Vec<u8>, Unavailable> {
     loop {
-        fence(deadline, cancel)?;
+        if let Some(deadline) = deadline {
+            fence(deadline, cancel)?;
+        } else if cancel.load(Ordering::Acquire) {
+            return Err(Unavailable::Cancelled);
+        }
         let mut bytes = [0; wire::MAX_FRAME + 1];
         let mut space =
             [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1), ScmCredentials(1))];
@@ -142,11 +153,24 @@ impl Session {
     /// Потребляет все роли. metadata — только от helper resource owner.
     /// cancel не является authority и может только отозвать существующую сессию.
     pub fn serve(mut self, cancel: &AtomicBool) -> Result<(), Unavailable> {
-        let result = self.serve_inner(cancel);
+        let result = self.serve_inner(cancel, || Ok(()));
         self.close();
         result
     }
-    fn serve_inner(&mut self, cancel: &AtomicBool) -> Result<(), Unavailable> {
+    pub fn serve_with_ready(
+        mut self,
+        cancel: &AtomicBool,
+        on_ready: impl FnOnce() -> Result<(), Unavailable>,
+    ) -> Result<(), Unavailable> {
+        let result = self.serve_inner(cancel, on_ready);
+        self.close();
+        result
+    }
+    fn serve_inner(
+        &mut self,
+        cancel: &AtomicBool,
+        on_ready: impl FnOnce() -> Result<(), Unavailable>,
+    ) -> Result<(), Unavailable> {
         let socket = rustix::io::fcntl_dupfd_cloexec(
             &self.roles.as_ref().ok_or(Unavailable::Authority)?.worker,
             0,
@@ -166,14 +190,15 @@ impl Session {
         drop(fd);
         let ack = receive(&socket, expires, cancel)?;
         self.acknowledge(&ack).map_err(|_| Unavailable::Malformed)?;
+        on_ready()?;
         loop {
-            let bytes = receive(&socket, expires, cancel)?;
+            let bytes = receive_inner(&socket, None, cancel)?;
             let header = self.header(&bytes).map_err(|_| Unavailable::Malformed)?;
             if header.kind == Kind::Revoke {
                 self.revoke(&bytes).map_err(|_| Unavailable::Malformed)?;
                 return Ok(());
             }
-            let deadline = (Instant::now() + Duration::from_nanos(wire::OWNER_TTL_NS)).min(expires);
+            let deadline = Instant::now() + Duration::from_nanos(wire::OWNER_TTL_NS);
             #[cfg(test)]
             BEFORE_LOOKUP.with(|hook| {
                 if let Some(callback) = hook.borrow_mut().take() {
