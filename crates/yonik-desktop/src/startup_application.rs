@@ -419,6 +419,7 @@ async fn prepare_inner(
             Operation::State,
             system_revision(actor),
             generation,
+            actor.event_log.clone(),
         ));
         let result = tokio::time::timeout(Duration::from_secs(4), &mut query.0.task)
             .await
