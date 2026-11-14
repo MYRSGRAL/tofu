@@ -73,6 +73,11 @@ pub struct HostConfig {
     scheduler_interval: Option<Duration>,
     #[cfg(feature = "test-support")]
     test_subscription_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    #[cfg(feature = "test-support")]
+    schedule_trace: Option<(
+        std::sync::mpsc::SyncSender<serde_json::Value>,
+        Arc<AtomicBool>,
+    )>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -96,12 +101,24 @@ impl HostConfig {
             scheduler_interval: None,
             #[cfg(feature = "test-support")]
             test_subscription_fetch: None,
+            #[cfg(feature = "test-support")]
+            schedule_trace: None,
         }
     }
     /// Concrete socket transport отдельного subscription fixture; не native authority.
     #[cfg(feature = "test-support")]
     pub fn with_test_subscription_fetch(mut self, fetch: Arc<yonik_linux::FetchHost>) -> Self {
         self.test_subscription_fetch = Some(fetch);
+        self
+    }
+    /// Bounded read-only trace; overflow/disconnect запрещают acceptance fixture.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_schedule_trace(
+        mut self,
+        sender: std::sync::mpsc::SyncSender<serde_json::Value>,
+        overflow: Arc<AtomicBool>,
+    ) -> Self {
+        self.schedule_trace = Some((sender, overflow));
         self
     }
     /// Только наблюдение реального producer в отдельном test-support стенде.
@@ -3415,6 +3432,52 @@ type RefreshTask = (
     String,
 );
 
+#[cfg(feature = "test-support")]
+#[derive(Default)]
+struct ScheduleTrace {
+    window_origin: Option<Duration>,
+    drain_id: u64,
+    previous: Option<serde_json::Value>,
+}
+#[cfg(feature = "test-support")]
+impl ScheduleTrace {
+    fn emit(
+        &mut self,
+        config: &HostConfig,
+        scheduled: &DesktopSchedule,
+        lease: ProxyLease,
+        now: Duration,
+        phase: &'static str,
+    ) {
+        let Some((sender, overflow)) = &config.schedule_trace else {
+            return;
+        };
+        if scheduled.window_until.is_none() {
+            self.window_origin = None;
+        }
+        let row = serde_json::json!({"phase":phase,"window_origin_ns":self.window_origin.map(|d| d.as_nanos()),"window_deadline_ns":scheduled.window_until.map(|d|d.as_nanos()),"scheduled_generation":scheduled.generation,"lease_generation":lease.map(|l|l.0),"drain_id":self.drain_id,"fetching":scheduled.fetching});
+        if self.previous.as_ref() == Some(&row) {
+            return;
+        }
+        self.previous = Some(row.clone());
+        let mut event = row;
+        event["at_ns"] = serde_json::json!(now.as_nanos());
+        if sender.try_send(event).is_err() {
+            overflow.store(true, Ordering::Release);
+        }
+    }
+    fn begin_drain(&mut self, config: &HostConfig) {
+        match self.drain_id.checked_add(1) {
+            Some(id) => self.drain_id = id,
+            None => {
+                if let Some((_, overflow)) = &config.schedule_trace {
+                    overflow.store(true, Ordering::Release);
+                }
+            }
+        }
+    }
+}
+
 type ProxyLease = Option<(u64, SocketAddr)>;
 
 /// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
@@ -4147,7 +4210,17 @@ async fn run(
         config.test_subscription_fetch.clone(),
     );
     let mut maintenance_controller = maintenance::Controller::default();
+    #[cfg(feature = "test-support")]
+    let mut schedule_trace = ScheduleTrace::default();
     loop {
+        #[cfg(feature = "test-support")]
+        schedule_trace.emit(
+            &config,
+            &scheduled,
+            *proxy_session.borrow(),
+            origin.elapsed(),
+            "state",
+        );
         let interval = Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
         #[cfg(feature = "test-support")]
@@ -4266,7 +4339,12 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if let Err(error) = scheduled.shutdown(origin.elapsed()).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
+                #[cfg(feature = "test-support")]
+                { schedule_trace.begin_drain(&config); schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), "stop_drain_begin"); }
+                let shutdown = scheduled.shutdown(origin.elapsed()).await;
+                #[cfg(feature = "test-support")]
+                schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), if shutdown.is_ok() { "stop_drain_complete" } else { "stop_drain_failed" });
+                if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
                     let policy = scheduled.policy;
@@ -4400,7 +4478,15 @@ async fn run(
                 if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
                     schedule_host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone());
                     let host = &schedule_host;
-                    scheduled.open_window(origin.elapsed());
+                    let window_now = origin.elapsed();
+                    #[cfg(feature = "test-support")]
+                    let was_closed = scheduled.window_until.is_none();
+                    scheduled.open_window(window_now);
+                    #[cfg(feature = "test-support")]
+                    {
+                        if was_closed && scheduled.window_until.is_some() { schedule_trace.window_origin = Some(window_now); }
+                        schedule_trace.emit(&config, &scheduled, *proxy_session.borrow(), origin.elapsed(), "dispatch");
+                    }
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
