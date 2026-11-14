@@ -1059,16 +1059,13 @@ impl Backend {
             .map_err(unavailable)?;
         cancel.check().map_err(|_| ServiceError::Cancelled)?;
         let ticket = if artifact.attribution_required {
-            if output.is_some() {
-                return Err(ServiceError::Unsupported);
-            }
             self.retain_canonical_queue(&artifact.plan, &tun, cancel)
                 .await?;
             let record = self
                 .verify_native_network(Arc::clone(&artifact), index, &link, cancel)
                 .await?;
             self.commit_native_owner(record)?;
-            self.start_committed_native(cancel).await?
+            self.start_committed_native(output, cancel).await?
         } else {
             self.worker_uncertain = true;
             diagnostic_result(

@@ -24,6 +24,8 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue},
 };
 
+mod lookup_leaf;
+pub(crate) use lookup_leaf::{LookupLeafLease, VerifiedLookupLeaf};
 const BUS: &str = "unix:path=/run/dbus/system_bus_socket";
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER: &str = "/org/freedesktop/systemd1";
@@ -518,10 +520,24 @@ pub struct SystemWorkerSupervisor {
     native_transfer: Option<JoinHandle<Result<WorkerAck>>>,
     native_admission: Option<JoinHandle<NativeAdmission>>,
     native_custody: Option<crate::worker::anchor_exchange::NamespaceRetention>,
+    lookup_leaf: Option<lookup_leaf::LeafPending>,
+    native_lookup_transfer: Option<JoinHandle<Result<crate::attribution::broker::RemoteLookup>>>,
+    native_remote: Option<crate::attribution::broker::RemoteLookup>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
         if !self.clean {
+            if let Some(task) = self.native_lookup_transfer.take() {
+                std::mem::forget(task);
+            }
+            if let Some(remote) = self.native_remote.take() {
+                std::mem::forget(remote);
+            }
+
+            if let Some(leaf) = self.lookup_leaf.take() {
+                std::mem::forget(leaf);
+            }
+
             if let Some(custody) = self.native_custody.take() {
                 std::mem::forget(custody);
             }
@@ -587,6 +603,9 @@ impl SystemWorkerSupervisor {
                 native_transfer: None,
                 native_admission: None,
                 native_custody: None,
+                lookup_leaf: None,
+                native_lookup_transfer: None,
+                native_remote: None,
             };
             supervisor.validate_contract().await?;
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
@@ -742,6 +761,7 @@ impl SystemWorkerSupervisor {
         journal: &crate::managed_network::Journal,
         topology: crate::LinuxTopology,
         epoch: u64,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<WorkerTicket> {
         use super::native_bootstrap::{VerifiedPendingRun, verify_pending};
@@ -807,6 +827,10 @@ impl SystemWorkerSupervisor {
             None,
         )
         .map_err(unavailable)?;
+        let leaf = self
+            .launch_lookup_leaf(owner, coverage.lookup_authorization(), cancel, deadline)
+            .await?;
+        let coverage = coverage.revalidate(self, owner, cancel).await?;
         let issued = verify_pending(coverage, owner, queue, journal, topology, helper)?;
         let (nonce, session, generation, invocation_context, epoch, digest) =
             issued.run.context()?;
@@ -831,8 +855,15 @@ impl SystemWorkerSupervisor {
             .map_err(unavailable)?,
             record: binding.record().map_err(unavailable)?,
         };
-        let session = crate::attribution::native_session::Session::from_verified(issued.session)
-            .map_err(unavailable)?;
+        let lookup_scope = issued.session.lookup_scope();
+        self.native_lookup_transfer = Some(tokio::task::spawn_blocking(move || {
+            crate::attribution::broker::RemoteLookup::from_verified(leaf, lookup_scope)
+                .map_err(unavailable)
+        }));
+        let remote = wait_owned(&mut self.native_lookup_transfer, cancel, deadline).await??;
+        let session =
+            crate::attribution::native_session::Session::from_verified(issued.session, remote)
+                .map_err(unavailable)?;
         let (ready_tx, ready) = std::sync::mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
@@ -874,7 +905,7 @@ impl SystemWorkerSupervisor {
             )
             .map_err(unavailable)?;
             payload
-                .send_output_before(&stream, WorkerMode::Run, None, deadline.into_std())
+                .send_output_before(&stream, WorkerMode::Run, output, deadline.into_std())
                 .map_err(unavailable)
         }));
         let ack = wait_owned(&mut self.native_transfer, cancel, deadline).await??;
@@ -1237,6 +1268,13 @@ impl SystemWorkerSupervisor {
                 drop((pending, custody, frame));
             }
         }
+        if self.native_lookup_transfer.is_some() {
+            if let Ok(remote) =
+                wait_owned(&mut self.native_lookup_transfer, cancel, deadline).await?
+            {
+                self.native_remote = Some(remote);
+            }
+        }
         if let Some(handle) = self.native_transfer.as_mut() {
             bounded(cancel, deadline, async {
                 let _result = handle.await.map_err(unavailable)?;
@@ -1264,6 +1302,7 @@ impl SystemWorkerSupervisor {
             }
             bounded(cancel, deadline, self.unit_job("StopUnit", mode.service())).await?;
         }
+        self.stop_lookup_leaf(cancel, deadline).await?;
         loop {
             if bounded(cancel, deadline, self.all_empty()).await? {
                 self.pending = None;
@@ -1272,6 +1311,7 @@ impl SystemWorkerSupervisor {
                 self.retained_copy = None;
                 self.native_runtime = None;
                 self.native_custody = None;
+                self.native_remote = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {
@@ -1281,7 +1321,7 @@ impl SystemWorkerSupervisor {
             .await?;
         }
     }
-    async fn unit_job(&self, method: &str, unit: &'static str) -> Result<()> {
+    async fn unit_job(&self, method: &str, unit: &str) -> Result<()> {
         tokio::time::timeout(DEADLINE, async {
             let proxy = zbus::Proxy::new(
                 &self.connection,

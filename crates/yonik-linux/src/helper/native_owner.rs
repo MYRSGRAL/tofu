@@ -289,6 +289,7 @@ impl super::Backend {
     }
     pub(super) async fn start_committed_native(
         &mut self,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut crate::Cancellation,
     ) -> Result<crate::helper::systemd_worker::WorkerTicket, ServiceError> {
         self.supervisor().await?;
@@ -318,6 +319,7 @@ impl super::Backend {
                 self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
                 topology,
                 pending.network_epoch,
+                output,
                 cancel,
             )
             .await
