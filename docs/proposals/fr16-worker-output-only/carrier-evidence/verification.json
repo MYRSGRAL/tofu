@@ -1,0 +1,12 @@
+{
+  "source_files_verified": 479,
+  "focused_passed": 14,
+  "focused_failed": 0,
+  "default_clippy": "PASS",
+  "test_support_clippy": "PASS",
+  "fmt": "PASS",
+  "production_registration": false,
+  "production_execution": false,
+  "Runtime16": false,
+  "codec_ref": "e1970210190b7e89ab9ffd06a0a33203dec82d85"
+}

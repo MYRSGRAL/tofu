@@ -30,6 +30,7 @@ pub(crate) struct Row {
     source: &'static str,
     code: String,
     value: Option<i32>,
+    technical_details: Option<String>,
     session_id: Option<String>,
     generation: Option<String>,
 }
@@ -72,6 +73,7 @@ impl Page {
                 .events
                 .iter()
                 .zip(&scoped.contexts)
+                .filter(|(event, _)| !event.code.is_native() || event.technical_details().is_some())
                 .map(|(event, context)| Row {
                     session_id: context.map(|c| c.session_id.to_string()),
                     generation: context.map(|c| c.generation.to_string()),
@@ -82,6 +84,7 @@ impl Page {
                     },
                     code: format!("{:?}", event.code),
                     value: event.value,
+                    technical_details: event.technical_details(),
                 })
                 .collect(),
         }
@@ -389,5 +392,50 @@ mod companion_tests {
         assert_eq!(std::fs::read(&destination).expect("файл"), b"previous");
         std::fs::remove_file(destination).expect("очистка");
         std::fs::remove_dir(root).expect("очистка каталога");
+    }
+}
+
+#[cfg(test)]
+mod native_projection_tests {
+    use super::*;
+    use yonik_linux::event_log::{EventCode, LogEvent};
+    #[test]
+    fn technical_body_is_shared_by_page_export_and_plain_dto() {
+        let event = LogEvent {
+            id: 1,
+            source: EventSource::Engine,
+            code: EventCode::NativeSingStarted,
+            value: Some(123),
+        };
+        let body = event.technical_details().unwrap();
+        assert_eq!(body, "sing-box started (1.23s)");
+        let page = yonik_linux::event_log::LogPage {
+            events: vec![event],
+            cursor: 1,
+            evicted: 0,
+            rejected: 0,
+            missed: 0,
+        };
+        assert!(page.export().contains(&body));
+        let row = Row {
+            id: "1".into(),
+            source: "engine",
+            code: "NativeSingStarted".into(),
+            value: Some(123),
+            technical_details: event.technical_details(),
+            session_id: Some("1".into()),
+            generation: Some("7".into()),
+        };
+        assert!(serde_json::to_string(&row).unwrap().contains(&body));
+        let bad = LogEvent {
+            value: Some(-1),
+            ..event
+        };
+        assert!(bad.technical_details().is_none());
+        let page = yonik_linux::event_log::LogPage {
+            events: vec![bad],
+            ..page
+        };
+        assert!(!page.export().contains("NativeSingStarted"));
     }
 }

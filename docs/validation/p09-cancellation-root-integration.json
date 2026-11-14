@@ -1,0 +1,14 @@
+{
+  "original_source": "8e138f78264287c1802ce30974afb88f527e53da",
+  "root_integration_source": "0bb3e86e22d7bf6709c90453e9f8619b60a59ee4",
+  "root_integration_accepted_in_main": false,
+  "method": "ordinary merge; no manual conflict resolution",
+  "historical_execution": "docs/validation/2026-11-14-p09-validate-apply-cancellation.md",
+  "historical_evidence": "/home/myrs/projects/yonik/local/evidence/p09-cancellation-private-ss/final-binding.json",
+  "historical_matrix": "8/8 on original frozen source only",
+  "new_runtime_pass": false,
+  "p11_freshness": "OPEN: union backend blob differs from reviewed root entry; ledger unchanged pending independent review",
+  "p11_root_backend_blob": "c165b3f411f60ca802d56e20bb34abb6ac89efec",
+  "union_backend_blob": "61e4901ca5a06aa8b6b871f5d07d41f9cdc4404f",
+  "rust_build_or_runtime_executed": false
+}

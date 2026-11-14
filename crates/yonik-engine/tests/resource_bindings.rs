@@ -60,6 +60,7 @@ fn single_evaluator_preserves_or_groups_and_app_and_priority() {
         enabled: true,
         action: Action::Block,
         conditions: Conditions {
+            transport: Default::default(),
             platform_sources: vec![],
             executables: vec!["/app".into()],
             domains: vec![DomainPattern::Exact("inline.test".parse().unwrap())],
@@ -412,6 +413,7 @@ fn unadmitted_data_rejects_invalid_path_and_actual_four_mib_output() {
                         enabled: true,
                         action: Action::Block,
                         conditions: Conditions {
+                            transport: Default::default(),
                             executables: conditions.executables.clone(),
                             domains: conditions.domains.clone(),
                             destinations: conditions.destinations.clone(),

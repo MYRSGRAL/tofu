@@ -5,6 +5,8 @@ use yonik_domain::{Action, Conditions, DomainName, DomainPattern, Policy, Rule};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<yonik_engine::transport::TransportInput>,
     pub id: u64,
     pub enabled: bool,
     pub executables: Vec<String>,
@@ -159,6 +161,7 @@ impl Draft {
                 "domain":exact,"domain_suffix":suffixes.iter().map(|s| &s[2..]).collect::<Vec<_>>(),
                 "ip_cidr":typed.conditions.destinations.iter().map(ToString::to_string).collect::<Vec<_>>(),
                 "executable_paths":r.executables});
+            if let Some(transport) = &r.transport { row["transport"] = serde_json::json!(transport); }
             if let Some(sources) = &r.platform_sources { row["platform_sources"] = serde_json::json!(sources); }
             row
         }).collect::<Vec<_>>();
@@ -194,7 +197,7 @@ impl Draft {
         }) {
             return Err("invalid_input");
         }
-        if ![1, 2].contains(&self.version) || self.rules.len() > 256 {
+        if ![1, 2, 3].contains(&self.version) || self.rules.len() > 256 {
             return Err("limit");
         }
         let bytes: usize = self
@@ -218,10 +221,24 @@ impl Draft {
         if bytes > 200_000 {
             return Err("limit");
         }
+        if self
+            .rules
+            .iter()
+            .filter_map(|r| r.transport.as_ref())
+            .filter_map(|t| t.destination_ports.as_ref())
+            .map(Vec::len)
+            .sum::<usize>()
+            > 4096
+        {
+            return Err("limit");
+        }
         let mut ids = std::collections::HashSet::new();
         let mut rules = Vec::with_capacity(self.rules.len());
         for input in &self.rules {
-            if (self.version == 2) != input.platform_sources.is_some() {
+            if self.version < 3 && input.transport.is_some() {
+                return Err("format");
+            }
+            if (self.version >= 2) != input.platform_sources.is_some() {
                 return Err("format");
             }
             let sources = input.platform_sources.as_deref().unwrap_or_default();
@@ -288,6 +305,12 @@ impl Draft {
                 enabled: input.enabled,
                 action: action(&input.action)?,
                 conditions: Conditions {
+                    transport: input
+                        .transport
+                        .as_ref()
+                        .map(|v| v.typed())
+                        .transpose()?
+                        .unwrap_or_default(),
                     platform_sources,
                     executables: input.executables.clone(),
                     domains,
@@ -306,6 +329,14 @@ impl Draft {
     }
     pub fn put(&mut self, input: RuleInput, confirm_broad: bool) -> Result<(), &'static str> {
         let mut candidate = self.clone();
+        if input.transport.is_some() {
+            candidate.version = 3;
+            for rule in &mut candidate.rules {
+                if rule.platform_sources.is_none() {
+                    rule.platform_sources = Some(vec![]);
+                }
+            }
+        }
         if input
             .platform_sources
             .as_ref()
@@ -318,10 +349,18 @@ impl Draft {
             }
         }
         let mut input = input;
+        if input.transport.is_none() {
+            input.transport = candidate
+                .rules
+                .iter()
+                .find(|r| r.id == input.id)
+                .and_then(|r| r.transport.clone());
+        }
+
         if candidate.version == 1 && input.platform_sources.as_ref().is_some_and(Vec::is_empty) {
             input.platform_sources = None;
         }
-        if candidate.version == 2 && input.platform_sources.is_none() {
+        if candidate.version >= 2 && input.platform_sources.is_none() {
             input.platform_sources = Some(
                 candidate
                     .rules
@@ -336,6 +375,10 @@ impl Draft {
             && input.domains.is_empty()
             && input.destinations.is_empty()
             && input.platform_sources.as_ref().is_none_or(Vec::is_empty)
+            && !input
+                .transport
+                .as_ref()
+                .is_some_and(|t| t.typed().is_ok_and(|t| t.constrained()))
             && !confirm_broad
         {
             return Err("broad");
@@ -357,6 +400,7 @@ pub fn catalog(
     processes: bool,
     query: &str,
     offset: usize,
+    #[cfg(feature = "test-support")] observer: Option<yonik_linux::applications::CatalogObserver>,
 ) -> Result<serde_json::Value, &'static str> {
     use yonik_linux::applications::{Catalog, Limits};
     if query.len() > 256 || offset > 4096 {
@@ -379,6 +423,8 @@ pub fn catalog(
     }
     let catalog = Catalog::new(roots, "/proc".into(), "ru".into(), Limits::default())
         .map_err(|_| "catalog")?;
+    #[cfg(feature = "test-support")]
+    let catalog = catalog.with_observer(observer);
     let (items, incomplete) = if processes {
         let snapshot = catalog.process_snapshot().map_err(|_| "catalog")?;
         (snapshot.items.into_iter().map(|p| serde_json::json!({"name":p.name,"pid":p.pid,"executable":p.exe.and_then(|p| p.to_str().map(str::to_owned)), "unsupported":""})).collect::<Vec<_>>(), snapshot.incomplete)

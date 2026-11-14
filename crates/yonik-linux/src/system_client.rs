@@ -613,3 +613,7 @@ impl SystemClient {
 
 /// Удобная граница по умолчанию для интерактивной авторизации.
 pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub mod output;
+
+pub use output::PreparedOutput;

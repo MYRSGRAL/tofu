@@ -27,6 +27,7 @@ fn rule(id: u64, paths: &[&str], networks: &[&str], action: Action) -> Rule {
         id,
         enabled: true,
         conditions: Conditions {
+            transport: Default::default(),
             platform_sources: vec![],
             executables: paths.iter().map(|p| (*p).to_owned()).collect(),
             destinations: networks.iter().map(|p| cidr(p)).collect(),

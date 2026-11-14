@@ -1,3 +1,7 @@
+#[cfg(feature = "test-support")]
+mod lifecycle_gate;
+#[cfg(feature = "test-support")]
+pub use lifecycle_gate::{LifecycleGate, LifecycleStage};
 mod binary;
 mod probe;
 mod process;
@@ -56,11 +60,39 @@ impl std::error::Error for HostError {}
 
 /// Закрытие источника тоже отменяет операцию: потеря владельца не оставляет core.
 #[derive(Clone, Debug)]
-pub struct Cancellation(watch::Receiver<bool>, Option<watch::Receiver<bool>>);
+pub struct Cancellation(
+    watch::Receiver<bool>,
+    Option<watch::Receiver<bool>>,
+    #[cfg(feature = "test-support")] Option<(LifecycleGate, u64)>,
+);
 impl Cancellation {
+    #[cfg(feature = "test-support")]
+    pub fn with_lifecycle_gate(mut self, gate: LifecycleGate, generation: u64) -> Self {
+        self.2 = Some((gate, generation));
+        self
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) async fn lifecycle_reach(
+        &mut self,
+        stage: LifecycleStage,
+        pid: u32,
+    ) -> Result<(), HostError> {
+        if let Some((gate, generation)) = self.2.clone() {
+            gate.reach(stage, pid, generation, self).await?;
+        }
+        self.check()
+    }
     pub fn new() -> (watch::Sender<bool>, Self) {
         let (sender, receiver) = watch::channel(false);
-        (sender, Self(receiver, None))
+        (
+            sender,
+            Self(
+                receiver,
+                None,
+                #[cfg(feature = "test-support")]
+                None,
+            ),
+        )
     }
     pub fn check(&self) -> Result<(), HostError> {
         if *self.0.borrow()
@@ -91,7 +123,12 @@ impl Cancellation {
 impl Cancellation {
     /// Использует существующий watch-источник; закрытие означает отмену.
     pub fn from_receiver(receiver: watch::Receiver<bool>) -> Self {
-        Self(receiver, None)
+        Self(
+            receiver,
+            None,
+            #[cfg(feature = "test-support")]
+            None,
+        )
     }
 
     pub(crate) fn with_other(mut self, receiver: watch::Receiver<bool>) -> Self {

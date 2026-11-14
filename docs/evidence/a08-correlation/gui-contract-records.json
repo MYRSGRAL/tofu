@@ -1,0 +1,298 @@
+[
+  {
+    "phase": "edit_preserved",
+    "revision": 2,
+    "routing": {
+      "default_action": "proxy",
+      "ru_direct": null,
+      "rules": [
+        {
+          "action": "block",
+          "destinations": [],
+          "domains": [
+            "example.com"
+          ],
+          "enabled": true,
+          "executables": [],
+          "id": 8,
+          "platform_sources": [
+            {
+              "kind": "android_package",
+              "package": "org.example.App"
+            }
+          ]
+        }
+      ],
+      "version": 2
+    }
+  },
+  {
+    "expected": 0,
+    "new_admissions": 0,
+    "new_reads": 0,
+    "phase": "stale_rejected",
+    "reply": {
+      "incomplete": false,
+      "items": [
+        {
+          "executable": "/mnt/helper",
+          "name": "a08-helper",
+          "pid": 13,
+          "unsupported": ""
+        }
+      ],
+      "offset": 0,
+      "request_id": 3,
+      "total": 1
+    },
+    "rows": 0
+  },
+  {
+    "expected": 4,
+    "phase": "desktop_after_reopen",
+    "reply": {
+      "incomplete": true,
+      "items": [
+        {
+          "executable": "/mnt/helper",
+          "name": "A08 marker",
+          "unsupported": ""
+        },
+        {
+          "executable": null,
+          "name": "A08 page 00",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 01",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 02",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 03",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 04",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 05",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 06",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 07",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 08",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 09",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 10",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 11",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 12",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 13",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 14",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 15",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 16",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 17",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 18",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 19",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 20",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 21",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 22",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 23",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 24",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 25",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 26",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 27",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 28",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 29",
+          "unsupported": "MissingExec"
+        },
+        {
+          "executable": null,
+          "name": "A08 page 30",
+          "unsupported": "MissingExec"
+        }
+      ],
+      "offset": 0,
+      "request_id": 4,
+      "total": 42
+    }
+  },
+  {
+    "expected": 0,
+    "phase": "query_invalidated",
+    "rows": 0
+  },
+  {
+    "expected": 0,
+    "phase": "mode_invalidated",
+    "rows": 0
+  },
+  {
+    "offset": 32,
+    "phase": "page_correlated",
+    "reply_id": 8,
+    "rows": 10
+  },
+  {
+    "current_expected": 10,
+    "older_reply": 9,
+    "phase": "older_reply_rejected"
+  },
+  {
+    "phase": "legacy_shape",
+    "reply": {
+      "incomplete": true,
+      "items": [
+        {
+          "executable": "/mnt/helper",
+          "name": "A08 marker",
+          "unsupported": ""
+        }
+      ],
+      "offset": 0,
+      "total": 1
+    }
+  },
+  {
+    "error": "limit",
+    "new_admissions": 0,
+    "phase": "error_preserved",
+    "request_id": 0
+  },
+  {
+    "error": "limit",
+    "new_admissions": 0,
+    "phase": "error_preserved",
+    "request_id": 7777
+  },
+  {
+    "last_safe_id": 9007199254740991,
+    "phase": "completed",
+    "revision": 2,
+    "routing": {
+      "default_action": "proxy",
+      "ru_direct": null,
+      "rules": [
+        {
+          "action": "block",
+          "destinations": [],
+          "domains": [
+            "example.com"
+          ],
+          "enabled": true,
+          "executables": [],
+          "id": 8,
+          "platform_sources": [
+            {
+              "kind": "android_package",
+              "package": "org.example.App"
+            }
+          ]
+        }
+      ],
+      "version": 2
+    }
+  }
+]

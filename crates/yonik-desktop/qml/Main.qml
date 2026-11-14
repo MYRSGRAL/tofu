@@ -120,6 +120,13 @@ ApplicationWindow {
         commandContext = sourceCommands.indexOf(command.command) >= 0 ? "source" : "connection"
         if (!state.closed) backend.dispatch(JSON.stringify(command))
     }
+    // Общий для всех жизней routing Loader; ID используется только для correlation.
+    property double catalogRequestSequence: 0
+    function nextCatalogRequestId() {
+        if (!Number.isSafeInteger(catalogRequestSequence) || catalogRequestSequence < 0 || catalogRequestSequence >= Number.MAX_SAFE_INTEGER) return 0
+        catalogRequestSequence += 1
+        return catalogRequestSequence
+    }
     property bool routingPending: false
     property double routingRequestId: 0
     property double routingExpectedSavedId: 0
@@ -149,6 +156,19 @@ ApplicationWindow {
         searchQueued = false
         send({command: "query", search: search.text, favorites_only: false, offset: offset})
     }
+    property int startupSequence: 0
+    property string startupPending: ""
+    function saveStartup(capture, autostart, autoconnect) {
+        if (startupPending || !state.ready || !state.startup || startupSequence >= 2147483647) return
+        startupSequence += 1
+        startupPending = String(startupSequence)
+        const command = Object.create(null)
+        command.command = capture ? "autoconnect_target_set" : "startup_preferences_set"
+        command.request_id = startupPending
+        command.expected_revision = state.startup.revision
+        if (!capture) { command.autostart_into_tray = autostart; command.autoconnect = autoconnect }
+        send(command)
+    }
     function readSnapshot() {
         try {
             const raw = backend.snapshot_json
@@ -160,6 +180,8 @@ ApplicationWindow {
                 const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
                 if (next.maintenance_ack && typeof next.maintenance_ack === "object") update.maintenance_ack = next.maintenance_ack
                 if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
+                if (next.startup) update.startup = next.startup
+                if (next.startup && next.startup.request_id === startupPending && next.startup.save !== "pending") startupPending = ""
                 state = Object.assign({}, state, update)
                 parseError = ""
                 return
@@ -177,6 +199,7 @@ ApplicationWindow {
             if (desiredProfileId === next.selected_profile) desiredProfileId = null
             if (next.language) language = next.language
             state = next
+            if (next.startup && next.startup.request_id === startupPending && next.startup.save !== "pending") startupPending = ""
             completeRouting(next.routing_ack)
             if (searchQueued && !next.busy && !next.pending) searchDelay.restart()
             parseError = ""
@@ -344,6 +367,15 @@ ApplicationWindow {
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
+        const startupMessages = {
+            preferences_conflict: ["Настройки изменены другим writer. Показаны актуальные значения; проверьте их и повторите действие явно.", "Settings changed by another writer. Current values are shown; review them and explicitly retry."],
+            startup_conflict: ["Настройки изменились. Проверьте актуальные значения и повторите действие.", "Settings changed. Review current values and retry."],
+            startup_binding: ["Цель или владелец недоступны. При замене БД или владельца перезапустите приложение; выберите сохранённый профиль и подтвердите цель заново.", "Target or owner unavailable. If the database or owner changed, restart the application; select a saved profile and confirm the target again."],
+            startup_timeout: ["Время ожидания startup истекло. Автоподключение не повторяется в этом запуске.", "Startup timed out. Autoconnect will not retry in this run."],
+            startup_admission: ["Автоподключение заблокировано текущим состоянием. Автоматического unlock или другого режима нет.", "Autoconnect blocked by current state. No automatic unlock or alternative mode."],
+            startup_xdg: ["Настройки сохранены, но применение записи XDG не подтверждено. Чужие файлы сохранены.", "Settings saved, but XDG entry application is unconfirmed. Foreign files are preserved."],
+            startup_xdg_unknown: ["Запись XDG опубликована, надёжность записи неизвестна. Автоподключение в этом запуске заблокировано.", "XDG entry published; durability unknown. Autoconnect blocked in this run."]
+        }
         const editorMessages = {
             action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
             format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
@@ -355,10 +387,14 @@ ApplicationWindow {
             domain: ["Некорректный домен", "Invalid domain"], cidr: ["Некорректный IP/CIDR: проверьте биты сети", "Invalid IP/CIDR: check network bits"],
             executable: ["Нужен абсолютный путь без . и ..", "An absolute path without . and .. is required"],
             broad: ["Подтвердите правило для любого трафика", "Confirm matching all traffic"],
+            ports: ["Порты назначения: 1–65535, до 16 непустых диапазонов.", "Destination ports: 1–65535, up to 16 nonempty ranges."],
+            ports_overlap: ["Диапазоны портов пересекаются или повторяются.", "Port ranges overlap or repeat."],
+            protocols: ["Укажите tcp и/или udp без повторов.", "Enter tcp and/or udp without duplicates."],
+            transport_input: ["Проверьте формат протоколов и диапазонов портов.", "Check protocol and port range syntax."],
             id: ["Недопустимый или повторяющийся ID", "Invalid or duplicate ID"],
             limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
         }
-        const pair = messages[key] || editorMessages[key]
+        const pair = messages[key] || startupMessages[key] || editorMessages[key]
         return pair ? tr(pair[0], pair[1]) : tr("Категория ошибки отсутствует в каталоге сообщений.", "The error category is missing from the message catalog.")
     }
 
@@ -810,7 +846,7 @@ ApplicationWindow {
                         SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                         SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
                         SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
-                        SettingsRow { objectName: "settingsScheduleButton"; text: window.tr("Обновления подписок", "Subscription updates"); description: window.tr("Интервал и фоновое окно", "Interval and background window"); symbol: "↻"; onClicked: window.settingsSection = "schedule" }
+                        SettingsRow { objectName: "settingsScheduleButton"; text: window.tr("Запуск и обновления", "Startup and updates"); description: window.tr("Автозапуск, цель подключения, подписки", "Autostart, connection target, subscriptions"); symbol: "↻"; onClicked: window.settingsSection = "schedule" }
                         SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                         SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     }
@@ -852,6 +888,18 @@ ApplicationWindow {
                 id: editor
                 objectName: "routingEditor"
                 enabled: window.state.ready && !window.state.closed && !window.routingPending
+                property double catalogExpectedId: 0
+                property bool catalogRequestLimit: false
+                readonly property var displayedCatalog: catalogExpectedId > 0 && window.state.routing_catalog && window.state.routing_catalog.request_id === catalogExpectedId ? window.state.routing_catalog : null
+                function invalidateCatalog() { catalogExpectedId = 0 }
+                function requestCatalog(offset) {
+                    invalidateCatalog()
+                    const id = window.nextCatalogRequestId()
+                    catalogRequestLimit = id === 0
+                    if (!id) return
+                    catalogExpectedId = id
+                    window.send({command: "routing_catalog", request_id: id, processes: processCatalog.checked, query: catalogQuery.text, offset: offset})
+                }
                 property var formRevision: window.state.routing_revision
                 property double pendingRequest: 0
                 property string saveError: ""
@@ -870,11 +918,15 @@ ApplicationWindow {
                 spacing: 12
                 property bool advanced: false
                 property double selectedId: 0
+                property var transport: undefined
                 property var platformSources: undefined
                 function resetPlatformSources() { platformSources = undefined }
                 property int simpleGroup: 0
                 function values(text) { return text.split("\n").map(s => s.trim()).filter(s => s.length > 0) }
                 function load(rule) {
+                    transport = rule.transport === undefined ? undefined : JSON.parse(JSON.stringify(rule.transport))
+                    protocolInput.text = transport && transport.transport_protocols ? transport.transport_protocols.join(",") : ""
+                    portInput.text = transport && transport.destination_ports ? transport.destination_ports.map(p => p[0] === p[1] ? String(p[0]) : p[0] + "-" + p[1]).join(",") : ""
                     platformSources = rule.platform_sources === undefined ? undefined : JSON.parse(JSON.stringify(rule.platform_sources))
                     selectedId = rule.id
                     formRevision = window.state.routing_revision
@@ -941,7 +993,7 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         PlainLabel { Layout.fillWidth: true; text: "#" + ruleRow.modelData.id + " · " + ruleRow.modelData.action + (ruleRow.modelData.enabled ? "" : window.tr(" · выключено", " · disabled")) }
-                        SmallLabel { Layout.fillWidth: true; text: ruleRow.modelData.platform_sources && ruleRow.modelData.platform_sources.length ? window.tr("Платформенный селектор неприменим на Linux", "Platform selector is unsupported on Linux") : (ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules")) }
+                        SmallLabel { Layout.fillWidth: true; text: (ruleRow.modelData.transport ? window.tr("Транспортное условие (активация недоступна) · ", "Transport condition (activation unavailable) · ") : "") + (ruleRow.modelData.platform_sources && ruleRow.modelData.platform_sources.length ? window.tr("Платформенный селектор неприменим на Linux", "Platform selector is unsupported on Linux") : (ruleRow.modelData.executables.concat(ruleRow.modelData.domains, ruleRow.modelData.destinations).join(" ∧/∨ ") || window.tr("Любой трафик: перекрывает последующие правила", "Any traffic: shadows following rules"))) }
                         RowLayout {
                             ActionButton { objectName: "routingEdit" + ruleRow.modelData.id; text: window.tr("Изменить", "Edit"); onClicked: editor.load(ruleRow.modelData) }
                             ActionButton { objectName: "routingUp" + ruleRow.modelData.id; text: "↑"; Accessible.name: window.tr("Выше", "Move up"); onClicked: editor.order(ruleRow.modelData.id, -1, false) }
@@ -953,13 +1005,15 @@ ApplicationWindow {
                     }
                 }
                 ComboBox { visible: !editor.advanced; model: [window.tr("Программа", "Executable"), window.tr("Домен", "Domain"), "IP / CIDR"]; onActivated: editor.simpleGroup = currentIndex }
-                TextField { id: catalogQuery; Layout.fillWidth: true; placeholderText: window.tr("Поиск программы", "Search applications") }
-                CheckBox { id: processCatalog; text: window.tr("Запущенные процессы", "Running processes") }
-                ActionButton { text: window.tr("Загрузить каталог", "Load catalog"); onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: 0}) }
+                TextField { id: catalogQuery; objectName: "routingCatalogQuery"; onTextChanged: editor.invalidateCatalog(); Layout.fillWidth: true; placeholderText: window.tr("Поиск программы", "Search applications") }
+                CheckBox { id: processCatalog; objectName: "routingCatalogProcesses"; onCheckedChanged: editor.invalidateCatalog(); text: window.tr("Запущенные процессы", "Running processes") }
+                ActionButton { objectName: "routingCatalogLoad"; text: window.tr("Загрузить каталог", "Load catalog"); onClicked: editor.requestCatalog(0) }
+                SmallLabel { objectName: "routingCatalogLimit"; visible: editor.catalogRequestLimit; text: window.tr("Исчерпан счётчик запросов каталога. Перезапустите приложение.", "Catalog request counter exhausted. Restart the application.") }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Каталог читается только по запросу. Wrapper/интерпретатор может быть неподдержан. PID — диагностика; выбор сохраняет только точный executable для следующих запусков.", "Catalog is read on demand. Wrappers/interpreters may be unsupported. PID is diagnostic; selection saves only the exact executable for future launches.") }
-                SmallLabel { visible: window.state.routing_catalog && window.state.routing_catalog.incomplete; text: window.tr("Каталог неполный: достигнут лимит или нет доступа", "Incomplete catalog: limit reached or access denied") }
+                SmallLabel { visible: !!editor.displayedCatalog && editor.displayedCatalog.incomplete; text: window.tr("Каталог неполный: достигнут лимит или нет доступа", "Incomplete catalog: limit reached or access denied") }
                 Repeater {
-                    model: window.state.routing_catalog ? window.state.routing_catalog.items : []
+                    objectName: "routingCatalogRows"
+                    model: editor.displayedCatalog ? editor.displayedCatalog.items : []
                     delegate: ActionButton {
                         required property var modelData
                         Layout.fillWidth: true
@@ -969,8 +1023,8 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
-                    ActionButton { text: window.tr("Назад", "Previous"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset > 0; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: Math.max(0, window.state.routing_catalog.offset - 32)}) }
-                    ActionButton { text: window.tr("Далее", "Next"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset + 32 < window.state.routing_catalog.total; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: window.state.routing_catalog.offset + 32}) }
+                    ActionButton { objectName: "routingCatalogPrevious"; text: window.tr("Назад", "Previous"); enabled: !!editor.displayedCatalog && editor.displayedCatalog.offset > 0; onClicked: editor.requestCatalog(Math.max(0, editor.displayedCatalog.offset - 32)) }
+                    ActionButton { objectName: "routingCatalogNext"; text: window.tr("Далее", "Next"); enabled: !!editor.displayedCatalog && editor.displayedCatalog.offset + 32 < editor.displayedCatalog.total; onClicked: editor.requestCatalog(editor.displayedCatalog.offset + 32) }
                 }
                 PlainLabel { objectName: "routingRuleIdentity"; text: editor.selectedId ? window.tr("Редактирование #", "Editing #") + editor.selectedId : window.tr("Новое правило", "New rule") }
                 SmallLabel { visible: editor.advanced || editor.simpleGroup === 0; Layout.fillWidth: true; text: window.tr("Точный путь программы (для следующих запусков, без наследования дочерними процессами)", "Exact executable path (future launches, no child process inheritance)") }
@@ -979,7 +1033,10 @@ ApplicationWindow {
                 TextArea { visible: editor.advanced || editor.simpleGroup === 1; id: domainInput; objectName: "routingDomain"; Layout.fillWidth: true; placeholderText: "example.org"; wrapMode: TextEdit.Wrap; selectByMouse: true }
                 SmallLabel { visible: editor.advanced || editor.simpleGroup === 2; text: window.tr("IP или канонический CIDR", "IP or canonical CIDR") }
                 TextArea { visible: editor.advanced || editor.simpleGroup === 2; id: cidrInput; objectName: "routingCidr"; Layout.fillWidth: true; placeholderText: "192.0.2.0/24"; wrapMode: TextEdit.Wrap; selectByMouse: true }
-                SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Порты, протоколы, process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Ports, protocols, process names, UID, cgroup and PID are unsupported by the current model.") }
+                SmallLabel { visible: editor.advanced; Layout.fillWidth: true; text: window.tr("По одному значению на строку. Process name, UID, cgroup и PID не поддерживаются текущей моделью.", "One value per line. Process names, UID, cgroup and PID are unsupported by the current model.") }
+                SmallLabel { text: window.tr("Транспорт: tcp,udp; destination порты 1–65535 (до 16 диапазонов). Активация пока недоступна.", "Transport: tcp,udp; destination ports 1–65535 (up to 16 ranges). Activation unavailable.") }
+                TextField { id: protocolInput; objectName: "routingProtocols"; maximumLength: 7; placeholderText: "tcp,udp" }
+                TextField { id: portInput; objectName: "routingPorts"; maximumLength: 191; placeholderText: "443,8000-8080" }
                 ComboBox { id: actionInput; model: ["Proxy", "Direct", "Block"] }
                 CheckBox { id: enabledInput; objectName: "routingEnabled"; checked: true; text: window.tr("Правило включено", "Rule enabled") }
                 CheckBox { id: broadInput; text: window.tr("Подтверждаю правило для любого трафика", "Confirm matching all traffic") }
@@ -988,10 +1045,16 @@ ApplicationWindow {
                         objectName: "routingSaveRule"
                         text: window.tr("Подтвердить", "Confirm")
                         onClicked: {
+                            const protocols = protocolInput.text.trim()
+                            const ports = portInput.text.trim()
+                            if (protocols.length > 7 || ports.length > 191 || (protocols && !/^(tcp|udp)(,(tcp|udp))?$/.test(protocols)) || (ports && !/^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$/.test(ports))) { editor.saveError = "transport_input"; return }
+                            editor.transport = protocols || ports || editor.transport !== undefined ? {} : undefined
+                            if (protocols) editor.transport.transport_protocols = protocols.split(",")
+                            if (ports) editor.transport.destination_ports = ports.split(",").map(s => { const p = s.split("-").map(Number); return [p[0], p.length === 1 ? p[0] : p[1]] })
                             const rules = window.state.routing.rules
                             const id = editor.selectedId || (rules.reduce((n, r) => Math.max(n, r.id), 0) + 1)
                             editor.saveError = ""
-                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, platform_sources: editor.platformSources, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
+                            editor.pendingRequest = window.sendRouting({command: "edit_routing", expected_revision: editor.formRevision, create: editor.selectedId === 0, confirm_broad: broadInput.checked, rule: {id: id, transport: editor.transport, platform_sources: editor.platformSources, enabled: enabledInput.checked, executables: editor.values(executableInput.text), domains: editor.values(domainInput.text), destinations: editor.values(cidrInput.text), action: ["proxy", "direct", "block"][actionInput.currentIndex]}})
                             editor.settle()
                         }
                     }
@@ -1057,30 +1120,61 @@ ApplicationWindow {
     }
     Component {
         id: schedulePanel
-        ColumnLayout {
-            spacing: 18
-            PlainLabel { text: window.tr("Обновления подписок", "Subscription updates"); font.pixelSize: 19; font.weight: Font.DemiBold }
-            PlainLabel { text: window.tr("Интервал в часах (не менее 24)", "Interval in hours (at least 24)") }
-            SpinBox {
-                id: scheduleHours
-                objectName: "subscriptionInterval"
-                enabled: window.state.source_local === false
-                from: 24; to: 1193046
-                value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
-                editable: true
-                onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
-                Accessible.name: window.tr("Интервал обновлений в часах", "Update interval in hours")
+        PanelScroll {
+            id: startupScroll
+            ColumnLayout {
+                width: startupScroll.availableWidth
+                spacing: 18
+                PlainLabel { text: window.tr("Запуск приложения", "Application startup"); font.pixelSize: 19; font.weight: Font.DemiBold }
+                CheckBox {
+                    objectName: "autostartIntoTray"
+                    enabled: window.state.ready && !window.startupPending && !window.state.preferences_warning
+                    text: window.tr("Автозапуск в трей при входе", "Start in tray at login")
+                    checked: !!window.state.startup && window.state.startup.autostart_into_tray
+                    onClicked: window.saveStartup(false, checked, window.state.startup.autoconnect)
+                }
+                CheckBox {
+                    objectName: "startupAutoconnect"
+                    enabled: window.state.ready && !window.startupPending && !window.state.preferences_warning
+                    text: window.tr("Автоподключение при запуске", "Connect at startup")
+                    checked: !!window.state.startup && window.state.startup.autoconnect
+                    onClicked: window.saveStartup(false, window.state.startup.autostart_into_tray, checked)
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.state.startup && window.state.startup.target ? window.tr("Цель: ", "Target: ") + window.state.startup.target : window.tr("Цель не подтверждена", "No confirmed target") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Выбрано: ", "Selected: ") + (window.state.selected_name || "—") + " · " + (window.state.engine || "—") + " · " + (window.state.connection_mode || "—") }
+                ActionButton {
+                    objectName: "confirmStartupTarget"
+                    text: window.tr("Подтвердить текущую цель", "Confirm current target")
+                    enabled: window.state.ready && !!window.state.selected_profile && !window.state.ephemeral && !window.startupPending && !window.state.preferences_warning
+                    onClicked: window.saveStartup(true, false, false)
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Подтверждается текущий выбранный профиль, ядро, режим и ревизия маршрутизации. Сохранение не начинает соединение. Обычный запуск остаётся видимым; без готового трея окно всегда видно.", "Confirms the currently selected profile, core, mode and routing revision. Saving does not connect. Normal launches stay visible; without a ready tray the window remains visible.") }
+                PlainLabel {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#e6bc83"
+                    text: window.startupPending ? window.tr("Сохранение…", "Saving…") : window.state.startup && window.state.startup.xdg === "error" ? window.errorText("startup_xdg") : window.state.startup && window.state.startup.error ? window.errorText(window.state.startup.error) : window.state.startup && (window.state.startup.save === "durability_unknown" || window.state.startup.xdg === "durability_unknown") ? window.tr("Файл опубликован, надёжность записи неизвестна. Автоматические действия не выполняются.", "File published; durability unknown. No automatic actions performed.") : window.state.startup && window.state.startup.attempt === "blocked" ? window.tr("Автоподключение заблокировано до следующего запуска.", "Autoconnect blocked until the next launch.") : window.state.startup && window.state.startup.save === "durable" ? window.tr("Настройки сохранены", "Settings saved") : ""
+                }
+                PlainLabel { text: window.tr("Обновления подписок", "Subscription updates"); font.pixelSize: 19; font.weight: Font.DemiBold }
+                PlainLabel { text: window.tr("Интервал в часах (не менее 24)", "Interval in hours (at least 24)") }
+                SpinBox {
+                    id: scheduleHours
+                    objectName: "subscriptionInterval"
+                    enabled: window.state.source_local === false
+                    from: 24; to: 1193046
+                    value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
+                    editable: true
+                    onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
+                    Accessible.name: window.tr("Интервал обновлений в часах", "Update interval in hours")
+                }
+                CheckBox {
+                    objectName: "subscriptionBackground"
+                    enabled: window.state.source_local === false
+                    text: window.tr("Разрешить обновления в фоне", "Allow background updates")
+                    checked: window.state.subscription_background === true
+                    onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения.", "The shared background window is 60 seconds. Updates are deferred on unknown or metered networks and in power saving mode. The update report requires confirmation.") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
             }
-            CheckBox {
-                objectName: "subscriptionBackground"
-                enabled: window.state.source_local === false
-                text: window.tr("Разрешить обновления в фоне", "Allow background updates")
-                checked: window.state.subscription_background === true
-                onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
-            }
-            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения.", "The shared background window is 60 seconds. Updates are deferred on unknown or metered networks and in power saving mode. The update report requires confirmation.") }
-            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
-            Item { Layout.fillHeight: true }
         }
     }
     Component {

@@ -266,3 +266,67 @@ async fn local_snapshot_atomic_cancel_fault_and_success() {
     assert_eq!(repo.source_records(0, 10).await.unwrap().total, 1);
     repo.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn format5_current_backup_cas_and_legacy_writer() {
+    let f = Fixture::new();
+    let repo = f.open().await;
+    repo.routing_draft().await.unwrap();
+    repo.save_routing_draft(0, V1.to_vec()).await.unwrap();
+    repo.close().await.unwrap();
+    let old = f.backup("old3").await;
+    let repo = f.open().await;
+    repo.save_routing_draft_v2(1, V2.to_vec(), Some(old.clone()))
+        .await
+        .unwrap();
+    let v3 = br#"{"version":3,"rules":[],"default_action":"proxy"}"#.to_vec();
+    assert!(
+        repo.save_routing_draft_v3(2, v3.clone(), Some(old))
+            .await
+            .is_err()
+    );
+    repo.close().await.unwrap();
+    let current = f.backup("current4").await;
+    let repo = f.open().await;
+    repo.run(|db| {
+        db.fail_format4 = true;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.save_routing_draft_v3(2, v3.clone(), Some(current.clone()))
+            .await,
+        Err(RepositoryError::Storage)
+    );
+    assert_eq!(version(&repo).await, 4);
+    assert_eq!(repo.routing_draft().await.unwrap().unwrap().0, 2);
+    repo.run(|db| {
+        db.fail_format4 = false;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        repo.save_routing_draft_v3(1, v3.clone(), Some(current.clone()))
+            .await,
+        Err(RepositoryError::Conflict)
+    );
+    assert_eq!(version(&repo).await, 4);
+    repo.save_routing_draft_v3(2, v3.clone(), Some(current))
+        .await
+        .unwrap();
+    assert_eq!(version(&repo).await, 5);
+    assert_eq!(
+        repo.routing_draft().await.unwrap().unwrap().1.as_slice(),
+        v3
+    );
+    repo.save_routing_draft_v2(3, V2.to_vec(), None)
+        .await
+        .unwrap();
+    assert_eq!(version(&repo).await, 5);
+    repo.close().await.unwrap();
+    let repo = f.open().await;
+    assert_eq!(version(&repo).await, 5);
+    repo.close().await.unwrap();
+}

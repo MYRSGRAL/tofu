@@ -29,7 +29,7 @@ ColumnLayout {
         Layout.fillWidth: true
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
-        text: view.tr("Лицензии компонентов. Rust: состав зависимостей сборки. Go: отдельно исследованные внешние ядра, не включённые в пакет. Версии установленных ядер доступны у их системного поставщика.", "Component licenses. Rust: build dependency closure. Go: separately inspected external cores, absent from the package. Installed core versions are available from their system provider.")
+        text: view.tr("Лицензии компонентов. Rust: состав зависимостей сборки. Go: состав исследованных ядер. Controller-пакет содержит Xray и sing-box с архивами исходников. В legacy-варианте с внешним поставщиком ядра устанавливаются отдельно. Состав и версии проверяйте по конкретному пакету и его manifest.", "Component licenses. Rust: build dependency closure. Go: inspected core dependencies. The controller package includes Xray and sing-box with source archives. In the legacy external-provider variant, cores are installed separately. Check the specific package and its manifest for contents and versions.")
     }
     TextField {
         id: search

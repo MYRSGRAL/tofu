@@ -1,0 +1,16 @@
+{
+  "xray": {
+    "path": "/home/myrs/projects/yonik/local/engines/xray-26.10.31/xray",
+    "sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+    "version": "Xray 26.10.31 (Xray, Penetrates Everything.) a4a3dff (go1.27.3 linux/amd64)\nA unified platform for anti-censorship.\n"
+  },
+  "sing-box": {
+    "path": "/home/myrs/projects/yonik/local/engines/sing-box-1.14.4/sing-box",
+    "sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a",
+    "version": "sing-box version 1.14.4\n\nEnvironment: go1.26.10 linux/amd64\nTags: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_cloudflared,with_naive_outbound,with_usbip,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0,with_purego\nRevision: c005f35300ce76427dc285481ec5695f5b179cd2\nCGO: disabled\n"
+  },
+  "compiler": {
+    "path": "/home/myrs/projects/yonik/local/evidence/p08-ss2022-3247/yonik-compile",
+    "sha256": "f3e19ac1707309463b3024c70c3f2e505969af333c898ac003c923a811b5d059"
+  }
+}

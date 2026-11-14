@@ -1,0 +1,75 @@
+{
+  "binary_sha256": "a4873ff1ec5e892ef7051a85da63873546a08e1cddb9bd19eb9326f3240bb01f",
+  "name_absent_before": true,
+  "before": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 0",
+    "locked": false,
+    "attributes": []
+  },
+  "seed": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "source_sha256": "8d6632cdc22ab70d935365920a4fb5138c512089dc8659a9736492e6cf7b8942",
+  "backup": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "restore": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "negative": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "reopen": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "verify": {
+    "owner_pid": 2029987,
+    "owner_uid": 1000,
+    "collection": "/org/freedesktop/secrets/collection/kdewallet",
+    "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+    "locked": false,
+    "attributes": [
+      "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+    ]
+  },
+  "stages_passed": true,
+  "name_absent_after": true
+}

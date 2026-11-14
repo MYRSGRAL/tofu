@@ -1,0 +1,9 @@
+{
+  "base": "3247e6c32a5ed83ec5d812dfc1f70695d3f2b3b4",
+  "parent": "9c7bcc4cb7ce7cc34d64807434f632a4bf60727a",
+  "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)\nbinary: rustc\ncommit-hash: 4eb161250e340c8f48f66e2b929ef4a5bed7c181\ncommit-date: 2025-03-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.85.1\nLLVM version: 19.1.7\n",
+  "kernel": "Linux cachyos-myrs 7.2.9-1-cachyos #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 18:34:55 +0000 x86_64 GNU/Linux\n",
+  "qt": "6.11.2\n",
+  "build": "cargo +1.85.1 build --offline --locked -p yonik-desktop --features gui --example p07_persistence -j 1",
+  "isolation": "private bus/SS/HOME/XDG; offscreen/software; user+net namespace"
+}

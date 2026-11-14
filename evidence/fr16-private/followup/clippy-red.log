@@ -1,0 +1,79 @@
+    Checking yonik-import v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-import)
+    Checking yonik-domain v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-domain)
+    Checking yonik-engine v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-engine)
+    Checking yonik-subscription v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-subscription)
+    Checking yonik-nsfs v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-nsfs)
+    Checking yonik-application v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-application)
+    Checking yonik-linux v0.1.0 (/home/myrs/.t3/worktrees/yonik/t3-821c4241-ca743c4e91c7a135/crates/yonik-linux)
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture:49:16
+   |
+49 |               if false
+   |  ________________^
+50 | |                 || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+51 | |                 || flags & OFlags::ACCMODE != OFlags::WRONLY
+52 | |                 || flags.contains(OFlags::NONBLOCK)
+53 | |                 || !fcntl_getfd(fd)?.contains(FdFlags::CLOEXEC)
+   | |_______________________________________________________________^ help: try: `FileType::from_raw_mode(stat.st_mode) != FileType::Fifo || flags & OFlags::ACCMODE != OFlags::WRONLY || flags.contains(OFlags::NONBLOCK) || !fcntl_getfd(fd)?.contains(FdFlags::CLOEXEC)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+   = note: `-D clippy::nonminimal-bool` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::nonminimal_bool)]`
+
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture:49:16
+   |
+49 |               if false
+   |  ________________^
+50 | |                 || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+51 | |                 || flags & OFlags::ACCMODE != OFlags::WRONLY
+52 | |                 || flags.contains(OFlags::NONBLOCK)
+   | |___________________________________________________^ help: try: `FileType::from_raw_mode(stat.st_mode) != FileType::Fifo || flags & OFlags::ACCMODE != OFlags::WRONLY || flags.contains(OFlags::NONBLOCK)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture:49:16
+   |
+49 |               if false
+   |  ________________^
+50 | |                 || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+51 | |                 || flags & OFlags::ACCMODE != OFlags::WRONLY
+   | |____________________________________________________________^ help: try: `FileType::from_raw_mode(stat.st_mode) != FileType::Fifo || flags & OFlags::ACCMODE != OFlags::WRONLY`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture:49:16
+   |
+49 |               if false
+   |  ________________^
+50 | |                 || FileType::from_raw_mode(stat.st_mode) != FileType::Fifo
+   | |__________________________________________________________________________^ help: try: `FileType::from_raw_mode(stat.st_mode) != FileType::Fifo`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_roles.rs.fixture:86:8
+   |
+86 |       if count > 16
+   |  ________^
+87 | |         || bytes.len() != 112 + 54 * count
+88 | |         || false
+89 | |         || bytes[100..112] != [0; 12]
+   | |_____________________________________^ help: try: `count > 16 || bytes.len() != 112 + 54 * count || bytes[100..112] != [0; 12]`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+
+error: this boolean expression can be simplified
+  --> crates/yonik-linux/src/worker/output_transport/fixtures/mutant_roles.rs.fixture:86:8
+   |
+86 |       if count > 16
+   |  ________^
+87 | |         || bytes.len() != 112 + 54 * count
+88 | |         || false
+   | |________________^ help: try: `count > 16 || bytes.len() != 112 + 54 * count`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#nonminimal_bool
+
+error: could not compile `yonik-linux` (lib test) due to 6 previous errors

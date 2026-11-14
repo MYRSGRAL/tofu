@@ -1,0 +1,16 @@
+{
+  "drop": {
+    "exit": 1,
+    "failure": {
+      "phase": "FAIL",
+      "reason": "deadline"
+    }
+  },
+  "hidden-scan": {
+    "exit": 1,
+    "failure": {
+      "phase": "FAIL",
+      "reason": "close/reopen no NEW admission"
+    }
+  }
+}

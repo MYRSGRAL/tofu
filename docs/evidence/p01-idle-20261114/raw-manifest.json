@@ -1,0 +1,89 @@
+{
+  "root": "/home/myrs/projects/yonik/local/validation/p01-178",
+  "raw": {
+    "repeat-1/samples.jsonl": {
+      "sha256": "a509275d77a0f7ea9c212570885a57ac54770b554c09f5a6128bdfae00d5f0e5",
+      "bytes": 761298
+    },
+    "repeat-1/terminal.json": {
+      "sha256": "fc193cf90523109e4df9548b9933ac494a2ec5770966a5ed93b7064cce369a29",
+      "bytes": 15644
+    },
+    "repeat-1/host-context.jsonl": {
+      "sha256": "edfc7850ad25aec2d592aade4810bae3476987c22c2d8e657dbada8a80e10328",
+      "bytes": 591259
+    },
+    "repeat-1/versions.txt": {
+      "sha256": "dce0994875cbae5db8dca225830979197efae9a96fe6c6ecedb6f7ab624ad7f9",
+      "bytes": 6409
+    },
+    "repeat-1/gui.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-1/measurement.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-1/fixture-audit.json": {
+      "sha256": "ceee504ab42427f56061b8c7f848cd10afff32d59c5c4b9349296c67c840d96c",
+      "bytes": 333
+    },
+    "repeat-2/samples.jsonl": {
+      "sha256": "4568c1240d45326f2c463b40ecfef18752f739d4e326e878573e7881ec3b9d55",
+      "bytes": 761539
+    },
+    "repeat-2/terminal.json": {
+      "sha256": "0c86053451e96d26768e4897dd5e41800ed0394792a8fc0e545e728e4cc88c84",
+      "bytes": 15644
+    },
+    "repeat-2/host-context.jsonl": {
+      "sha256": "c9ca0bc52b0088ca47e9e0821858095b61b25f0c689dec48eb1aa63e0a3997f1",
+      "bytes": 591251
+    },
+    "repeat-2/versions.txt": {
+      "sha256": "dce0994875cbae5db8dca225830979197efae9a96fe6c6ecedb6f7ab624ad7f9",
+      "bytes": 6409
+    },
+    "repeat-2/gui.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-2/measurement.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-2/fixture-audit.json": {
+      "sha256": "d4ac7d0c631d45fbc95e64f5fee2d5eae6e19fa5579ffe7205cb7421816b507b",
+      "bytes": 333
+    },
+    "repeat-3/samples.jsonl": {
+      "sha256": "12bf72d2af3bacd27617d10266e7df166206c2920327e8432fd1171ecb341f1a",
+      "bytes": 761157
+    },
+    "repeat-3/terminal.json": {
+      "sha256": "aa84b14352024c6b075ae4c733e76af33dc40d733c0fd1a4ad6acfcc92f29803",
+      "bytes": 15638
+    },
+    "repeat-3/host-context.jsonl": {
+      "sha256": "0c233b03a0c8224ae57fe749eb871e6612fcec283e87d52e3db6b7adb4fb568d",
+      "bytes": 591260
+    },
+    "repeat-3/versions.txt": {
+      "sha256": "dce0994875cbae5db8dca225830979197efae9a96fe6c6ecedb6f7ab624ad7f9",
+      "bytes": 6409
+    },
+    "repeat-3/gui.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-3/measurement.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "repeat-3/fixture-audit.json": {
+      "sha256": "b1ff8e6be8a6f216e3624528a0c62d245aebc782e67ea11f0ee14074f49f4b57",
+      "bytes": 332
+    }
+  }
+}

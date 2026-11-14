@@ -49,6 +49,17 @@ pub fn snapshot(current: &str, request: &str, message: &str) -> String {
             }
         }
     }
+    if let Ok(command) = serde_json::from_str::<Value>(request) {
+        if matches!(
+            command["command"].as_str(),
+            Some("startup_preferences_set" | "autoconnect_target_set")
+        ) {
+            let startup = snapshot.entry("startup").or_insert_with(|| json!({}));
+            startup["request_id"] = command["request_id"].clone();
+            startup["error"] = message.into();
+            startup["save"] = "error".into();
+        }
+    }
     snapshot.insert("error".into(), message.into());
     Value::Object(snapshot).to_string()
 }

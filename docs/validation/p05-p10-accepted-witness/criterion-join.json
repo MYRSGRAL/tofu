@@ -1,0 +1,77 @@
+{
+  "accepted": "41e0e8cb92b266b8053edd241f0531662bda5298",
+  "frozen199": "7b175e4b9e207b57eec55b75a8172b586ee2c3c5",
+  "new_execution": false,
+  "files": {
+    "crates/yonik-desktop/src/backend.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "4d711bf14f6dc84aef3b4167287b5290a1a4d512a9c0e8957ccd1dd32a8256e8",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "9c9a2be19f292d85c7cec6316c586f7b6516ac230401b7f901d55ee8a8db9d94"
+    },
+    "crates/yonik-desktop/src/desktop_schedule.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "128be873382d6903714bf700dadb996f710d876206991f973b627a435656705b"
+    },
+    "crates/yonik-linux/src/fetch.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "3930830aaa2a41283c359fac4987b41da5d787521779e7088a374e0a6749cbba"
+    },
+    "crates/yonik-linux/src/subscriptions.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "1b0586ec74f9a966711b7128f4627eac58512bdee7fde83e98020cf92d77978b",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "1b0586ec74f9a966711b7128f4627eac58512bdee7fde83e98020cf92d77978b"
+    },
+    "crates/yonik-linux/src/subscription_scheduler.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "0a55b04f0d9372891b8233cbe233bae67e9f59a36d7fc63b3a2b5b6b3f7db239"
+    },
+    "crates/yonik-linux/src/subscription_policy.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "3a45322d46bc40f6271785f21dc698616a707a4e93d9054cd5ac8420d968ad7d"
+    },
+    "crates/yonik-subscription/src/scheduler.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "4f54d5f8dddb91ed774191eeb815d42fe102824fcce09221ed83761049e5a639"
+    },
+    "crates/yonik-subscription/src/lib.rs": {
+      "41e0e8cb92b266b8053edd241f0531662bda5298": "4e6546a7e5e4c72b02c9760811ab19f1c1a3edd40d08680bd5b4a2c56e7c7004",
+      "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "4e6546a7e5e4c72b02c9760811ab19f1c1a3edd40d08680bd5b4a2c56e7c7004"
+    }
+  },
+  "backend_sections": {
+    "default_fetch_tail": {
+      "start_after": "            let mut host = yonik_linux::FetchHost::new(Duration::from_secs(30))?;",
+      "end_before": "\nstruct Running {",
+      "byte_equal": true,
+      "sha256": {
+        "41e0e8cb92b266b8053edd241f0531662bda5298": "264109a9fe741759771452efeab9d91649c4281ed57b83f550f224f43cbfd3c5",
+        "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "264109a9fe741759771452efeab9d91649c4281ed57b83f550f224f43cbfd3c5"
+      }
+    },
+    "running_to_watch": {
+      "start_after": "        let lease = running",
+      "end_before": "        if manual_host.as_ref()",
+      "byte_equal": true,
+      "sha256": {
+        "41e0e8cb92b266b8053edd241f0531662bda5298": "c6d7e0243d1aa24001705a3a0dbb1f8a6333d9b2d86ed7362044883d6d3c4b0b",
+        "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "c6d7e0243d1aa24001705a3a0dbb1f8a6333d9b2d86ed7362044883d6d3c4b0b"
+      }
+    },
+    "manual_commit_persist": {
+      "start_after": "    async fn persist_refresh_completion(",
+      "end_before": "\n// Всегда дожидается ACK/drain;",
+      "byte_equal": true,
+      "sha256": {
+        "41e0e8cb92b266b8053edd241f0531662bda5298": "36983072b16b3b2177ece027d15ebe9d3880ee1902f0e83a1fa49f49cd3882d0",
+        "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "36983072b16b3b2177ece027d15ebe9d3880ee1902f0e83a1fa49f49cd3882d0"
+      }
+    },
+    "three_proxy_regressions": {
+      "start_after": "    async fn domain_proxy_without_config_fails_before_socks_lookup()",
+      "end_before": "\nfn system_revision(",
+      "byte_equal": true,
+      "sha256": {
+        "41e0e8cb92b266b8053edd241f0531662bda5298": "f9d29c78cb3e8b25006c66abbc7eb30ba4c4fcd23baf05c78f8b4a924c121782",
+        "7b175e4b9e207b57eec55b75a8172b586ee2c3c5": "f9d29c78cb3e8b25006c66abbc7eb30ba4c4fcd23baf05c78f8b4a924c121782"
+      }
+    }
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "schema": 1,
+  "scope": "CI215 unittest integration fix only; attribution helper task paused",
+  "baseline_pr_head": "f437de4158103080b11916564de853b2e04a2c70",
+  "red": {
+    "command": "python -S -m unittest discover -s tools/tests -p test_p25_capture_producer.py -v; same for test_p25_final_profile.py",
+    "import_errors": 2,
+    "error": "ModuleNotFoundError: pytest",
+    "also_reproduced_from_baseline_source_without_site_packages": true
+  },
+  "green_targeted": {
+    "normal_command": "python -S -m unittest discover -s tools/tests -p test_p25_*.py -v",
+    "optimized_command": "python -S -O -m unittest discover -s tools/tests -p test_p25_*.py -v",
+    "methods_passed_each": 37,
+    "successful_subtests_each": 33,
+    "new_module_methods": 14,
+    "new_module_expanded_cases": 27,
+    "new_module_parameter_subtests": 16,
+    "case_accounting": "4 producer standalone + 7 profile standalone + 16 profile subTests",
+    "bare_asserts_remaining": 0,
+    "assertion_predicates_preserved": 43,
+    "comparison_method": "AST predicate multiset equality against baseline asserts; assertRaises/Regex preserve original exception checks"
+  },
+  "existing_ci_discovery": {
+    "command": "python3 -m unittest discover -s tools/tests -v",
+    "methods_run": 333,
+    "passed": 332,
+    "errors": 1,
+    "remaining_error": {
+      "test": "test_p11_integrated_candidate.IntegratedCandidate.test_reused_producer_evidence_is_bound_and_not_runtime_claim",
+      "exception": "FileNotFoundError",
+      "missing_path": "local/validation/desktop-reviewed-integration/source-binding.json",
+      "scope": "unchanged P11 test requiring absent local receipt; not skipped or modified"
+    },
+    "overall_status": "FAILED_UNRELATED_MISSING_RECEIPT"
+  },
+  "other_ci_checks": {
+    "translations_unittest": {
+      "passed": 18,
+      "errors": 0
+    },
+    "translation_checker": "388 inline pairs, 108 map keys, 17 QML",
+    "ruff_check_tools": 0,
+    "ruff_format_check_tools": 0,
+    "ruff_version": "0.17.4"
+  },
+  "coverage": {
+    "baseline_missing_pytest_import_errors": 2,
+    "before_expanded_producer_profile_cases": 27,
+    "unittest_methods_passed": 37,
+    "methods_by_class": {
+      "CaptureTests": 23,
+      "ProducerTests": 4,
+      "FinalProfileTests": 10
+    },
+    "successful_subtests": 33,
+    "profile_parameter_subtests": [
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_executor_bounds_and_reaps_without_execution",
+        "parameters": {
+          "failure": "'cap'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_executor_bounds_and_reaps_without_execution",
+        "parameters": {
+          "failure": "'deadline'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_executor_bounds_and_reaps_without_execution",
+        "parameters": {
+          "failure": "None"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_make_rejects_unsupported",
+        "parameters": {
+          "raw": "b'o: $(shell bad)'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_make_rejects_unsupported",
+        "parameters": {
+          "raw": "b'o: a\\no2: b'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_make_rejects_unsupported",
+        "parameters": {
+          "raw": "b'o: a\\\\'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_make_rejects_unsupported",
+        "parameters": {
+          "raw": "b'o:'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'positive'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'outside'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'symlink'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'identity'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'missing-record'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'external-unit'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'repeat-unit'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'parent-normalization'"
+        },
+        "ok": true
+      },
+      {
+        "method": "test_p25_final_profile.FinalProfileTests.test_positive_final_metadata",
+        "parameters": {
+          "case": "'symlink-parent'"
+        },
+        "ok": true
+      }
+    ],
+    "preserved_assertion_predicates": 43,
+    "bare_assert_remaining": 0,
+    "original_27_case_accounting": "4 producer + 7 nonparameterized profile + 16 profile subTest variants",
+    "expected_new_producer_profile_methods": 14,
+    "scoped_capture_schema_methods": 23
+  },
+  "logs": {
+    "ci215-case-counts.log": {
+      "path": "local/evidence/qt-file-attribution-candidate-9f51fae/ci215-case-counts.log",
+      "sha256": "3893e2ed5bd886674703a21eeb09a1631680de62f2680b6d1194028700fbd0f8",
+      "summary": [
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 37 tests in 0.538s",
+        "",
+        "OK"
+      ]
+    },
+    "ci215-targeted-optimized.log": {
+      "path": "local/evidence/qt-file-attribution-candidate-9f51fae/ci215-targeted-optimized.log",
+      "sha256": "85595e549cb12f1dff9978f9e970b66edeaa9a682d6e296ea58d473a2b09ffd0",
+      "summary": [
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 37 tests in 0.621s",
+        "",
+        "OK"
+      ]
+    },
+    "ci215-exact-ci-discovery.log": {
+      "path": "local/evidence/qt-file-attribution-candidate-9f51fae/ci215-exact-ci-discovery.log",
+      "sha256": "4cb93dbbba1ee8d45cfb5a9f73e4802f0b17e1d89a079c50b80deec48edc5ed0",
+      "summary": [
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 333 tests in 38.015s",
+        "",
+        "FAILED (errors=1)"
+      ]
+    },
+    "ci215-ci-translations.log": {
+      "path": "local/evidence/qt-file-attribution-candidate-9f51fae/ci215-ci-translations.log",
+      "sha256": "ef1b8ee1ede64f6dc313981300c67a042ce5f232773e6817d0d74674242765e1",
+      "summary": [
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 18 tests in 0.173s",
+        "",
+        "OK"
+      ]
+    }
+  },
+  "preserved_production_and_attribution_paths": [
+    "tools/release_controller.py",
+    "tools/_p25_capture_producer.py",
+    "tools/_p25_final_profile.py",
+    "tools/p25_cxx_capture_wrapper.py",
+    "tools/p25_capture_build_closure.py",
+    "docs/validation/p25-current-payload/qt-file-attribution-candidate"
+  ],
+  "new_dependencies": false,
+  "skip_or_xfail_added": false,
+  "actual_build_compiler_query_network_download_vm_install_release": false,
+  "note": "117 earlier pytest results are not represented as unittest discovery results here"
+}

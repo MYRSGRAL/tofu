@@ -1,0 +1,18 @@
+{
+  "head": "fdeb20a227f05139f723614841c767f03c30e611",
+  "elf_sha256": "cde85b5bea18ba4cd54a37e8fc437b8a44ec355cda5721513f5c06926efe6d32",
+  "compiled_sources_mismatches": [],
+  "scripts": {
+    "tools/p01_campaign_host.py": "97e5e694fdc2e89446fc688d82dacb7a4eaae04d41977c47aa05e0bccc7088c4",
+    "tools/p01_observer_measure.py": "912a95c19734c1cc2a67fe4c3fe1ffd919d3b06901cffeaddd104d87f591887a",
+    "tools/p01_report.py": "777d589e592f8ef8f729cf654f06ffe728b9361241c48edeac60ca12f8ac6acd",
+    "tools/p01_fixture_audit.py": "1f84a9bb33cd2c8a52e2574c233dc27badfb0db167041123418232791136bc4b",
+    "tools/format4_gui_vm.py": "c055ee19b251520a27e307ac29e6d52c3ea2a44a3cb0a390f8041339e2e1c0b0",
+    "tools/format4_gui_guest.py": "236d4e98fe3a5d15d456ae241df1550eaf60dfc956d3db555d45489f4487f8f5"
+  },
+  "root_recheck": "R1 eb395 CLEAN; OS reap not guaranteed by timeout sum",
+  "state": "BOUND_NOT_STARTED_PENDING_SHORT_CONTROLS",
+  "stats": "N_A source-bound frozen3e64220; null/not measured",
+  "old_proofs": "preflight-candidate-46227ed and discarded-wakeup-oracle-v1; not acceptance",
+  "epoch": 1794614594.7510927
+}

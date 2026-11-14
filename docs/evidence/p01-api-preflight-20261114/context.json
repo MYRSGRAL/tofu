@@ -1,0 +1,55 @@
+{
+  "timestamp_utc": "2026-11-13T21:56:11Z",
+  "source": "3e64220fc16b7cfdd2170bd0fffc7049d056c8a7",
+  "kind": "read-only API preflight, NOT runtime acceptance",
+  "source_sha256": {
+    "crates/yonik-desktop/src/main.rs": "a65e26873d34f79a85c24a7b7432a8c91374000d4e27d23a4bdec6ee990c7e59",
+    "crates/yonik-desktop/src/application.cpp": "e3ac3a61c4ad6c657e8c55b2f0a14926295be804b9e96c29a6f00cb5ca79b770",
+    "crates/yonik-desktop/qml/Main.qml": "d6646815e76876b801ef2260ea628bd42de8421be998d4cc09618ab898f324bf",
+    "crates/yonik-desktop/src/bridge.rs": "7bcfd27cf84b19fb074184e5298be5a7f980d6e447d149b95b6d84349988edb4",
+    "crates/yonik-desktop/src/bridge_impl.rs": "5084028a8db546260bc02a8ae28f79bff358245c613c338239b73ac64dd5ae82",
+    "docs/specs/performance.md": "d6fbdcd826ec3b39a9d687652ed5d0319c89aca02b92954b16a5dd7d3c0004b0",
+    "tools/desktop_tray_smoke.py": "8d4c5b44faf1dc4baf428bf71d05d53488ffc9c63f8ffb947dfdd00277bab76a"
+  },
+  "kernel": "7.2.9-1-cachyos",
+  "loadavg": "0.83 1.09 1.15 3/2235 1244320",
+  "tools": {
+    "Xvfb": null,
+    "Xvnc": "/usr/bin/Xvnc",
+    "gnome-keyring-daemon": null,
+    "dbus-run-session": "/usr/bin/dbus-run-session",
+    "xdotool": "/usr/bin/xdotool",
+    "qemu-system-x86_64": "/usr/bin/qemu-system-x86_64"
+  },
+  "governors": {
+    "/sys/devices/system/cpu/cpu7/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu5/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu3/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu1/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu6/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu4/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu2/cpufreq/scaling_governor": "powersave",
+    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor": "powersave"
+  },
+  "power": {
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:002/online": "1",
+    "/sys/class/power_supply/AC0/online": "1",
+    "/sys/class/power_supply/ucsi-source-psy-USBC000:001/online": "0"
+  },
+  "temperatures": {
+    "/sys/class/thermal/thermal_zone2/temp": "20000",
+    "/sys/class/thermal/thermal_zone0/temp": "44000",
+    "/sys/class/thermal/thermal_zone9/temp": "50",
+    "/sys/class/thermal/thermal_zone12/temp": "83000",
+    "/sys/class/thermal/thermal_zone7/temp": "50",
+    "/sys/class/thermal/thermal_zone10/temp": "82050",
+    "/sys/class/thermal/thermal_zone5/temp": "50",
+    "/sys/class/thermal/thermal_zone3/temp": "50",
+    "/sys/class/thermal/thermal_zone1/temp": "87000",
+    "/sys/class/thermal/thermal_zone13/temp": "50000",
+    "/sys/class/thermal/thermal_zone8/temp": "50",
+    "/sys/class/thermal/thermal_zone11/temp": "82000",
+    "/sys/class/thermal/thermal_zone6/temp": "50",
+    "/sys/class/thermal/thermal_zone4/temp": "50"
+  }
+}

@@ -1,0 +1,4 @@
+{"closed_ack":true}
+{"passed":true,"stage":"reopen"}
+{"closed":false,"error":null,"maintenance_ack":null,"pending":false,"ready":false,"revision":0,"sources_total":0,"total":0}
+{"closed":false,"error":null,"maintenance_ack":null,"pending":false,"ready":true,"revision":1,"sources_total":1,"total":1}

@@ -16,6 +16,27 @@ pub(crate) struct BoundTun {
     pub(super) framing: Framing,
 }
 impl BoundTun {
+    #[cfg(all(test, feature = "test-support"))]
+    pub(crate) fn queue_fd_for_test(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.queue.as_fd()
+    }
+
+    #[cfg(all(test, feature = "test-support"))]
+    pub(crate) fn duplicate_same_kernel_queue_for_test(&self) -> Result<Self, TunError> {
+        Ok(Self {
+            queue: self
+                .queue
+                .test_duplicate()
+                .map_err(|_| TunError::Evidence)?,
+            operation: self.operation.clone(),
+            owner: self.owner,
+            tun_id: self.tun_id,
+            index: self.index,
+            mtu: self.mtu,
+            framing: self.framing,
+        })
+    }
+
     pub(crate) fn duplicate_for_attach(&self) -> Result<std::os::fd::OwnedFd, TunError> {
         rustix::io::fcntl_dupfd_cloexec(self.queue.as_fd(), 0).map_err(|_| TunError::Io)
     }

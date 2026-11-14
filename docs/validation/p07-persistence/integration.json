@@ -1,0 +1,287 @@
+{
+  "kind": "ordinary merge accepted main; data/source audit only",
+  "feature_head": "a5f61259479d730f1775db220817625988ba7331",
+  "accepted_main": "b25ed1184d917a4ba9465b000b4bec080cfcaa3e",
+  "merge_commit": "44403008c96e8a9fd8ae97ed24e825b8443a2410",
+  "merge_parents": [
+    "a5f61259479d730f1775db220817625988ba7331",
+    "b25ed1184d917a4ba9465b000b4bec080cfcaa3e"
+  ],
+  "merge_tree": "5319afd8f737f7720d93fdff229bccafaad53c3b",
+  "tree_scope": "точное дерево merge до добавления этого integration.json; self-referential final tree не заявляется",
+  "mechanical_conflicts": false,
+  "retained_feature_blobs": [
+    {
+      "path": "crates/yonik-desktop/examples/p07_persistence.rs",
+      "git_blob": "5382fcc097e7cfc07b6196c4d79da6b84e524a56",
+      "sha256": "8ba1a760190dd30269bcaa48684a190a95d8ba2a513e5920026df07c0cb6698c"
+    },
+    {
+      "path": "docs/validation/2026-11-14-p07-normal-ss-persistence.md",
+      "git_blob": "93302df37bdd387cd981e292341b928c2bd22cc5",
+      "sha256": "aae81f6fd4aba891ff721d87f513f7b249c8a43ac002ef90c3398fd2d71c6620"
+    },
+    {
+      "path": "docs/validation/2026-11-14-p07-p20-port-api-gap.md",
+      "git_blob": "c0a915eddf14f34aafec147164d4eb829ccdf1a9",
+      "sha256": "f896409e087d8a50d941a2e03ed28cdbf05f6901d60fb93615d265a4ea404c96"
+    },
+    {
+      "path": "docs/validation/2026-11-14-p07-port-protocol-contract-proposal.md",
+      "git_blob": "883cac18dae70a34e9cdacf1117f974d1927e8dd",
+      "sha256": "7434b52f4f3cd7081e07fd610a5b27ed4157f7a8e5f1f504329a8bb7ea9f4c89"
+    },
+    {
+      "path": "docs/validation/p07-p20-source-gap/source-binding.json",
+      "git_blob": "7916165b22c3fe534f6ef825951562e0c3c60c39",
+      "sha256": "aa3d0698fe90ffa13cbbf81da783d524b0a4b3ab3a89ce92536a0bf0a3c2cf7d"
+    },
+    {
+      "path": "docs/validation/p07-persistence/bindings.json",
+      "git_blob": "a2ce81f4ef8147c53afe22b2f8bbc03459cfa93d",
+      "sha256": "e6e40727a11455146cc41cd4e7e3661191088b46733f3a3254063d2cc42097c3"
+    },
+    {
+      "path": "docs/validation/p07-persistence/compiled-sources.json",
+      "git_blob": "dc342bce41cddddb07c4de72ad8881884846ffa1",
+      "sha256": "9f2a5e72375a5a3015ed8328fbd486f26716f275477d322ff56220ed6b41fcb5"
+    },
+    {
+      "path": "docs/validation/p07-persistence/environment.json",
+      "git_blob": "e98355651a9cec46beb8f607d842140c8473de16",
+      "sha256": "67d2eb6b9edd7feeab6f0e90a971fc9235c84446749cb440bda1125ac130ade1"
+    },
+    {
+      "path": "docs/validation/p07-persistence/fresh-final-script.json",
+      "git_blob": "2c7a230d825b059a29791bc8eba7e73bad21b356",
+      "sha256": "105112bdfe2b16aebedf43d5783c2c9ef4c4a835b5e05798675faf5bdc54c707"
+    },
+    {
+      "path": "docs/validation/p07-persistence/fresh-final-trace.jsonl",
+      "git_blob": "2d91464c87f293cc242d916b8d88cd13deb592e5",
+      "sha256": "ad5566714952f36337fc2916cefbde28c422b2f29f2da93e6737d505ef489676"
+    },
+    {
+      "path": "docs/validation/p07-persistence/fresh-negative-script.json",
+      "git_blob": "3bfdf897cdd3b8f96aef14197ddca5653389bacf",
+      "sha256": "ef0ba27326b0a5d9092f94914e747c90c0b9ef60480219e5227d817be8aea3e4"
+    },
+    {
+      "path": "docs/validation/p07-persistence/fresh-negative-trace.jsonl",
+      "git_blob": "bfca56e243b8577b4894e6314daa725fa72b3f66",
+      "sha256": "fc90d5c200e417225cc13cb0cac27f7e962e313bd125d3820746c56f0f03553e"
+    },
+    {
+      "path": "docs/validation/p07-persistence/result.json",
+      "git_blob": "ce860087cbcea7858f799ce9cf6ba3e0f36cbab1",
+      "sha256": "6b385961fa29c9baed209e59e815293c6b005d774d5ef4610f6a5e0e153c818d"
+    },
+    {
+      "path": "docs/validation/p07-persistence/save-script.json",
+      "git_blob": "c600f5396124776458f5f2a7d4560ce29c705b3d",
+      "sha256": "636732713aba52aa34f757b022e8383be1353e39572f776d09d9d797d294dcd6"
+    },
+    {
+      "path": "docs/validation/p07-persistence/save-trace.jsonl",
+      "git_blob": "6db79ebe0635dc39b5ac5a3ce132ed7b4ceaad11",
+      "sha256": "195859d785c3e88b334008b51578260f08a6c247698fe6fbb69abd6de3ccd30c"
+    },
+    {
+      "path": "tools/p07_persistence.py",
+      "git_blob": "f03cfafc15780afb864024f4d31e7d4e3144a960",
+      "sha256": "8159cdbb3db94a8217eb70416e4404aa7bd0ca0cf464a93818f5be34abf449cc"
+    }
+  ],
+  "retained_artifacts_sha256_checked": 26,
+  "compiled_closure": {
+    "historical_files": 394,
+    "unchanged": 382,
+    "changed": [
+      {
+        "path": "crates/yonik-desktop/qml/LogsView.qml",
+        "feature_compiled_sha256": "f2c9a36721777f104c46f3da641df0932435665846ebe3e8d83e50435ad6850f",
+        "integration_source_sha256": "52abd5f8687283bff957c072f2bfe728eb3fee0c758765e8f37b672004230469"
+      },
+      {
+        "path": "crates/yonik-desktop/src/backend.rs",
+        "feature_compiled_sha256": "4d711bf14f6dc84aef3b4167287b5290a1a4d512a9c0e8957ccd1dd32a8256e8",
+        "integration_source_sha256": "27b5de315cae6e893e76c847731c85f855b2ef78a3f09060618214afbb653c5b"
+      },
+      {
+        "path": "crates/yonik-desktop/src/logs.rs",
+        "feature_compiled_sha256": "53bc8be202c3414532dc441b3b390bc85acccb2dfa6b9d779ab739164c1e0f6e",
+        "integration_source_sha256": "ee392a7bb8221b7475406e75ec8f01d284ad0b68ba0fd1a49dbeefb5896dcba0"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/logs_native.py",
+        "feature_compiled_sha256": "04bc3d656d550edce70c8ad17fbfa910c83f20f54c1d99104dfbf11b9d2152d2",
+        "integration_source_sha256": "94170d66b5d01251d1fafae57769f79c6a6d144aa6c1fd937ad0acca800f401e"
+      },
+      {
+        "path": "crates/yonik-engine/src/lib.rs",
+        "feature_compiled_sha256": "763f533c52f0d970f0d809959952769e67f0813216fa1bff08dcbd850eb6d107",
+        "integration_source_sha256": "e0588f6d1c0bae71c91750578ddc7f3e4c3a943b8d30662d3341f36daad48f36"
+      },
+      {
+        "path": "crates/yonik-engine/tests/compiler.rs",
+        "feature_compiled_sha256": "b33f7b4069ac5eaaad7a3d9d785e327e9d285da84a0a0304fc0b2453ebebab21",
+        "integration_source_sha256": "2fe5981088f793714e0fb9b646c352a8d3d82ac4bb1b470567f9f9ffc8ea9fe5"
+      },
+      {
+        "path": "crates/yonik-linux/src/event_log.rs",
+        "feature_compiled_sha256": "86c25e730726fd569ac7fcfc4b4de87af4c42c1dcd70a38fb3141d361029b10b",
+        "integration_source_sha256": "6eda7b1600bc0852ebf56fe7c499e4d3d00f2b8c7a1e8f0f8ffcfbc1c8e92cbb"
+      },
+      {
+        "path": "crates/yonik-linux/src/event_log/disk.rs",
+        "feature_compiled_sha256": "e0b300f1a42862e70b1a74553b50f9463a2ecb2696fa67b034ec92dd8710dceb",
+        "integration_source_sha256": "db6a000130f6493a27bbb92c337ecc9fa02257417bb2e68f4e992c893a9bf25b"
+      },
+      {
+        "path": "crates/yonik-linux/src/host/process.rs",
+        "feature_compiled_sha256": "b4a61316d6794fcbd2b2b75da9f2383f9bfeb56385d0ba709bbf2d35cc3c066f",
+        "integration_source_sha256": "f7bf3b12e8536c424a5b909dcea835fca46daa892204df49fbbf69add003c28d"
+      },
+      {
+        "path": "crates/yonik-linux/src/host/session.rs",
+        "feature_compiled_sha256": "a9618a83a26aba5d210094860e60152fec17af465e9e1e85abbcf04737493a8a",
+        "integration_source_sha256": "80a1b3028c4cb1d1a961f85bd019e00953ea53abd0aa288c2f535c8d9b3351d2"
+      },
+      {
+        "path": "crates/yonik-linux/src/host/session_tests.rs",
+        "feature_compiled_sha256": "3abdcb5c546c5c7228fb661bcbe1374dd329db56e6a47bc10078b2eeb1384be3",
+        "integration_source_sha256": "5b40b88c58627eeffe05f89f78fe30a702847db459a0acf275c85aa52b6c8a74"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport.rs",
+        "feature_compiled_sha256": "932d4c11ff32f1ef73ea70fc6fd44c89828deaf67f457f6c396094ed637752a9",
+        "integration_source_sha256": "7e1fca833cb195e25a3bd6fdd4b89bc265f2e17c5aaa055619d24573511a491e"
+      }
+    ],
+    "note": "дрейф исходников записан; старый ELF не атрибутируется integration head",
+    "incoming_added_paths_outside_historical_manifest": [
+      {
+        "path": "crates/yonik-desktop/tests/fr16_local_native.py",
+        "sha256": "556cb86c4f1b7576aad417b37da38b291b08d6064f7b1612c59bd1275125410e"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/fr16_notice.py",
+        "sha256": "e548a35877749861d30746f0c61fd0d94b11801879018deecdcdf0a50bda5102"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/p05_legacy_stop_window.py",
+        "sha256": "1e84e28b69fde2f680690c99fcb1067d05365a8cd64170177c839b154b841e5a"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/p05_legacy_stop_window.rs",
+        "sha256": "d6cc9971a35cb42ae2d280a5438f0b4c4bcdb00dcc37c0b316a71866131cae7f"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/p05_p10_actual_priority.py",
+        "sha256": "ee466d42e344c71356ddeaa4823c4e655db80a12674cc0439ebb91d35ddffbe5"
+      },
+      {
+        "path": "crates/yonik-desktop/tests/p05_p10_actual_priority.rs",
+        "sha256": "54d10389c672acb7a7cc7c4c617f6f55426cc4ff6335e472e5f29d73dfdc3c34"
+      },
+      {
+        "path": "crates/yonik-engine/tests/local_logging.rs",
+        "sha256": "f203d98396b8353c9887fbdcf632b813dafabd39550ea68b1bafffb33ff7d6a3"
+      },
+      {
+        "path": "crates/yonik-linux/src/event_log/native_details.rs",
+        "sha256": "91e0d17e4ba00f80eb7d1259e3a975d06b5cc1c5f9e68450c717806bd31e8d6b"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/compatibility.rs",
+        "sha256": "e8f61d270cd852bec0713403b4109c76201021415a78ed9ebe0f755693890ac9"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/abi260.sha256",
+        "sha256": "64ee7b673fd7fee44e2c1657a5cdf9dd04f26eef7cc831d429ca21902adba965"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/baseline.rs.fixture",
+        "sha256": "08d4bf96f9dcbafae2c2ed3472d92f89306f2e2fe204dff63b22eab92b2d7cd2"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_lifetime.rs.fixture",
+        "sha256": "cca70de089c222870ea7781b3db4eadeab003512b1a3cd59e02c9d5d96a7b25e"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_pipefs.rs.fixture",
+        "sha256": "c955b9c7c022b357694ccf6cd82742009a93a97078c9d29edc1ccf102eb41a9e"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_resources.rs.fixture",
+        "sha256": "f561a906fc862a95f6ca1be59f210537037a9915b0c0dac8ae2afff72eacd492"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/mutant_roles.rs.fixture",
+        "sha256": "121e76330af88322674535b7a228c095450800b825724520db38a3720eb237c1"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/v1.bin",
+        "sha256": "efdda5cc232927889af18b98dc07c365e99c11c83247dda066541bc5751660fb"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/v2.bin",
+        "sha256": "a360c3e2e9e554cc3d1754a07f32cda8f453f69f8537e201e1d994196115f3dc"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/v3.bin",
+        "sha256": "aad757b303a206f0ee5d31f64aca2d533e84bce77a41aeea9dcbf272381d6733"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/fixtures/ynkrole1.bin",
+        "sha256": "e200e7b1866e441d5672d3fb9a32aa86865968ae42e4741ac30387563f898bf5"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/golden_compat.rs",
+        "sha256": "f217bfaaafd9b9aa42b4ad82ab657bdad351e3e68a428841c6ac2af11e9a713e"
+      },
+      {
+        "path": "crates/yonik-linux/src/worker/output_transport/source_mutants.rs",
+        "sha256": "12d9a09b1ac8326be59d315bb3823ee3bd6672a45b763a5a06b8accd892fe867"
+      }
+    ]
+  },
+  "backend_invariant_sections": [
+    {
+      "section": "credential_directory_open",
+      "byte_equal": true,
+      "sha256": "ff18d0a910190029b01f4e4a270510fb33dfe648dd9cf57dff7a0f79d6cd6574"
+    },
+    {
+      "section": "routing_actor_operations",
+      "byte_equal": true,
+      "sha256": "9cf6cc188c2ed2e9ff3e38d7cc429920e2be846d41307b115cd2b4000b313a2b"
+    },
+    {
+      "section": "early_activation_refusal",
+      "byte_equal": true,
+      "sha256": "8d12a110c6f5a0731ed2191098b778f4a1afd67934d4fd2373512d8507520bb3"
+    },
+    {
+      "section": "inline_policy_conversion",
+      "byte_equal": true,
+      "sha256": "4ba0097a45de8667a03e9425a039bbc91d373cfa22da54cbec622930a29756b8"
+    }
+  ],
+  "impact_review": "Изменения accepted main относятся к logging/worker transport и subscription scheduler/test-support. Main/editor/bridge/repository/domain flow, credential open, routing actor operations и early unsupported Connect guard сохранены. Witness не запускает core, imports или subscription refresh. Полный backend source отличается; нового runtime доказательства нет.",
+  "new_runtime_pass": false,
+  "rust_rebuild": false,
+  "gui_rerun": false,
+  "full_p07_p20_promotion": false,
+  "checks": {
+    "feature_blobs": "PASS",
+    "retained_artifacts": "PASS",
+    "json_jsonl_parse": "PASS",
+    "relevant_rustfmt_skip_children": "PASS",
+    "runner_ruff_check_format": "PASS",
+    "diff_check": "PASS"
+  },
+  "review_state": "готово к root review и CI; merge PR не выполнялся",
+  "feature_tree": "bb9e547ea2d4f5ae775d0ec3bc55d2b21ea47114",
+  "accepted_main_tree": "25ff001188b14d10986bcc1e7a1280af02c32e1b"
+}

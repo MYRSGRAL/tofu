@@ -20,7 +20,7 @@ pub const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
 pub const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
 pub const SERVICE_INTERFACE: &str = SERVICE_NAME;
 const MAX_WIRE_BYTES: usize = 64 * 1024;
-const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="BundleCapabilitiesV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="PrepareBundleV1"><arg name="request" type="s" direction="in"/><arg name="canonical" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
+const INTROSPECTION: &str = r#"<node><interface name="cloud.highpriority.yonik.Network1"><method name="Prepare"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="ApplyOutputV1"><arg name="request" type="s" direction="in"/><arg name="output" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Apply"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Stop"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Unlock"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="State"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="Capabilities"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="BundleCapabilitiesV1"><arg name="request" type="s" direction="in"/><arg name="response" type="s" direction="out"/></method><method name="PrepareBundleV1"><arg name="request" type="s" direction="in"/><arg name="canonical" type="ah" direction="in"/><arg name="response" type="s" direction="out"/></method></interface><interface name="org.freedesktop.DBus.Introspectable"><method name="Introspect"><arg name="xml" type="s" direction="out"/></method></interface></node>"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -157,6 +157,15 @@ pub trait ProtectionHost: Send + 'static {
         artifact: &Self::Artifact,
         cancel: Cancellation,
     ) -> impl Future<Output = Result<ProtectionState, ServiceError>> + Send;
+    fn apply_output(
+        &mut self,
+        _uid: u32,
+        _artifact: &Self::Artifact,
+        _output: crate::output_transport::ValidatedWriters,
+        _cancel: Cancellation,
+    ) -> impl Future<Output = Result<ProtectionState, ServiceError>> + Send {
+        async { Err(ServiceError::Unsupported) }
+    }
     fn stop(
         &mut self,
         uid: u32,
@@ -233,6 +242,7 @@ enum Request {
     PrepareBundle(Box<SystemBundleRequest>),
     BundleCapabilities,
     Apply(PreparedHandle),
+    ApplyOutput(PreparedHandle, crate::output_transport::ValidatedWriters),
     Stop,
     Unlock,
     State,
@@ -253,6 +263,13 @@ fn parse(message: &Message) -> Result<Request, ServiceError> {
         || message.body().len() > MAX_WIRE_BYTES
     {
         return Err(ServiceError::InvalidRequest);
+    }
+    if header.member().map(|m| m.as_str()) == Some("ApplyOutputV1") {
+        let decoded = crate::output_transport::decode(message.clone())
+            .map_err(|_| ServiceError::InvalidRequest)?;
+        let handle = PreparedHandle::try_from(decoded.handle.as_slice())
+            .map_err(|_| ServiceError::InvalidRequest)?;
+        return Ok(Request::ApplyOutput(handle, decoded.writers));
     }
     let body = message.body();
     if header.member().map(|m| m.as_str()) == Some("PrepareBundleV1") {
@@ -586,7 +603,11 @@ async fn dispatch<H: ProtectionHost>(
                 .await?;
             serde_json::json!({"version":1,"handle":handle.as_bytes()})
         }
-        Request::Apply(handle) => {
+        Request::Apply(handle) | Request::ApplyOutput(handle, _) => {
+            let output = match request {
+                Request::ApplyOutput(_, writers) => Some(writers),
+                _ => None,
+            };
             let mut guard = None;
             let artifact = broker
                 .claim_for_apply(message, handle, Prompt::Allow, cancel.clone(), || {
@@ -600,7 +621,12 @@ async fn dispatch<H: ProtectionHost>(
                 })
                 .await?;
             let mut host = guard.ok_or(ServiceError::Unavailable)?;
-            let state = host.apply(uid, artifact.as_ref(), cancel).await?;
+            let state = if let Some(output) = output {
+                host.apply_output(uid, artifact.as_ref(), output, cancel)
+                    .await?
+            } else {
+                host.apply(uid, artifact.as_ref(), cancel).await?
+            };
             serde_json::json!({"version":1,"state":state})
         }
         Request::State => {
@@ -668,3 +694,23 @@ async fn send_result(
 #[cfg(test)]
 #[path = "service_tests.rs"]
 pub(super) mod tests;
+
+// Typed decode boundary не включён в parse/dispatch или D-Bus introspection.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(dead_code)]
+struct StagedApplyOutput {
+    _handle: PreparedHandle,
+    _writers: crate::output_transport::ValidatedWriters,
+}
+#[cfg(any(test, feature = "test-support"))]
+#[allow(dead_code)]
+fn decode_staged_output(message: Message) -> Result<StagedApplyOutput, ServiceError> {
+    let decoded =
+        crate::output_transport::decode(message).map_err(|_| ServiceError::InvalidRequest)?;
+    let handle = PreparedHandle::try_from(decoded.handle.as_slice())
+        .map_err(|_| ServiceError::InvalidRequest)?;
+    Ok(StagedApplyOutput {
+        _handle: handle,
+        _writers: decoded.writers,
+    })
+}

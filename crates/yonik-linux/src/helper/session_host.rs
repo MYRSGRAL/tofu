@@ -20,6 +20,8 @@ use crate::{
     read_topology,
     worker::WorkerPayload,
 };
+#[path = "native_owner.rs"]
+pub(super) mod native_owner;
 use sha2::Digest;
 use std::{
     fs::File,
@@ -355,6 +357,7 @@ pub(super) struct SessionArtifact {
     port: u16,
     protocol: crate::TransportProtocol,
     memory: ByteLease,
+    native_owner_stamp: Option<native_owner::NativeArtifactStamp>,
 }
 impl SessionArtifact {
     pub(super) fn retained_bytes(&self) -> usize {
@@ -529,11 +532,13 @@ impl Backend {
     }
     // Вызывается только после успешного supervisor.recover; не admission API.
     fn release_stopped_resources(&mut self) {
+        self.native_owner.release_confirmed();
         self.active = None;
         self.tun_custody = None;
     }
     pub(super) fn has_session(&self) -> bool {
-        self.tun_custody.is_some()
+        self.native_owner.busy()
+            || self.tun_custody.is_some()
             || self.active.is_some()
             || self.journal.as_ref().is_some_and(|journal| {
                 journal.session_recovery().is_some()
@@ -728,6 +733,7 @@ impl Backend {
             )
             .map_err(|_| ServiceError::Unsupported)?
         };
+        let config = config.with_local_runtime_logging();
         if self.registry.is_none() {
             self.registry = Some(TrustedRegistry::system().map_err(unavailable)?);
         }
@@ -832,6 +838,7 @@ impl Backend {
             None
         };
         let artifact = SessionArtifact {
+            native_owner_stamp: None,
             bundle: bundle_digests,
             payload,
             plan,
@@ -862,6 +869,7 @@ impl Backend {
         uid: u32,
         artifact: Arc<SessionArtifact>,
         stamp: NetworkStamp,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
         if artifact.bundle.is_some() {
@@ -919,7 +927,7 @@ impl Backend {
         // Любая ошибка проходит через независимый worker-first cleanup.
         let result = diagnostic_result(
             "start_profile",
-            self.start_profile(owner, artifact, cancel).await,
+            self.start_profile(owner, artifact, output, cancel).await,
         );
         if result.is_err() {
             let cleanup = diagnostic_result("error_cleanup", self.finish_session(uid, false).await);
@@ -954,6 +962,7 @@ impl Backend {
         &mut self,
         owner: Ownership,
         artifact: Arc<SessionArtifact>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
         self.policy(owner, compile_protection(&artifact.baseline, false)?)
@@ -1050,7 +1059,7 @@ impl Backend {
             "worker_start",
             self.supervisor()
                 .await?
-                .start(Arc::clone(&artifact.payload), cancel)
+                .start_output(Arc::clone(&artifact.payload), output, cancel)
                 .await,
         )
         .map_err(unavailable)?;
@@ -1072,58 +1081,48 @@ impl Backend {
         self.bindings = None;
         Ok(ProtectionState::TunnelStarting)
     }
-    async fn verify_session(&mut self, cancel: &mut Cancellation) -> Result<(), ServiceError> {
-        let active = self.active.as_ref().ok_or(ServiceError::Unavailable)?;
-        let supervisor = self.supervisor.as_ref().ok_or(ServiceError::Unavailable)?;
-        if diagnostic_value("observe_before", supervisor.observe(&active.ticket).await)
-            .map_err(unavailable)?
-            != WorkerLiveness::Running
-        {
-            return diagnostic_result(
-                "verification_state_mismatch",
-                Err(ServiceError::Unavailable),
-            );
-        }
-        diagnostic_result(
-            "worker_status",
-            verify_worker_process(active.ticket.pid(), active.artifact.worker_uid),
-        )?;
+    async fn verify_network_facts(
+        &mut self,
+        artifact: &SessionArtifact,
+        index: u32,
+        link: &LinuxLink,
+        cancel: &mut Cancellation,
+    ) -> Result<(), ServiceError> {
         let (current, current_capture) = diagnostic_result(
             "topology_read",
             read_topology_captured(cancel, DEADLINE).await,
         )
         .map_err(unavailable)?;
-        let link = current
+        let current_link = current
             .links
             .iter()
-            .find(|link| link.index == active.index)
+            .find(|link| link.index == index)
             .ok_or(ServiceError::Unavailable);
-        let link = diagnostic_result("own_link_present", link)?;
-        if !same_link_contract(&active.link, link) {
+        let current_link = diagnostic_result("own_link_present", current_link)?;
+        if !same_link_contract(link, current_link) {
             #[cfg(test)]
-            diagnostic_link("raw", &active.link, link);
+            diagnostic_link("raw", link, current_link);
             return diagnostic_result("same_link_contract", Err(stale()));
         }
         diagnostic_result(
             "external_verification",
-            active.artifact.plan.verify_external_captured(
-                &active.artifact.baseline,
-                active.artifact.baseline_capture,
+            artifact.plan.verify_external_captured(
+                &artifact.baseline,
+                artifact.baseline_capture,
                 current,
                 current_capture,
                 self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
-                active.index,
+                index,
             ),
         )
         .map_err(unavailable)?;
-        let (route, route_capture) =
-            lookup_route_captured(active.artifact.query(), cancel, DEADLINE)
-                .await
-                .map_err(unavailable)?;
+        let (route, route_capture) = lookup_route_captured(artifact.query(), cancel, DEADLINE)
+            .await
+            .map_err(unavailable)?;
         if !same_captured_kernel_route(
-            &active.artifact.route,
+            &artifact.route,
             &route,
-            Some((active.artifact.route_capture, route_capture)),
+            Some((artifact.route_capture, route_capture)),
         ) {
             return diagnostic_result("escape_route_contract", Err(stale()));
         }
@@ -1147,6 +1146,29 @@ impl Backend {
                 Err(ServiceError::Unavailable),
             );
         }
+        Ok(())
+    }
+    async fn verify_session(&mut self, cancel: &mut Cancellation) -> Result<(), ServiceError> {
+        let active = self.active.as_ref().ok_or(ServiceError::Unavailable)?;
+        let supervisor = self.supervisor.as_ref().ok_or(ServiceError::Unavailable)?;
+        if diagnostic_value("observe_before", supervisor.observe(&active.ticket).await)
+            .map_err(unavailable)?
+            != WorkerLiveness::Running
+        {
+            return diagnostic_result(
+                "verification_state_mismatch",
+                Err(ServiceError::Unavailable),
+            );
+        }
+        diagnostic_result(
+            "worker_status",
+            verify_worker_process(active.ticket.pid(), active.artifact.worker_uid),
+        )?;
+        let artifact = Arc::clone(&active.artifact);
+        let index = active.index;
+        let link = active.link.clone();
+        self.verify_network_facts(&artifact, index, &link, cancel)
+            .await?;
         let active = self.active.as_ref().ok_or(ServiceError::Unavailable)?;
         diagnostic_result(
             "worker_status",
@@ -1260,6 +1282,7 @@ struct BackendRecovery<'a> {
 impl RecoveryHost for BackendRecovery<'_> {
     async fn stop_worker(&mut self) -> Result<(), ServiceError> {
         let (_keep, mut cancel) = fresh_cancel();
+        self.backend.native_owner.revoke();
         self.backend.worker_uncertain = true;
         // recover подтверждает оба fixed cgroup и отключённые socket activation.
         // Повторный Stop не использует stale ticket успешно остановленного worker.

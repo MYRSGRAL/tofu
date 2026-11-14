@@ -1,6 +1,10 @@
 #include "application.h"
+#include "p01_build_guard.h"
 #include "ui_smoke.h"
 #include "yonik-desktop/src/bridge.cxxqt.h"
+#if YONIK_P01_TEST_SUPPORT
+#include "p01_observer.h"
+#endif
 
 #include <QApplication>
 #include <QClipboard>
@@ -9,6 +13,10 @@
 #include <QDir>
 #include <QDBusConnection>
 #include <QDBusServiceWatcher>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QDBusVariant>
 #include <QFileInfo>
 #include <QFile>
 #include <QIcon>
@@ -271,15 +279,21 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     QObject::connect(&menu, &QMenu::aboutToShow, window, updateTrayLabels);
     updateTrayLabels();
     tray.setContextMenu(&menu);
-    QObject::connect(showAction, &QAction::triggered, window, [window] {
+    bool startupVisibilityDecided = false;
+    QObject::connect(showAction, &QAction::triggered, window, [window, &startupVisibilityDecided] {
+        startupVisibilityDecided = true;
         window->show();
         window->raise();
         window->requestActivate();
     });
     QDBusServiceWatcher trayWatcher(QStringLiteral("org.kde.StatusNotifierWatcher"),
-        QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForUnregistration);
+        QDBusConnection::sessionBus(), QDBusServiceWatcher::WatchForUnregistration | QDBusServiceWatcher::WatchForOwnerChange);
     QObject::connect(&trayWatcher, &QDBusServiceWatcher::serviceUnregistered, window,
         [showAction](const QString&) { showAction->trigger(); });
+    QObject::connect(&trayWatcher, &QDBusServiceWatcher::serviceOwnerChanged, window,
+        [showAction](const QString&, const QString& oldOwner, const QString& newOwner) {
+            if (!oldOwner.isEmpty() && oldOwner != newOwner) showAction->trigger();
+        });
     QObject::connect(&server, &QLocalServer::newConnection, window, [&server, showAction] {
         while (server.hasPendingConnections()) {
             auto* socket = server.nextPendingConnection();
@@ -395,6 +409,14 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
                 && !snapshot.value(QStringLiteral("closed")).toBool()) {
                 showAction->trigger();
             }
+            const auto startupState = snapshot.value(QStringLiteral("startup")).toObject();
+            if (startupState.value(QStringLiteral("attempt")).toString() == QStringLiteral("blocked")
+                || !startupState.value(QStringLiteral("error")).toString().isEmpty()
+                || snapshot.value(QStringLiteral("preferences_warning")).toBool()
+                || (startupState.value(QStringLiteral("attempt")).toString() == QStringLiteral("attempted")
+                    && !snapshot.value(QStringLiteral("connection_error")).toString().isEmpty())) {
+                showAction->trigger();
+            }
             QJsonObject metadata;
             for (const auto* key : {"status", "ready", "busy", "error", "revision", "selected_profile", "closed", "tcp_busy", "can_stop"}) {
                 metadata.insert(QLatin1String(key), snapshot.value(QLatin1String(key)));
@@ -454,6 +476,66 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
     application.installEventFilter(&closeHandler);
     // Qt автоматически регистрирует иконку при последующем появлении tray-сервиса.
     tray.show();
+    // Hint не скрывает окно до подтверждённой регистрации собственной SNI-иконки.
+    // После первого решения поздние tray/network события не скрывают окно снова.
+    QTimer startupTrayTimer;
+    startupTrayTimer.setInterval(100);
+    int startupTrayAttempts = 0;
+    bool startupTrayQueryPending = false;
+    QObject::connect(&startupTrayTimer, &QTimer::timeout, window, [&] {
+        if (startupVisibilityDecided) { startupTrayTimer.stop(); return; }
+        const auto snapshot = QJsonDocument::fromJson(bridge->getSnapshot_json().toUtf8()).object();
+        const auto startup = snapshot.value(QStringLiteral("startup")).toObject();
+        if (!startup.value(QStringLiteral("start_hidden")).toBool()) {
+            if (snapshot.contains(QStringLiteral("ready"))) { startupVisibilityDecided = true; startupTrayTimer.stop(); }
+            return;
+        }
+        if (!snapshot.value(QStringLiteral("ready")).toBool()) return;
+        if (startupTrayQueryPending) return;
+        if (++startupTrayAttempts > 10 || !QSystemTrayIcon::isSystemTrayAvailable()) {
+            startupVisibilityDecided = true; startupTrayTimer.stop(); return;
+        }
+        auto request = QDBusMessage::createMethodCall(QStringLiteral("org.kde.StatusNotifierWatcher"),
+            QStringLiteral("/StatusNotifierWatcher"), QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"));
+        request << QStringLiteral("org.kde.StatusNotifierWatcher") << QStringLiteral("RegisteredStatusNotifierItems");
+        startupTrayQueryPending = true;
+        auto* pending = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(request, 500), window);
+        QObject::connect(pending, &QDBusPendingCallWatcher::finished, window, [&, pending] {
+            QDBusPendingReply<QDBusVariant> reply = *pending;
+            pending->deleteLater();
+            if (startupVisibilityDecided || reply.isError()) { startupTrayQueryPending = false; return; }
+            const auto items = qdbus_cast<QStringList>(reply.value().variant());
+            if (items.size() > 64) { startupTrayQueryPending = false; return; }
+            QStringList services;
+            for (const auto& item : items) {
+                if (item.size() > 256 || !item.endsWith(QStringLiteral("/StatusNotifierItem"))) continue;
+                const auto service = item.section(QLatin1Char('/'), 0, 0);
+                if (service.startsWith(QLatin1Char(':')) || service.startsWith(QStringLiteral("org.kde.StatusNotifierItem-"))) services.append(service);
+            }
+            if (services.isEmpty()) { startupTrayQueryPending = false; return; }
+            // Qt может владеть SNI через отдельную connection с другим unique name.
+            // PID реального владельца зарегистрированного item связывает её с GUI.
+            const auto remaining = std::make_shared<int>(services.size());
+            for (const auto& service : services) {
+                auto owner = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+                    QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"), QStringLiteral("GetConnectionUnixProcessID"));
+                owner << service;
+                auto* ownerPending = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(owner, 500), window);
+                QObject::connect(ownerPending, &QDBusPendingCallWatcher::finished, window, [&, ownerPending, remaining] {
+                    QDBusPendingReply<uint> pid = *ownerPending;
+                    ownerPending->deleteLater();
+                    if (--*remaining == 0) startupTrayQueryPending = false;
+                    if (startupVisibilityDecided || pid.isError()) return;
+                    if (pid.value() == uint(application.applicationPid()) && tray.isVisible() && QSystemTrayIcon::isSystemTrayAvailable()) {
+                        startupVisibilityDecided = true;
+                        startupTrayTimer.stop();
+                        window->hide();
+                    }
+                });
+            }
+        });
+    });
+    startupTrayTimer.start();
     if (smokeTest) {
         // Окно включает 30-секундный deadline системного RPC и подтверждение Stop.
         QTimer::singleShot(45000, bridge, [&, bridge] {
@@ -462,6 +544,18 @@ int run_application(const QString& dataDir, bool smokeTest, const QString& scree
             bridge->shutdown();
         });
     }
+#if YONIK_P01_TEST_SUPPORT
+    // Observer не включает smoke fixture и не меняет normal credentials.
+    std::unique_ptr<P01Observer> p01;
+    if (qEnvironmentVariableIsSet("YONIK_P01_CONTROL_FD")) {
+        if (smokeTest) return 1;
+        bool valid = false;
+        const int fd = qEnvironmentVariableIntValue("YONIK_P01_CONTROL_FD", &valid);
+        if (!valid || fd < 3) return 1;
+        p01 = std::make_unique<P01Observer>(fd, window, bridge, showAction, quitAction);
+        if (!p01->valid()) return 1;
+    }
+#endif
     const auto result = application.exec();
     return smokeTest && smokeFailed ? 2 : result;
 }
