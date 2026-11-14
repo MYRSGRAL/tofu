@@ -1,5 +1,9 @@
 # P09: сверка producer coverage и недостающий контракт
 
+Последующий independent runtime: [actual host SIGKILL finding](2026-11-14-p09-host-sigkill.md).
+Фразы «не выполнялся» ниже описывают первоначальную сверку `5560ab7`;
+новый finding не закрывает barrier/native gaps.
+
 Проверенный исходный срез: `8ea826a` (accepted main), 14 ноября 2026.
 Результат — **partial, API gap**, не новый runtime PASS. Production, P06/#198,
 зависимости и прежние отчёты не изменены. Новых запусков host/core и сборок нет.
