@@ -282,6 +282,8 @@ enum Command {
         target: String,
     },
     RoutingCatalog {
+        #[serde(default)]
+        request_id: u64,
         processes: bool,
         query: String,
         offset: usize,
@@ -1470,6 +1472,48 @@ async fn open(
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
+fn catalog_response(request_id: u64, mut page: serde_json::Value) -> serde_json::Value {
+    if request_id != 0 {
+        page["request_id"] = request_id.into();
+    }
+    page
+}
+
+#[cfg(test)]
+mod catalog_correlation_tests {
+    #[test]
+    fn legacy_shape_and_positive_reply_identity() {
+        let page = serde_json::json!({"items":[],"offset":0,"total":0,"incomplete":false});
+        assert_eq!(super::catalog_response(0, page.clone()), page);
+        let reply = super::catalog_response(9_007_199_254_740_991, page.clone());
+        assert_eq!(reply["request_id"], 9_007_199_254_740_991_u64);
+        let mut restored = reply;
+        restored
+            .as_object_mut()
+            .expect("catalog object")
+            .remove("request_id");
+        assert_eq!(restored, page);
+    }
+    #[test]
+    fn missing_id_remains_legacy_and_invalid_ids_are_rejected() {
+        let legacy = r#"{"command":"routing_catalog","processes":false,"query":"","offset":0}"#;
+        assert!(matches!(
+            serde_json::from_str::<super::Command>(legacy),
+            Ok(super::Command::RoutingCatalog { request_id: 0, .. })
+        ));
+        for id in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("text"),
+            serde_json::Value::Null,
+        ] {
+            let mut input: serde_json::Value = serde_json::from_str(legacy).expect("legacy JSON");
+            input["request_id"] = id;
+            assert!(serde_json::from_value::<super::Command>(input).is_err());
+        }
+    }
+}
+
 struct Actor {
     #[cfg(feature = "test-support")]
     catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
@@ -2428,6 +2472,7 @@ impl Actor {
                 result.map(|_| ())
             }
             Command::RoutingCatalog {
+                request_id,
                 processes,
                 query,
                 offset,
@@ -2442,6 +2487,7 @@ impl Actor {
                         #[cfg(feature = "test-support")]
                         observer,
                     )
+                    .map(|page| catalog_response(request_id, page))
                 })
                 .await
                 .map_err(|_| {

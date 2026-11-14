@@ -120,6 +120,13 @@ ApplicationWindow {
         commandContext = sourceCommands.indexOf(command.command) >= 0 ? "source" : "connection"
         if (!state.closed) backend.dispatch(JSON.stringify(command))
     }
+    // Общий для всех жизней routing Loader; ID используется только для correlation.
+    property double catalogRequestSequence: 0
+    function nextCatalogRequestId() {
+        if (!Number.isSafeInteger(catalogRequestSequence) || catalogRequestSequence < 0 || catalogRequestSequence >= Number.MAX_SAFE_INTEGER) return 0
+        catalogRequestSequence += 1
+        return catalogRequestSequence
+    }
     property bool routingPending: false
     property double routingRequestId: 0
     property double routingExpectedSavedId: 0
@@ -852,6 +859,18 @@ ApplicationWindow {
                 id: editor
                 objectName: "routingEditor"
                 enabled: window.state.ready && !window.state.closed && !window.routingPending
+                property double catalogExpectedId: 0
+                property bool catalogRequestLimit: false
+                readonly property var displayedCatalog: catalogExpectedId > 0 && window.state.routing_catalog && window.state.routing_catalog.request_id === catalogExpectedId ? window.state.routing_catalog : null
+                function invalidateCatalog() { catalogExpectedId = 0 }
+                function requestCatalog(offset) {
+                    invalidateCatalog()
+                    const id = window.nextCatalogRequestId()
+                    catalogRequestLimit = id === 0
+                    if (!id) return
+                    catalogExpectedId = id
+                    window.send({command: "routing_catalog", request_id: id, processes: processCatalog.checked, query: catalogQuery.text, offset: offset})
+                }
                 property var formRevision: window.state.routing_revision
                 property double pendingRequest: 0
                 property string saveError: ""
@@ -953,13 +972,15 @@ ApplicationWindow {
                     }
                 }
                 ComboBox { visible: !editor.advanced; model: [window.tr("Программа", "Executable"), window.tr("Домен", "Domain"), "IP / CIDR"]; onActivated: editor.simpleGroup = currentIndex }
-                TextField { id: catalogQuery; Layout.fillWidth: true; placeholderText: window.tr("Поиск программы", "Search applications") }
-                CheckBox { id: processCatalog; text: window.tr("Запущенные процессы", "Running processes") }
-                ActionButton { text: window.tr("Загрузить каталог", "Load catalog"); onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: 0}) }
+                TextField { id: catalogQuery; objectName: "routingCatalogQuery"; onTextChanged: editor.invalidateCatalog(); Layout.fillWidth: true; placeholderText: window.tr("Поиск программы", "Search applications") }
+                CheckBox { id: processCatalog; objectName: "routingCatalogProcesses"; onCheckedChanged: editor.invalidateCatalog(); text: window.tr("Запущенные процессы", "Running processes") }
+                ActionButton { objectName: "routingCatalogLoad"; text: window.tr("Загрузить каталог", "Load catalog"); onClicked: editor.requestCatalog(0) }
+                SmallLabel { objectName: "routingCatalogLimit"; visible: editor.catalogRequestLimit; text: window.tr("Исчерпан счётчик запросов каталога. Перезапустите приложение.", "Catalog request counter exhausted. Restart the application.") }
                 SmallLabel { Layout.fillWidth: true; text: window.tr("Каталог читается только по запросу. Wrapper/интерпретатор может быть неподдержан. PID — диагностика; выбор сохраняет только точный executable для следующих запусков.", "Catalog is read on demand. Wrappers/interpreters may be unsupported. PID is diagnostic; selection saves only the exact executable for future launches.") }
-                SmallLabel { visible: window.state.routing_catalog && window.state.routing_catalog.incomplete; text: window.tr("Каталог неполный: достигнут лимит или нет доступа", "Incomplete catalog: limit reached or access denied") }
+                SmallLabel { visible: !!editor.displayedCatalog && editor.displayedCatalog.incomplete; text: window.tr("Каталог неполный: достигнут лимит или нет доступа", "Incomplete catalog: limit reached or access denied") }
                 Repeater {
-                    model: window.state.routing_catalog ? window.state.routing_catalog.items : []
+                    objectName: "routingCatalogRows"
+                    model: editor.displayedCatalog ? editor.displayedCatalog.items : []
                     delegate: ActionButton {
                         required property var modelData
                         Layout.fillWidth: true
@@ -969,8 +990,8 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
-                    ActionButton { text: window.tr("Назад", "Previous"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset > 0; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: Math.max(0, window.state.routing_catalog.offset - 32)}) }
-                    ActionButton { text: window.tr("Далее", "Next"); enabled: window.state.routing_catalog && window.state.routing_catalog.offset + 32 < window.state.routing_catalog.total; onClicked: window.send({command: "routing_catalog", processes: processCatalog.checked, query: catalogQuery.text, offset: window.state.routing_catalog.offset + 32}) }
+                    ActionButton { objectName: "routingCatalogPrevious"; text: window.tr("Назад", "Previous"); enabled: !!editor.displayedCatalog && editor.displayedCatalog.offset > 0; onClicked: editor.requestCatalog(Math.max(0, editor.displayedCatalog.offset - 32)) }
+                    ActionButton { objectName: "routingCatalogNext"; text: window.tr("Далее", "Next"); enabled: !!editor.displayedCatalog && editor.displayedCatalog.offset + 32 < editor.displayedCatalog.total; onClicked: editor.requestCatalog(editor.displayedCatalog.offset + 32) }
                 }
                 PlainLabel { objectName: "routingRuleIdentity"; text: editor.selectedId ? window.tr("Редактирование #", "Editing #") + editor.selectedId : window.tr("Новое правило", "New rule") }
                 SmallLabel { visible: editor.advanced || editor.simpleGroup === 0; Layout.fillWidth: true; text: window.tr("Точный путь программы (для следующих запусков, без наследования дочерними процессами)", "Exact executable path (future launches, no child process inheritance)") }

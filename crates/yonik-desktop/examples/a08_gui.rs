@@ -129,12 +129,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if fs::remove_file(barrier_root.join("arm")).is_ok() {
                     fs::write(barrier_root.join("held"), token.to_string()).expect("own barrier");
                     let start = Instant::now();
-                    while !barrier_root.join("release").exists()
+                    while !barrier_root.join(format!("release-{token}")).exists()
                         && start.elapsed() < Duration::from_secs(8)
                     {
                         std::thread::sleep(Duration::from_millis(10));
                     }
-                    assert!(barrier_root.join("release").exists(), "barrier deadline");
+                    assert!(
+                        barrier_root.join(format!("release-{token}")).exists(),
+                        "barrier deadline"
+                    );
                 }
                 serde_json::json!({"event":"released","token":token})
             }
