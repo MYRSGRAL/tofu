@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "base": "0fc3442b45a2cc633f736b28d11c9863f7d35533",
+  "input_only_ref": "b0b3aaa7a24e14e5c49962c358f294b6b7dceb25",
+  "preserved_refs": [
+    "PR189",
+    "7ce",
+    "PR188",
+    "PR229"
+  ],
+  "artifacts": [
+    {
+      "path": "/usr/lib/systemd/systemd",
+      "resolved": "/usr/lib/systemd/systemd",
+      "sha256": "c8d085d92145266342fd60d686d2517fd7cf5f2659483b2cb3d5ad593790811a",
+      "bytes": 176520
+    },
+    {
+      "path": "/usr/lib/systemd/libsystemd-shared-262-1.so",
+      "resolved": "/usr/lib/systemd/libsystemd-shared-262-1.so",
+      "sha256": "eacc4ee8d31ee6f8d02f06878b11cc26f8c3f42e5f401122c3c9c7d4fd213c35",
+      "bytes": 6285192
+    },
+    {
+      "path": "/usr/lib/libseccomp.so.2",
+      "resolved": "/usr/lib/libseccomp.so.2.6.0",
+      "sha256": "5cd82027e6ab3dba31ee44200bb07f364a9f8e881d073fefbdf15a65cee8005c",
+      "bytes": 206864
+    }
+  ],
+  "package": {
+    "path": "/var/cache/pacman/pkg/systemd-262-1-x86_64.pkg.tar.zst",
+    "sha256": "6a66944f081cbd190ed0a63bb7be8dae35d9c246dd7248a40b63e66977695f9d",
+    "signature_sha256": "13bda419ef699dc801c2f05703c624a303d34d9965a16428897c6967938bf4d9",
+    "comparisons": [
+      {
+        "member": "usr/lib/systemd/systemd",
+        "exit_code": 0,
+        "sha256": "c8d085d92145266342fd60d686d2517fd7cf5f2659483b2cb3d5ad593790811a",
+        "equals_installed": true
+      },
+      {
+        "member": "usr/lib/systemd/libsystemd-shared-262-1.so",
+        "exit_code": 0,
+        "sha256": "eacc4ee8d31ee6f8d02f06878b11cc26f8c3f42e5f401122c3c9c7d4fd213c35",
+        "equals_installed": true
+      }
+    ]
+  },
+  "source_reference": {
+    "path": "/home/myrs/projects/yonik/local/orchestration/proposals/kernel-enforcement-probe-v2/sources/seccomp-util.c",
+    "sha256": "0ef3cb61a294b7a9d468892a260403b1e9a93726a2cab87351b617f403966ae8",
+    "authority": "historical upstream reference, not exact downstream source"
+  },
+  "records_sha256": "d2faf6beef494f1dd1b9bf9fbc33a000418850ae1b4bb3d09701cf0500f7be9f",
+  "unknowns": [
+    "cached signed libseccomp 2.6.0-1.1 x86_64_v3 package and detached signature missing in /var/cache",
+    "exact downstream source/build reproduction chain",
+    "complete libseccomp translation and emitted BPF semantics including i386/x32 exclusion",
+    "loaded PID1/executor/library bytes",
+    "successful complete filter load for authenticated pending invocation",
+    "production admission remains closed"
+  ],
+  "runtime_executed": false
+}

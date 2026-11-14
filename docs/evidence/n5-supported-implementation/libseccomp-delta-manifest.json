@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "parent_commit": "f6fb2ea1115e175a3cec0f62a14279ee7c4e891f",
+  "frozen_parent_files_unchanged": true,
+  "scope": "libseccomp signed archive to installed bytes; bounded static translation edges",
+  "downloads": [
+    {
+      "argv": [
+        "curl",
+        "--proto",
+        "=https",
+        "--location",
+        "--max-time",
+        "30",
+        "--connect-timeout",
+        "10",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--output",
+        "local/evidence/n5-libseccomp-download/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst",
+        "--write-out",
+        "%{http_code} %{url_effective} %{size_download}",
+        "https://us.cachyos.org/repo/x86_64_v3/cachyos-core-v3/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst"
+      ],
+      "exit_code": 0,
+      "stdout": "200 https://us.cachyos.org/repo/x86_64_v3/cachyos-core-v3/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst 103177",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "curl",
+        "--proto",
+        "=https",
+        "--location",
+        "--max-time",
+        "30",
+        "--connect-timeout",
+        "10",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--output",
+        "local/evidence/n5-libseccomp-download/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst.sig",
+        "--write-out",
+        "%{http_code} %{url_effective} %{size_download}",
+        "https://us.cachyos.org/repo/x86_64_v3/cachyos-core-v3/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst.sig"
+      ],
+      "exit_code": 0,
+      "stdout": "200 https://us.cachyos.org/repo/x86_64_v3/cachyos-core-v3/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst.sig 438",
+      "stderr": ""
+    }
+  ],
+  "package": {
+    "path": "/home/myrs/.t3/worktrees/yonik/t3-4a4c738e-40d1ff75c85cc1eb/local/evidence/n5-libseccomp-download/libseccomp-2.6.0-1.1-x86_64_v3.pkg.tar.zst",
+    "sha256": "68a684f61f9d3a3fbe1ae9392eebf55fbb71cf0799dd6b9d620070360a89c4f7",
+    "size": 103177,
+    "metadata_sha256_matches": true,
+    "member": "usr/lib/libseccomp.so.2.6.0",
+    "member_sha256": "5cd82027e6ab3dba31ee44200bb07f364a9f8e881d073fefbdf15a65cee8005c",
+    "installed_path": "/usr/lib/libseccomp.so.2.6.0",
+    "installed_sha256": "5cd82027e6ab3dba31ee44200bb07f364a9f8e881d073fefbdf15a65cee8005c",
+    "equals_installed": true
+  },
+  "signature": {
+    "sha256": "74254ad6174e50b3a0874466a13b2580f1fe33497440036da8fa25beca67f927",
+    "base64": "iQGzBAABCgAdFiEEiC3P5I4gUdSOJWKr87YHSI2zWkcFAmliyn4ACgkQ87YHSI2zWkfl5AwAhv4vmqpTzAa7wUCuf5d/lUEZLs5z0R0pwVDRRW53p0lVNrEvCl4EDTbwCfNiCHDPCXif+70vcfm1s/M9DMkbxO/O4N6/JTO9tyEruLMQ5cP0qvN/e0T+QYCpZsLn+VpXUBtH0cjXlo8oIZSrQrqDQLiWZfZXqxHVrMA3aH+1i5NXuYHF0KM2F2G0t1TpmuP16qGFJaNlxL4OiqrFsxawzSDFrFftv9fNISBkfQm8dIg/Cj1vTJ1l8pS6RAOu4rgwk03kCd5iBAvVL+DeyMzvB7YmNTUgG5uTCTk3KtVHFac29oW/yEjnK8a+X/3LDHc9dAZH7W8EWk60QcM1XDPXsBIUwxUHInaZpFHf7+aoRlKTM5mEsGwHZAXVI14jH/0mfIoSYLCEhe5Hn2zO7fZu6oz2PeaCvbSDgOx9swNvbEJVhzHWB8uRuSVGObm5nvnyhL+zFBLLXo8Gy2DRzUyWH30Q+RO615iTSZbAqCvp5ROqSsZUGAjAdvAIK9FwbAC/",
+    "fingerprint": "882DCFE48E2051D48E2562ABF3B607488DB35A47",
+    "keyring": "/etc/pacman.d/gnupg",
+    "gpg_exit": 0,
+    "trust": "TRUST_FULLY; existing pacman trust only; no imports"
+  },
+  "records_sha256": "e2f7c22f7ad6121a0dd16bc2a94c8f3103da1ed8c08adcc1532082acb3089734",
+  "covered_edges": [
+    "configured CachyOS mirror plus exact sync DB filename/hash -> HTTP200 package and detached signature",
+    "existing trusted CachyOS signing key -> package bytes",
+    "signed package ELF member -> exact installed libseccomp hash",
+    "x32 resolver bit munging and ABI rewrite dispatch",
+    "comparator op7 preserves both 64-bit datum words in rule input normalization"
+  ],
+  "unknowns": [
+    "exact downstream source/build reproduction",
+    "complete MASKED_EQ normalization through optimizer and BPF emitter",
+    "full native-only i386/x32 exclusion proof",
+    "loaded PID1/executor/library bytes and resolution",
+    "actual full successful filter load for exact authenticated pending invocation",
+    "production admission"
+  ],
+  "runtime_executed": false,
+  "transient_created": false
+}
