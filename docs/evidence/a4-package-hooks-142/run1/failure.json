@@ -1,0 +1,6 @@
+{
+  "type": "TimeoutError",
+  "error": "SSH readiness deadline240s",
+  "failed": true,
+  "unknown_transaction_outcome": false
+}
