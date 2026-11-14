@@ -1391,7 +1391,10 @@ mod tests {
         assert!(observation.bind_run([1; 32], [1; 16], 1, 1).is_err());
         assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
         assert!(observation.same_custody(&observation));
+        let retained = observation.retention();
         drop(observation);
+        assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_ok());
+        drop(retained);
         assert!(std::fs::metadata(format!("/proc/self/fd/{fd}")).is_err());
     }
     #[test]
