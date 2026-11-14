@@ -411,6 +411,38 @@ fn encode_data_v4(
     Ok(f)
 }
 
+/// Проверка покрытия после authenticated v4 transport и immutable producer validation.
+/// Хеш ссылки не подпись: доверие producer проверяется отдельно до вызова.
+pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> Result<(), Error> {
+    use sha2::{Digest, Sha256};
+    use yonik_nsfs::fixed_self_fence::{PROFILE_DIGEST, PROGRAM_SHA256};
+    let data = decode(frame, expected)?;
+    if expected.profile != PROFILE_DIGEST {
+        return Err(Error::Profile);
+    }
+    let mut vector = [1; VECTOR];
+    vector[2] = 38;
+    if data.observations != vector {
+        return Err(Error::ObservationMismatch);
+    }
+    if data.baseline_filters.checked_add(1) != Some(data.current_filters) {
+        return Err(Error::IncompleteApplication);
+    }
+    let reference = data.receipt_reference.ok_or(Error::EvidenceUnavailable)?;
+    let mut canonical = *frame;
+    canonical[184..216].fill(0);
+    let mut hash = Sha256::new();
+    hash.update(b"yonik/fixed-self-fence/v2/local-delta1/receipt\0");
+    hash.update(PROGRAM_SHA256);
+    hash.update(PROFILE_DIGEST);
+    hash.update(canonical);
+    let computed: [u8; 32] = hash.finalize().into();
+    if computed != reference {
+        return Err(Error::Binding);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -916,38 +948,6 @@ mod tests {
         drop(pending(&owner, Instant::now() + Duration::from_secs(1)));
         assert!(owner.is_revoked());
     }
-}
-
-/// Проверка покрытия после authenticated v4 transport и immutable producer validation.
-/// Хеш ссылки не подпись: доверие producer проверяется отдельно до вызова.
-pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> Result<(), Error> {
-    use sha2::{Digest, Sha256};
-    use yonik_nsfs::fixed_self_fence::{PROFILE_DIGEST, PROGRAM_SHA256};
-    let data = decode(frame, expected)?;
-    if expected.profile != PROFILE_DIGEST {
-        return Err(Error::Profile);
-    }
-    let mut vector = [1; VECTOR];
-    vector[2] = 38;
-    if data.observations != vector {
-        return Err(Error::ObservationMismatch);
-    }
-    if data.baseline_filters.checked_add(1) != Some(data.current_filters) {
-        return Err(Error::IncompleteApplication);
-    }
-    let reference = data.receipt_reference.ok_or(Error::EvidenceUnavailable)?;
-    let mut canonical = *frame;
-    canonical[184..216].fill(0);
-    let mut hash = Sha256::new();
-    hash.update(b"yonik/fixed-self-fence/v2/local-delta1/receipt\0");
-    hash.update(PROGRAM_SHA256);
-    hash.update(PROFILE_DIGEST);
-    hash.update(canonical);
-    let computed: [u8; 32] = hash.finalize().into();
-    if computed != reference {
-        return Err(Error::Binding);
-    }
-    Ok(())
 }
 
 #[cfg(test)]

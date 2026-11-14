@@ -13,6 +13,8 @@ use crate::{
 use std::os::unix::net::UnixStream;
 use tokio::time::Instant as Deadline;
 
+pub(crate) type NativeRoleContext = ([u8; 32], [u8; 16], u64, [u8; 16], u64, [u8; 32]);
+
 type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) struct VerifiedPendingRun {
@@ -33,6 +35,7 @@ pub(crate) struct VerifiedCoverage {
 }
 
 impl VerifiedPendingRun {
+    #[allow(clippy::too_many_arguments)] // Согласованный consuming интерфейс canonical pending context.
     pub(crate) async fn verify(
         supervisor: &SystemWorkerSupervisor,
         owner: &RunAuthority,
@@ -198,7 +201,7 @@ impl RuntimeScopeStamp {
         }
         Ok(())
     }
-    pub(crate) fn context(&self) -> ([u8; 32], [u8; 16], u64, [u8; 16], u64, [u8; 32]) {
+    pub(crate) fn context(&self) -> NativeRoleContext {
         let e = &self.inner.expected;
         (
             e.nonce,
@@ -217,7 +220,7 @@ impl RunRole {
     pub(crate) fn validate(&self) -> Result<()> {
         self.scope.validate()
     }
-    pub(crate) fn context(&self) -> Result<([u8; 32], [u8; 16], u64, [u8; 16], u64, [u8; 32])> {
+    pub(crate) fn context(&self) -> Result<NativeRoleContext> {
         self.validate()?;
         Ok(self.scope.context())
     }
@@ -305,5 +308,11 @@ impl RuntimeScopeStamp {
             owner: self.owner,
             queue: Arc::clone(&self.queue),
         }
+    }
+}
+
+impl RuntimeScopeStamp {
+    pub(crate) fn owns_observation(&self, observation: &NamespaceObservation) -> bool {
+        self.inner.custody.same_custody(observation)
     }
 }

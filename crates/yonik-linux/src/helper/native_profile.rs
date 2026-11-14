@@ -261,6 +261,42 @@ impl VerifiedInstalledProfile {
     }
 }
 
+/// Linux экспортирует native-endian ELF notes; принимается один полный GNU build-id.
+fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
+    if notes.len() > 65536 {
+        return Err(Error::Untrusted);
+    }
+    let mut offset = 0usize;
+    let mut found = None;
+    while offset < notes.len() {
+        let header = notes
+            .get(offset..offset.checked_add(12).ok_or(Error::Untrusted)?)
+            .ok_or(Error::Untrusted)?;
+        let word = |n| u32::from_ne_bytes(header[n..n + 4].try_into().unwrap_or([0; 4])) as usize;
+        let (namesz, descsz, kind) = (word(0), word(4), word(8));
+        offset += 12;
+        let name_end = offset.checked_add(namesz).ok_or(Error::Untrusted)?;
+        let name = notes.get(offset..name_end).ok_or(Error::Untrusted)?;
+        let desc_start = name_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
+        let desc_end = desc_start.checked_add(descsz).ok_or(Error::Untrusted)?;
+        let desc = notes.get(desc_start..desc_end).ok_or(Error::Untrusted)?;
+        if kind == 3 && name == b"GNU\0" {
+            if found.is_some() || descsz != 20 {
+                return Err(Error::Untrusted);
+            }
+            let id: [u8; 20] = desc.try_into().map_err(|_| Error::Untrusted)?;
+            if id == [0; 20] {
+                return Err(Error::Untrusted);
+            }
+            found = Some(id);
+        }
+        offset = desc_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
+        if offset > notes.len() {
+            return Err(Error::Untrusted);
+        }
+    }
+    found.ok_or(Error::Unavailable)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,42 +345,6 @@ mod tests {
     }
 }
 
-/// Linux exports native-endian ELF notes; only a single complete GNU build-id is accepted.
-fn kernel_build_id(notes: &[u8]) -> Result<[u8; 20]> {
-    if notes.len() > 65536 {
-        return Err(Error::Untrusted);
-    }
-    let mut offset = 0usize;
-    let mut found = None;
-    while offset < notes.len() {
-        let header = notes
-            .get(offset..offset.checked_add(12).ok_or(Error::Untrusted)?)
-            .ok_or(Error::Untrusted)?;
-        let word = |n| u32::from_ne_bytes(header[n..n + 4].try_into().unwrap_or([0; 4])) as usize;
-        let (namesz, descsz, kind) = (word(0), word(4), word(8));
-        offset += 12;
-        let name_end = offset.checked_add(namesz).ok_or(Error::Untrusted)?;
-        let name = notes.get(offset..name_end).ok_or(Error::Untrusted)?;
-        let desc_start = name_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
-        let desc_end = desc_start.checked_add(descsz).ok_or(Error::Untrusted)?;
-        let desc = notes.get(desc_start..desc_end).ok_or(Error::Untrusted)?;
-        if kind == 3 && name == b"GNU\0" {
-            if found.is_some() || descsz != 20 {
-                return Err(Error::Untrusted);
-            }
-            let id: [u8; 20] = desc.try_into().map_err(|_| Error::Untrusted)?;
-            if id == [0; 20] {
-                return Err(Error::Untrusted);
-            }
-            found = Some(id);
-        }
-        offset = desc_end.checked_add(3).ok_or(Error::Untrusted)? & !3;
-        if offset > notes.len() {
-            return Err(Error::Untrusted);
-        }
-    }
-    found.ok_or(Error::Unavailable)
-}
 #[cfg(test)]
 mod kernel_note_tests {
     use super::*;
