@@ -98,7 +98,7 @@ impl Binding {
         let reason = u16::from_be_bytes([bytes[10], bytes[11]]);
         match (kind, bytes[9], reason, rights) {
             (HELLO | INSPECT, 0, 0, 0) | (ACK | RESULT, 0, 0, 4) => Ok(()),
-            (RESULT, 1, 1..=7, 0) => Ok(()),
+            (RESULT, 1, 1..=6, 0) => Ok(()),
             _ => Err(Unavailable::Malformed),
         }
     }

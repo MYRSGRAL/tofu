@@ -64,24 +64,59 @@ struct Protocol {
     binding: Binding,
     id: u64,
 }
+struct PendingLease<'a> {
+    lease: &'a PeerVerifierLease,
+    armed: bool,
+}
+impl Drop for PendingLease<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.lease.revoke();
+        }
+    }
+}
 impl Protocol {
     fn observe(
         &mut self,
         deadline: Instant,
         lease: &PeerVerifierLease,
-    ) -> Result<VerifiedPeerSnapshot, Unavailable> {
-        self.id = self.id.checked_add(1).ok_or(Unavailable::Limit)?;
+    ) -> Result<VerifiedPeerSnapshot, AttributionFailure> {
+        self.id = self
+            .id
+            .checked_add(1)
+            .ok_or(AttributionFailure::ProcUnavailable)?;
         self.channel
-            .send(&self.binding.encode(wire::INSPECT, self.id)?, &[], deadline)?;
-        let packet = self.channel.receive(FRAME, Some(deadline))?;
-        credentials(packet.credentials, lease.pid(), lease.uid())?;
+            .send(
+                &self
+                    .binding
+                    .encode(wire::INSPECT, self.id)
+                    .map_err(native)?,
+                &[],
+                deadline,
+            )
+            .map_err(native)?;
+        let packet = self
+            .channel
+            .receive(FRAME, Some(deadline))
+            .map_err(native)?;
+        credentials(packet.credentials, lease.pid(), lease.uid()).map_err(native)?;
         self.binding
-            .validate(&packet.bytes, wire::RESULT, self.id, packet.rights.len())?;
+            .validate(&packet.bytes, wire::RESULT, self.id, packet.rights.len())
+            .map_err(native)?;
         if packet.bytes[9] != 0 {
-            return Err(Unavailable::Coverage);
+            return Err(
+                match u16::from_be_bytes([packet.bytes[10], packet.bytes[11]]) {
+                    1 => AttributionFailure::ProcUnavailable,
+                    2 => AttributionFailure::ForeignUidDenied,
+                    3 => AttributionFailure::ProcessChanged,
+                    4 => AttributionFailure::ScanLimit,
+                    6 => AttributionFailure::WorkerIsCaller,
+                    _ => AttributionFailure::NativeMechanismUnverified,
+                },
+            );
         }
-        let snapshot = VerifiedPeerSnapshot::from_packet(packet)?;
-        fence(deadline)?;
+        let snapshot = VerifiedPeerSnapshot::from_packet(packet).map_err(native)?;
+        fence(deadline).map_err(native)?;
         Ok(snapshot)
     }
 }
@@ -100,6 +135,10 @@ impl PeerAttestation {
         captured: Arc<CapturedBusScope>,
         source: VerifiedStaticInstalledImage,
     ) -> Result<Arc<Self>, AttributionFailure> {
+        let mut pending = PendingLease {
+            lease: &lease,
+            armed: true,
+        };
         captured.validate()?;
         source.revalidate().map_err(native)?;
         lease.validate().map_err(native)?;
@@ -142,11 +181,7 @@ impl PeerAttestation {
             binding,
             id: 0,
         };
-        let snapshot = Arc::new(
-            protocol
-                .observe(deadline.min(Instant::now() + DEADLINE), &lease)
-                .map_err(native)?,
-        );
+        let snapshot = Arc::new(protocol.observe(deadline.min(Instant::now() + DEADLINE), &lease)?);
         captured.validate()?;
         source.validate().map_err(native)?;
         lease.validate().map_err(native)?;
@@ -155,6 +190,8 @@ impl PeerAttestation {
         lease
             .retain_snapshot(Arc::clone(&snapshot))
             .map_err(native)?;
+        pending.armed = false;
+        drop(pending);
         Ok(Arc::new(Self {
             protocol: Mutex::new(protocol),
             lease,
@@ -181,7 +218,14 @@ impl PeerAttestation {
             .protocol
             .try_lock()
             .map_err(|_| AttributionFailure::ProcUnavailable)?;
-        let fresh = protocol.observe(deadline, &self.lease).map_err(native)?;
+        let fresh = match protocol.observe(deadline, &self.lease) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.lease.revoke();
+                protocol.channel.shutdown();
+                return Err(error);
+            }
+        };
         if !self.snapshot.same(&fresh) {
             self.lease.revoke();
             protocol.channel.shutdown();
@@ -272,10 +316,7 @@ pub(super) fn serve(
     }
     let binding = Binding::hello(&hello.bytes)?;
     credentials(hello.credentials, binding.server, 0)?;
-    if crate::attribution::start_time(binding.server)
-        .map_err(native)
-        .is_err()
-        || binding.inspector != std::process::id()
+    if binding.inspector != std::process::id()
         || super::start(binding.server)? != binding.server_start
         || super::start(std::process::id())? != binding.inspector_start
     {
