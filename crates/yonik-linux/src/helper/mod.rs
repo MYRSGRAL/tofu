@@ -44,7 +44,7 @@ use crate::Cancellation;
 const AUTHORITY: &str = "org.freedesktop.PolicyKit1";
 const PATH: &str = "/org/freedesktop/PolicyKit1/Authority";
 const INTERFACE: &str = "org.freedesktop.PolicyKit1.Authority";
-const SYSTEM_BUS: &str = "unix:path=/run/dbus/system_bus_socket";
+mod output_bus;
 const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERACTIVE_TIMEOUT: Duration = Duration::from_secs(120);
 const CANCEL_TIMEOUT: Duration = Duration::from_millis(250);
@@ -199,11 +199,15 @@ pub struct PeerAuthorizer {
 impl PeerAuthorizer {
     pub async fn system(mut cancel: Cancellation) -> Result<Self, AuthorizationError> {
         let connection = bounded(&mut cancel, Instant::now() + SETUP_TIMEOUT, async {
-            zbus::connection::Builder::address(SYSTEM_BUS)
-                .map_err(|_| AuthorizationError::Unavailable)?
-                .build()
-                .await
-                .map_err(|_| AuthorizationError::Unavailable)
+            output_bus::builder(
+                tokio::net::UnixStream::connect("/run/dbus/system_bus_socket")
+                    .await
+                    .map_err(|_| AuthorizationError::Unavailable)?,
+            )
+            .map_err(|_| AuthorizationError::Unavailable)?
+            .build()
+            .await
+            .map_err(|_| AuthorizationError::Unavailable)
         })
         .await?;
         Ok(Self {

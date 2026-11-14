@@ -653,7 +653,17 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         cancel: &mut Cancellation,
     ) -> Result<WorkerTicket> {
-        self.start_inner(payload, None, cancel)
+        self.start_inner(payload, None, None, cancel)
+            .await
+            .map(|(ticket, _)| ticket)
+    }
+    pub(crate) async fn start_output(
+        &mut self,
+        payload: Arc<WorkerPayload>,
+        output: Option<crate::output_transport::ValidatedWriters>,
+        cancel: &mut Cancellation,
+    ) -> Result<WorkerTicket> {
+        self.start_inner(payload, None, output, cancel)
             .await
             .map(|(ticket, _)| ticket)
     }
@@ -666,7 +676,7 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
     ) -> Result<AuthorizedRun> {
         let (ticket, lease) = self
-            .start_inner(payload, Some(authorization), cancel)
+            .start_inner(payload, Some(authorization), None, cancel)
             .await?;
         Ok(AuthorizedRun {
             ticket,
@@ -677,6 +687,7 @@ impl SystemWorkerSupervisor {
         &mut self,
         payload: Arc<WorkerPayload>,
         authorization: Option<RunAuthorization>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<(WorkerTicket, Option<AuthorizedLease>)> {
         // Guard живёт в future, а не в blocking task: drop отзывает поздний ACK.
@@ -684,7 +695,14 @@ impl SystemWorkerSupervisor {
         let deadline = Instant::now() + DEADLINE;
         self.begin(WorkerMode::Run, cancel, deadline).await?;
         let (ack, binding) = self
-            .send_inner(payload, WorkerMode::Run, authorization, cancel, deadline)
+            .send_inner(
+                payload,
+                WorkerMode::Run,
+                authorization,
+                output,
+                cancel,
+                deadline,
+            )
             .await?;
         if ack.status != WorkerStatus::Accepted {
             return Err(WorkerSupervisorError::Protocol);
@@ -793,7 +811,7 @@ impl SystemWorkerSupervisor {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<WorkerAck> {
-        self.send_inner(payload, mode, None, cancel, deadline)
+        self.send_inner(payload, mode, None, None, cancel, deadline)
             .await
             .map(|(ack, _)| ack)
     }
@@ -802,10 +820,13 @@ impl SystemWorkerSupervisor {
         payload: Arc<WorkerPayload>,
         mode: WorkerMode,
         authorization: Option<RunAuthorization>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> TransferResult {
-        if authorization.is_some() && mode != WorkerMode::Run {
+        if (authorization.is_some() && mode != WorkerMode::Run)
+            || (output.is_some() && (mode != WorkerMode::Run || authorization.is_some()))
+        {
             return Err(WorkerSupervisorError::Protocol);
         }
         if payload.needs_tmpfs_assets() {
@@ -875,7 +896,7 @@ impl SystemWorkerSupervisor {
                     .map(|(ack, binding)| (ack, Some(binding)))
             } else {
                 payload
-                    .send(&stream, mode)
+                    .send_output(&stream, mode, output)
                     .map(|ack| (ack, None))
                     .map_err(|_| WorkerSupervisorError::Protocol)
             }

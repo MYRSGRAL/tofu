@@ -108,7 +108,6 @@ pub mod bundle_identity;
 #[cfg(target_os = "linux")]
 pub mod bundle_request;
 
-// Staged FR16 carrier не входит в default library.
-#[cfg(all(target_os = "linux", any(test, feature = "test-support")))]
-#[allow(dead_code)] // Нет production caller до отдельного root decision.
+// Закрытый legacy worker output transport.
+#[cfg(target_os = "linux")]
 mod output_transport;

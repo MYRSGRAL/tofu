@@ -116,6 +116,15 @@ impl Server {
         assert_eq!(value["handle"].as_array().unwrap().len(), 32);
         "{\"version\":1,\"state\":\"verified_rules\"}".into()
     }
+    #[zbus(name = "ApplyOutputV1")]
+    async fn apply_output(&self, request: &str, output: Vec<zbus::zvariant::OwnedFd>) -> String {
+        assert_eq!(output.len(), 2);
+        let value: serde_json::Value = serde_json::from_str(request).unwrap();
+        assert_eq!(value["version"], 1);
+        self.effects.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        self.apply(request).await
+    }
     async fn stop(&self, _request: &str) -> String {
         self.effects.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -441,7 +450,8 @@ async fn adapter_gate_revision_and_unknown_cleanup() {
             profile: 1,
             generation: 1,
         };
-        let mut adapter = SystemSession::new(client, revision);
+        let mut adapter =
+            SystemSession::new(client, revision, yonik_linux::event_log::EventLog::new());
         let report = yonik_import::import_bytes(
             b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
         )
@@ -550,7 +560,7 @@ async fn adapter_retained_policy_can_prepare_without_unlock() {
         profile: 1,
         generation: 1,
     };
-    let mut adapter = SystemSession::new(client, revision);
+    let mut adapter = SystemSession::new(client, revision, yonik_linux::event_log::EventLog::new());
     let report = yonik_import::import_bytes(
         b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
     )
@@ -629,7 +639,7 @@ async fn inline_policy_prepare_apply_одноразовый_и_инвалиди�
         profile: 1,
         generation: 1,
     };
-    let mut session = SystemSession::new(client, revision);
+    let mut session = SystemSession::new(client, revision, yonik_linux::event_log::EventLog::new());
     let report = yonik_import::import_bytes(
         b"vless://11111111-1111-1111-1111-111111111111@example.org:443?security=tls".to_vec(),
     )
@@ -786,4 +796,63 @@ async fn bundle_fd_transport_echo_closed_reply_and_no_mutation_retry() {
     ));
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(effects.load(Ordering::SeqCst), before + 1);
+}
+
+#[tokio::test]
+async fn output_cancel_after_send_is_one_shot_and_foreign_prepared_is_stale() {
+    use yonik_linux::{event_log::EventLog, system_client::PreparedOutput};
+    let bus = Bus::new();
+    let server = bus.connect().await;
+    let effects = Arc::new(AtomicUsize::new(0));
+    server
+        .object_server()
+        .at(
+            SERVICE_PATH,
+            Server {
+                system_tun: false,
+                response: Arc::new(Mutex::new(String::new())),
+                effects: effects.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    server.request_name(SERVICE_NAME).await.unwrap();
+    let (_keep, cancel) = Cancellation::new();
+    let mut client = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let prepared = client.prepare(deadline(), cancel.clone()).await.unwrap();
+    let output =
+        PreparedOutput::bind(prepared, yonik_engine::Engine::Xray, &EventLog::new(), 1).unwrap();
+    let (stop, cancellation) = Cancellation::new();
+    let observed = effects.clone();
+    let signal = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while observed.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send_replace(true);
+    });
+    let (result, drain) = client.apply_output(output, deadline(), cancellation).await;
+    assert_eq!(result, Err(ClientError::Cancelled));
+    signal.await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), drain.unwrap().drained())
+            .await
+            .unwrap()
+    );
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    let prepared = client.prepare(deadline(), cancel.clone()).await.unwrap();
+    let output =
+        PreparedOutput::bind(prepared, yonik_engine::Engine::Xray, &EventLog::new(), 2).unwrap();
+    let mut foreign = SystemClient::on_connection(bus.connect().await, deadline(), cancel.clone())
+        .await
+        .unwrap();
+    let (result, drain) = foreign.apply_output(output, deadline(), cancel).await;
+    assert_eq!(result, Err(ClientError::Stale));
+    assert!(drain.is_none());
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
 }

@@ -4,7 +4,7 @@ use yonik_engine::Engine;
 use yonik_import::ServerIntent;
 use yonik_linux::{
     Cancellation,
-    system_client::{ClientError, Prepared, State, SystemClient},
+    system_client::{ClientError, PreparedOutput, State, SystemClient},
 };
 
 /// Ревизии выдаёт GUI host при каждом изменении выбора или источника.
@@ -18,19 +18,34 @@ pub struct ProfileRevision {
 pub struct SystemSession {
     client: SystemClient,
     revision: ProfileRevision,
-    prepared: Option<Prepared>,
+    prepared: Option<PreparedOutput>,
+    log: yonik_linux::event_log::EventLog,
+    drains: Vec<yonik_linux::system_client::output::OutputDrain>,
     state: State,
     capability: Option<Instant>,
 }
 impl SystemSession {
-    pub fn new(client: SystemClient, revision: ProfileRevision) -> Self {
+    pub fn new(
+        client: SystemClient,
+        revision: ProfileRevision,
+        log: yonik_linux::event_log::EventLog,
+    ) -> Self {
         Self {
             client,
+            log,
+            drains: Vec::new(),
             revision,
             prepared: None,
             state: State::Unknown,
             capability: None,
         }
+    }
+    // Новый bus owner не меняет immutable контекст уже работающих readers.
+    pub(crate) fn replace_client(&mut self, client: SystemClient) {
+        self.client = client;
+        self.prepared = None;
+        self.capability = None;
+        self.state = State::Unknown;
     }
     pub fn system_tun_available(&self) -> bool {
         !self.owner_lost()
@@ -81,10 +96,13 @@ impl SystemSession {
         {
             return Err(ClientError::Unsupported);
         }
+        let prepared = self
+            .client
+            .prepare_profile(server, engine, kill_switch, deadline, cancel)
+            .await?;
         self.prepared = Some(
-            self.client
-                .prepare_profile(server, engine, kill_switch, deadline, cancel)
-                .await?,
+            PreparedOutput::bind(prepared, engine, &self.log, revision.generation)
+                .map_err(|_| ClientError::Unavailable)?,
         );
         Ok(())
     }
@@ -109,10 +127,13 @@ impl SystemSession {
         {
             return Err(ClientError::Unsupported);
         }
+        let prepared = self
+            .client
+            .prepare_inline_policy(server, engine, true, policy, deadline, cancel)
+            .await?;
         self.prepared = Some(
-            self.client
-                .prepare_inline_policy(server, engine, true, policy, deadline, cancel)
-                .await?,
+            PreparedOutput::bind(prepared, engine, &self.log, revision.generation)
+                .map_err(|_| ClientError::Unavailable)?,
         );
         Ok(())
     }
@@ -126,7 +147,10 @@ impl SystemSession {
         let prepared = self.prepared.take().ok_or(ClientError::InvalidHandle)?;
         // До отправки эффекта публикуем неизвестный исход: drop future безопасен.
         self.state = State::Unknown;
-        let result = self.client.apply(prepared, deadline, cancel).await;
+        let (result, drain) = self.client.apply_output(prepared, deadline, cancel).await;
+        if let Some(drain) = drain {
+            self.drains.push(drain);
+        }
         self.record(result)
     }
     fn record(&mut self, result: Result<State, ClientError>) -> Result<State, ClientError> {
@@ -158,7 +182,21 @@ impl SystemSession {
         self.prepared = None;
         self.state = State::Unknown;
         let result = self.client.stop(deadline, cancel).await;
+        if matches!(result, Ok(State::NoManagedPolicy | State::RecoveryRequired)) {
+            for drain in std::mem::take(&mut self.drains) {
+                if !drain.drained().await {
+                    return self.record(Err(ClientError::Unavailable));
+                }
+            }
+        }
         self.record(result)
+    }
+    pub async fn drain_output(&mut self) -> bool {
+        let mut complete = true;
+        for drain in self.drains.drain(..) {
+            complete &= drain.drained().await;
+        }
+        complete
     }
     pub async fn unlock(
         &mut self,
@@ -168,6 +206,13 @@ impl SystemSession {
         self.prepared = None;
         self.state = State::Unknown;
         let result = self.client.unlock(deadline, cancel).await;
+        if matches!(result, Ok(State::NoManagedPolicy)) {
+            for drain in std::mem::take(&mut self.drains) {
+                if !drain.drained().await {
+                    return self.record(Err(ClientError::Unavailable));
+                }
+            }
+        }
         self.record(result)
     }
 }
