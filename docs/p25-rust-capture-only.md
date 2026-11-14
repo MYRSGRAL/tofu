@@ -54,6 +54,9 @@ Registry TAR ограничен 64 MiB compressed/decoded; декодирова�
 во временный файл. До `tarfile` проверяются физические заголовки, cap metadata,
 ограниченная цепочка PAX/GNU metadata и полный нулевой хвост после двух конечных
 блоков. Sparse-форматы и скрытые записи после end marker отклоняются.
+PAX size override и ненулевой payload nonregular-записей отклоняются до разбора:
+их семантика могла бы рассинхронизировать смещения предварительного прохода
+и `tarfile`. Обычного size header достаточно при заданных caps.
 Внутренний `_registry_tar(archive, *, gzip_encoded=True)` возвращает context manager
 с `TarFile`; `gzip_encoded=False` предназначен для pinned plain source TAR
 с общим `MAX_FILE` cap. Проверка package/path/type остаётся обязанностью consumer.

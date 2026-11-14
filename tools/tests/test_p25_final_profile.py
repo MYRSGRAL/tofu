@@ -221,6 +221,48 @@ class FinalProfileTests(unittest.TestCase):
             tool.assert_not_called()
             runner.assert_not_called()
 
+    def test_registry_tar_rejects_offset_overrides_before_parser(self) -> None:
+        import gzip
+        import io
+        import tarfile
+        from unittest.mock import Mock
+
+        hidden = io.BytesIO()
+        for _ in range(400):
+            header = tarfile.TarInfo("metadata")
+            header.type = tarfile.XHDTYPE
+            hidden.write(header.tobuf())
+        hidden.write(bytes(1024))
+        body = hidden.getvalue()
+        for kind in ("pax-size", "directory", "link"):
+            with self.subTest(kind=kind):
+                raw = io.BytesIO()
+                header = tarfile.TarInfo("package/payload")
+                header.size = len(body)
+                if kind == "pax-size":
+                    pax = tarfile.TarInfo("metadata")
+                    pax.type = tarfile.XHDTYPE
+                    pax.size = 10
+                    raw.write(pax.tobuf())
+                    raw.write(b"10 size=0\n" + bytes(502))
+                else:
+                    header.type = (
+                        tarfile.DIRTYPE if kind == "directory" else tarfile.SYMTYPE
+                    )
+                raw.write(header.tobuf())
+                raw.write(body)
+                raw.write(bytes(1024))
+                parser = Mock(side_effect=AssertionError("High-level parser reached"))
+                with (
+                    patch.object(p.tarfile, "open", parser),
+                    self.assertRaisesRegex(
+                        ValueError, "size override|nonregular payload"
+                    ),
+                ):
+                    with p._registry_tar(gzip.compress(raw.getvalue())):
+                        pass
+                parser.assert_not_called()
+
     def test_registry_rejects_untrusted_inputs_and_mutation(self) -> None:
         for case in (
             "unknown",

@@ -282,6 +282,9 @@ def _pax_fields(payload: bytes) -> None:
         require(record.endswith(b"\n") and b"=" in record, "TAR PAX record")
         key = record[:-1].split(b"=", 1)[0]
         require(bool(key) and not key.startswith(b"GNU.sparse"), "TAR sparse PAX")
+        # Все допустимые файлы меньше предела обычного size header. Override
+        # изменил бы смещения tarfile относительно предварительного прохода.
+        require(key != b"size", "TAR PAX size override")
         fields += 1
         require(fields <= MAX_FILES, "TAR PAX field cap")
         position = end
@@ -327,12 +330,17 @@ def _registry_tar(
                 require(headers <= MAX_FILES * 4, "TAR physical header cap")
                 member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
                 require(member.type != tarfile.GNUTYPE_SPARSE, "TAR sparse header")
+                metadata = member.type in (b"x", b"g", b"X", b"L", b"K")
+                require(
+                    member.isreg() or metadata or member.size == 0,
+                    "TAR nonregular payload",
+                )
                 padded = (member.size + 511) // 512 * 512
                 require(
                     member.size >= 0 and expanded.tell() + padded <= size,
                     "TAR physical member bounds",
                 )
-                if member.type in (b"x", b"g", b"X", b"L", b"K"):
+                if metadata:
                     metadata_chain += 1
                     require(metadata_chain <= 8, "TAR metadata chain cap")
                     require(member.size <= MAX_METADATA, "TAR metadata cap")
