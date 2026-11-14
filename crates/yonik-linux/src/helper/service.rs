@@ -668,3 +668,23 @@ async fn send_result(
 #[cfg(test)]
 #[path = "service_tests.rs"]
 pub(super) mod tests;
+
+// Typed decode boundary не включён в parse/dispatch или D-Bus introspection.
+#[cfg(any(test, feature = "test-support"))]
+#[allow(dead_code)]
+struct StagedApplyOutput {
+    _handle: PreparedHandle,
+    _writers: crate::output_transport::ValidatedWriters,
+}
+#[cfg(any(test, feature = "test-support"))]
+#[allow(dead_code)]
+fn decode_staged_output(message: Message) -> Result<StagedApplyOutput, ServiceError> {
+    let decoded =
+        crate::output_transport::decode(message).map_err(|_| ServiceError::InvalidRequest)?;
+    let handle = PreparedHandle::try_from(decoded.handle.as_slice())
+        .map_err(|_| ServiceError::InvalidRequest)?;
+    Ok(StagedApplyOutput {
+        _handle: handle,
+        _writers: decoded.writers,
+    })
+}

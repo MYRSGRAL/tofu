@@ -1,0 +1,20 @@
+error[E0425]: cannot find function `mkfifo` in module `rustix::fs`
+   --> crates/yonik-linux/src/output_transport/carrier_tests.rs:199:17
+    |
+199 |     rustix::fs::mkfifo(&path, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR)?;
+    |                 ^^^^^^ help: a function with a similar name exists: `mkfifoat`
+    |
+   ::: /home/myrs/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustix-1.1.6/src/fs/at.rs:514:1
+    |
+514 | pub fn mkfifoat<P: path::Arg, Fd: AsFd>(dirfd: Fd, path: P, mode: Mode) -> io::Result<()> {
+    | ----------------------------------------------------------------------------------------- similarly named function `mkfifoat` defined here
+
+warning: unused import: `os::fd::OwnedFd`
+ --> crates/yonik-linux/src/worker/output_transport.rs:7:15
+  |
+7 | use std::{io, os::fd::OwnedFd};
+  |               ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+For more information about this error, try `rustc --explain E0425`.
