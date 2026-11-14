@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "CONSISTENT_DATA_ONLY",
+  "checks": 2620,
+  "headers": 23,
+  "explicit_spdx_candidates": 20,
+  "verified_qt_primary_refs": 195,
+  "unique_qt_primary_sha256": 172,
+  "verified_cxx_primary_refs": 20,
+  "source_fragments_bytes": 616534,
+  "replayed_source_offer_sha256": "d2aa23f29622280fbc2c826e200ae3d99ed1067391aabc854808b8062770f74c",
+  "compiler_query_build_executed": false,
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false,
+  "scope": "offline data/hash/reference checks, not production/legal acceptance"
+}

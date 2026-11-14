@@ -1,0 +1,237 @@
+{
+  "schema": 1,
+  "frozen_producer_ref": "9f51fae1988fe10c8eba8de3cea9b924128b4419",
+  "scope": "attachment join to retained evidence; never rewrite capture status",
+  "required_retained_files": [
+    "build-capture-manifest.json",
+    "build-capture-record.json",
+    "build-capture-report.json",
+    "build-cxx-observed.json"
+  ],
+  "integrity_checks": [
+    {
+      "manifest_field": "record_sha256",
+      "file": "build-capture-record.json"
+    },
+    {
+      "manifest_field": "report_sha256",
+      "file": "build-capture-report.json"
+    },
+    {
+      "manifest_field": "positive_metadata.observed_sha256",
+      "file": "build-cxx-observed.json"
+    }
+  ],
+  "join_steps": [
+    {
+      "step": 1,
+      "action": "verify manifest pins, final_profile/source/ELF identity and producer review before consuming rows"
+    },
+    {
+      "step": 2,
+      "action": "for each observed.input_origins[origin_path]=staged_path, select report.files row root=sdk,path=staged_path,verified=true"
+    },
+    {
+      "step": 3,
+      "action": "match candidate origin_path AND sha256 to captured row.sha256, not only filename, version, package name or SPDX token"
+    },
+    {
+      "step": 4,
+      "action": "attach exact matched notice_excerpt/SPDX and available primary SHA refs as candidates; keep source fragment separate from complete corresponding source"
+    },
+    {
+      "step": 5,
+      "action": "record qconfig 6.11.2 as final-version evidence only if the captured qconfig path+hash equals candidate; query version alone does not promote current SDK package revisions"
+    },
+    {
+      "step": 6,
+      "action": "for unbound_generated_sources consume retained text/hash and actual argv/depfile; join generation source/tool declaration only when independently established; do not inherit generator license/output exception"
+    },
+    {
+      "step": 7,
+      "action": "write separate reviewed attachment, never overwrite producer report or historical package142; unmatched capture rows stay unclassified, not silently assigned this table"
+    }
+  ],
+  "sha_index": {
+    "4c9e75b22d53ab33b0670b00d1902e29299fb3bf4a2eafa6949c1df552ab391d": {
+      "candidate_id": "QtCore-qconfig.h",
+      "origin_path": "/usr/include/qt6/QtCore/qconfig.h",
+      "supported_candidates": []
+    },
+    "66e210aa12ac2da18916b58b0b78db18488557b80454a9c3a42e8503a6c06d34": {
+      "candidate_id": "QtCore-qtversion.h",
+      "origin_path": "/usr/include/qt6/QtCore/qtversion.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "aabc85822ff3cc98f359eed78538c9b8faabf2c5881c7b6a98c62305f3eb510a": {
+      "candidate_id": "QtCore-qstring.h",
+      "origin_path": "/usr/include/qt6/QtCore/qstring.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "8ae56403b5e804fa5f65ca1f56d85f01c32def4c54f16e63f9994c95086bf459": {
+      "candidate_id": "QtCore-qhashfunctions.h",
+      "origin_path": "/usr/include/qt6/QtCore/qhashfunctions.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "951e1ab06b388db0c5e2b84fab90d34288bd0acbf7ec94adcbd17699149c8b92": {
+      "candidate_id": "QtCore-qlist.h",
+      "origin_path": "/usr/include/qt6/QtCore/qlist.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "ab13597c8ca0c5665297c253cbb658e8a6552c9f42a970e3f070a0a23026caa8": {
+      "candidate_id": "QtCore-qstringlist.h",
+      "origin_path": "/usr/include/qt6/QtCore/qstringlist.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "0491588f1124b5fbee928f082998542afae60578dc3fff0d6e86328a594fa4b1": {
+      "candidate_id": "QtCore-QStringList",
+      "origin_path": "/usr/include/qt6/QtCore/QStringList",
+      "supported_candidates": []
+    },
+    "d9ab78a92f47a29edb19816c1860f95817454a05dc6c58706c5d299cdad71627": {
+      "candidate_id": "QtCore-qchar.h",
+      "origin_path": "/usr/include/qt6/QtCore/qchar.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "1505aaec73980c40ac0fd7062c5f84e13aa22a92a51f97b7c01d16bebe1dfc26": {
+      "candidate_id": "QtCore-qcomparehelpers.h",
+      "origin_path": "/usr/include/qt6/QtCore/qcomparehelpers.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "2897a4a6ee9fbfff247fcf1fad4115952748c114c8a818c3dd51e07586a626a9": {
+      "candidate_id": "QtCore-qcompare.h",
+      "origin_path": "/usr/include/qt6/QtCore/qcompare.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "43c32a2caa2d98011e878b986f16e1f943d23dbdff471d05b8d0eac7d174b73d": {
+      "candidate_id": "QtCore-qnamespace.h",
+      "origin_path": "/usr/include/qt6/QtCore/qnamespace.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "a66bbc048a4de55f9fba8677ede009a80b880bbaeecbc8463b994d1db598b086": {
+      "candidate_id": "QtCore-qbytearray.h",
+      "origin_path": "/usr/include/qt6/QtCore/qbytearray.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "d76530e19a740cbe7dc807ce9fcfb5f1da4423cf825732219edd07cfdb727078": {
+      "candidate_id": "QtCore-QByteArray",
+      "origin_path": "/usr/include/qt6/QtCore/QByteArray",
+      "supported_candidates": []
+    },
+    "fd0920bbbb34b4692c7d17b1975c82d15fc4c8b678d7d1655385559927317628": {
+      "candidate_id": "QtCore-qmetatype.h",
+      "origin_path": "/usr/include/qt6/QtCore/qmetatype.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "68c7065f0a09d621977a14bd11b6afe5bc9deac6c09f55707d7cfdc27e946724": {
+      "candidate_id": "QtCore-qobjectdefs.h",
+      "origin_path": "/usr/include/qt6/QtCore/qobjectdefs.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "5b8d760914cea8f632a2865ec8c5f0534ad8b7493906f89d4f960e9d8d560b70": {
+      "candidate_id": "QtQml-qqml.h",
+      "origin_path": "/usr/include/qt6/QtQml/qqml.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "5adb9ef0b6df8895de915b9f2e7710d049dd36432159eecca2e83a8616c03f02": {
+      "candidate_id": "QtQml-qqmlengine.h",
+      "origin_path": "/usr/include/qt6/QtQml/qqmlengine.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "0be47b736b766da719ea5afee43fec01eb5300e47c8ba256616466ca885d8251": {
+      "candidate_id": "QtQml-qqmlregistration.h",
+      "origin_path": "/usr/include/qt6/QtQml/qqmlregistration.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "b7b4572da9003bd9df9c988941b286ce4b756287d98cd7b8aaa0a490a7df015a": {
+      "candidate_id": "QtQuick-qquickitem.h",
+      "origin_path": "/usr/include/qt6/QtQuick/qquickitem.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "88a4d05392ccdd46c683fca1ae0735ed1026c5261ee62ad84bd2e325a1301c6d": {
+      "candidate_id": "QtWidgets-qwidget.h",
+      "origin_path": "/usr/include/qt6/QtWidgets/qwidget.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "65895339ce09601a14a95fa9906ae6804102b986284b5507f910ccbe38f31c99": {
+      "candidate_id": "QtNetwork-qnetworkaccessmanager.h",
+      "origin_path": "/usr/include/qt6/QtNetwork/qnetworkaccessmanager.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "2087aee9fb1695a20e1646168e8917c9650ef40ddde1ce4f966382aaf6eb6e14": {
+      "candidate_id": "QtDBus-qdbusconnection.h",
+      "origin_path": "/usr/include/qt6/QtDBus/qdbusconnection.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    },
+    "282715c52738a91732f86ce3c9ad90700ede2a32c55c1962600aec3ef87b88a4": {
+      "candidate_id": "QtSvg-qsvgrenderer.h",
+      "origin_path": "/usr/include/qt6/QtSvg/qsvgrenderer.h",
+      "supported_candidates": [
+        "GPL-3.0-only",
+        "LGPL-3.0-only"
+      ]
+    }
+  },
+  "positive_candidate_count": 20,
+  "forwarding_only_count": 2,
+  "configuration_no_spdx_count": 1,
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false
+}

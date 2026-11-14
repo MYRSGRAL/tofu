@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "candidates": [
+    {
+      "id": "GPL3-direct-explicit-OR",
+      "eligible_rows": [
+        "QtCore-qtversion.h",
+        "QtCore-qstring.h",
+        "QtCore-qhashfunctions.h",
+        "QtCore-qlist.h",
+        "QtCore-qstringlist.h",
+        "QtCore-qchar.h",
+        "QtCore-qcomparehelpers.h",
+        "QtCore-qcompare.h",
+        "QtCore-qnamespace.h",
+        "QtCore-qbytearray.h",
+        "QtCore-qmetatype.h",
+        "QtCore-qobjectdefs.h",
+        "QtQml-qqml.h",
+        "QtQml-qqmlengine.h",
+        "QtQml-qqmlregistration.h",
+        "QtQuick-qquickitem.h",
+        "QtWidgets-qwidget.h",
+        "QtNetwork-qnetworkaccessmanager.h",
+        "QtDBus-qdbusconnection.h",
+        "QtSvg-qsvgrenderer.h"
+      ],
+      "expression_operand": "GPL-3.0-only",
+      "primary_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "condition": "only exact file hash matches; usual GPL3 copyright/license/source terms still assessed by root; no election made"
+    },
+    {
+      "id": "LGPL3-header-object-code",
+      "eligible_rows": [
+        "QtCore-qtversion.h",
+        "QtCore-qstring.h",
+        "QtCore-qhashfunctions.h",
+        "QtCore-qlist.h",
+        "QtCore-qstringlist.h",
+        "QtCore-qchar.h",
+        "QtCore-qcomparehelpers.h",
+        "QtCore-qcompare.h",
+        "QtCore-qnamespace.h",
+        "QtCore-qbytearray.h",
+        "QtCore-qmetatype.h",
+        "QtCore-qobjectdefs.h",
+        "QtQml-qqml.h",
+        "QtQml-qqmlengine.h",
+        "QtQml-qqmlregistration.h",
+        "QtQuick-qquickitem.h",
+        "QtWidgets-qwidget.h",
+        "QtNetwork-qnetworkaccessmanager.h",
+        "QtDBus-qdbusconnection.h",
+        "QtSvg-qsvgrenderer.h"
+      ],
+      "expression_operand": "LGPL-3.0-only",
+      "primary_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "incorporated_GPL3_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "section_3_facts": [
+        "object code incorporating library header material may be conveyed under terms of choice",
+        "unless incorporation is limited to stated small-material categories, prominent library/use notice plus both GPL and LGPL documents are required"
+      ],
+      "no_small_fragment_waiver_assumed": true,
+      "section_4_boundary": "linking/Combined Work is separate; this candidate does not prove notice/relink/source conditions satisfied",
+      "condition": "GPL3 application is a candidate terms-of-choice context, not a declaration that every combined-work obligation is fulfilled"
+    }
+  ],
+  "excluded_elections": [
+    "bare GPL-2.0-only not offered as GPL3-compatible conversion",
+    "LicenseRef-Qt-Commercial not assumed available",
+    "no OR operand selected",
+    "no Qt-GPL-exception WITH added to headers"
+  ],
+  "legal_status": "NOTPROVEN",
+  "final_linux_acceptance": false
+}
