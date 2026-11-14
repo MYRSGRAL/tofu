@@ -110,3 +110,83 @@ metadata/log hashes и 5 retained ELF SHA. Из 5 binary bindings mismatch=0.
 поднимались. Нет нового runtime PASS, hardware/energy PASS или P04 promotion.
 P04 source ledger и его missing observed trace boundaries остаются неизменными.
 Toolkit campaign не опрашивалась, её process/session/immutable snapshot не трогались.
+
+## Выполненный actual witness, 2026-11-14
+
+Предложение выше историческое: root одобрил конкретный transport-only builder,
+реализация — `6e73f01958d677cb4fec4257ccf9878723bcda4f`.
+`HostConfig::with_test_subscription_fetch(Arc<FetchHost>)` существует только под
+nondefault `test-support`. Только subscription factories получают concrete host;
+preset fetch и обычный default/CLI/JSON остаются на прежнем пути. Ответ не
+инжектируется: production FetchHost выполняет настоящие SOCKS/TLS/route/
+local_exception/validators/HWID/cancellation; Service/review/commit/persist и typed
+context publication прежние. Transport input не создаёт native lease/Running.
+Stop продолжает отзывать watch, включая fixture None→None.
+
+Новый [actual-binding.json](actual-binding.json) отделён от исторического
+[binding.json](binding.json). Старые 124 cases и window/full/fetch-causes reports
+не запускались повторно и не присвоены новому backend. `p11-integrated-candidate`
+получил только запись source update/history с `review_pending=true`.
+
+| Критерий | Новый actual scope и наблюдение |
+|---|---|
+| NormalHost/key custody/persist | Обычный Host без ephemeral key, свой bus + Secret Service, encrypted repository открывается тем же actual SS key; закрытие/reopen сохраняет revision=1/рабочий профиль. Не доказательство host keyring пользователя. |
+| Scheduled failure/backoff | Через существующий metadata API выставлен overdue до старта; через существующий policy API заданы online/visible. Production scheduler → HTTP503 через SOCKS → typed `scheduler_service_fetch_failed`, scheduler generation >0; после close metadata failures>0 и due в будущем. Не clock/hardware injection и не повторное window proof. |
+| Manual priority | При persisted future due явный refresh получает actual HTTPS partial report за <900ms; clean baseline auto-commit, partial accepted=1/rejected=1 остаётся review, revision=1. После discard persisted failures=0 по существующему contract. |
+| Cancellation/revoke | В двух отдельных held HTTPS body операциях cancel с actual refresh token и Stop закрывают socket до fixture deadline, busy=false/pending=null; профили не заменяются. |
+| Старый report/source CAS | После partial source_change(expected_generation=1) подтверждает generation=2/error=null; попытка approve старого review отклонена, pending=null/revision=1. Это блокировка старого report после изменения source; исторический Service CAS matrix не переприсвоен. |
+| No hidden DIRECT | После reopen выбран persisted source route=Proxy; SOCKS listener закрыт, отдельный normal-TLS health control доказывает доступный origin; refresh FAIL, subscription origin count не растёт. |
+| Cleanup | Final result: 6 origin subscription requests / 6 SOCKS requests; обе held операции observed closed. Три own session child (test/private SS/bus) завершены/reaped. Дополнительный реальный child игнорирует TERM: Guard KILL→reap, exit=-9, <6s. |
+
+`crates/yonik-desktop/tests/p05_p10_actual_priority.rs` — один ignored integration
+scenario; Python runner поднимает только owned loopback HTTPS/SOCKS/control,
+свой HOME/runtime/bus/SS. TLS: отдельный synthetic CA с keyCertSign, serverAuth
+leaf + IP SAN, доверие только fixture CA через SSL_CERT_FILE; TLS проверки не
+отключаются. Private address — явный source local_exception=true. Runtime взят
+read-only из прежнего A4 cache с проверкой архивных SHA, минимальная closure
+скопирована в собственный evidence prefix; нет установки или загрузки пакетов.
+Пароли/ключи/URLs не сохраняются в evidence, temporary synthetic keyring удалён.
+
+Внешний постоянный evidence root:
+`/home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1`.
+`execution-binding.json` SHA256:
+`543e3f9b81f8194aca3f85776fa05d5b3a72454ea45b4a61c71c79c7d0ce917c`.
+Final ELF `p05_p10_actual_priority-v5` SHA256:
+`9e2899d5c00d928e00d3b883e161e1e48226630c437188555573a3b02c8e1319`.
+391 source files проверены по frozen manifest и содержимому source archive;
+это Cargo/crates inputs и два новых harness files, не полный root tree.
+`source-before-build-v5` фиксирован до compile; final archive отличается только
+Python formatting cleanup receipt, native inputs byte-exact. Команды/логические
+ограничения — внешний `commands.json`, хеши logs/runtime/artifacts в binding.
+
+Финальная фактически выполненная команда (для повтора нужен новый output path):
+
+```sh
+python -B crates/yonik-desktop/tests/p05_p10_actual_priority.py --binary /home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1/p05_p10_actual_priority-v5 --runtime /home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1/runtime --output /home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1/run6
+```
+
+Финальные проверки Rust 1.85.1: actual integration 1 PASS; lib unit 113 PASS,
+1 ignored, 0 FAIL; clippy test-support all-targets `-D warnings` PASS;
+no-default-features lib check PASS; rustfmt и ruff check/format PASS.
+Один own Cargo target и dependency graph, jobs1/global slot/root-directory flock,
+empty wrappers; incremental пересборки уточняли тестовый сценарий и TLS fixture.
+Первые попытки не PASS: clean auto-commit ошибочно ожидался как pending,
+backoff ошибочно проверялся после успешного discard, Python strict TLS control
+обнаружил missing CA keyUsage. Все failures сохранены отдельно; assertions и TLS
+не ослаблены. Final runner выполнен заново, не объявлен PASS по старому run.
+
+Final ELF/source/commands сохранены до `cargo clean` (4722 files/2.3GiB),
+собственный transient root удалён после завершения build sessions и owned child.
+Host load не измерялся; фоновые P01/P02/прочие workers не опрашивались и не
+менялись, elapsed не performance/energy acceptance. Нет native engine/TUN/N5,
+GUI/hardware power PASS, полного P05/P10/Linux acceptance или P04 promotion.
+Результат готов для независимого narrow review, не заменяет решение root.
+
+
+Дополнительный P11 static gate: 2 source freshness/history tests PASS. Полный
+исторический модуль: 5 PASS / 1 ERROR, поскольку отсутствует старый
+`local/validation/desktop-reviewed-integration/source-binding.json` (также нет
+в canonical `/home/myrs/projects/yonik/local/validation/desktop-reviewed-integration/source-binding.json`).
+Это отдельный missing historical artifact, не FAIL нового actual witness;
+чужие доказательства/paths не подменены. Логи `p11-freshness-check.log` и
+`p11-ledger-check.log` сохранены в новом evidence root.

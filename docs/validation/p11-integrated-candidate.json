@@ -489,10 +489,21 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
+      "source": "6e73f01958d677cb4fec4257ccf9878723bcda4f",
+      "blob": "f787140e37899a18ad9702c044b40850c7c44b95",
+      "scope": "P05/P10 concrete FetchHost transport только subscription test-support; default/CLI/JSON без нового входа; прежние P11 execution сохранены без переприсвоения",
+      "review": "Root одобрил concrete contract после 76472c; новый implementation ожидает независимый narrow review",
+      "execution": "docs/validation/p05-p10-accepted-witness/actual-binding.json",
+      "review_pending": true
+    }
+  },
+  "reviewed_source_updates_history": [
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
       "source": "1579c57bab0f9459526469d4ea272abf89451e7f",
       "blob": "0e760e41966279d24477d4442f6b0136a643e724",
       "scope": "FR16 test-support host boundary; прежний producer execution не присвоен новому source",
       "review": "R2 346f1042-89bd-4021-985e-11e08f996d74 CLEAN; frozen diff 7ce512..1579c57"
     }
-  }
+  ]
 }
