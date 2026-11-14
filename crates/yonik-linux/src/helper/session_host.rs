@@ -567,6 +567,11 @@ impl Backend {
         if self.has_session() || self.worker_uncertain {
             return Err(ServiceError::Busy);
         }
+        self.ensure_peer_attestation(
+            Arc::clone(request.peer.as_ref().ok_or(ServiceError::Unsupported)?),
+            cancel,
+        )
+        .await?;
         request
             .peer
             .as_ref()
@@ -628,6 +633,25 @@ impl Backend {
         self.prepare_profile_inner(uid, profile, Some(bundle), cancel)
             .await
     }
+    async fn ensure_peer_attestation(
+        &mut self,
+        peer: Arc<crate::attribution::PeerProcess>,
+        cancel: &mut Cancellation,
+    ) -> Result<(), ServiceError> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        // Отсутствие approved static profile закрывает путь до любого child/Check эффекта.
+        let source = super::super::native_bootstrap::load_static_preflight(deadline.into_std())
+            .map_err(|_| ServiceError::Unsupported)?;
+        let supervisor = tokio::select! {biased;
+            _=cancel.cancelled()=>return Err(ServiceError::Cancelled),
+            _=tokio::time::sleep_until(deadline)=>return Err(ServiceError::Unavailable),
+            result=self.supervisor()=>result?,
+        };
+        supervisor
+            .attest_preparation(peer, source, cancel, deadline)
+            .await
+            .map_err(|_| ServiceError::Unsupported)
+    }
     pub(super) async fn prepare_profile(
         &mut self,
         uid: u32,
@@ -651,6 +675,11 @@ impl Backend {
             .as_ref()
             .is_some_and(|policy| policy.requires_attribution());
         if attribution_required {
+            self.ensure_peer_attestation(
+                Arc::clone(request.peer.as_ref().ok_or(ServiceError::Unsupported)?),
+                cancel,
+            )
+            .await?;
             let admission_uid = worker_uid().map_err(|_| ServiceError::Unsupported)?;
             crate::attribution::preflight(true, request.peer.as_deref(), admission_uid)
                 .await
