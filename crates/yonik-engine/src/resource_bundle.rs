@@ -265,6 +265,138 @@ impl<C: VerifiedCatalog> ResourceRoutes for BoundPolicy<'_, C> {
         self.manifest()
     }
 }
+/// Данные для offline codec/config-check. Не принимаются activation/seal API.
+pub struct UnadmittedCompiledData {
+    bytes: Vec<u8>,
+    manifest: Vec<ExternalRef>,
+    revision: u64,
+    identity: Vec<u8>,
+}
+impl UnadmittedCompiledData {
+    pub fn write_sensitive(&self, mut writer: impl io::Write) -> io::Result<()> {
+        writer.write_all(&self.bytes)
+    }
+    pub fn manifest(&self) -> &[ExternalRef] {
+        &self.manifest
+    }
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn policy_identity(&self) -> &[u8] {
+        &self.identity
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundCompileError {
+    Cancelled,
+    Policy(crate::PolicyCompileError),
+}
+impl std::fmt::Display for BoundCompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("Компиляция отменена"),
+            Self::Policy(error) => error.fmt(f),
+        }
+    }
+}
+impl std::error::Error for BoundCompileError {}
+impl From<crate::PolicyCompileError> for BoundCompileError {
+    fn from(error: crate::PolicyCompileError) -> Self {
+        Self::Policy(error)
+    }
+}
+pub(crate) struct Checkpoint<'a> {
+    proceed: &'a dyn Fn() -> bool,
+    cancelled: std::cell::Cell<bool>,
+}
+impl<'a> Checkpoint<'a> {
+    pub(crate) fn new(proceed: &'a dyn Fn() -> bool) -> Self {
+        Self {
+            proceed,
+            cancelled: std::cell::Cell::new(false),
+        }
+    }
+    pub(crate) fn check(&self) -> Result<(), BoundCompileError> {
+        if self.cancelled.get() || !(self.proceed)() {
+            self.cancelled.set(true);
+            Err(BoundCompileError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Только compile data; host обязан заново проверить отмену перед внешним commit.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_bound_data_cancellable<C: VerifiedCatalog>(
+    server: &yonik_import::ParsedServer,
+    engine: crate::Engine,
+    port: std::num::NonZeroU16,
+    probe_port: std::num::NonZeroU16,
+    bound: &BoundPolicy<'_, C>,
+    revision: u64,
+    identity: &[u8],
+    proceed: impl Fn() -> bool,
+) -> Result<UnadmittedCompiledData, BoundCompileError> {
+    let checkpoint = Checkpoint::new(&proceed);
+    checkpoint.check()?;
+    bound
+        .validate_revision(revision, identity)
+        .map_err(|_| crate::PolicyCompileError::InvalidPolicy)?;
+    for reference in bound.manifest() {
+        checkpoint.check()?;
+        reference
+            .validate()
+            .map_err(|_| crate::PolicyCompileError::InvalidPolicy)?;
+        if reference.engine != engine {
+            return Err(crate::PolicyCompileError::InvalidPolicy.into());
+        }
+    }
+    let config = crate::routing::compile_unadmitted_data(
+        server,
+        engine,
+        port,
+        probe_port,
+        bound.policy(),
+        bound,
+        &checkpoint,
+    )?;
+    struct Writer<'a> {
+        bytes: Vec<u8>,
+        checkpoint: &'a Checkpoint<'a>,
+    }
+    impl io::Write for Writer<'_> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.checkpoint.check().map_err(io::Error::other)?;
+            if bytes.len() > (4 * 1024 * 1024usize).saturating_sub(self.bytes.len()) {
+                return Err(io::Error::other("Превышен output budget"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    checkpoint.check()?;
+    let mut writer = Writer {
+        bytes: Vec::new(),
+        checkpoint: &checkpoint,
+    };
+    let result = config.write_sensitive(&mut writer);
+    checkpoint.check()?;
+    result.map_err(|_| crate::PolicyCompileError::InvalidPolicy)?;
+    let artifact = UnadmittedCompiledData {
+        bytes: writer.bytes,
+        manifest: bound.manifest().to_vec(),
+        revision,
+        identity: identity.to_vec(),
+    };
+    checkpoint.check()?;
+    Ok(artifact)
+}
+
 pub struct CompiledResourceBundle {
     config: crate::CompiledConfig,
     manifest: Vec<ExternalRef>,
@@ -339,6 +471,12 @@ impl CompiledResourceBundle {
 }
 
 pub fn validate_policy_bounds(policy: &Policy) -> io::Result<()> {
+    validate_policy_bounds_checked(policy, &|| Ok(()))
+}
+pub(crate) fn validate_policy_bounds_checked(
+    policy: &Policy,
+    checkpoint: &dyn Fn() -> io::Result<()>,
+) -> io::Result<()> {
     if policy
         .user_rules
         .len()
@@ -356,6 +494,7 @@ pub fn validate_policy_bounds(policy: &Policy) -> io::Result<()> {
     for rules in [&policy.user_rules, &policy.preset_rules] {
         let mut ids = HashSet::new();
         for r in rules {
+            checkpoint()?;
             if !ids.insert(r.id) {
                 return Err(invalid());
             }
@@ -364,6 +503,7 @@ pub fn validate_policy_bounds(policy: &Policy) -> io::Result<()> {
                 .saturating_add(r.conditions.domains.len())
                 .saturating_add(r.conditions.destinations.len());
             for p in &r.conditions.executables {
+                checkpoint()?;
                 if p.len() > 4096 {
                     return Err(invalid());
                 }

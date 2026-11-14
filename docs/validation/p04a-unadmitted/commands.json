@@ -1,0 +1,32 @@
+[
+  {
+    "argv": [
+      "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/p04a_unadmitted_data-final",
+      "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture"
+    ],
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/home/myrs/projects/yonik/local/engines/xray-26.10.31/xray",
+      "run",
+      "-test",
+      "-config",
+      "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture/xray-data/config.json"
+    ],
+    "cwd": "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture/xray-data",
+    "exit": 0,
+    "elf_sha256": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1"
+  },
+  {
+    "argv": [
+      "/home/myrs/projects/yonik/local/engines/sing-box-1.14.4/sing-box",
+      "check",
+      "-c",
+      "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture/sing-box-data/config.json"
+    ],
+    "cwd": "/home/myrs/.t3/worktrees/yonik/t3-e5a27eb0-88ac3241f89f4fea/local/p04a-mixed-red/candidate-fixture/sing-box-data",
+    "exit": 0,
+    "elf_sha256": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a"
+  }
+]

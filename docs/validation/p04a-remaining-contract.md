@@ -88,3 +88,10 @@ peak RSS, serialized bytes, native count, post-cancel/post-success RSS по ци
 
 Full native P04B/GAPP/TUN остаётся OPEN и зависит от N5. Config-check pinned
 ELF подтверждает формат, но не mint authority, Apply или process attribution.
+
+## Решение root и продолжение
+
+Предложение выше сохранено как история исходного gap. Root утвердил compile-only
+data artifact без flow receipt/N5 prerequisite; activation остаётся отдельным gate.
+Исполняемый RED: [p04a-mixed-red](p04a-mixed-red/README.md). Реализация и targeted
+GREEN evidence: [p04a-unadmitted](p04a-unadmitted/README.md).

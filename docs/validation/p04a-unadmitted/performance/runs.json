@@ -1,0 +1,4194 @@
+[
+  {
+    "engine": "xray",
+    "rules": 10,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.24634289999812609,
+    "cpu_s": 0.22728299999999999,
+    "peak_rss_kib": 23892,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 536,
+              "request_to_return_ns": 506
+            },
+            {
+              "checkpoint": 100,
+              "ns": 34802,
+              "request_to_return_ns": 3728
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 41615,
+              "request_to_return_ns": 3095
+            }
+          ],
+          "compile_ns": 62044,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 178,
+              "request_to_return_ns": 154
+            },
+            {
+              "checkpoint": 100,
+              "ns": 33742,
+              "request_to_return_ns": 3413
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 40854,
+              "request_to_return_ns": 2837
+            }
+          ],
+          "compile_ns": 44405,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 83,
+              "request_to_return_ns": 122
+            },
+            {
+              "checkpoint": 100,
+              "ns": 36427,
+              "request_to_return_ns": 3267
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 42109,
+              "request_to_return_ns": 3054
+            }
+          ],
+          "compile_ns": 41771,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 98,
+              "request_to_return_ns": 133
+            },
+            {
+              "checkpoint": 100,
+              "ns": 31572,
+              "request_to_return_ns": 2942
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 37185,
+              "request_to_return_ns": 2694
+            }
+          ],
+          "compile_ns": 37347,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.25584840300143696,
+    "cpu_s": 0.235547,
+    "peak_rss_kib": 23836,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 471,
+              "request_to_return_ns": 562
+            },
+            {
+              "checkpoint": 100,
+              "ns": 46538,
+              "request_to_return_ns": 4923
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 49141,
+              "request_to_return_ns": 3381
+            }
+          ],
+          "compile_ns": 67765,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 19504,
+          "rss_after_recovery_kib": 19504,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 97,
+              "request_to_return_ns": 132
+            },
+            {
+              "checkpoint": 100,
+              "ns": 32608,
+              "request_to_return_ns": 3277
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 38704,
+              "request_to_return_ns": 2677
+            }
+          ],
+          "compile_ns": 44802,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 19504,
+          "rss_after_recovery_kib": 19504,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 113,
+              "request_to_return_ns": 155
+            },
+            {
+              "checkpoint": 100,
+              "ns": 32083,
+              "request_to_return_ns": 3137
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 37274,
+              "request_to_return_ns": 2839
+            }
+          ],
+          "compile_ns": 37267,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 19504,
+          "rss_after_recovery_kib": 19504,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 112,
+              "request_to_return_ns": 160
+            },
+            {
+              "checkpoint": 100,
+              "ns": 33990,
+              "request_to_return_ns": 3003
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 39446,
+              "request_to_return_ns": 2795
+            }
+          ],
+          "compile_ns": 36544,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 19504,
+          "rss_after_recovery_kib": 19504,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.25548600599722704,
+    "cpu_s": 0.234877,
+    "peak_rss_kib": 24032,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 434,
+              "request_to_return_ns": 370
+            },
+            {
+              "checkpoint": 100,
+              "ns": 41458,
+              "request_to_return_ns": 4338
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 44983,
+              "request_to_return_ns": 3179
+            }
+          ],
+          "compile_ns": 64586,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 19560,
+          "rss_after_recovery_kib": 19560,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 125,
+              "request_to_return_ns": 137
+            },
+            {
+              "checkpoint": 100,
+              "ns": 34625,
+              "request_to_return_ns": 3360
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 39681,
+              "request_to_return_ns": 2744
+            }
+          ],
+          "compile_ns": 41575,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 19560,
+          "rss_after_recovery_kib": 19560,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 64,
+              "request_to_return_ns": 101
+            },
+            {
+              "checkpoint": 100,
+              "ns": 35504,
+              "request_to_return_ns": 8203
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 39619,
+              "request_to_return_ns": 3006
+            }
+          ],
+          "compile_ns": 36297,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 19560,
+          "rss_after_recovery_kib": 19560,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 89,
+              "request_to_return_ns": 118
+            },
+            {
+              "checkpoint": 100,
+              "ns": 35422,
+              "request_to_return_ns": 3364
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 40445,
+              "request_to_return_ns": 2857
+            }
+          ],
+          "compile_ns": 41327,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 19560,
+          "rss_after_recovery_kib": 19560,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.245805181999458,
+    "cpu_s": 0.229382,
+    "peak_rss_kib": 23816,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 390,
+              "request_to_return_ns": 387
+            },
+            {
+              "checkpoint": 100,
+              "ns": 42206,
+              "request_to_return_ns": 4282
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 43070,
+              "request_to_return_ns": 3085
+            }
+          ],
+          "compile_ns": 67119,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 19480,
+          "rss_after_recovery_kib": 19480,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 98,
+              "request_to_return_ns": 133
+            },
+            {
+              "checkpoint": 100,
+              "ns": 32230,
+              "request_to_return_ns": 3097
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 38612,
+              "request_to_return_ns": 2706
+            }
+          ],
+          "compile_ns": 41763,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 19480,
+          "rss_after_recovery_kib": 19480,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 93,
+              "request_to_return_ns": 140
+            },
+            {
+              "checkpoint": 100,
+              "ns": 38073,
+              "request_to_return_ns": 3645
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 41517,
+              "request_to_return_ns": 2982
+            }
+          ],
+          "compile_ns": 48929,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 19480,
+          "rss_after_recovery_kib": 19480,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3809,
+          "callback_count": 1024,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 118,
+              "request_to_return_ns": 154
+            },
+            {
+              "checkpoint": 100,
+              "ns": 30926,
+              "request_to_return_ns": 2939
+            },
+            {
+              "checkpoint": 1024,
+              "ns": 36760,
+              "request_to_return_ns": 2595
+            }
+          ],
+          "compile_ns": 40256,
+          "native_nodes": 13,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 19480,
+          "rss_after_recovery_kib": 19480,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 100,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.2640365670013125,
+    "cpu_s": 0.23229999999999998,
+    "peak_rss_kib": 24036,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 525,
+              "request_to_return_ns": 481
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2462,
+              "request_to_return_ns": 473
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 299230,
+              "request_to_return_ns": 14538
+            }
+          ],
+          "compile_ns": 319530,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 19532,
+          "rss_after_recovery_kib": 19532,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 145,
+              "request_to_return_ns": 175
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1884,
+              "request_to_return_ns": 273
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 303571,
+              "request_to_return_ns": 15502
+            }
+          ],
+          "compile_ns": 286457,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 19532,
+          "rss_after_recovery_kib": 19532,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 96,
+              "request_to_return_ns": 116
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1992,
+              "request_to_return_ns": 261
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 296087,
+              "request_to_return_ns": 16235
+            }
+          ],
+          "compile_ns": 291950,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 19532,
+          "rss_after_recovery_kib": 19532,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 83,
+              "request_to_return_ns": 110
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1906,
+              "request_to_return_ns": 229
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 288829,
+              "request_to_return_ns": 16958
+            }
+          ],
+          "compile_ns": 293955,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 19532,
+          "rss_after_recovery_kib": 19532,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 100,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.24247765700420132,
+    "cpu_s": 0.23199299999999998,
+    "peak_rss_kib": 23968,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 359,
+              "request_to_return_ns": 318
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2111,
+              "request_to_return_ns": 419
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 268278,
+              "request_to_return_ns": 15016
+            }
+          ],
+          "compile_ns": 315904,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 126,
+              "request_to_return_ns": 141
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1870,
+              "request_to_return_ns": 273
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 273582,
+              "request_to_return_ns": 13420
+            }
+          ],
+          "compile_ns": 287216,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 93,
+              "request_to_return_ns": 95
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1839,
+              "request_to_return_ns": 220
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 285897,
+              "request_to_return_ns": 13266
+            }
+          ],
+          "compile_ns": 265503,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 72,
+              "request_to_return_ns": 77
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1729,
+              "request_to_return_ns": 199
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 287029,
+              "request_to_return_ns": 14412
+            }
+          ],
+          "compile_ns": 267844,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 100,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.26310730499972124,
+    "cpu_s": 0.22865,
+    "peak_rss_kib": 23792,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 605,
+              "request_to_return_ns": 630
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2048,
+              "request_to_return_ns": 293
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 285107,
+              "request_to_return_ns": 18586
+            }
+          ],
+          "compile_ns": 305733,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 19456,
+          "rss_after_recovery_kib": 19456,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 105,
+              "request_to_return_ns": 121
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1648,
+              "request_to_return_ns": 201
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 254581,
+              "request_to_return_ns": 14694
+            }
+          ],
+          "compile_ns": 256952,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 19456,
+          "rss_after_recovery_kib": 19456,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 98,
+              "request_to_return_ns": 158
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1629,
+              "request_to_return_ns": 172
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 258285,
+              "request_to_return_ns": 15859
+            }
+          ],
+          "compile_ns": 260547,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 19456,
+          "rss_after_recovery_kib": 19456,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 80,
+              "request_to_return_ns": 120
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1502,
+              "request_to_return_ns": 196
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 254821,
+              "request_to_return_ns": 16142
+            }
+          ],
+          "compile_ns": 285220,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 19456,
+          "rss_after_recovery_kib": 19456,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 100,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.2622901470022043,
+    "cpu_s": 0.23404599999999998,
+    "peak_rss_kib": 23864,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 762,
+              "request_to_return_ns": 687
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2636,
+              "request_to_return_ns": 800
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 284820,
+              "request_to_return_ns": 15160
+            }
+          ],
+          "compile_ns": 304879,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 19536,
+          "rss_after_recovery_kib": 19536,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 131,
+              "request_to_return_ns": 166
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1685,
+              "request_to_return_ns": 179
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 287702,
+              "request_to_return_ns": 17653
+            }
+          ],
+          "compile_ns": 249331,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 19536,
+          "rss_after_recovery_kib": 19536,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 106,
+              "request_to_return_ns": 129
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1634,
+              "request_to_return_ns": 192
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 268373,
+              "request_to_return_ns": 15986
+            }
+          ],
+          "compile_ns": 249479,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 19536,
+          "rss_after_recovery_kib": 19536,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 29729,
+          "callback_count": 6694,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 96,
+              "request_to_return_ns": 126
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1895,
+              "request_to_return_ns": 211
+            },
+            {
+              "checkpoint": 6694,
+              "ns": 279971,
+              "request_to_return_ns": 14671
+            }
+          ],
+          "compile_ns": 279348,
+          "native_nodes": 103,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 19536,
+          "rss_after_recovery_kib": 19536,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 1000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.30550339599722065,
+    "cpu_s": 0.27363499999999996,
+    "peak_rss_kib": 23776,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 874,
+              "request_to_return_ns": 788
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4163,
+              "request_to_return_ns": 520
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2382624,
+              "request_to_return_ns": 123885
+            }
+          ],
+          "compile_ns": 2423516,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 184,
+              "request_to_return_ns": 241
+            },
+            {
+              "checkpoint": 100,
+              "ns": 3865,
+              "request_to_return_ns": 283
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2492850,
+              "request_to_return_ns": 141370
+            }
+          ],
+          "compile_ns": 2389916,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 203,
+              "request_to_return_ns": 262
+            },
+            {
+              "checkpoint": 100,
+              "ns": 3788,
+              "request_to_return_ns": 290
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2582357,
+              "request_to_return_ns": 162615
+            }
+          ],
+          "compile_ns": 2445799,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 183,
+              "request_to_return_ns": 252
+            },
+            {
+              "checkpoint": 100,
+              "ns": 3794,
+              "request_to_return_ns": 251
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2544564,
+              "request_to_return_ns": 140224
+            }
+          ],
+          "compile_ns": 2496581,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 19528,
+          "rss_after_recovery_kib": 19528,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 1000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.2950632889987901,
+    "cpu_s": 0.257496,
+    "peak_rss_kib": 23776,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 401,
+              "request_to_return_ns": 345
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4187,
+              "request_to_return_ns": 500
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2566893,
+              "request_to_return_ns": 138147
+            }
+          ],
+          "compile_ns": 2460330,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 202,
+              "request_to_return_ns": 279
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4562,
+              "request_to_return_ns": 327
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2684420,
+              "request_to_return_ns": 138260
+            }
+          ],
+          "compile_ns": 2626869,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 181,
+              "request_to_return_ns": 246
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4049,
+              "request_to_return_ns": 259
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2673227,
+              "request_to_return_ns": 131910
+            }
+          ],
+          "compile_ns": 2569867,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 169,
+              "request_to_return_ns": 195
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4069,
+              "request_to_return_ns": 340
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2762358,
+              "request_to_return_ns": 156390
+            }
+          ],
+          "compile_ns": 2689044,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 19464,
+          "rss_after_recovery_kib": 19464,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 1000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.27187311300076544,
+    "cpu_s": 0.254764,
+    "peak_rss_kib": 23928,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 570,
+              "request_to_return_ns": 592
+            },
+            {
+              "checkpoint": 100,
+              "ns": 3946,
+              "request_to_return_ns": 385
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2456649,
+              "request_to_return_ns": 137410
+            }
+          ],
+          "compile_ns": 2344258,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 19484,
+          "rss_after_recovery_kib": 19484,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 220,
+              "request_to_return_ns": 264
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4717,
+              "request_to_return_ns": 377
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2703977,
+              "request_to_return_ns": 161434
+            }
+          ],
+          "compile_ns": 2560198,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 19484,
+          "rss_after_recovery_kib": 19484,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 380,
+              "request_to_return_ns": 310
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4261,
+              "request_to_return_ns": 423
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2709474,
+              "request_to_return_ns": 137755
+            }
+          ],
+          "compile_ns": 2619491,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 19484,
+          "rss_after_recovery_kib": 19484,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 180,
+              "request_to_return_ns": 201
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4080,
+              "request_to_return_ns": 415
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2696933,
+              "request_to_return_ns": 169885
+            }
+          ],
+          "compile_ns": 2657126,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 19484,
+          "rss_after_recovery_kib": 19484,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 1000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.2902639569947496,
+    "cpu_s": 0.25821299999999997,
+    "peak_rss_kib": 23892,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 476,
+              "request_to_return_ns": 478
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4221,
+              "request_to_return_ns": 572
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2720659,
+              "request_to_return_ns": 143055
+            }
+          ],
+          "compile_ns": 2554656,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 19492,
+          "rss_after_recovery_kib": 19492,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 179,
+              "request_to_return_ns": 242
+            },
+            {
+              "checkpoint": 100,
+              "ns": 3843,
+              "request_to_return_ns": 312
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2802806,
+              "request_to_return_ns": 132583
+            }
+          ],
+          "compile_ns": 2657887,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 19492,
+          "rss_after_recovery_kib": 19492,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 167,
+              "request_to_return_ns": 209
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4344,
+              "request_to_return_ns": 398
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2802202,
+              "request_to_return_ns": 133445
+            }
+          ],
+          "compile_ns": 2667796,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 19492,
+          "rss_after_recovery_kib": 19492,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 289829,
+          "callback_count": 63394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 204,
+              "request_to_return_ns": 273
+            },
+            {
+              "checkpoint": 100,
+              "ns": 4681,
+              "request_to_return_ns": 409
+            },
+            {
+              "checkpoint": 63394,
+              "ns": 2777044,
+              "request_to_return_ns": 133678
+            }
+          ],
+          "compile_ns": 2797312,
+          "native_nodes": 1003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 19492,
+          "rss_after_recovery_kib": 19492,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.6257014639995759,
+    "cpu_s": 0.586469,
+    "peak_rss_kib": 46376,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 967,
+              "request_to_return_ns": 821
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40752,
+              "request_to_return_ns": 781
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31647588,
+              "request_to_return_ns": 2237844
+            }
+          ],
+          "compile_ns": 33082527,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 32952,
+          "rss_after_recovery_kib": 32516,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 366,
+              "request_to_return_ns": 577
+            },
+            {
+              "checkpoint": 100,
+              "ns": 47428,
+              "request_to_return_ns": 953
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 32327261,
+              "request_to_return_ns": 2468775
+            }
+          ],
+          "compile_ns": 31661915,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 34976,
+          "rss_after_recovery_kib": 33512,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 717,
+              "request_to_return_ns": 883
+            },
+            {
+              "checkpoint": 100,
+              "ns": 42541,
+              "request_to_return_ns": 1047
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31830337,
+              "request_to_return_ns": 2214940
+            }
+          ],
+          "compile_ns": 31848726,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 34976,
+          "rss_after_recovery_kib": 33520,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 622,
+              "request_to_return_ns": 920
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40685,
+              "request_to_return_ns": 724
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31857485,
+              "request_to_return_ns": 2220365
+            }
+          ],
+          "compile_ns": 31764890,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 34976,
+          "rss_after_recovery_kib": 33528,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.6475065859995084,
+    "cpu_s": 0.63357,
+    "peak_rss_kib": 46292,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 1046,
+              "request_to_return_ns": 784
+            },
+            {
+              "checkpoint": 100,
+              "ns": 41635,
+              "request_to_return_ns": 758
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 40364467,
+              "request_to_return_ns": 2901332
+            }
+          ],
+          "compile_ns": 34472728,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 32888,
+          "rss_after_recovery_kib": 32452,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 769,
+              "request_to_return_ns": 1046
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40476,
+              "request_to_return_ns": 838
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 39944318,
+              "request_to_return_ns": 2297750
+            }
+          ],
+          "compile_ns": 41847401,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 34912,
+          "rss_after_recovery_kib": 33448,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 749,
+              "request_to_return_ns": 1015
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40425,
+              "request_to_return_ns": 771
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 33646294,
+              "request_to_return_ns": 2262799
+            }
+          ],
+          "compile_ns": 33598427,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 34912,
+          "rss_after_recovery_kib": 33456,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 1032,
+              "request_to_return_ns": 1041
+            },
+            {
+              "checkpoint": 100,
+              "ns": 41146,
+              "request_to_return_ns": 1117
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 41826924,
+              "request_to_return_ns": 3341334
+            }
+          ],
+          "compile_ns": 32858245,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 34912,
+          "rss_after_recovery_kib": 33464,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.6195910440001171,
+    "cpu_s": 0.598251,
+    "peak_rss_kib": 46336,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 788,
+              "request_to_return_ns": 878
+            },
+            {
+              "checkpoint": 100,
+              "ns": 37842,
+              "request_to_return_ns": 625
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 32827320,
+              "request_to_return_ns": 2304758
+            }
+          ],
+          "compile_ns": 34404877,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 32864,
+          "rss_after_recovery_kib": 32428,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 505,
+              "request_to_return_ns": 687
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40012,
+              "request_to_return_ns": 1192
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 32604978,
+              "request_to_return_ns": 2297905
+            }
+          ],
+          "compile_ns": 32904628,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 34888,
+          "rss_after_recovery_kib": 33424,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 898,
+              "request_to_return_ns": 776
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40240,
+              "request_to_return_ns": 857
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 32354694,
+              "request_to_return_ns": 2159166
+            }
+          ],
+          "compile_ns": 32379229,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 34888,
+          "rss_after_recovery_kib": 33432,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 598,
+              "request_to_return_ns": 725
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39969,
+              "request_to_return_ns": 1109
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 32622767,
+              "request_to_return_ns": 2210577
+            }
+          ],
+          "compile_ns": 32083855,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 34888,
+          "rss_after_recovery_kib": 33436,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "xray",
+    "rules": 10000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.622237318995758,
+    "cpu_s": 0.580248,
+    "peak_rss_kib": 46384,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 3288913,
+      "rounds": [
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 1005,
+              "request_to_return_ns": 908
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39933,
+              "request_to_return_ns": 505
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31438719,
+              "request_to_return_ns": 2079046
+            }
+          ],
+          "compile_ns": 33323097,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 32860,
+          "rss_after_recovery_kib": 32424,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 816,
+              "request_to_return_ns": 898
+            },
+            {
+              "checkpoint": 100,
+              "ns": 41006,
+              "request_to_return_ns": 1066
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31564479,
+              "request_to_return_ns": 2154132
+            }
+          ],
+          "compile_ns": 31473945,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 34884,
+          "rss_after_recovery_kib": 33420,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 753,
+              "request_to_return_ns": 909
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40548,
+              "request_to_return_ns": 1118
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31308646,
+              "request_to_return_ns": 2362108
+            }
+          ],
+          "compile_ns": 31043188,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 34884,
+          "rss_after_recovery_kib": 33428,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 2899829,
+          "callback_count": 630394,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 880,
+              "request_to_return_ns": 1042
+            },
+            {
+              "checkpoint": 100,
+              "ns": 41023,
+              "request_to_return_ns": 912
+            },
+            {
+              "checkpoint": 630394,
+              "ns": 31317352,
+              "request_to_return_ns": 2233436
+            }
+          ],
+          "compile_ns": 31194850,
+          "native_nodes": 10003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 34884,
+          "rss_after_recovery_kib": 33440,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.3184562270034803,
+    "cpu_s": 0.27900600000000003,
+    "peak_rss_kib": 26376,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 309,
+              "request_to_return_ns": 348
+            },
+            {
+              "checkpoint": 100,
+              "ns": 48100,
+              "request_to_return_ns": 5018
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 56155,
+              "request_to_return_ns": 4331
+            }
+          ],
+          "compile_ns": 80140,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 20048,
+          "rss_after_recovery_kib": 20048,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 101,
+              "request_to_return_ns": 144
+            },
+            {
+              "checkpoint": 100,
+              "ns": 44290,
+              "request_to_return_ns": 4260
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 52312,
+              "request_to_return_ns": 3977
+            }
+          ],
+          "compile_ns": 54352,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 20048,
+          "rss_after_recovery_kib": 20048,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 103,
+              "request_to_return_ns": 132
+            },
+            {
+              "checkpoint": 100,
+              "ns": 46857,
+              "request_to_return_ns": 7458
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 53077,
+              "request_to_return_ns": 4119
+            }
+          ],
+          "compile_ns": 53009,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 20048,
+          "rss_after_recovery_kib": 20048,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 54,
+              "request_to_return_ns": 92
+            },
+            {
+              "checkpoint": 100,
+              "ns": 44816,
+              "request_to_return_ns": 4239
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 51199,
+              "request_to_return_ns": 3718
+            }
+          ],
+          "compile_ns": 56502,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 20048,
+          "rss_after_recovery_kib": 20048,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.36619054099719506,
+    "cpu_s": 0.32323,
+    "peak_rss_kib": 26460,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 352,
+              "request_to_return_ns": 395
+            },
+            {
+              "checkpoint": 100,
+              "ns": 63602,
+              "request_to_return_ns": 6556
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 69012,
+              "request_to_return_ns": 5093
+            }
+          ],
+          "compile_ns": 85267,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 97,
+              "request_to_return_ns": 123
+            },
+            {
+              "checkpoint": 100,
+              "ns": 47470,
+              "request_to_return_ns": 4716
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 54764,
+              "request_to_return_ns": 4286
+            }
+          ],
+          "compile_ns": 61353,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 93,
+              "request_to_return_ns": 142
+            },
+            {
+              "checkpoint": 100,
+              "ns": 46179,
+              "request_to_return_ns": 4304
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 54672,
+              "request_to_return_ns": 4125
+            }
+          ],
+          "compile_ns": 56603,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 83,
+              "request_to_return_ns": 97
+            },
+            {
+              "checkpoint": 100,
+              "ns": 44926,
+              "request_to_return_ns": 4305
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 55856,
+              "request_to_return_ns": 4138
+            }
+          ],
+          "compile_ns": 55893,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.3276306650004699,
+    "cpu_s": 0.290647,
+    "peak_rss_kib": 26404,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 427,
+              "request_to_return_ns": 398
+            },
+            {
+              "checkpoint": 100,
+              "ns": 50091,
+              "request_to_return_ns": 5040
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 57688,
+              "request_to_return_ns": 4305
+            }
+          ],
+          "compile_ns": 76678,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 20120,
+          "rss_after_recovery_kib": 20120,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 113,
+              "request_to_return_ns": 155
+            },
+            {
+              "checkpoint": 100,
+              "ns": 44542,
+              "request_to_return_ns": 4341
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 53454,
+              "request_to_return_ns": 4227
+            }
+          ],
+          "compile_ns": 55211,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 20120,
+          "rss_after_recovery_kib": 20120,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 144,
+              "request_to_return_ns": 173
+            },
+            {
+              "checkpoint": 100,
+              "ns": 49723,
+              "request_to_return_ns": 4734
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 61165,
+              "request_to_return_ns": 4379
+            }
+          ],
+          "compile_ns": 57199,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 20120,
+          "rss_after_recovery_kib": 20120,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 80,
+              "request_to_return_ns": 116
+            },
+            {
+              "checkpoint": 100,
+              "ns": 42950,
+              "request_to_return_ns": 4240
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 54031,
+              "request_to_return_ns": 3843
+            }
+          ],
+          "compile_ns": 57406,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 20120,
+          "rss_after_recovery_kib": 20120,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.3301896039993153,
+    "cpu_s": 0.290502,
+    "peak_rss_kib": 26424,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 349,
+              "request_to_return_ns": 464
+            },
+            {
+              "checkpoint": 100,
+              "ns": 49874,
+              "request_to_return_ns": 5272
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 56733,
+              "request_to_return_ns": 4313
+            }
+          ],
+          "compile_ns": 76214,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 0,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 107,
+              "request_to_return_ns": 157
+            },
+            {
+              "checkpoint": 100,
+              "ns": 44991,
+              "request_to_return_ns": 4480
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 53863,
+              "request_to_return_ns": 4155
+            }
+          ],
+          "compile_ns": 55255,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 1,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 119,
+              "request_to_return_ns": 138
+            },
+            {
+              "checkpoint": 100,
+              "ns": 49752,
+              "request_to_return_ns": 5085
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 60801,
+              "request_to_return_ns": 4592
+            }
+          ],
+          "compile_ns": 61694,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 2,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 4472,
+          "callback_count": 1432,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 77,
+              "request_to_return_ns": 99
+            },
+            {
+              "checkpoint": 100,
+              "ns": 42583,
+              "request_to_return_ns": 4071
+            },
+            {
+              "checkpoint": 1432,
+              "ns": 55425,
+              "request_to_return_ns": 3924
+            }
+          ],
+          "compile_ns": 53812,
+          "native_nodes": 53,
+          "native_rules": 13,
+          "round": 3,
+          "rss_after_compile_kib": 20096,
+          "rss_after_recovery_kib": 20096,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 100,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.3227634439972462,
+    "cpu_s": 0.308492,
+    "peak_rss_kib": 26420,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 257,
+              "request_to_return_ns": 256
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2101,
+              "request_to_return_ns": 374
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 391485,
+              "request_to_return_ns": 27395
+            }
+          ],
+          "compile_ns": 464690,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 20112,
+          "rss_after_recovery_kib": 20112,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 168,
+              "request_to_return_ns": 205
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1715,
+              "request_to_return_ns": 182
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 383567,
+              "request_to_return_ns": 26459
+            }
+          ],
+          "compile_ns": 402374,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 20112,
+          "rss_after_recovery_kib": 20112,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 115,
+              "request_to_return_ns": 135
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1728,
+              "request_to_return_ns": 233
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 405489,
+              "request_to_return_ns": 28907
+            }
+          ],
+          "compile_ns": 387209,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 20112,
+          "rss_after_recovery_kib": 20112,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 90,
+              "request_to_return_ns": 138
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1659,
+              "request_to_return_ns": 205
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 423770,
+              "request_to_return_ns": 29000
+            }
+          ],
+          "compile_ns": 405854,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 20112,
+          "rss_after_recovery_kib": 20112,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 100,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.3224933419987792,
+    "cpu_s": 0.28655,
+    "peak_rss_kib": 26392,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 333,
+              "request_to_return_ns": 300
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2143,
+              "request_to_return_ns": 376
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 389346,
+              "request_to_return_ns": 27323
+            }
+          ],
+          "compile_ns": 440340,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 20148,
+          "rss_after_recovery_kib": 20148,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 116,
+              "request_to_return_ns": 170
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1772,
+              "request_to_return_ns": 176
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 392435,
+              "request_to_return_ns": 30431
+            }
+          ],
+          "compile_ns": 393851,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 20148,
+          "rss_after_recovery_kib": 20148,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 129,
+              "request_to_return_ns": 141
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1671,
+              "request_to_return_ns": 209
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 427272,
+              "request_to_return_ns": 32918
+            }
+          ],
+          "compile_ns": 398606,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 20148,
+          "rss_after_recovery_kib": 20148,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 115,
+              "request_to_return_ns": 146
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1769,
+              "request_to_return_ns": 175
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 427363,
+              "request_to_return_ns": 29061
+            }
+          ],
+          "compile_ns": 411863,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 20148,
+          "rss_after_recovery_kib": 20148,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 100,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.31188826900324784,
+    "cpu_s": 0.290713,
+    "peak_rss_kib": 26220,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 322,
+              "request_to_return_ns": 403
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1957,
+              "request_to_return_ns": 327
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 432444,
+              "request_to_return_ns": 26138
+            }
+          ],
+          "compile_ns": 469378,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 20012,
+          "rss_after_recovery_kib": 20012,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 138,
+              "request_to_return_ns": 189
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1644,
+              "request_to_return_ns": 192
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 423914,
+              "request_to_return_ns": 29536
+            }
+          ],
+          "compile_ns": 404478,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 20012,
+          "rss_after_recovery_kib": 20012,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 234,
+              "request_to_return_ns": 278
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1841,
+              "request_to_return_ns": 215
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 452540,
+              "request_to_return_ns": 32129
+            }
+          ],
+          "compile_ns": 448618,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 20012,
+          "rss_after_recovery_kib": 20012,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 106,
+              "request_to_return_ns": 178
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1875,
+              "request_to_return_ns": 195
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 486820,
+              "request_to_return_ns": 37593
+            }
+          ],
+          "compile_ns": 455906,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 20012,
+          "rss_after_recovery_kib": 20012,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 100,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.33428971800458385,
+    "cpu_s": 0.311542,
+    "peak_rss_kib": 26408,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 442,
+              "request_to_return_ns": 588
+            },
+            {
+              "checkpoint": 100,
+              "ns": 2243,
+              "request_to_return_ns": 519
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 429817,
+              "request_to_return_ns": 27530
+            }
+          ],
+          "compile_ns": 480032,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 0,
+          "rss_after_compile_kib": 20068,
+          "rss_after_recovery_kib": 20068,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 152,
+              "request_to_return_ns": 193
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1983,
+              "request_to_return_ns": 253
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 417700,
+              "request_to_return_ns": 26254
+            }
+          ],
+          "compile_ns": 392336,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 1,
+          "rss_after_compile_kib": 20068,
+          "rss_after_recovery_kib": 20068,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 143,
+              "request_to_return_ns": 169
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1876,
+              "request_to_return_ns": 211
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 397753,
+              "request_to_return_ns": 26954
+            }
+          ],
+          "compile_ns": 403848,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 2,
+          "rss_after_compile_kib": 20068,
+          "rss_after_recovery_kib": 20068,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 34982,
+          "callback_count": 11062,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 108,
+              "request_to_return_ns": 145
+            },
+            {
+              "checkpoint": 100,
+              "ns": 1511,
+              "request_to_return_ns": 147
+            },
+            {
+              "checkpoint": 11062,
+              "ns": 399781,
+              "request_to_return_ns": 28014
+            }
+          ],
+          "compile_ns": 422062,
+          "native_nodes": 503,
+          "native_rules": 103,
+          "round": 3,
+          "rss_after_compile_kib": 20068,
+          "rss_after_recovery_kib": 20068,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 100
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 1000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 0.3727998799950001,
+    "cpu_s": 0.343468,
+    "peak_rss_kib": 26368,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 633,
+              "request_to_return_ns": 899
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6335,
+              "request_to_return_ns": 619
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4438425,
+              "request_to_return_ns": 338823
+            }
+          ],
+          "compile_ns": 5049458,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 23320,
+          "rss_after_recovery_kib": 23320,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 261,
+              "request_to_return_ns": 437
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6545,
+              "request_to_return_ns": 606
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4556744,
+              "request_to_return_ns": 328165
+            }
+          ],
+          "compile_ns": 4493937,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 23320,
+          "rss_after_recovery_kib": 23324,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 198,
+              "request_to_return_ns": 335
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6796,
+              "request_to_return_ns": 897
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4622688,
+              "request_to_return_ns": 326868
+            }
+          ],
+          "compile_ns": 4593240,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 23332,
+          "rss_after_recovery_kib": 23332,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 569,
+              "request_to_return_ns": 658
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6462,
+              "request_to_return_ns": 870
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4664046,
+              "request_to_return_ns": 337473
+            }
+          ],
+          "compile_ns": 4701007,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 23344,
+          "rss_after_recovery_kib": 23348,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 1000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.38416219699865906,
+    "cpu_s": 0.341974,
+    "peak_rss_kib": 26436,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 467,
+              "request_to_return_ns": 578
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6015,
+              "request_to_return_ns": 612
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4299304,
+              "request_to_return_ns": 334298
+            }
+          ],
+          "compile_ns": 4920430,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 23344,
+          "rss_after_recovery_kib": 23344,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 197,
+              "request_to_return_ns": 280
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5315,
+              "request_to_return_ns": 343
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4545625,
+              "request_to_return_ns": 336184
+            }
+          ],
+          "compile_ns": 4571953,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 23344,
+          "rss_after_recovery_kib": 23348,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 537,
+              "request_to_return_ns": 580
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5610,
+              "request_to_return_ns": 458
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4651201,
+              "request_to_return_ns": 355091
+            }
+          ],
+          "compile_ns": 4541348,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 23356,
+          "rss_after_recovery_kib": 23356,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 506,
+              "request_to_return_ns": 712
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5837,
+              "request_to_return_ns": 698
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4543991,
+              "request_to_return_ns": 311443
+            }
+          ],
+          "compile_ns": 4550933,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 23364,
+          "rss_after_recovery_kib": 23368,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 1000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.4350134509950294,
+    "cpu_s": 0.41419799999999996,
+    "peak_rss_kib": 26408,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 702,
+              "request_to_return_ns": 662
+            },
+            {
+              "checkpoint": 100,
+              "ns": 8936,
+              "request_to_return_ns": 745
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 8092206,
+              "request_to_return_ns": 520835
+            }
+          ],
+          "compile_ns": 6000854,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 23356,
+          "rss_after_recovery_kib": 23356,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 381,
+              "request_to_return_ns": 668
+            },
+            {
+              "checkpoint": 100,
+              "ns": 8979,
+              "request_to_return_ns": 1124
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 7320490,
+              "request_to_return_ns": 508658
+            }
+          ],
+          "compile_ns": 6126694,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 23356,
+          "rss_after_recovery_kib": 23360,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 615,
+              "request_to_return_ns": 755
+            },
+            {
+              "checkpoint": 100,
+              "ns": 8645,
+              "request_to_return_ns": 1216
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 7005204,
+              "request_to_return_ns": 554675
+            }
+          ],
+          "compile_ns": 7844217,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 23364,
+          "rss_after_recovery_kib": 23368,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 546,
+              "request_to_return_ns": 741
+            },
+            {
+              "checkpoint": 100,
+              "ns": 9796,
+              "request_to_return_ns": 894
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 7385791,
+              "request_to_return_ns": 453191
+            }
+          ],
+          "compile_ns": 7065612,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 23376,
+          "rss_after_recovery_kib": 23380,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 1000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.41884231499716407,
+    "cpu_s": 0.367656,
+    "peak_rss_kib": 26252,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 593,
+              "request_to_return_ns": 796
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5441,
+              "request_to_return_ns": 486
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4372519,
+              "request_to_return_ns": 340653
+            }
+          ],
+          "compile_ns": 4796529,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 0,
+          "rss_after_compile_kib": 23324,
+          "rss_after_recovery_kib": 23324,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 298,
+              "request_to_return_ns": 525
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5941,
+              "request_to_return_ns": 684
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4519904,
+              "request_to_return_ns": 339186
+            }
+          ],
+          "compile_ns": 4325053,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 1,
+          "rss_after_compile_kib": 23324,
+          "rss_after_recovery_kib": 23328,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 591,
+              "request_to_return_ns": 907
+            },
+            {
+              "checkpoint": 100,
+              "ns": 6733,
+              "request_to_return_ns": 573
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4594529,
+              "request_to_return_ns": 343821
+            }
+          ],
+          "compile_ns": 4534627,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 2,
+          "rss_after_compile_kib": 23336,
+          "rss_after_recovery_kib": 23336,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 340982,
+          "callback_count": 107362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 371,
+              "request_to_return_ns": 556
+            },
+            {
+              "checkpoint": 100,
+              "ns": 5973,
+              "request_to_return_ns": 638
+            },
+            {
+              "checkpoint": 107362,
+              "ns": 4636780,
+              "request_to_return_ns": 328759
+            }
+          ],
+          "compile_ns": 4498196,
+          "native_nodes": 5003,
+          "native_rules": 1003,
+          "round": 3,
+          "rss_after_compile_kib": 23348,
+          "rss_after_recovery_kib": 23348,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 1000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10000,
+    "repeat": 0,
+    "warmup": true,
+    "wall_s": 1.0132987940014573,
+    "cpu_s": 0.9640759999999999,
+    "peak_rss_kib": 103520,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 752,
+              "request_to_return_ns": 1078
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40591,
+              "request_to_return_ns": 647
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 59558241,
+              "request_to_return_ns": 5466070
+            }
+          ],
+          "compile_ns": 76237880,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 103196,
+          "rss_after_recovery_kib": 103196,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 957,
+              "request_to_return_ns": 954
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39123,
+              "request_to_return_ns": 1056
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 57306226,
+              "request_to_return_ns": 5266494
+            }
+          ],
+          "compile_ns": 58178621,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 103676,
+          "rss_after_recovery_kib": 103676,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 672,
+              "request_to_return_ns": 823
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39145,
+              "request_to_return_ns": 1215
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 58755326,
+              "request_to_return_ns": 5239610
+            }
+          ],
+          "compile_ns": 56878007,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 103740,
+          "rss_after_recovery_kib": 103740,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 510,
+              "request_to_return_ns": 648
+            },
+            {
+              "checkpoint": 100,
+              "ns": 37391,
+              "request_to_return_ns": 749
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 57372191,
+              "request_to_return_ns": 5296941
+            }
+          ],
+          "compile_ns": 57179197,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 103740,
+          "rss_after_recovery_kib": 103740,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10000,
+    "repeat": 1,
+    "warmup": false,
+    "wall_s": 0.9937784749999992,
+    "cpu_s": 0.952376,
+    "peak_rss_kib": 103516,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 1178,
+              "request_to_return_ns": 943
+            },
+            {
+              "checkpoint": 100,
+              "ns": 57598,
+              "request_to_return_ns": 928
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 66524358,
+              "request_to_return_ns": 6212509
+            }
+          ],
+          "compile_ns": 78990843,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 103288,
+          "rss_after_recovery_kib": 103288,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 691,
+              "request_to_return_ns": 617
+            },
+            {
+              "checkpoint": 100,
+              "ns": 38699,
+              "request_to_return_ns": 499
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 57256712,
+              "request_to_return_ns": 5328962
+            }
+          ],
+          "compile_ns": 64015387,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 103768,
+          "rss_after_recovery_kib": 103768,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 634,
+              "request_to_return_ns": 645
+            },
+            {
+              "checkpoint": 100,
+              "ns": 40014,
+              "request_to_return_ns": 1071
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 56483133,
+              "request_to_return_ns": 5071715
+            }
+          ],
+          "compile_ns": 59951668,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 103768,
+          "rss_after_recovery_kib": 103768,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 542,
+              "request_to_return_ns": 576
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39585,
+              "request_to_return_ns": 1142
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 57326817,
+              "request_to_return_ns": 5024196
+            }
+          ],
+          "compile_ns": 59839557,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 103768,
+          "rss_after_recovery_kib": 103768,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10000,
+    "repeat": 2,
+    "warmup": false,
+    "wall_s": 0.9555786400014767,
+    "cpu_s": 0.919688,
+    "peak_rss_kib": 104156,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 902,
+              "request_to_return_ns": 1036
+            },
+            {
+              "checkpoint": 100,
+              "ns": 37552,
+              "request_to_return_ns": 579
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 59575617,
+              "request_to_return_ns": 5428035
+            }
+          ],
+          "compile_ns": 75930454,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 103280,
+          "rss_after_recovery_kib": 103280,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 525,
+              "request_to_return_ns": 519
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39323,
+              "request_to_return_ns": 1312
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 59019146,
+              "request_to_return_ns": 5479871
+            }
+          ],
+          "compile_ns": 58703763,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 103760,
+          "rss_after_recovery_kib": 103760,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 651,
+              "request_to_return_ns": 569
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39530,
+              "request_to_return_ns": 938
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 58703193,
+              "request_to_return_ns": 5285702
+            }
+          ],
+          "compile_ns": 57654049,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 103760,
+          "rss_after_recovery_kib": 103760,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 760,
+              "request_to_return_ns": 723
+            },
+            {
+              "checkpoint": 100,
+              "ns": 38301,
+              "request_to_return_ns": 710
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 57356080,
+              "request_to_return_ns": 5458405
+            }
+          ],
+          "compile_ns": 56363072,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 104244,
+          "rss_after_recovery_kib": 104244,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  },
+  {
+    "engine": "sing-box",
+    "rules": 10000,
+    "repeat": 3,
+    "warmup": false,
+    "wall_s": 0.9597291059981217,
+    "cpu_s": 0.916549,
+    "peak_rss_kib": 104004,
+    "cancelled": false,
+    "exit": 0,
+    "result": {
+      "cidrs": 50000,
+      "domains": 100000,
+      "native_resource_bytes": 5339236,
+      "rounds": [
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 540,
+              "request_to_return_ns": 862
+            },
+            {
+              "checkpoint": 100,
+              "ns": 38711,
+              "request_to_return_ns": 708
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 56981977,
+              "request_to_return_ns": 5151184
+            }
+          ],
+          "compile_ns": 73153776,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 0,
+          "rss_after_compile_kib": 103196,
+          "rss_after_recovery_kib": 103196,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 893,
+              "request_to_return_ns": 1092
+            },
+            {
+              "checkpoint": 100,
+              "ns": 38812,
+              "request_to_return_ns": 1274
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 56655664,
+              "request_to_return_ns": 5260539
+            }
+          ],
+          "compile_ns": 56584259,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 1,
+          "rss_after_compile_kib": 103676,
+          "rss_after_recovery_kib": 103676,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 1051,
+              "request_to_return_ns": 955
+            },
+            {
+              "checkpoint": 100,
+              "ns": 49039,
+              "request_to_return_ns": 1193
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 65304229,
+              "request_to_return_ns": 5373267
+            }
+          ],
+          "compile_ns": 58929021,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 2,
+          "rss_after_compile_kib": 103676,
+          "rss_after_recovery_kib": 103676,
+          "status": "COMPILED"
+        },
+        {
+          "bytes": 3409982,
+          "callback_count": 1070362,
+          "cancel": [
+            {
+              "checkpoint": 1,
+              "ns": 597,
+              "request_to_return_ns": 431
+            },
+            {
+              "checkpoint": 100,
+              "ns": 39956,
+              "request_to_return_ns": 1060
+            },
+            {
+              "checkpoint": 1070362,
+              "ns": 56937809,
+              "request_to_return_ns": 5179252
+            }
+          ],
+          "compile_ns": 56230453,
+          "native_nodes": 50003,
+          "native_rules": 10003,
+          "round": 3,
+          "rss_after_compile_kib": 104160,
+          "rss_after_recovery_kib": 104160,
+          "status": "COMPILED"
+        }
+      ],
+      "rules": 10000
+    }
+  }
+]

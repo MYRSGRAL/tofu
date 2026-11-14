@@ -1,0 +1,46 @@
+// Test-only resource provider и synthetic process metadata, без owner authority.
+package rule
+import (
+ "context"
+ J "github.com/sagernet/sing/common/json"
+ "net/netip"
+ "os"
+ "path/filepath"
+ "testing"
+ "github.com/sagernet/sing-box/adapter"
+ "github.com/sagernet/sing-box/log"
+ "github.com/sagernet/sing-box/option"
+ M "github.com/sagernet/sing/common/metadata"
+ "github.com/sagernet/sing/service"
+)
+type codecSet struct { adapter.RuleSet; rules []adapter.HeadlessRule }
+func(s *codecSet) IncRef(){}
+func(s *codecSet) DecRef(){}
+func(s *codecSet) Match(m *adapter.InboundContext)bool {for _,r:=range s.rules {if r.Match(m){return true}};return false}
+type codecRouter struct { adapter.Router; sets map[string]adapter.RuleSet }
+func(r *codecRouter) RuleSet(tag string)(adapter.RuleSet,bool){s,ok:=r.sets[tag];return s,ok}
+func TestP04AActualCodecAND(t *testing.T) {
+ root:=os.Getenv("P04A_DATA"); raw,err:=os.ReadFile(filepath.Join(root,"config.json"));if err!=nil {t.Fatal(err)}
+ var envelope struct {Route struct {Rules []option.Rule `json:"rules"`; Sets []struct{Tag,Path string} `json:"rule_set"`} `json:"route"`}
+ if err=J.UnmarshalContext(context.Background(),raw,&envelope);err!=nil {t.Fatal(err)}
+ router:=&codecRouter{sets:map[string]adapter.RuleSet{}}
+ ctx:=service.ContextWith[adapter.Router](context.Background(),router)
+ for _,ref:=range envelope.Route.Sets {
+  data,err:=os.ReadFile(filepath.Join(root,ref.Path));if err!=nil {t.Fatal(err)}
+  var source option.PlainRuleSetCompat;if err=J.UnmarshalContext(context.Background(),data,&source);err!=nil {t.Fatal(err)}
+  plain,err:=source.Upgrade();if err!=nil {t.Fatal(err)}
+  set:=&codecSet{}
+  for _,options:=range plain.Rules {r,err:=NewHeadlessRule(ctx,options);if err!=nil {t.Fatal(err)};set.rules=append(set.rules,r)}
+  router.sets[ref.Tag]=set
+ }
+ rule,err:=NewRule(ctx,log.NewNOPFactory().Logger(),envelope.Route.Rules[2],true);if err!=nil {t.Fatal(err)}
+ if err=rule.Start();err!=nil {t.Fatal(err)};defer rule.Close()
+ cases:=[]struct{name,domain,ip,app,inbound string; want bool}{
+  {"match","a.example.invalid","203.0.113.7","/opt/fixture/app-0","system-tun",true},
+  {"wrongapp","a.example.invalid","203.0.113.7","/opt/fixture/other","system-tun",false},
+  {"wrongname","miss.example.invalid","203.0.113.7","/opt/fixture/app-0","system-tun",false},
+  {"wrongCIDR","a.example.invalid","203.0.114.7","/opt/fixture/app-0","system-tun",false},
+  {"wronginbound","a.example.invalid","203.0.113.7","/opt/fixture/app-0","socks",false},
+ }
+ for _,c:=range cases {t.Run(c.name,func(t *testing.T){m:=&adapter.InboundContext{Inbound:c.inbound,Domain:c.domain,Destination:M.SocksaddrFrom(netip.MustParseAddr(c.ip),443),ProcessInfo:&adapter.ConnectionOwner{ProcessPath:c.app}};if got:=rule.Match(m);got!=c.want {t.Fatalf("match=%v want %v",got,c.want)}})}
+}
