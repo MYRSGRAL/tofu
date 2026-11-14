@@ -239,6 +239,8 @@ impl LocalSession {
             )?);
             self.log(crate::event_log::EventCode::ProcessSpawned);
             let child = self.child.as_mut().ok_or(HostError::State)?;
+            #[cfg(feature = "test-support")]
+            cancel.lifecycle_reach(super::LifecycleStage::Apply, child.id().ok_or(HostError::Process)?).await?;
             process::write_config(child, &checked.bytes, cancel).await?;
             let readiness = async {
                 loop {
