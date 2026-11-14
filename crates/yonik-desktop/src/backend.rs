@@ -4380,10 +4380,7 @@ async fn run(
                 if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
-                    let policy = scheduled.policy;
-                    let visible = scheduled.visible;
-                    if let Ok(mut replacement) = DesktopSchedule::new() {
-                        replacement.policy = policy; replacement.visible = visible;
+                    if let Ok(mut replacement) = scheduled.replacement() {
                         if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
                         actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
