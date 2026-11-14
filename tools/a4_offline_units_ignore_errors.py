@@ -340,13 +340,14 @@ class IgnoreUnitsRead(offline.Extraction):
         self.task.mkdir(mode=0o700)
         locks = []
         for directory, operation in [
-            (self.task, fcntl.LOCK_EX),
+            (self.task, fcntl.LOCK_SH),
             (offline.CACHE, fcntl.LOCK_SH),
             (self.overlay.parent, fcntl.LOCK_SH),
         ]:
             fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
             fcntl.flock(fd, operation)
             locks.append(fd)
+        self.capture_locks = tuple(locks)
         (self.out / "root-decision-binding.json").write_text(
             json.dumps(
                 {"decision": decision, "sha256": offline.sha(DECISION)}, indent=2
@@ -396,21 +397,19 @@ class IgnoreUnitsRead(offline.Extraction):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                start_new_session=True,
+                pass_fds=self.capture_locks,
                 env={"PATH": "/usr/bin", "LC_ALL": "C"},
             )
-            timed_out = False
-            try:
-                stdout, stderr = process.communicate(timeout=60)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                process.kill()
-                stdout, stderr = process.communicate()
+            stdout, stderr, capture_failure = offline.a4_offline_capture.capture(
+                process, 60
+            )
             command = {
                 "argv": argv,
                 "pid": process.pid,
                 "exit": process.returncode,
-                "timeout": timed_out,
+                "timeout": capture_failure == "timeout",
+                "capture_failure": capture_failure,
                 "start_ns": began,
                 "end_ns": time.monotonic_ns(),
                 "stdout": stdout,
@@ -420,6 +419,8 @@ class IgnoreUnitsRead(offline.Extraction):
             (self.out / "restore-command.json").write_text(
                 json.dumps(command, indent=2) + "\n"
             )
+            if capture_failure:
+                raise offline.OfflineCaptureFailure(capture_failure)
             analysis = account_units(
                 destination, stdout + "\n" + stderr, process.returncode
             )

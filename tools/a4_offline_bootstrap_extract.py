@@ -18,6 +18,8 @@ import uuid
 import zlib
 from pathlib import Path
 
+import a4_offline_capture
+
 BASE = Path(__file__).resolve().parents[1]
 SUMMARY = BASE / "docs/evidence/a4-bootstrap-diagnostic-142/run1/summary.json"
 CACHE = Path("/home/myrs/projects/yonik/local/validation/vm-base")
@@ -245,6 +247,10 @@ def source_references(paths: list[Path]) -> list[dict]:
     return results
 
 
+class OfflineCaptureFailure(ValueError):
+    """Неуспешный capture завершает всю сессию без следующей команды."""
+
+
 class Extraction:
     def __init__(self) -> None:
         self.tag = secrets.token_hex(4)
@@ -257,6 +263,7 @@ class Extraction:
         self.fs = ""
         self.root = None
         self.commands = 0
+        self.capture_locks: tuple[int, ...] = ()
         summary = json.loads(SUMMARY.read_text())
         self.overlay = Path(summary["failed_overlay"]["path"])
         self.overlay_sha = summary["failed_overlay"]["sha256"]
@@ -283,19 +290,16 @@ class Extraction:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            start_new_session=True,
+            pass_fds=self.capture_locks,
             env={"PATH": "/usr/bin", "LC_ALL": "C", "LANG": "C"},
         )
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
-            raise TimeoutError("Bounded offline tool timeout") from None
+        stdout, stderr, capture_failure = a4_offline_capture.capture(process, timeout)
         row = {
             "argv": argv,
             "pid": process.pid,
             "exit": process.returncode,
+            "capture_failure": capture_failure,
             "start_ns": started,
             "end_ns": time.monotonic_ns(),
             "stdout": stdout,
@@ -303,6 +307,8 @@ class Extraction:
         }
         with (self.out / "commands-private.jsonl").open("a") as stream:
             stream.write(json.dumps(row) + "\n")
+        if capture_failure:
+            raise OfflineCaptureFailure(capture_failure)
         if process.returncode:
             raise ValueError(
                 "Offline tool failed: "
@@ -631,11 +637,12 @@ class Extraction:
     def execute(self) -> None:
         self.task.mkdir(mode=0o700)
         lock = os.open(self.task, os.O_RDONLY | os.O_DIRECTORY)
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        fcntl.flock(lock, fcntl.LOCK_SH)
         base_lock = os.open(CACHE, os.O_RDONLY | os.O_DIRECTORY)
         fcntl.flock(base_lock, fcntl.LOCK_SH)
         input_lock = os.open(self.overlay.parent, os.O_RDONLY | os.O_DIRECTORY)
         fcntl.flock(input_lock, fcntl.LOCK_SH)
+        self.capture_locks = (lock, base_lock, input_lock)
         (self.out / "executed-source.py").write_bytes(Path(__file__).read_bytes())
         try:
             ready = self.prepare()
@@ -665,6 +672,8 @@ class Extraction:
                     break
                 try:
                     result = self.dispatch(request)
+                except OfflineCaptureFailure:
+                    raise
                 except Exception as error:
                     result = {"error": str(error)}
                     (self.out / "action-failure.json").write_text(

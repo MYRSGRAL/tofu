@@ -56,6 +56,7 @@ def main() -> int:
             raise ValueError(
                 "Original bounded session lock no longer held; no new session"
             )
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
         prepared = json.loads((out / "prepare.json").read_text())
         if (
             prepared["root"]["filesystem"] != "btrfs"
@@ -83,16 +84,20 @@ def main() -> int:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            start_new_session=True,
+            pass_fds=(fd,),
             env={"PATH": "/usr/bin", "LC_ALL": "C"},
         )
-        stdout, stderr = process.communicate(timeout=60)
+        stdout, stderr, capture_failure = offline.a4_offline_capture.capture(
+            process, 60
+        )
         (out / "units-only-command.json").write_text(
             json.dumps(
                 {
                     "argv": argv,
                     "pid": process.pid,
                     "exit": process.returncode,
+                    "capture_failure": capture_failure,
                     "stdout": stdout,
                     "stderr": stderr,
                 },
@@ -100,11 +105,12 @@ def main() -> int:
             )
             + "\n"
         )
-        if process.returncode:
+        if capture_failure or process.returncode:
             print(
                 json.dumps(
                     {
                         "unit_read_tool_gap": True,
+                        "capture_failure": capture_failure,
                         "exit": process.returncode,
                         "stderr": stderr,
                     }
