@@ -733,6 +733,7 @@ impl Backend {
             )
             .map_err(|_| ServiceError::Unsupported)?
         };
+        let config = config.with_local_runtime_logging();
         if self.registry.is_none() {
             self.registry = Some(TrustedRegistry::system().map_err(unavailable)?);
         }
@@ -868,6 +869,7 @@ impl Backend {
         uid: u32,
         artifact: Arc<SessionArtifact>,
         stamp: NetworkStamp,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
         if artifact.bundle.is_some() {
@@ -925,7 +927,7 @@ impl Backend {
         // Любая ошибка проходит через независимый worker-first cleanup.
         let result = diagnostic_result(
             "start_profile",
-            self.start_profile(owner, artifact, cancel).await,
+            self.start_profile(owner, artifact, output, cancel).await,
         );
         if result.is_err() {
             let cleanup = diagnostic_result("error_cleanup", self.finish_session(uid, false).await);
@@ -960,6 +962,7 @@ impl Backend {
         &mut self,
         owner: Ownership,
         artifact: Arc<SessionArtifact>,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut Cancellation,
     ) -> Result<ProtectionState, ServiceError> {
         self.policy(owner, compile_protection(&artifact.baseline, false)?)
@@ -1056,7 +1059,7 @@ impl Backend {
             "worker_start",
             self.supervisor()
                 .await?
-                .start(Arc::clone(&artifact.payload), cancel)
+                .start_output(Arc::clone(&artifact.payload), output, cancel)
                 .await,
         )
         .map_err(unavailable)?;

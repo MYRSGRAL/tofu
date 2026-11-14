@@ -1,42 +1,25 @@
-//! Только тестовая основа FR16: две фиксированные роли без metadata authority.
-//! Factory требует явно введённый Tokio runtime с I/O driver. Wire, EventLog
-//! binding и production caller остаются отдельным gate; ABI и протокол не меняются.
+//! Закрытый output transport legacy Apply: две роли без дополнительной authority.
+//! FIFO импорт проверяет PIPEFS, flags и identity до owned duplication.
 use rustix::{
     fs::{FileType, OFlags, fcntl_getfl, fstat, fstatfs},
     io::{FdFlags, fcntl_getfd},
 };
-#[cfg(test)]
 use std::process::Command;
 use std::{io, os::fd::OwnedFd};
 use tokio::net::unix::pipe::{Receiver, pipe};
 
 pub(crate) struct OutputReaders {
-    #[cfg(test)]
     pub(crate) stdout: Receiver,
-    #[cfg(not(test))]
-    stdout: Receiver,
-    #[cfg(test)]
     pub(crate) stderr: Receiver,
-    #[cfg(not(test))]
-    stderr: Receiver,
 }
 
 pub(crate) struct OutputWriters {
-    #[cfg(test)]
     pub(crate) roles: Vec<OwnedFd>,
-    #[cfg(not(test))]
-    roles: Vec<OwnedFd>,
 }
 
-pub(crate) struct ValidatedWriters {
-    #[cfg(test)]
+pub struct ValidatedWriters {
     pub(crate) stdout: OwnedFd,
-    #[cfg(not(test))]
-    stdout: OwnedFd,
-    #[cfg(test)]
     pub(crate) stderr: OwnedFd,
-    #[cfg(not(test))]
-    stderr: OwnedFd,
 }
 
 pub(crate) fn create() -> io::Result<(OutputReaders, OutputWriters)> {
@@ -89,9 +72,8 @@ fn validate_pair(fds: [std::os::fd::BorrowedFd<'_>; 2]) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
 impl ValidatedWriters {
-    // Только frozen test harness #204, отсутствует в non-test feature carrier.
+    // Назначает только две фиксированные роли; stdin/config остаются у worker.
     pub(crate) fn attach(self, command: &mut Command) {
         command.stdout(self.stdout).stderr(self.stderr);
     }
@@ -124,6 +106,7 @@ pub(crate) struct DecodedOutput {
 }
 
 /// Сериализация данных без Connection/send. Исходная пара закрывается при возврате.
+#[cfg(test)]
 pub(crate) fn encode(handle: [u8; 32], writers: ValidatedWriters) -> io::Result<zbus::Message> {
     use std::os::fd::AsFd;
     let json = serde_json::to_string(&ApplyOutputJson { version: 1, handle })

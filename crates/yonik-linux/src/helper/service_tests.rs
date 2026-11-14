@@ -30,11 +30,22 @@ impl PrivateBus {
         }
     }
     async fn connect(&self) -> zbus::Connection {
-        zbus::connection::Builder::address(self.address.as_str())
-            .unwrap()
-            .build()
+        super::super::output_bus::builder(
+            tokio::net::UnixStream::connect(
+                self.address
+                    .strip_prefix("unix:path=")
+                    .unwrap()
+                    .split(',')
+                    .next()
+                    .unwrap(),
+            )
             .await
-            .unwrap()
+            .unwrap(),
+        )
+        .unwrap()
+        .build()
+        .await
+        .unwrap()
     }
 }
 impl Drop for PrivateBus {
@@ -96,6 +107,15 @@ impl ProtectionHost for Host {
                 authorized: true,
             },
         )?)
+    }
+    async fn apply_output(
+        &mut self,
+        uid: u32,
+        artifact: &Artifact,
+        _output: crate::output_transport::ValidatedWriters,
+        cancel: Cancellation,
+    ) -> Result<ProtectionState, ServiceError> {
+        self.apply(uid, artifact, cancel).await
     }
     async fn apply(
         &mut self,
@@ -654,4 +674,47 @@ fn bundle_method_rejects_wrong_signature_fd_count_and_unknown_fields() {
         .build(&("{\"version\":1}",))
         .unwrap();
     assert!(matches!(parse(&valid), Ok(Request::BundleCapabilities)));
+}
+
+// Только private bus и синтетический host, без systemd/engine execution.
+#[tokio::test]
+async fn output_dispatch_preserves_claim_owner_stale_authorization_and_replay_fences() {
+    async fn output_call(peer: &zbus::Connection, request: &str) -> zbus::Result<zbus::Message> {
+        use std::os::fd::AsFd;
+        let (_readers, writers) = crate::output_transport::create().unwrap();
+        let writers = writers.validate().unwrap();
+        let roles = [
+            zbus::zvariant::Fd::from(writers.stdout.as_fd()),
+            zbus::zvariant::Fd::from(writers.stderr.as_fd()),
+        ];
+        peer.call_method(
+            Some(SERVICE_NAME),
+            SERVICE_PATH,
+            Some(SERVICE_INTERFACE),
+            "ApplyOutputV1",
+            &(request, roles.as_slice()),
+        )
+        .await
+    }
+    let f = Fixture::new().await;
+    let prepared = f.call("Prepare", &profile_frame()).await.unwrap();
+    let request = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    let other = f._bus.connect().await;
+    assert!(output_call(&other, &request).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 0);
+    f.generation.store(2, Ordering::SeqCst);
+    assert!(output_call(&f.peer, &request).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 0);
+    let prepared = f.call("Prepare", &profile_frame()).await.unwrap();
+    let request = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    f.allowed.store(false, Ordering::SeqCst);
+    assert!(output_call(&f.peer, &request).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 0);
+    f.allowed.store(true, Ordering::SeqCst);
+    let prepared = f.call("Prepare", &profile_frame()).await.unwrap();
+    let request = serde_json::json!({"version":1,"handle":prepared["handle"]}).to_string();
+    output_call(&f.peer, &request).await.unwrap();
+    assert!(output_call(&f.peer, &request).await.is_err());
+    assert_eq!(f.effects.load(Ordering::SeqCst), 1);
+    f.shutdown().await;
 }

@@ -85,3 +85,41 @@ fn invalid_generation_and_drop_close_bound_transport() -> io::Result<()> {
     assert_eq!(rustix::io::read(&stderr, &mut [0])?, 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn production_readers_frame_separately_drop_secrets_and_keep_old_scope() {
+    use std::io::Write;
+    let root = EventLog::new();
+    let old = PreparedOutput::bind(prepared([1; 32]), Engine::SingBox, &root, 41).unwrap();
+    let next = PreparedOutput::bind(prepared([2; 32]), Engine::Xray, &root, 42).unwrap();
+    let mut stdout = std::fs::File::from(old.writers.stdout);
+    let mut stderr = std::fs::File::from(old.writers.stderr);
+    let drain = OutputDrain(vec![
+        reader(old.readers.stdout, old.engine, old.log.clone()),
+        reader(old.readers.stderr, old.engine, old.log),
+    ]);
+    stdout.write_all(b"INFO[0000] sing-box ").unwrap();
+    tokio::task::yield_now().await;
+    stderr
+        .write_all(b"started (0.12s)\nSECRET-CANARY\n")
+        .unwrap();
+    stdout.write_all(b"started (0.12s)\n").unwrap();
+    for _ in 0..5 {
+        stderr.write_all(&[b'x'; 1024]).unwrap();
+    }
+    stderr.write_all(b"\nunfinished-SECRET").unwrap();
+    drop(next);
+    drop(stdout);
+    drop(stderr);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), drain.drained())
+            .await
+            .unwrap()
+    );
+    let page = root.read_scoped(0, LogFilter::default(), MAX_PAGE).unwrap();
+    assert_eq!(page.page.events.len(), 1);
+    assert_eq!(page.page.events[0].code, EventCode::NativeSingStarted);
+    assert_eq!(page.contexts[0].unwrap().generation, 41);
+    assert!(page.page.rejected >= 4);
+    assert!(!format!("{:?}", page).contains("SECRET"));
+}
