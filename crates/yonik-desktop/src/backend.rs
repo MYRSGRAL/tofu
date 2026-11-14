@@ -11,12 +11,14 @@ mod desktop_schedule;
 mod logs;
 #[path = "presets.rs"]
 mod presets;
+#[path = "startup_application.rs"]
+mod startup_application;
 use crate::maintenance;
 use backend_startup::StartupObserver;
 pub use backend_startup::StartupPhase;
 #[path = "maintenance_job.rs"]
 mod maintenance_job;
-use crate::preferences::{Preferences, SaveOutcome, Store};
+use crate::preferences::{Preferences, SaveError, SaveOutcome, Store};
 use crate::system_session::{ProfileRevision, SystemSession};
 use batch_diagnostics::{BatchEvent, BatchPoll, BatchRunning, BatchState};
 use desktop_schedule::DesktopSchedule;
@@ -47,7 +49,7 @@ use yonik_linux::{
     NetworkWatch, PendingRefresh, ProbeResult, ProbeTarget, ProfileQuery, RefreshResult,
     ResolvedProfile, SubscriptionError, SubscriptionIdentity, SubscriptionService,
     SubscriptionSource, TCP_SERIES_SAMPLES, TcpProbeSeriesResult, TcpProbeStatus, TcpProbeTarget,
-    check_tcp_series, subscription_master_key,
+    check_tcp_series,
 };
 use zeroize::Zeroizing;
 
@@ -60,6 +62,9 @@ pub struct HostConfig {
     listen_port: Option<NonZeroU16>,
     system_subscription_policy: bool,
     startup_observer: StartupObserver,
+    startup_xdg_root: Option<PathBuf>,
+    start_hidden: bool,
+    startup_custody: Option<yonik_linux::CredentialOwnerGuard>,
     schedule_observer: Option<Arc<dyn Fn(yonik_linux::SubscriptionPolicy, bool) + Send + Sync>>,
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
@@ -91,6 +96,9 @@ impl HostConfig {
             system_subscription_policy: true,
             schedule_observer: None,
             startup_observer: StartupObserver::default(),
+            startup_xdg_root: crate::startup_xdg::config_root(),
+            start_hidden: false,
+            startup_custody: None,
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
@@ -108,6 +116,17 @@ impl HostConfig {
             #[cfg(feature = "test-support")]
             schedule_trace: None,
         }
+    }
+    /// Только hint окна; не меняет preferences и не разрешает Connect.
+    pub fn with_start_hidden(mut self, hidden: bool) -> Self {
+        self.start_hidden = hidden;
+        self
+    }
+    /// Только собственный fixture root; normal host использует XDG config root.
+    #[cfg(feature = "test-support")]
+    pub fn with_startup_fixture_config(mut self, root: PathBuf) -> Self {
+        self.startup_xdg_root = Some(root);
+        self
     }
     #[cfg(feature = "test-support")]
     pub fn with_lifecycle_gate(mut self, gate: yonik_linux::LifecycleGate) -> Self {
@@ -425,6 +444,16 @@ enum Command {
     SelectProfile {
         id: i64,
         revision: i64,
+    },
+    StartupPreferencesSet {
+        request_id: String,
+        expected_revision: String,
+        autostart_into_tray: bool,
+        autoconnect: bool,
+    },
+    AutoconnectTargetSet {
+        request_id: String,
+        expected_revision: String,
     },
     SetSubscriptionSchedule {
         interval_seconds: u32,
@@ -903,6 +932,18 @@ fn validate(command: &Command) -> Result<()> {
         | Command::DeleteSource { id }
         | Command::CancelRefresh { id, .. } => *id > 0,
         Command::SelectProfile { id, revision } => *id > 0 && *revision > 0,
+        Command::StartupPreferencesSet {
+            request_id,
+            expected_revision,
+            ..
+        }
+        | Command::AutoconnectTargetSet {
+            request_id,
+            expected_revision,
+        } => {
+            startup_application::number(request_id).is_some_and(|id| id > 0)
+                && startup_application::number(expected_revision).is_some()
+        }
         _ => true,
     };
     if valid {
@@ -1043,6 +1084,7 @@ enum RoutingMutation {
 }
 #[derive(Serialize)]
 struct Snapshot {
+    startup: startup_application::View,
     presets: presets::Status,
     maintenance_available: bool,
     maintenance_ack: Option<maintenance::Ack>,
@@ -1128,6 +1170,7 @@ struct Snapshot {
 impl Snapshot {
     fn new(ephemeral: bool) -> Self {
         Self {
+            startup: startup_application::View::default(),
             presets: presets::Status::default(),
             maintenance_available: false,
             maintenance_ack: None,
@@ -1489,20 +1532,25 @@ async fn open(
     config.startup_observer.emit(StartupPhase::Credential);
     let key = match config.ephemeral_key.take() {
         Some(key) => key,
-        None => subscription_master_key(!path.exists())
-            .await
-            .map_err(|error| {
-                ContextFailure::new(match error {
-                    CredentialError::Missing => Cause::KeyringMissing,
-                    CredentialError::Locked => Cause::KeyringLocked,
-                    CredentialError::Unavailable => Cause::KeyringUnavailable,
-                    CredentialError::Ambiguous => Cause::KeyringAmbiguous,
-                    CredentialError::InvalidKey => Cause::KeyringInvalidKey,
-                    CredentialError::Random => Cause::KeyringRandom,
-                    CredentialError::Timeout => Cause::KeyringTimeout,
-                    CredentialError::Busy => Cause::KeyringBusy,
-                })
-            })?,
+        None => async {
+            let (key, owner) =
+                yonik_linux::subscription_master_key_with_owner(!path.exists()).await?;
+            config.startup_custody = owner;
+            Ok::<_, CredentialError>(key)
+        }
+        .await
+        .map_err(|error| {
+            ContextFailure::new(match error {
+                CredentialError::Missing => Cause::KeyringMissing,
+                CredentialError::Locked => Cause::KeyringLocked,
+                CredentialError::Unavailable => Cause::KeyringUnavailable,
+                CredentialError::Ambiguous => Cause::KeyringAmbiguous,
+                CredentialError::InvalidKey => Cause::KeyringInvalidKey,
+                CredentialError::Random => Cause::KeyringRandom,
+                CredentialError::Timeout => Cause::KeyringTimeout,
+                CredentialError::Busy => Cause::KeyringBusy,
+            })
+        })?,
     };
     config.startup_observer.emit(StartupPhase::RepositoryOpen);
     let repo = EncryptedSubscriptionRepository::open(path, key)
@@ -1836,24 +1884,47 @@ impl Actor {
     }
 
     fn save_preferences(&mut self, preferences: Preferences) -> Result<()> {
-        let outcome = self.preferences_store.save(&preferences).map_err(|error| {
-            let cause = match error.kind() {
-                std::io::ErrorKind::PermissionDenied => Some(Cause::PreferencesIoPermissionDenied),
-                std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
-                std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
-                std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
-                std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
-                _ => None,
-            };
-            if let Some(cause) = cause {
-                self.state.error_contexts.set_generation(
-                    Slot::Error,
-                    cause,
-                    Some(self.state.command_generation),
-                );
+        let outcome = match self.preferences_store.save(&preferences) {
+            Ok(outcome) => outcome,
+            Err(SaveError::Conflict(current)) => {
+                self.preferences = *current;
+                // Старый apply receipt не подтверждает перечитанную ревизию.
+                // Unknown/error не снимаются чтением без нового explicit apply.
+                if self.state.startup.xdg == "applied" {
+                    self.state.startup.xdg = "unchanged";
+                }
+                // Read refresh не переключает текущие engine/port/probe inputs,
+                // не перепривязывает target/owner и не повторяет запись/Connect.
+                self.state.language = self.preferences.language.clone();
+                self.state.subscription_interval_seconds =
+                    self.preferences.subscription_interval_seconds;
+                self.state.subscription_background = self.preferences.subscription_background;
+                self.state.proxy_fetch_dns = self.preferences.proxy_fetch_dns;
+                self.startup_view();
+                return Err(DesktopError("preferences_conflict"));
             }
-            DesktopError("preferences_write")
-        })?;
+            Err(SaveError::Io(error)) => {
+                self.state.preferences_warning |= self.preferences_store.blocked();
+                let cause = match error.kind() {
+                    std::io::ErrorKind::PermissionDenied => {
+                        Some(Cause::PreferencesIoPermissionDenied)
+                    }
+                    std::io::ErrorKind::AlreadyExists => Some(Cause::PreferencesIoAlreadyExists),
+                    std::io::ErrorKind::NotFound => Some(Cause::PreferencesIoNotFound),
+                    std::io::ErrorKind::InvalidInput => Some(Cause::PreferencesIoInvalidInput),
+                    std::io::ErrorKind::Other => Some(Cause::PreferencesIoOther),
+                    _ => None,
+                };
+                if let Some(cause) = cause {
+                    self.state.error_contexts.set_generation(
+                        Slot::Error,
+                        cause,
+                        Some(self.state.command_generation),
+                    );
+                }
+                return Err(DesktopError("preferences_write"));
+            }
+        };
         self.state.preferences_durability_warning =
             outcome == SaveOutcome::PublishedDurabilityUnknown;
         self.preferences = preferences;
@@ -1950,6 +2021,7 @@ impl Actor {
         );
     }
     fn emit(&mut self) {
+        self.startup_view();
         if self.state.presets.stopping
             && matches!(self.state.status, "Disconnected" | "NoManagedPolicy")
         {
@@ -3148,6 +3220,53 @@ mod settings_tests {
             .expect("команда настройки");
         actor.command(command).await.expect("сессия освобождена");
         assert_eq!(actor.state.port, 18889);
+        actor.state.startup.xdg_root = Some(directory.0.clone());
+        let control = super::Control {
+            generation: std::sync::atomic::AtomicU64::new(0),
+            priority: tokio::sync::watch::channel(super::Priority::default()).0,
+            tcp_priority: tokio::sync::watch::channel(0).0,
+            subscription_policy: tokio::sync::watch::channel(Default::default()).0,
+            subscription_override: std::sync::atomic::AtomicBool::new(false),
+            subscription_visible: tokio::sync::watch::channel(false).0,
+            closed: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        };
+        let attempt = actor.state.startup.attempt;
+        actor.state.startup.xdg = "applied";
+        let (mut external_store, _, _) = Store::open(&directory.0);
+        let (mut external, _) = external_store
+            .save_startup(0, true, false, None)
+            .expect("cooperating writer");
+        external.language = "en".into();
+        external_store
+            .save(&external)
+            .expect("mixed external prefs");
+        let published = fs::read(directory.0.join("preferences.json")).expect("published");
+        let conflict = actor
+            .startup_save("1".into(), "0".into(), Some((false, true)), &control, 0)
+            .await
+            .expect_err("stale writer");
+        assert_eq!(conflict.key(), "startup_conflict");
+        assert_eq!(actor.state.startup.revision, "1");
+        assert_eq!(actor.state.startup.xdg, "unchanged");
+        assert!(actor.state.startup.autostart_into_tray && !actor.state.startup.autoconnect);
+        assert_eq!(actor.preferences.language, "en");
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(actor.preferences.repository_identity.is_none());
+        assert!(actor.selected.is_none());
+        assert!(!actor.state.can_stop);
+        assert!(!directory.0.join("autostart").exists());
+        assert_eq!(
+            fs::read(directory.0.join("preferences.json")).expect("no auto retry"),
+            published
+        );
+        actor
+            .startup_save("2".into(), "1".into(), Some((false, true)), &control, 0)
+            .await
+            .expect("explicit retry");
+        assert_eq!(actor.state.startup.revision, "2");
+        assert!(!actor.state.startup.autostart_into_tray && actor.state.startup.autoconnect);
+        assert_eq!(actor.state.startup.attempt, attempt);
+        assert!(!actor.state.can_stop);
         actor.preferences_store.sync_directory =
             |_| Err(std::io::Error::other("инъекция dir fsync"));
         actor
@@ -3161,6 +3280,21 @@ mod settings_tests {
         assert_eq!(actor.preferences.language, "en");
         assert!(actor.state.preferences_durability_warning);
         assert_eq!(Store::open(&directory.0).1.language, "en");
+        actor.state.startup.xdg_root = Some(directory.0.clone());
+
+        actor
+            .startup_save("3".into(), "2".into(), Some((true, true)), &control, 0)
+            .await
+            .expect("published");
+        assert_eq!(actor.state.startup.save, "durability_unknown");
+        assert_eq!(actor.state.startup.xdg, "not_applied");
+        assert!(!directory.0.join("autostart").exists());
+        assert!(
+            super::startup_application::prepare(&mut actor, &control, 0)
+                .await
+                .0
+                .is_none()
+        );
         actor
             .service
             .take()
@@ -3908,6 +4042,14 @@ fn reject_unavailable_command(
     cause: Cause,
     generation: u64,
 ) {
+    if let Command::StartupPreferencesSet { request_id, .. }
+    | Command::AutoconnectTargetSet { request_id, .. } = command
+    {
+        state.startup.request_id = Some(request_id.clone());
+        state.startup.save = "error";
+        state.startup.error = Some(error);
+    }
+
     state.maintenance_available = false;
     if let Some(request_id) = command.preset_request_id() {
         state.presets.ack = Some(presets::Ack {
@@ -3992,7 +4134,10 @@ async fn run(
     callback: Callback,
     #[cfg(any(test, feature = "test-support"))] disk_fixture: Option<DiskTestInput>,
 ) {
+    // Host generation начинается с default Priority. Даже Stop до worker закрывает startup.
+    let startup_generation = Priority::default().generation;
     let mut state = Snapshot::new(config.ephemeral_key.is_some());
+    state.startup.start_hidden = config.start_hidden;
     state.port = config.listen_port.map_or(0, NonZeroU16::get);
     state.busy = true;
     state.emit(&callback);
@@ -4114,7 +4259,13 @@ async fn run(
     if let Some(controller) = &actor.presets {
         actor.state.presets = controller.status();
     }
-    match actor.routing_repository().routing_draft().await {
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        actor.routing_repository().routing_draft(),
+    )
+    .await
+    .unwrap_or(Err(yonik_linux::RepositoryError::Storage))
+    {
         Ok(None) => {}
         Ok(Some((revision, raw))) => match std::str::from_utf8(&raw)
             .ok()
@@ -4142,14 +4293,34 @@ async fn run(
             actor.state.error = Some("routing_storage");
         }
     }
+    actor.state.startup.custody = config.startup_custody.take();
+    actor.state.startup.xdg_root = config.startup_xdg_root.clone();
+    actor.state.startup.owner = tokio::time::timeout(
+        Duration::from_secs(5),
+        actor.routing_repository().database_identity(),
+    )
+    .await
+    .ok()
+    .and_then(|result| result.ok())
+    .and_then(|id| crate::startup_identity::Identity::capture(&config.data_dir, id).ok());
     actor.state.routing_diagnostics = actor.state.routing.diagnostics();
     actor.state.routing_revision = actor.routing_revision;
-    if let Err(error) = actor.reload().await {
-        actor.state.command_error(true, error.key());
+    match tokio::time::timeout(Duration::from_secs(5), actor.reload()).await {
+        Ok(Ok(())) => (),
+        Ok(Err(error)) => {
+            actor.state.startup.initialization_failed = true;
+            actor.state.command_error(true, error.key());
+        }
+        Err(_) => {
+            actor.state.startup.initialization_failed = true;
+            actor.state.startup.error = Some("startup_timeout");
+        }
     }
     actor.emit();
     let (updates, mut events) = mpsc::channel::<SessionUpdate>(16);
-    let mut system_session: Option<SystemSession> = None;
+    let (mut startup_command, mut system_session) =
+        startup_application::prepare(&mut actor, &control, startup_generation).await;
+    actor.emit();
     let mut system_flight: Option<Flight> = None;
     let mut system_stop = false;
     let mut system_active = false;
@@ -4389,6 +4560,8 @@ async fn run(
         tokio::select! {
             biased;
             changed = priority.changed() => {
+                startup_command = None;
+                if actor.state.startup.attempt == "dispatched" { actor.state.startup.attempt = "cancelled"; }
                 if let Some((_, cancel, task)) = local_task.take() { cancel.send_replace(true); let _ = task.await; actor.state.busy = false; }
                 if local_pending.take().is_some() { actor.state.pending = None; }
 
@@ -4742,9 +4915,21 @@ async fn run(
                 if preset_stopping { actor.state.status = "Stopping"; actor.state.can_stop = true; }
                 actor.emit();
             }
-            command = commands.recv(), if !quitting => {
-                let Some(envelope) = command else { control.interrupt(true); continue; };
+            command = async { if let Some(envelope) = startup_command.take() { Some((envelope, true)) } else { commands.recv().await.map(|envelope| (envelope, false)) } }, if !quitting => {
+                let Some((envelope, from_startup)) = command else { control.interrupt(true); continue; };
+                if from_startup {
+                    let validation = tokio::time::timeout(Duration::from_secs(5), actor.startup_revalidate(&control, envelope.generation)).await;
+                    if !matches!(validation, Ok(Ok(()))) {
+                        actor.state.startup.attempt = "blocked";
+                        actor.state.startup.error = Some(match validation { Ok(Err(error)) => error.key(), _ => "startup_timeout" });
+                        actor.emit(); continue;
+                    }
+                    actor.state.startup.attempt = "attempted";
+                }
                 if envelope.generation != control.generation.load(Ordering::SeqCst) {
+                    if let Command::StartupPreferencesSet { request_id, .. } | Command::AutoconnectTargetSet { request_id, .. } = &envelope.command {
+                        actor.state.startup.request_id = Some(request_id.clone()); actor.state.startup.save = "error"; actor.state.startup.error = Some("cancelled"); actor.emit();
+                    }
                     if let Some(request_id) = envelope.command.preset_request_id() {
                         actor.state.presets.ack = Some(presets::Ack { request_id, error: Some("cancelled") });
                         actor.emit();
@@ -4989,6 +5174,8 @@ async fn run(
                 }
                 let local_is_file = matches!(&envelope.command, Command::ImportFile { .. });
                 let outcome: SourceResult<()> = match envelope.command {
+                    Command::StartupPreferencesSet { request_id, expected_revision, autostart_into_tray, autoconnect } => actor.startup_save(request_id, expected_revision, Some((autostart_into_tray, autoconnect)), &control, envelope.generation).await.map_err(Into::into),
+                    Command::AutoconnectTargetSet { request_id, expected_revision } => actor.startup_save(request_id, expected_revision, None, &control, envelope.generation).await.map_err(Into::into),
                     Command::ImportText { name, text } | Command::ImportFile { name, path: text } => {
                         if refreshing.is_some() || scheduled.fetching || scheduled.deferred.is_some() || scheduled.review.is_some() || actor.pending.is_some() || actor.state.can_stop { Err(DesktopError("busy").into()) }
                         else {
