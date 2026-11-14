@@ -1,0 +1,6 @@
+
+running 2 tests
+test system_client::output::tests::invalid_generation_and_drop_close_bound_transport ... ok
+test system_client::output::tests::actual_prepared_handle_owned_with_immutable_log_and_engine ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 605 filtered out; finished in 0.00s

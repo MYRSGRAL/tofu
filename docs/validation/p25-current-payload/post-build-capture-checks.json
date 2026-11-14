@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "base": "abe778cc6bc7661900b5ea1cf3e1bed825b800da",
+  "scope": "synthetic pure post-build capture fixtures; no actual final build capture",
+  "files": [
+    {
+      "path": "tools/p25_capture_build_closure.py",
+      "sha256": "cbc21df477cee746ba86ac2399a445ac801776440cd5e8526fbfd0a62037e96d"
+    },
+    {
+      "path": "tools/tests/test_p25_capture_build_closure.py",
+      "sha256": "53ceb920155aa7aaec4c78693a760ccf6ef771c9e310cc74e174a0d7b0f37103"
+    },
+    {
+      "path": "docs/validation/p25-current-payload/post-build-capture-tool.md",
+      "sha256": "ede205875271c9f0c20b37db4f308087bb3ab2a43844d0833e17f6eb7e32be7b"
+    }
+  ],
+  "checks": {
+    "new_unittest": {
+      "tests": 22,
+      "result": "PASS"
+    },
+    "optimized_python_unittest": {
+      "tests": 22,
+      "result": "PASS"
+    },
+    "existing_compile_notices": {
+      "tests": 5,
+      "result": "PASS"
+    },
+    "existing_inventory": {
+      "tests": 13,
+      "result": "PASS"
+    },
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "historical_package142_ledger_replay": "BYTE_IDENTICAL",
+    "input_readonly_cli_fixture": "PASS"
+  },
+  "red_evidence": [
+    "new module absent: ModuleNotFoundError before implementation",
+    "generated source without SPDX incorrectly CAPTURED: missing SPDX:generated assertion failed before conditions fix"
+  ],
+  "production_gate": false,
+  "live_build_capture_performed": false,
+  "final_linux_acceptance": false,
+  "legal_status": "NOTPROVEN"
+}

@@ -1,0 +1,12 @@
+
+running 8 tests
+test output_transport::carrier_tests::own_pipe_partial_reads_without_executor_or_bus ... ok
+test output_transport::carrier_tests::invalid_owned_fd_flags_and_types_fail_closed ... ok
+test output_transport::carrier_tests::two_pairs_have_unique_identity_and_drop_is_eof ... ok
+test output_transport::carrier_tests::named_fifo_on_disk_is_not_pipefs ... ok
+test output_transport::carrier_tests::fixed_sah_roundtrip_and_sender_copies_close ... ok
+test output_transport::carrier_tests::wrong_signature_path_interface_and_member_fail_closed ... ok
+test output_transport::carrier_tests::exact_count_and_aliases_fail_close_every_received_writer ... ok
+test output_transport::carrier_tests::json_rejects_extra_duplicate_version_and_handle_fail_closed ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 599 filtered out; finished in 0.01s

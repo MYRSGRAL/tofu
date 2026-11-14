@@ -1,0 +1,90 @@
+diff --git a/crates/yonik-nsfs/Cargo.toml b/crates/yonik-nsfs/Cargo.toml
+index 775630a10d3bb5a8b9bcbf6f4f073611073dd46b..4b28f6172756188d8e0ae90747560aa6292261ee 100644
+--- a/crates/yonik-nsfs/Cargo.toml
++++ b/crates/yonik-nsfs/Cargo.toml
+@@ -8,9 +8,9 @@
+ 
+ [target.'cfg(target_os = "linux")'.dependencies]
+ libc = "=0.2.191"
+-rustix = { version = "=1.1.6", default-features = false, features = ["fs", "std"] }
++rustix = { version = "=1.1.6", default-features = false, features = ["fs", "std", "process"] }
+ 
+-# Согласованные исключения: private NS_GET_NSTYPE и три fixed TUN ioctl.
++# Исключения: nsfs/TUN; новый fixed local-parent-death требует отдельного approval.
+ # Workspace forbid и yonik-linux lints.workspace остаются без изменений.
+ [lints.rust]
+ unsafe_code = "deny"
+diff --git a/crates/yonik-nsfs/src/lib.rs b/crates/yonik-nsfs/src/lib.rs
+index cc9793acec4bd7f4fa5bca512cab8eee303ca87c..3834de2dacb7ad4780bfc5dd6e9f3225d4ed72a8 100644
+--- a/crates/yonik-nsfs/src/lib.rs
++++ b/crates/yonik-nsfs/src/lib.rs
+@@ -2,6 +2,8 @@
+ #![cfg(target_os = "linux")]
+ pub mod kernel_probe;
+ pub mod kernel_probe_v2;
++/// Fixed parent-death adapter локального sealed core; отдельное unsafe approval.
++pub mod local_parent_death;
+ use std::{io, os::fd::AsFd};
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+diff --git a/crates/yonik-linux/src/host/binary.rs b/crates/yonik-linux/src/host/binary.rs
+index b4b5fc60b867197bb6a6c64ed0b454364e3d685d..7fbbda5f36665e3d2e0ac7923d11e61f5fb20398 100644
+--- a/crates/yonik-linux/src/host/binary.rs
++++ b/crates/yonik-linux/src/host/binary.rs
+@@ -216,6 +216,7 @@
+                 command.env(key, value);
+             }
+         }
++        yonik_nsfs::local_parent_death::install_kill_on_parent_death(command.as_std_mut());
+         command
+     }
+ }
+diff --git a/crates/yonik-nsfs/src/local_parent_death.rs b/crates/yonik-nsfs/src/local_parent_death.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..25d68f994f2dfe280acc22ab56e03d907423ee69
+--- /dev/null
++++ b/crates/yonik-nsfs/src/local_parent_death.rs
+@@ -0,0 +1,43 @@
++//! Fixed SIGKILL при потере родителя локального sealed core; не worker API.
++// Target guard не доказывает backend: требуется отдельный exact-build receipt.
++#[cfg(not(all(
++    target_os = "linux",
++    target_arch = "x86_64",
++    target_pointer_width = "64",
++    target_env = "gnu"
++)))]
++compile_error!("local parent-death: требуется verified x86_64-unknown-linux-gnu/raw backend");
++
++use rustix::process::{Signal, getpid, getppid, set_parent_process_death_signal};
++use std::{io, os::unix::process::CommandExt, process::Command};
++
++/// Устанавливается только на command локального sealed BinarySnapshot.
++/// PID захватывается внутри; caller не задаёт signal, PID или syscall arguments.
++#[allow(unsafe_code)]
++pub fn install_kill_on_parent_death(command: &mut Command) {
++    let expected_parent = getpid();
++    // SAFETY: после fork closure использует только getppid/prctl raw wrappers,
++    // Copy PID и errno-only io::Error. Нет allocator, locks, logging, env,
++    // доступа к унаследованным library state/FD. Proof условен: rustix 1.1.6
++    // linux_raw, LP64 и штатный getppid без errno emulation; dependency debug
++    // unwrap/assert существуют, но недостижимы при этом предусловии.
++    // Иной backend/ABI или неизвестная getppid sandbox policy не поддержаны.
++    // SIGKILL фиксирован; несовпадение родителя/ошибка запрещают exec.
++    unsafe {
++        command.pre_exec(move || {
++            if getppid() != Some(expected_parent) {
++                return Err(io::Error::from_raw_os_error(
++                    rustix::io::Errno::SRCH.raw_os_error(),
++                ));
++            }
++            set_parent_process_death_signal(Some(Signal::KILL))
++                .map_err(|error| io::Error::from_raw_os_error(error.raw_os_error()))?;
++            if getppid() != Some(expected_parent) {
++                return Err(io::Error::from_raw_os_error(
++                    rustix::io::Errno::SRCH.raw_os_error(),
++                ));
++            }
++            Ok(())
++        });
++    }
++}
