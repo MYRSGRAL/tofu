@@ -1,0 +1,10 @@
+{
+  "final-drop": {
+    "expected_rejection": "GUI campaign не завершён",
+    "actual_failure": "deadline"
+  },
+  "final-hidden": {
+    "expected_rejection": "GUI campaign не завершён",
+    "actual_failure": "hidden no NEW admission"
+  }
+}
