@@ -155,3 +155,6 @@ Version-only недостаточно. Следующий bounded результ
 и [source excerpts](runtime-source.json). Он заменяет version-only направление и
 предложение нового identity gate выше; остальные privacy/bounds остаются. Ни capture,
 ни disk/UI реализация не разрешены этим документом.
+
+Текущая стадия после следующего Root review: [private classifier GREEN и integration scope](integration.md).
+Предыдущие version-only/identity-gate эскизы не являются текущим планом.

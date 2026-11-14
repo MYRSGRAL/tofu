@@ -315,6 +315,29 @@
       }
     ],
     "source_excerpts": "runtime-source.json",
-    "new_identity_gate": false
-  }
+    "new_identity_gate": false,
+    "new_policy_direction": "normal INFO approved as direction; production enable deferred to scoped review"
+  },
+  "classifier_implementation": "crates/yonik-linux/src/event_log/native_details.rs",
+  "source_snapshot_note": "sources section hashes describe accepted base 61cfa0f; event_log.rs now has only private mod wire",
+  "startup": [
+    {
+      "engine": "sing-box",
+      "path": "/home/myrs/projects/yonik/local/evidence/pipeline-e5a27/sing.log",
+      "sha256": "6ea5efd779b176eff91b5fb8f057426b26c94c43b979f9c2db63cd22e1e6406c",
+      "line": 7,
+      "frame": "\u001b[36mINFO\u001b[0m[0000] sing-box started (0.00s)\n",
+      "projection_code": 7,
+      "status": "historical retained; pure classifier positive; not integrated producer proof"
+    },
+    {
+      "engine": "xray",
+      "path": "/home/myrs/projects/yonik/local/evidence/dns-downstream-e5a27/xray-final.log",
+      "sha256": "fa0a62d884bffa3e722d81aefd239c0fae300c8543101896d2c0ac1dd472f23f",
+      "line": 4,
+      "frame": "2026/11/12 04:47:51.265312 [Warning] core: Xray 26.10.31 started\n",
+      "projection_code": 9,
+      "status": "historical retained; pure classifier positive; not integrated producer proof"
+    }
+  ]
 }

@@ -127,3 +127,7 @@ frames, с честной отметкой historical/source-only. Новых en
 
 FR16 full PASS по этому документу запрещён: нужны согласованный normative scope,
 реально достижимые producers при разрешённой policy и integrated UI/export witness.
+
+Обновление: Root разрешил normal INFO direction; [integration.md](integration.md)
+содержит реализованный private classifier, normal startup обоих cores и заменяет
+прежний открытый вопрос Xray startup reachability. Production INFO ещё не включён.

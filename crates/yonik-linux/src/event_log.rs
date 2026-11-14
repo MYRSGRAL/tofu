@@ -8,6 +8,9 @@ use std::{
 };
 
 mod disk;
+// Закрытый парсер до отдельного согласованного подключения producer.
+#[allow(dead_code)]
+mod native_details;
 pub use disk::{DiskLogGuard, DiskLogStats, DiskLogStatus};
 
 pub const MAX_EVENTS: usize = 2_000;

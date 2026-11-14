@@ -279,5 +279,190 @@
         ]
       }
     ]
+  },
+  {
+    "engine": "xray",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/xray/upstream.tar",
+    "archive_sha256": "7dba1dd055bdc854a2c5311610872c9bf6315ddb0a741fb8c2206212cec51b53",
+    "member": "Xray-core-a4a3dff5b20c2faae567b742c172c7b95e75c083/core/xray.go",
+    "member_sha256": "66edf1a9ed6b9683b4f668612e6c6e876830cffb07521517f03a21e630f7ef15",
+    "excerpts": [
+      {
+        "first": 385,
+        "last": 402,
+        "lines": [
+          "// Start starts the Xray instance, including all registered features. When Start returns error, the state of the instance is unknown.",
+          "// A Xray instance can be started only once. Upon closing, the instance is not guaranteed to start again.",
+          "//",
+          "// xray:api:stable",
+          "func (s *Instance) Start() error {",
+          "\ts.statusLock.Lock()",
+          "\tdefer s.statusLock.Unlock()",
+          "",
+          "\ts.running = true",
+          "\tfor _, f := range s.features {",
+          "\t\tif err := f.Start(); err != nil {",
+          "\t\t\treturn err",
+          "\t\t}",
+          "\t}",
+          "",
+          "\terrors.LogWarning(s.ctx, \"Xray \", Version(), \" started\")",
+          "",
+          "\treturn nil"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "xray",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/xray/upstream.tar",
+    "archive_sha256": "7dba1dd055bdc854a2c5311610872c9bf6315ddb0a741fb8c2206212cec51b53",
+    "member": "Xray-core-a4a3dff5b20c2faae567b742c172c7b95e75c083/core/core.go",
+    "member_sha256": "fd9cd5796e9b2ef3328bb46415031606fb9a44d042139b5550cf6b3d38d0cbc9",
+    "excerpts": [
+      {
+        "first": 20,
+        "last": 24,
+        "lines": [
+          "var (",
+          "\tVersion_x byte = 26",
+          "\tVersion_y byte = 10",
+          "\tVersion_z byte = 31",
+          ")"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "xray",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/xray/upstream.tar",
+    "archive_sha256": "7dba1dd055bdc854a2c5311610872c9bf6315ddb0a741fb8c2206212cec51b53",
+    "member": "Xray-core-a4a3dff5b20c2faae567b742c172c7b95e75c083/main/run.go",
+    "member_sha256": "71df70178c842af308879d940a817f748065ea124ed6ab29610c76059d0b405a",
+    "excerpts": [
+      {
+        "first": 90,
+        "last": 99,
+        "lines": [
+          "\tif *test {",
+          "\t\tfmt.Println(\"Configuration OK.\")",
+          "\t\tos.Exit(0)",
+          "\t}",
+          "",
+          "\tif err := server.Start(); err != nil {",
+          "\t\tfmt.Println(\"Failed to start:\", err)",
+          "\t\tos.Exit(-1)",
+          "\t}",
+          "\tdefer server.Close()"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "sing-box-dependency",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/go-sources/1aeff50174f020b86dfc3444a365bb2f5fcef5f0338c02764ada5f64a7afa4dd.zip",
+    "archive_sha256": "1aeff50174f020b86dfc3444a365bb2f5fcef5f0338c02764ada5f64a7afa4dd",
+    "member": "github.com/sagernet/sing@v0.9.7-0.20261023115459-5dc452e537bf/common/format/fmt.go",
+    "member_sha256": "2d2d0c00f6a00172ba88f6bce86188a021ff08e2231c4185ed3f0bfe47de94a8",
+    "excerpts": [
+      {
+        "first": 75,
+        "last": 78,
+        "lines": [
+          "func Seconds(seconds float64) string {",
+          "\tseconds100 := int(seconds * 100)",
+          "\treturn ToString(seconds100/100, \".\", seconds100%100/10, seconds100%10)",
+          "}"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "sing-box",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/sing-box/upstream.tar",
+    "archive_sha256": "b17af9949529e2ad17f9fc0cd3d3b3cc352f3aaacb856ebaa7f245ba9a21472b",
+    "member": "log/log.go",
+    "member_sha256": "cdcde06e4bbeb4f5e101ccefc94ea7ef571641426b44f2dc8792e9571fab9645",
+    "excerpts": [
+      {
+        "first": 46,
+        "last": 69,
+        "lines": [
+          "\tlogFormatter := Formatter{",
+          "\t\tBaseTime:         options.BaseTime,",
+          "\t\tDisableColors:    logOptions.DisableColor || logFilePath != \"\",",
+          "\t\tDisableTimestamp: !logOptions.Timestamp && logFilePath != \"\",",
+          "\t\tFullTimestamp:    logOptions.Timestamp,",
+          "\t\tTimestampFormat:  \"-0700 2006-01-02 15:04:05\",",
+          "\t}",
+          "\tfactory := NewDefaultFactory(",
+          "\t\toptions.Context,",
+          "\t\tlogFormatter,",
+          "\t\tlogWriter,",
+          "\t\tlogFilePath,",
+          "\t\toptions.PlatformWriter,",
+          "\t\toptions.Observable,",
+          "\t)",
+          "\tif logOptions.Level != \"\" {",
+          "\t\tlogLevel, err := ParseLevel(logOptions.Level)",
+          "\t\tif err != nil {",
+          "\t\t\treturn nil, E.Cause(err, \"parse log level\")",
+          "\t\t}",
+          "\t\tfactory.SetLevel(logLevel)",
+          "\t} else {",
+          "\t\tfactory.SetLevel(LevelTrace)",
+          "\t}"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "sing-box",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/sing-box/upstream.tar",
+    "archive_sha256": "b17af9949529e2ad17f9fc0cd3d3b3cc352f3aaacb856ebaa7f245ba9a21472b",
+    "member": "option/options.go",
+    "member_sha256": "fbea921683615f999e881c25700af737d662a8bd03cdb441c643e0655dd40ac2",
+    "excerpts": [
+      {
+        "first": 69,
+        "last": 75,
+        "lines": [
+          "type LogOptions struct {",
+          "\tDisabled     bool   `json:\"disabled,omitempty\"`",
+          "\tLevel        string `json:\"level,omitempty\" enum:\"trace,debug,info,warn,warning,error,fatal,panic\"`",
+          "\tOutput       string `json:\"output,omitempty\"`",
+          "\tTimestamp    bool   `json:\"timestamp,omitempty\"`",
+          "\tDisableColor bool   `json:\"-\"`",
+          "}"
+        ]
+      }
+    ]
+  },
+  {
+    "engine": "sing-box",
+    "archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-mtree4/sing-box/upstream.tar",
+    "archive_sha256": "b17af9949529e2ad17f9fc0cd3d3b3cc352f3aaacb856ebaa7f245ba9a21472b",
+    "member": "box.go",
+    "member_sha256": "ef74d46689ef631dfb57872e4feb9991d40480213f4ac8aaa757ab42977c3671",
+    "excerpts": [
+      {
+        "first": 110,
+        "last": 112,
+        "lines": [
+          "func New(options Options) (*Box, error) {",
+          "\tcreatedAt := time.Now()",
+          "\tctx := options.Context"
+        ]
+      },
+      {
+        "first": 480,
+        "last": 482,
+        "lines": [
+          "\t\thttpClientService:   httpClientService,",
+          "\t\tcreatedAt:           createdAt,",
+          "\t\tdebugOptions:        debugOptions,"
+        ]
+      }
+    ]
   }
 ]
