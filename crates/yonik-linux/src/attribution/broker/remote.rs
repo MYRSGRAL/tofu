@@ -51,20 +51,26 @@ impl RemoteLookup {
         }
         let mut rights = packet.rights.into_iter();
         let mut view = Vec::with_capacity(3);
-        for expected in [
+        let expected_view = scope
+            .application_view()
+            .map_err(|_| Unavailable::Authority)?;
+        for (expected, identity) in [
             yonik_nsfs::NamespaceType::Net,
             yonik_nsfs::NamespaceType::Pid,
             yonik_nsfs::NamespaceType::Mount,
-        ] {
+        ]
+        .into_iter()
+        .zip(expected_view)
+        {
             let fd = rights.next().ok_or(Unavailable::Malformed)?;
             if yonik_nsfs::namespace_type(&fd).map_err(|_| Unavailable::Coverage)? != expected {
                 return Err(Unavailable::Coverage);
             }
-            if expected == yonik_nsfs::NamespaceType::Net {
-                let m = rustix::fs::fstat(&fd).map_err(|_| Unavailable::Coverage)?;
-                if (m.st_dev, m.st_ino) != binding.network {
-                    return Err(Unavailable::Coverage);
-                }
+            let m = rustix::fs::fstat(&fd).map_err(|_| Unavailable::Coverage)?;
+            if (m.st_dev, m.st_ino) != identity
+                || expected == yonik_nsfs::NamespaceType::Net && identity != binding.network
+            {
+                return Err(Unavailable::Coverage);
             }
             view.push(fd);
         }
