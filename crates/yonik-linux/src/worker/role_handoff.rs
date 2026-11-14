@@ -201,12 +201,17 @@ pub fn receive_roles(
 /// Run хранит exact роли до exec; любой ранний возврат закрывает owned FD.
 pub(crate) struct RunHandoff {
     permit: ProductionPermit,
+    transport: VerifiedTransport,
+}
+
+/// Одноразовое владение проверенным transport, не kernel admission и не permit.
+struct VerifiedTransport {
     roles: Roles,
     binding: Binding,
 }
 impl RunHandoff {
     pub(crate) fn exec(self, command: &mut std::process::Command) -> Result<(), WorkerError> {
-        self.permit.exec_run(self.roles, &self.binding, command)
+        self.permit.exec_run(self.transport, command)
     }
 }
 
@@ -269,6 +274,17 @@ pub(crate) fn receive_run_handoff(
 ) -> Result<RunHandoff, WorkerError> {
     // Gate предшествует чтению ролей и payload. Kernel proof пока не разрешён.
     let permit = ProductionPermit::mint()?;
+    let transport = receive_verified_transport(socket, challenge, helper_pid, deadline)?;
+    Ok(RunHandoff { permit, transport })
+}
+
+/// Единственный receiver-конструктор: caller bytes и Roles сами по себе не proof.
+fn receive_verified_transport(
+    socket: &OwnedFd,
+    challenge: &[u8; 128],
+    helper_pid: u32,
+    deadline: Instant,
+) -> Result<VerifiedTransport, WorkerError> {
     setup(socket, deadline)?;
     let mut record = [0; FRAME];
     let (size, _) = net::recv(socket, &mut record, RecvFlags::PEEK).map_err(|_| WorkerError::Io)?;
@@ -277,11 +293,7 @@ pub(crate) fn receive_run_handoff(
     }
     let binding = bound_record(&record, challenge, helper_pid)?;
     let roles = receive_roles(socket, &binding, deadline)?;
-    Ok(RunHandoff {
-        permit,
-        roles,
-        binding,
-    })
+    Ok(VerifiedTransport { roles, binding })
 }
 
 /// Неподделываемый production gate: конструкторов и caller bool нет.
@@ -293,17 +305,17 @@ impl ProductionPermit {
         Err(WorkerError::Peer)
     }
     /// Только protected Run producer. При failed exec owned roles закрываются.
-    pub fn exec_run(
+    fn exec_run(
         self,
-        roles: Roles,
-        binding: &Binding,
+        transport: VerifiedTransport,
         command: &mut std::process::Command,
     ) -> Result<(), WorkerError> {
         use std::os::{fd::AsRawFd, unix::process::CommandExt};
+        let VerifiedTransport { roles, binding } = transport;
         if roles.record != binding.record()? {
             return Err(WorkerError::Protocol);
         }
-        live_server(&roles.server_pidfd, binding)?;
+        live_server(&roles.server_pidfd, &binding)?;
         let mut hex = String::with_capacity(FRAME * 2);
         use std::fmt::Write;
         for byte in roles.record {
@@ -368,6 +380,122 @@ fn transport_send(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn verified_transport_userns_roundtrip() {
+        let result = std::process::Command::new("unshare")
+            .args(["-Ur"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "worker::role_handoff::tests::verified_transport_child",
+            ])
+            .env("YONIK_VERIFIED_TRANSPORT_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+    }
+
+    #[test]
+    fn verified_transport_child() {
+        if std::env::var_os("YONIK_VERIFIED_TRANSPORT_CHILD").is_none() {
+            return;
+        }
+        let count = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        let baseline = count();
+        // Изолированный собственный userns: никаких foreign UID или kernel admission.
+        for case in 0..8 {
+            {
+                let pair = || {
+                    let (a, b) = net::socketpair(
+                        net::AddressFamily::UNIX,
+                        net::SocketType::SEQPACKET,
+                        net::SocketFlags::CLOEXEC,
+                        None,
+                    )
+                    .unwrap();
+                    net::sockopt::set_socket_passcred(&a, true).unwrap();
+                    net::sockopt::set_socket_passcred(&b, true).unwrap();
+                    (a, b)
+                };
+                let (rx, tx) = pair();
+                let (channel, _peer) = pair();
+                let pidfd = rustix::process::pidfd_open(
+                    rustix::process::getpid(),
+                    rustix::process::PidfdFlags::NONBLOCK,
+                )
+                .unwrap();
+                let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+                let start = stat
+                    .rsplit_once(')')
+                    .unwrap()
+                    .1
+                    .split_whitespace()
+                    .nth(19)
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let binding = Binding {
+                    nonce: [1; 32],
+                    digest: [2; 32],
+                    epoch: 3,
+                    session: [4; 16],
+                    generation: 5,
+                    invocation: [6; 16],
+                    server_pid: std::process::id(),
+                    server_start: start,
+                };
+                let mut record = binding.record().unwrap();
+                let mut challenge = [0; 128];
+                challenge[8..72].copy_from_slice(&record[8..72]);
+                challenge[72..88].copy_from_slice(&record[80..96]);
+                challenge[88..96].copy_from_slice(&record[96..104]);
+                challenge[96..112].copy_from_slice(&record[104..120]);
+                match case {
+                    1 => challenge[8] ^= 1, // replay чужого challenge
+                    2 => record[191] ^= 1,  // exact bytes, включая reserved
+                    3 => record[128..136].copy_from_slice(&(start + 1).to_be_bytes()),
+                    _ => {}
+                }
+                let null = std::fs::File::open("/dev/null").unwrap();
+                let identity = if case == 4 {
+                    null.as_fd()
+                } else {
+                    pidfd.as_fd()
+                };
+                let channel_fd = if case == 7 {
+                    null.as_fd()
+                } else {
+                    channel.as_fd()
+                };
+                send(&tx, &record, &[channel_fd, identity]).unwrap();
+                let deadline = if case == 5 {
+                    Instant::now()
+                } else {
+                    Instant::now() + std::time::Duration::from_secs(1)
+                };
+                let helper = binding.server_pid + u32::from(case == 6);
+                let result = receive_verified_transport(&rx, &challenge, helper, deadline);
+                if case == 0 {
+                    let verified = result.expect("реальный transport должен пройти");
+                    assert_eq!(verified.binding.record().unwrap(), record);
+                    assert_eq!(verified.roles.record, record);
+                    let mut ack = record;
+                    ack[..8].copy_from_slice(b"YNKRACK1");
+                    receive(&tx, &ack, binding.server_pid, 0, 0, deadline).unwrap();
+                    drop(verified);
+                } else {
+                    assert!(result.is_err(), "case {case}");
+                }
+            }
+            assert_eq!(count(), baseline, "FD cleanup case {case}");
+        }
+    }
+
     #[test]
     fn run_gate_refuses_before_reading_roles() {
         let (rx, _tx) = net::socketpair(
