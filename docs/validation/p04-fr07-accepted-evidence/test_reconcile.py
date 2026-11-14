@@ -43,5 +43,54 @@ class CorpusIntegrity(unittest.TestCase):
             )
 
 
+class DeclarationIntegrity(unittest.TestCase):
+    def test_missing_required_manifest_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FileNotFoundError):
+                module.hash_manifest_entries(Path(directory), "fr07-manual")
+
+    def test_malformed_or_empty_declarations_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "declarations.sha256"
+            for text in ("", "corrupt line\n", "0" * 64 + "  valid\ninvalid\n"):
+                path.write_text(text)
+                with self.subTest(text=text), self.assertRaises(ValueError):
+                    module.entries(path)
+
+    def test_truncated_required_manifest_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "binaries.sha256").write_text("0" * 64 + "  one\n")
+            with self.assertRaises(ValueError):
+                module.hash_manifest_entries(root, "fr07-manual")
+
+    def test_duplicate_target_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "declarations.sha256"
+            path.write_text(("0" * 64 + "  duplicate\n") * 2)
+            with self.assertRaises(ValueError):
+                module.entries(path)
+
+    def test_source_header_is_exact_and_does_not_hide_bad_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source-binding.txt"
+            path.write_text("expected header\n" + "0" * 64 + "  source.rs\n")
+            self.assertEqual(len(module.entries(path, header=("expected header",))), 1)
+            with self.assertRaises(ValueError):
+                module.entries(path, header=("different header",))
+            path.write_text("expected header\nmalformed declaration\n")
+            with self.assertRaises(ValueError):
+                module.entries(path, header=("expected header",))
+
+    def test_valid_manifest_preserves_all_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lines = ["0" * 64 + f"  artifact-{i}\n" for i in range(4)]
+            (root / "binaries.sha256").write_text("".join(lines))
+            actual = module.hash_manifest_entries(root, "fr07-manual")
+            self.assertEqual(len(actual), 4)
+            self.assertEqual(actual[-1], ("binaries.sha256", "0" * 64, "artifact-3"))
+
+
 if __name__ == "__main__":
     unittest.main()

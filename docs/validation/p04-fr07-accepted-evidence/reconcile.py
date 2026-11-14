@@ -27,6 +27,14 @@ MANIFESTS = {
     "fr07-manual": "sources.sha256",
     "fr07-integrated": "source-binding.txt",
 }
+REQUIRED_HASH_MANIFESTS = {
+    "p04-robust-9214": {},
+    "fr07-desktop-import": {"logs.sha256": 84},
+    "fr07-manual": {"binaries.sha256": 4},
+    "fr07-integrated": {"binaries.sha256": 1},
+    "pr127-oracle": {},
+}
+
 HEADS = {
     "p04-robust-9214": "37638032f96c1730edefbb185e9380e370c458ed",
     "fr07-desktop-import": "048611be4cc9669276aba955337de7a3adaba128",
@@ -41,12 +49,33 @@ def sha(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def entries(path: Path) -> list[tuple[str, str]]:
+def entries(path: Path, *, header: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    lines = path.read_text().splitlines()
+    if lines[: len(header)] != list(header):
+        raise ValueError(f"Некорректный заголовок манифеста: {path}")
     result = []
-    for line in path.read_text().splitlines():
-        match = re.fullmatch(r"([0-9a-f]{64})\s+\*?(.+)", line)
-        if match:
-            result.append((match[1], match[2]))
+    seen = set()
+    for number, line in enumerate(lines[len(header) :], len(header) + 1):
+        match = re.fullmatch(r"([0-9a-f]{64})\s+\*?(\S(?:.*\S)?)", line)
+        if match is None:
+            raise ValueError(f"Некорректная декларация: {path}:{number}")
+        digest, target = match.groups()
+        if target in seen or any(ord(char) < 32 for char in target):
+            raise ValueError(f"Некорректная или повторная цель: {path}:{number}")
+        seen.add(target)
+        result.append((digest, target))
+    if not result:
+        raise ValueError(f"Пустой hash-манифест: {path}")
+    return result
+
+
+def hash_manifest_entries(root: Path, name: str) -> list[tuple[str, str, str]]:
+    result = []
+    for file, count in REQUIRED_HASH_MANIFESTS[name].items():
+        declared = entries(root / file)
+        if len(declared) != count:
+            raise ValueError(f"Неверное число деклараций: {root / file}")
+        result.extend((file, digest, path) for digest, path in declared)
     return result
 
 
@@ -196,7 +225,15 @@ def main() -> int:
             else "recorded_head"
         )
         source_entries = (
-            entries(root / MANIFESTS[name])
+            entries(
+                root / MANIFESTS[name],
+                header=(
+                    HEADS[name],
+                    "Fresh fixture build from this integrated main; no retained installed binary used.",
+                )
+                if name == "fr07-integrated"
+                else (),
+            )
             if name in MANIFESTS
             else [
                 (
@@ -223,32 +260,29 @@ def main() -> int:
                     equivalent_accepted_paths=equivalent if current != digest else [],
                 )
             )
-        for file in ("logs.sha256", "binaries.sha256"):
-            if not (root / file).exists():
-                continue
-            for expected, path in entries(root / file):
-                target = Path(path) if Path(path).is_absolute() else root / path
-                # Доступ только к canonical bundle и двум pinned synthetic core binaries.
-                if not target.is_relative_to(root) and target not in [
-                    BASE.parent / "engines/xray-26.10.31/xray",
-                    BASE.parent / "engines/sing-box-1.14.4/sing-box",
-                ]:
-                    item["checks"].append(
-                        dict(kind=file, path=path, status="outside_allowlist")
-                    )
-                    continue
+        for file, expected, path in hash_manifest_entries(root, name):
+            target = Path(path) if Path(path).is_absolute() else root / path
+            # Доступ только к canonical bundle и двум pinned synthetic core binaries.
+            if not target.is_relative_to(root) and target not in [
+                BASE.parent / "engines/xray-26.10.31/xray",
+                BASE.parent / "engines/sing-box-1.14.4/sing-box",
+            ]:
                 item["checks"].append(
-                    dict(
-                        kind=file,
-                        path=path,
-                        expected_sha256=expected,
-                        status="missing"
-                        if not target.is_file()
-                        else "match"
-                        if sha(target) == expected
-                        else "mismatch",
-                    )
+                    dict(kind=file, path=path, status="outside_allowlist")
                 )
+                continue
+            item["checks"].append(
+                dict(
+                    kind=file,
+                    path=path,
+                    expected_sha256=expected,
+                    status="missing"
+                    if not target.is_file()
+                    else "match"
+                    if sha(target) == expected
+                    else "mismatch",
+                )
+            )
         counts = {
             status: sum(x["status"] == status for x in item["source"])
             for status in ("same_path_exact", "mapped_exact", "changed_or_missing")
