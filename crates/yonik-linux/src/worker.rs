@@ -341,6 +341,17 @@ impl WorkerPayload {
         self.header.engine
     }
     pub fn send(&self, stream: &UnixStream, mode: WorkerMode) -> Result<WorkerAck, WorkerError> {
+        self.send_output(stream, mode, None)
+    }
+    pub(crate) fn send_output(
+        &self,
+        stream: &UnixStream,
+        mode: WorkerMode,
+        output: Option<crate::output_transport::ValidatedWriters>,
+    ) -> Result<WorkerAck, WorkerError> {
+        if output.is_some() && mode != WorkerMode::Run {
+            return Err(WorkerError::Protocol);
+        }
         let started = Instant::now();
         stream
             .set_read_timeout(Some(TIMEOUT))
@@ -381,11 +392,21 @@ impl WorkerPayload {
             WorkerMode::Check => 1,
             WorkerMode::Run => 2,
         };
+        if output.is_some() {
+            let resources = header.split_off(BUNDLE_HEADER_LEN.min(header.len()));
+            header.resize(112, 0);
+            header[7] = 3;
+            header[96..100].copy_from_slice(&[0, 2, 1, 2]);
+            header.extend_from_slice(&resources);
+        }
         let mut fds = vec![self.binary.file.as_fd(), self.config.as_fd()];
         if let Some(resources) = &self.resources {
             fds.extend(resources.artifacts.iter().map(|f| f.as_fd()));
         }
-        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(18))];
+        if let Some(output) = &output {
+            fds.extend([output.stdout.as_fd(), output.stderr.as_fd()]);
+        }
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(20))];
         let mut ancillary = SendAncillaryBuffer::new(&mut space);
         if !ancillary.push(SendAncillaryMessage::ScmRights(&fds)) {
             return Err(WorkerError::Protocol);
@@ -470,6 +491,7 @@ struct Received {
     config: File,
     resources: Vec<native_resources::OwnedResource>,
     resource_session: Option<ResourceSession>,
+    output: Option<crate::output_transport::ValidatedWriters>,
 }
 #[cfg(test)]
 fn receive(stream: &UnixStream, mode: WorkerMode) -> Result<(BinarySnapshot, File), WorkerError> {
@@ -505,8 +527,8 @@ fn receive_payload(stream: &UnixStream, mode: WorkerMode) -> Result<Received, Wo
                     .ok_or(WorkerError::Timeout)?,
             ))
             .map_err(|_| WorkerError::Io)?;
-        let mut part = [0; BUNDLE_HEADER_LEN + 16 * 54 + 1];
-        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(19))];
+        let mut part = [0; 112 + 16 * 54 + 1];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(21))];
         let mut ancillary = RecvAncillaryBuffer::new(&mut space);
         let msg = recvmsg(
             stream,
@@ -527,7 +549,7 @@ fn receive_payload(stream: &UnixStream, mode: WorkerMode) -> Result<Received, Wo
                 _ => return Err(WorkerError::Protocol),
             }
         }
-        if fds.len() > 18 || bytes.len() + msg.bytes > BUNDLE_HEADER_LEN + 16 * 54 {
+        if fds.len() > 20 || bytes.len() + msg.bytes > 112 + 16 * 54 {
             return Err(WorkerError::Protocol);
         }
         if msg.bytes == 0 {
@@ -552,17 +574,38 @@ fn receive_payload(stream: &UnixStream, mode: WorkerMode) -> Result<Received, Wo
             bytes.clear();
         }
     }
-    let (header, manifest, resource_session) = decode_bundle_header(&bytes)?;
+    let output_v3 = bytes.get(..8) == Some(b"YNKWRK\0\x03");
+    let legacy = if output_v3 {
+        decode_output_header(&bytes)?
+    } else {
+        bytes.clone()
+    };
+    let (header, manifest, resource_session) = decode_bundle_header(&legacy)?;
     if shm_preflight != (!manifest.is_empty() && header.engine == Engine::Xray) {
         return Err(WorkerError::Protocol);
     }
-    if header.mode != mode || fds.len() != 2 + manifest.len() {
+    if header.mode != mode || fds.len() != 2 + manifest.len() + if output_v3 { 2 } else { 0 } {
         return Err(WorkerError::Protocol);
     }
     let mut fds = fds.into_iter();
     let mut source = File::from(fds.next().ok_or(WorkerError::Protocol)?);
     let config = File::from(fds.next().ok_or(WorkerError::Protocol)?);
-    let native_files = fds.map(File::from).collect::<Vec<_>>();
+    let native_files = fds
+        .by_ref()
+        .take(manifest.len())
+        .map(File::from)
+        .collect::<Vec<_>>();
+    let output = if output_v3 {
+        Some(
+            crate::output_transport::OutputWriters {
+                roles: fds.collect(),
+            }
+            .validate()
+            .map_err(|_| WorkerError::Protocol)?,
+        )
+    } else {
+        None
+    };
     let mut total = 0u64;
     for (file, resource) in native_files.iter().zip(&manifest) {
         native_resources::validate(file, resource)?;
@@ -611,6 +654,7 @@ fn receive_payload(stream: &UnixStream, mode: WorkerMode) -> Result<Received, Wo
         config,
         resources,
         resource_session,
+        output,
     })
 }
 struct WorkerConfig {
@@ -774,6 +818,7 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
         config,
         resources,
         resource_session,
+        output,
     } = receive_payload(&stream, mode)?;
     // Исходный FD уже проверен receive: type/seals/declared size/SHA-256.
     // Helper удерживает отдельный global reserve до подтверждённого пустого cgroup.
@@ -827,6 +872,9 @@ async fn serve_stream(mut stream: UnixStream, mode: WorkerMode) -> Result<(), Wo
                 return Err(error);
             }
         };
+        if let Some(output) = output {
+            output.attach(&mut command);
+        }
         if let Some(handoff) = handoff {
             let result = handoff.exec(&mut command);
             if let Some(assets) = assets.as_mut() {
@@ -939,3 +987,32 @@ fn decode_bundle_header(
 
 #[cfg(test)]
 mod tests;
+
+// V3 добавляет только закрытые stdout/stderr роли; resource decoder остаётся общим.
+fn decode_output_header(bytes: &[u8]) -> Result<Vec<u8>, WorkerError> {
+    if bytes.len() < 112 || bytes.get(..8) != Some(b"YNKWRK\0\x03") {
+        return Err(WorkerError::Protocol);
+    }
+    let count = usize::from(bytes[10]);
+    if count > 16
+        || bytes.len() != 112 + 54 * count
+        || bytes[8] != 2
+        || bytes[96..100] != [0, 2, 1, 2]
+        || bytes[100..112] != [0; 12]
+    {
+        return Err(WorkerError::Protocol);
+    }
+    let mut legacy = bytes[..96].to_vec();
+    if count == 0 {
+        if legacy[80..96] != [0; 16] {
+            return Err(WorkerError::Protocol);
+        }
+        legacy.truncate(80);
+        legacy[7] = 1;
+    } else {
+        legacy[7] = 2;
+        legacy.extend_from_slice(&bytes[112..]);
+    }
+    decode_bundle_header(&legacy)?;
+    Ok(legacy)
+}

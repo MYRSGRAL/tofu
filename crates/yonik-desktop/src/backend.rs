@@ -4669,7 +4669,7 @@ async fn run(
                     record_system(&mut actor.state, SystemState::Unknown); actor.emit();
                 }
                 let generation = control.generation.load(Ordering::SeqCst);
-                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation));
+                system_flight = Some(Flight::start(system_session.take(), Operation::State, system_revision(&actor), generation, actor.event_log.clone()));
                 actor.state.system_busy = true; actor.emit();
             }
             _ = &mut provider => {},
@@ -5363,7 +5363,7 @@ async fn run(
                         if actor.state.connection_mode != ConnectionMode::System || system_flight.is_some() || (system_active && matches!(envelope.command, Command::SystemUnlock)) { Err(DesktopError("busy").into()) }
                         else {
                             let operation = if matches!(envelope.command, Command::SystemUnlock) { Operation::Unlock } else { Operation::State };
-                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation));
+                            system_flight = Some(Flight::start(system_session.take(), operation, system_revision(&actor), envelope.generation, actor.event_log.clone()));
                             actor.state.status = "Unknown"; Ok(())
                         }
                     }
@@ -5378,7 +5378,7 @@ async fn run(
                         else if let Some(profile) = actor.selected.as_ref() {
                             match yonik_import::ServerIntent::from_server(&profile.server).map_err(|_| DesktopError("engine_config")).and_then(|server| actor.current_inline_policy().map(|(policy, revision)| (server, policy, revision))) {
                                 Ok((server, policy, routing_revision)) => {
-                                    system_flight = Some(Flight::start(system_session.take(), Operation::PolicyConnect(Box::new(server), actor.state.engine.engine(), Box::new(policy), routing_revision), system_revision(&actor), envelope.generation));
+                                    system_flight = Some(Flight::start(system_session.take(), Operation::PolicyConnect(Box::new(server), actor.state.engine.engine(), Box::new(policy), routing_revision), system_revision(&actor), envelope.generation, actor.event_log.clone()));
                                     if let Some(flight) = &mut system_flight { flight.request_id = request_id; flight.source_generation = actor.state.source_generation; }
                                     actor.state.system_tun_available = false;
                                     actor.state.routing_ack = None;
@@ -5535,6 +5535,7 @@ async fn run(
                 Operation::Stop,
                 system_revision(&actor),
                 generation,
+                actor.event_log.clone(),
             ));
             actor.state.system_busy = true;
             actor.emit();
@@ -5586,12 +5587,17 @@ async fn run(
     } else {
         true
     };
+    let output_closed = match system_session.as_mut() {
+        Some(session) => session.drain_output().await,
+        None => true,
+    };
     disk_log.request_shutdown();
     // Guard остаётся здесь до Done; actor не выполняет файловые операции и join.
     while !disk_log.wait_closed(Duration::ZERO) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let closed = service_closed && routing_closed && provider_closed && network_closed;
+    let closed =
+        service_closed && routing_closed && provider_closed && network_closed && output_closed;
     drop(_lock);
     actor.state.ready = false;
     actor.state.busy = false;
@@ -6415,6 +6421,7 @@ impl Flight {
         operation: Operation,
         revision: ProfileRevision,
         generation: u64,
+        log: yonik_linux::event_log::EventLog,
     ) -> Self {
         let connecting = matches!(operation, Operation::PolicyConnect(..));
         let routing_revision = match &operation {
@@ -6426,9 +6433,17 @@ impl Flight {
         let task = tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
             let mut session = match session {
-                Some(session) if !session.owner_lost() => session,
-                _ => match SystemClient::system(deadline, cancellation.clone()).await {
-                    Ok(client) => SystemSession::new(client, revision),
+                Some(mut session) => {
+                    if session.owner_lost() {
+                        match SystemClient::system(deadline, cancellation.clone()).await {
+                            Ok(client) => session.replace_client(client),
+                            Err(error) => return (Some(session), Err(error)),
+                        }
+                    }
+                    session
+                }
+                None => match SystemClient::system(deadline, cancellation.clone()).await {
+                    Ok(client) => SystemSession::new(client, revision, log),
                     Err(error) => return (None, Err(error)),
                 },
             };
