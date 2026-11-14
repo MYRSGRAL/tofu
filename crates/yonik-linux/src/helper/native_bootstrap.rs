@@ -462,6 +462,19 @@ pub(crate) fn load_static_preflight(
     super::native_profile::load_static_image(deadline)
 }
 
+pub(crate) use super::service::BusPeerIdentity;
+
+pub(crate) use super::systemd_worker::{PeerVerifierLease, VerifiedPeerVerifier};
+
+impl RuntimeScopeStamp {
+    pub(crate) fn application_view(&self) -> Result<[(u64, u64); 3]> {
+        self.inner
+            .authorization
+            .application_view()
+            .map_err(|_| Error::Untrusted)
+    }
+}
+
 #[cfg(test)]
 mod split_receive_tests {
     use super::*;
@@ -493,18 +506,5 @@ mod split_receive_tests {
         fn sendable<T: Send + 'static>() {}
         sendable::<VerifiedPendingRun>();
         sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
-    }
-}
-
-pub(crate) use super::service::BusPeerIdentity;
-
-pub(crate) use super::systemd_worker::{PeerVerifierLease, VerifiedPeerVerifier};
-
-impl RuntimeScopeStamp {
-    pub(crate) fn application_view(&self) -> Result<[(u64, u64); 3]> {
-        self.inner
-            .authorization
-            .application_view()
-            .map_err(|_| Error::Untrusted)
     }
 }
