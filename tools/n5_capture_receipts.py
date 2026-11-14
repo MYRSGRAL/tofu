@@ -140,6 +140,7 @@ def final_capture(
     record: dict,
     report: dict,
     observed_pin: str,
+    registry_cwds: set[str] | None = None,
 ) -> dict:
     """Узкий offline join enriched evidence; никаких build-time методов enrich/prepare."""
     from _p25_final_profile import PROFILE, compile_arguments
@@ -332,9 +333,14 @@ def final_capture(
         cwd = row["cwd"]
         require(
             isinstance(cwd, str)
-            and any(
-                Path(cwd).is_relative_to(Path(roots[key]))
-                for key in ("source", "build")
+            and Path(cwd).is_absolute()
+            and ".." not in Path(cwd).parts
+            and (
+                any(
+                    Path(cwd).is_relative_to(Path(roots[key]))
+                    for key in ("source", "build")
+                )
+                or cwd in (registry_cwds or set())
             ),
             "Observed cwd outside roots",
         )
@@ -649,7 +655,12 @@ def final_capture(
 
 
 def produce(
-    retained: Path, pins: dict[str, str], source_commit: str
+    retained: Path,
+    pins: dict[str, str],
+    source_commit: str,
+    *,
+    registry_proof: str | None = None,
+    registry_proof_sha256: str | None = None,
 ) -> tuple[dict, dict]:
     """Pins передаются из независимого доверенного канала, никогда из самого marker."""
     require(
@@ -870,9 +881,47 @@ def produce(
         "ELF whitelist conflict",
     )
     report = values["build-capture-report.json"]
+    require(
+        (registry_proof is None) == (registry_proof_sha256 is None),
+        "Registry proof path/pin pair required",
+    )
+    registry_cwds = set()
+    if enriched:
+        _, observed_raw = reader.read_file("build-cxx-observed.json", 8 * MAX_METADATA)
+        observed_evidence = parse(observed_raw)
+        roots = report["roots"]
+        needs_registry = any(
+            isinstance(row, dict)
+            and isinstance(row.get("cwd"), str)
+            and not any(
+                Path(row["cwd"]).is_relative_to(Path(roots[key]))
+                for key in ("source", "build")
+            )
+            for row in sequence(observed_evidence["records"])
+        )
+        require(
+            not needs_registry or registry_proof is not None,
+            "MISSING: independently pinned registry proof",
+        )
+    else:
+        needs_registry = False
+    require(registry_proof is None or needs_registry, "Unexpected registry proof")
+    if registry_proof is not None:
+        from n5_registry_source_proof import validate
+
+        registry_cwds, payloads = validate(
+            reader, registry_proof, registry_proof_sha256, pins, source_commit
+        )
+        reader.virtual.update(payloads)
     replay = (
         final_capture(
-            reader, frozen, manifest, record, report, pins["build-cxx-observed.json"]
+            reader,
+            frozen,
+            manifest,
+            record,
+            report,
+            pins["build-cxx-observed.json"],
+            registry_cwds,
         )
         if enriched
         else _capture(reader, "capture-record.json", pins["build-capture-record.json"])
@@ -968,6 +1017,16 @@ def produce(
         "binding": "projection_of_externally_trusted_controller_build_evidence",
         "independent_compile_attestation": False,
         "independent_pins": pins,
+        **(
+            {
+                "registry_proof": {
+                    "path": registry_proof,
+                    "sha256": registry_proof_sha256,
+                }
+            }
+            if registry_proof is not None
+            else {}
+        ),
         "source_commit": source_commit,
         "source_archive_sha256": archive,
         "closure_status": replay["status"],
@@ -975,7 +1034,9 @@ def produce(
         "unavailable_input_bytes": [
             row["id"] for row in replay["files"] if not row["verified"]
         ],
-        "capture_byte_replay": "retained-generated-and-normalized-metadata"
+        "capture_byte_replay": "retained-registry-generated-and-normalized-metadata"
+        if registry_proof is not None
+        else "retained-generated-and-normalized-metadata"
         if enriched
         else "retained-elf-only",
         "closure_missing": replay["missing"],
@@ -1059,6 +1120,8 @@ def main() -> int:
             dest=name,
             required=name != "build-cxx-observed.json",
         )
+    parser.add_argument("--registry-proof")
+    parser.add_argument("--registry-proof-sha256")
     args = vars(parser.parse_args())
     try:
         receipts, report = produce(
@@ -1069,6 +1132,8 @@ def main() -> int:
                 if args[name] is not None
             },
             args["source_commit"],
+            registry_proof=args["registry_proof"],
+            registry_proof_sha256=args["registry_proof_sha256"],
         )
         emit(args["output"], receipts, report)
     except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
