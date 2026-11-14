@@ -49,3 +49,12 @@ lock checksum и bytes его regular members против распакован�
 Фактический cwd сохраняется в observed metadata, включая generated `-E` probe.
 Schema и format pins не меняются; изменение tooling требует нового trusted freeze
 с полным profile hash и новым release-id. Старый failed collect не переиспользуется.
+
+Registry TAR ограничен 64 MiB compressed/decoded; декодирование идёт порциями
+во временный файл. До `tarfile` проверяются физические заголовки, cap metadata,
+ограниченная цепочка PAX/GNU metadata и полный нулевой хвост после двух конечных
+блоков. Sparse-форматы и скрытые записи после end marker отклоняются.
+Внутренний `_registry_tar(archive, *, gzip_encoded=True)` возвращает context manager
+с `TarFile`; `gzip_encoded=False` предназначен для pinned plain source TAR
+с общим `MAX_FILE` cap. Проверка package/path/type остаётся обязанностью consumer.
+Новый cap входит в полный profile hash; старые frozen records не изменяются.

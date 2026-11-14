@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import gzip
 import hashlib
 import io
 import os
@@ -12,8 +13,10 @@ import signal
 import stat
 import subprocess
 import tarfile
+import tempfile
 import time
 import tomllib
+import zlib
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -36,6 +39,7 @@ PROFILE = {
     "qt_query": ["/usr/lib/qt6/bin/qtpaths", "--qt-version"],
     "sdk_root": "/usr",
     "registry_source_root": "/home/myrs/.cargo/registry/src",
+    "registry_unpacked_byte_cap": 64 * 1024 * 1024,
     "dependency_flags": ["-MD", "-MF"],
     "deadline_seconds": 300,
     "stream_cap": MAX_METADATA,
@@ -263,6 +267,89 @@ def _identity(path: Path) -> tuple[int, ...]:
     )
 
 
+def _pax_fields(payload: bytes) -> None:
+    """Ограничиваем metadata до того, как tarfile начнёт её интерпретацию."""
+    position = 0
+    fields = 0
+    while position < len(payload):
+        space = payload.find(b" ", position, position + 21)
+        require(space > position, "TAR PAX length")
+        digits = payload[position:space]
+        require(digits.isdigit(), "TAR PAX length")
+        end = position + int(digits)
+        require(space + 1 < end <= len(payload), "TAR PAX bounds")
+        record = payload[space + 1 : end]
+        require(record.endswith(b"\n") and b"=" in record, "TAR PAX record")
+        key = record[:-1].split(b"=", 1)[0]
+        require(bool(key) and not key.startswith(b"GNU.sparse"), "TAR sparse PAX")
+        fields += 1
+        require(fields <= MAX_FILES, "TAR PAX field cap")
+        position = end
+
+
+@contextmanager
+def _registry_tar(
+    archive: bytes, *, gzip_encoded: bool = True
+) -> Iterator[tarfile.TarFile]:
+    """Bounded decoded stream, physical headers и строгий конец TAR; без extract."""
+    cap = (
+        min(MAX_FILE, PROFILE["registry_unpacked_byte_cap"])
+        if gzip_encoded
+        else MAX_FILE
+    )
+    require(len(archive) <= cap, "TAR compressed byte cap")
+    try:
+        with tempfile.TemporaryFile() as expanded, ExitStack() as stack:
+            source = io.BytesIO(archive)
+            decoded = (
+                stack.enter_context(gzip.GzipFile(fileobj=source))
+                if gzip_encoded
+                else source
+            )
+            size = 0
+            while chunk := decoded.read(min(65536, cap - size + 1)):
+                size += len(chunk)
+                require(size <= cap, "TAR decoded byte cap")
+                expanded.write(chunk)
+            require(size >= 1024 and size % 512 == 0, "TAR block bounds")
+            expanded.seek(0)
+            headers = 0
+            metadata_chain = 0
+            while True:
+                header = expanded.read(512)
+                require(len(header) == 512, "TAR missing end marker")
+                if header == bytes(512):
+                    require(expanded.read(512) == bytes(512), "TAR end marker")
+                    while tail := expanded.read(65536):
+                        require(not any(tail), "TAR trailing data")
+                    break
+                headers += 1
+                require(headers <= MAX_FILES * 4, "TAR physical header cap")
+                member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
+                require(member.type != tarfile.GNUTYPE_SPARSE, "TAR sparse header")
+                padded = (member.size + 511) // 512 * 512
+                require(
+                    member.size >= 0 and expanded.tell() + padded <= size,
+                    "TAR physical member bounds",
+                )
+                if member.type in (b"x", b"g", b"X", b"L", b"K"):
+                    metadata_chain += 1
+                    require(metadata_chain <= 8, "TAR metadata chain cap")
+                    require(member.size <= MAX_METADATA, "TAR metadata cap")
+                    payload = expanded.read(member.size)
+                    if member.type in (b"x", b"g", b"X"):
+                        _pax_fields(payload)
+                    expanded.seek(padded - member.size, os.SEEK_CUR)
+                else:
+                    metadata_chain = 0
+                    expanded.seek(padded, os.SEEK_CUR)
+            expanded.seek(0)
+            with tarfile.open(fileobj=expanded, mode="r:") as tar:
+                yield tar
+    except (tarfile.TarError, EOFError, zlib.error) as error:
+        raise ValueError("Некорректный TAR stream") from error
+
+
 @contextmanager
 def registry_package(source: Path, package: Path) -> Iterator[set[str]]:
     """Один выбранный Cargo package: lock → archive → extracted bytes, без discovery."""
@@ -307,14 +394,15 @@ def registry_package(source: Path, package: Path) -> Iterator[set[str]]:
             "Registry lock checksum",
         )
         local = package.relative_to(base).as_posix()
-        archive = read("sdk", local + ".crate", MAX_FILE)
+        cap = min(MAX_FILE, PROFILE["registry_unpacked_byte_cap"])
+        archive = read("sdk", local + ".crate", cap)
         require(
             hashlib.sha256(archive).hexdigest() == checksum,
             "Registry archive checksum mismatch",
         )
         members: set[str] = set()
         total = 0
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        with _registry_tar(archive) as tar:
             for index, member in enumerate(tar):
                 require(index < MAX_FILES, "Registry archive member cap")
                 parts = member.name.split("/")
@@ -327,14 +415,16 @@ def registry_package(source: Path, package: Path) -> Iterator[set[str]]:
                 if member.isdir():
                     continue
                 require(
-                    member.isfile() and 0 <= member.size <= MAX_FILE,
+                    member.isfile()
+                    and not member.issparse()
+                    and 0 <= member.size <= cap,
                     "Registry archive member type/cap",
                 )
                 name = relative("/".join(parts[1:]))
                 require(name not in members, "Registry duplicate member")
                 members.add(name)
                 total += member.size
-                require(total <= MAX_FILE, "Registry expanded byte cap")
+                require(total <= cap, "Registry expanded byte cap")
                 stream = tar.extractfile(member)
                 require(stream is not None, "Registry archive missing member")
                 with stream:

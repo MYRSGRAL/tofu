@@ -75,6 +75,129 @@ class FinalProfileTests(unittest.TestCase):
         self.assertEqual(row["cwd"], str(package))
         self.assertEqual(row["unit"], str(package / "src/dummy.cc"))
 
+    def test_registry_rejects_pax_expansion_and_hidden_tar_tail(self) -> None:
+        import gzip
+        import hashlib
+        import io
+        import re
+        import tarfile
+
+        for case in ("pax-expansion", "pax-metadata", "sparse", "tail", "no-end"):
+            with self.subTest(case=case), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, package = self._registry_fixture(root)
+                headers = (
+                    {"comment": "x" * 100_000}
+                    if case in ("pax-expansion", "pax-metadata")
+                    else {"GNU.sparse.unexpected": "1"}
+                    if case == "sparse"
+                    else {}
+                )
+                raw = io.BytesIO()
+                with tarfile.open(
+                    fileobj=raw,
+                    mode="w",
+                    format=tarfile.PAX_FORMAT,
+                    pax_headers=headers,
+                ) as archive:
+                    body = (package / "src/dummy.cc").read_bytes()
+                    member = tarfile.TarInfo(package.name + "/src/dummy.cc")
+                    member.size = len(body)
+                    archive.addfile(member, io.BytesIO(body))
+                data = raw.getvalue()
+                if case == "tail":
+                    # Валидный второй header скрыт после первого end marker.
+                    hidden = tarfile.TarInfo("../unsafe")
+                    data += hidden.tobuf() + bytes(1024)
+                elif case == "no-end":
+                    data = data[:1024]
+                cached = root / "registry/cache" / package.parent.name
+                path = cached / (package.name + ".crate")
+                path.write_bytes(gzip.compress(data))
+                lock = source / "Cargo.lock"
+                lock.write_text(
+                    re.sub(
+                        r'checksum = "[0-9a-f]{64}"',
+                        f'checksum = "{hashlib.sha256(path.read_bytes()).hexdigest()}"',
+                        lock.read_text(),
+                    )
+                )
+                with (
+                    patch.dict(
+                        p.PROFILE,
+                        {
+                            "registry_source_root": str(package.parents[1]),
+                            "registry_unpacked_byte_cap": (
+                                16_384 if case == "pax-expansion" else 262_144
+                            ),
+                        },
+                    ),
+                    patch.object(
+                        p, "MAX_METADATA", 1024 if case == "pax-metadata" else 1_048_576
+                    ),
+                    self.assertRaises(ValueError),
+                ):
+                    with p.registry_package(source, package):
+                        pass
+
+    def test_registry_tar_bounded_parser_accepts_pax_and_plain_source(self) -> None:
+        import gzip
+        import io
+        import tarfile
+
+        raw = io.BytesIO()
+        with tarfile.open(
+            fileobj=raw,
+            mode="w",
+            format=tarfile.PAX_FORMAT,
+            pax_headers={"comment": "обычные metadata"},
+        ) as archive:
+            member = tarfile.TarInfo("source/Cargo.lock")
+            member.size = 4
+            archive.addfile(member, io.BytesIO(b"lock"))
+        for compressed in (False, True):
+            with self.subTest(compressed=compressed):
+                data = gzip.compress(raw.getvalue()) if compressed else raw.getvalue()
+                with p._registry_tar(data, gzip_encoded=compressed) as archive:
+                    members = list(archive)
+                    self.assertEqual([m.name for m in members], ["source/Cargo.lock"])
+                    with archive.extractfile(members[0]) as stream:
+                        self.assertEqual(stream.read(), b"lock")
+
+    def test_registry_tar_caps_before_high_level_metadata_parser(self) -> None:
+        import gzip
+        from unittest.mock import Mock
+
+        parser = Mock(side_effect=AssertionError("High-level parser reached"))
+        with (
+            patch.dict(p.PROFILE, {"registry_unpacked_byte_cap": 4096}),
+            patch.object(p.tarfile, "open", parser),
+            self.assertRaisesRegex(ValueError, "decoded byte cap"),
+        ):
+            with p._registry_tar(gzip.compress(bytes(8192))):
+                pass
+        parser.assert_not_called()
+
+    def test_registry_tar_rejects_recursive_metadata_chain_before_parser(self) -> None:
+        import io
+        import tarfile
+        from unittest.mock import Mock
+
+        raw = io.BytesIO()
+        for _ in range(9):
+            header = tarfile.TarInfo("metadata")
+            header.type = tarfile.XHDTYPE
+            raw.write(header.tobuf())
+        raw.write(bytes(1024))
+        parser = Mock(side_effect=AssertionError("High-level parser reached"))
+        with (
+            patch.object(p.tarfile, "open", parser),
+            self.assertRaisesRegex(ValueError, "metadata chain cap"),
+        ):
+            with p._registry_tar(raw.getvalue(), gzip_encoded=False):
+                pass
+        parser.assert_not_called()
+
     def test_registry_rejects_unselected_unit_before_compiler(self) -> None:
         from unittest.mock import Mock
 
