@@ -34,7 +34,8 @@ Typed expected outcomes: decided (route, origin, vpn), rejected (error),
 need_resolution (vpn). VPN 0 означает отсутствие VPN; это не настоящий ID.
 Ошибки `dns_policy_ambiguous` и `dns_policy_unresolved` соответствуют
 нормативным DNS_POLICY_AMBIGUOUS и DNS_POLICY_UNRESOLVED;
-unknown_fake_mapping соответствует PolicyFault::UnknownFakeMapping.
+unknown_fake_mapping соответствует PolicyFault::UnknownFakeMapping;
+wrong_resolver — PolicyFault::WrongResolver.
 Expected outcomes записаны явно, не вычисляются evaluator-ом.
 
 ## Покрытие и границы
@@ -61,7 +62,7 @@ classes на runtime boundary и allocator/persistence/nonreuse/revoke sockets.
 отсутствие публичных DNS-запросов, ограничения concurrency/deadline и интеграция
 с обоими ядрами. NeedResolution не доказывает выполнение lookup.
 
-Consumer ограничен 128 KiB JSON, 64 cases, 8 profiles, 64 адресами на case,
+Consumer ограничен 128 KiB JSON, 64 cases, 10 profiles, 64 адресами на case,
 253 bytes на имя; production DATA имеет собственные bounds. В частности,
 emitted answers=256 не расширяет существующий reference limit=64.
 Unknown поля envelope/case/observation и expected outcome отвергаются;
@@ -78,3 +79,33 @@ CARGO_TARGET_DIR внутри этого root. DBUS/XDG окружение не 
 Evidence (исходники, ELF, SHA256 и логи) сохраняется вне TTL в
 `/home/myrs/projects/yonik/local/evidence/n5-p14-oracle`.
 Никакие core/worker/Host, сеть, Go или Docker не запускаются.
+
+
+## Corrections после R2
+
+Корпус содержит 28 cases и 9 profiles. Добавлены ровно пять векторов:
+
+- `D-01/fake_private_available`: valid fake mapping и реальный private RRset
+  дают private_vpn, private_network, VPN 7.
+- `D-01/fake_private_unavailable`: те же mapping/RRset при недоступном VPN
+  дают block, private_network, без VPN.
+- `D-07/fake_private_public_ambiguity`: valid mapping не скрывает смешанный
+  private/public RRset; ожидается dns_policy_ambiguous.
+- `D-06/fresh_policy_wrong_resolver`: fresh full answer внутренней зоны
+  с Policy resolver path даёт wrong_resolver.
+- `D-06/fresh_wrong_vpn_resolver`: тот же ответ с VPN 8 вместо VPN 7
+  даёт wrong_resolver. Контроль `D-06/private_answer` сохраняет успех VPN 7.
+
+Новые fake profiles содержат одновременно desired fake pool/mapping lease
+и private VPN bindings; весь DATA golden проверяется до реконструкции Policy.
+Новые векторы, как остальные, проверяются в обоих порядках RRset.
+
+Для corrections evidence создаётся отдельно в
+`/home/myrs/projects/yonik/local/evidence/n5-p14-oracle-r2/<exact-SHA>/`.
+После локального коммита `git archive <exact-SHA>` сохраняет полный tracked
+source archive вне TTL. Frozen build использует только этот архив, включая
+canonical tracked Cargo.lock, а не изменённый рабочий lock. До исполнения
+pure tests сохраняются source/lock hashes, exact commands, rustc/cargo
+metadata и ELF с SHA256. Финальная проверка source manifest подтверждает,
+что build не изменил frozen sources. Старое evidence a185 не является
+full-source binding нового SHA. Full P14 по-прежнему NOT PASS.

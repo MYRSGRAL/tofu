@@ -53,7 +53,7 @@ fn load(raw: &str) -> Result<Corpus, String> {
     if c.version != 1
         || c.classification != "SYNTHETIC_REFERENCE"
         || c.cases.len() > 64
-        || c.profiles.len() > 8
+        || c.profiles.len() > 10
     {
         return Err("header/bounds".into());
     }
@@ -226,11 +226,21 @@ fn typed(profile: &str) -> (Policy, DnsPolicy, DesiredPlan) {
         fake_pools: vec![],
         reserved_constraints: vec![],
     };
-    if ["private", "unavailable", "zone", "zone_down", "two_vpns"].contains(&profile) {
+    if [
+        "private",
+        "unavailable",
+        "zone",
+        "zone_down",
+        "two_vpns",
+        "fake_private",
+        "fake_unavailable",
+    ]
+    .contains(&profile)
+    {
         p.private_networks.push(PrivateNetwork {
             network: "10.0.0.0/8".parse().unwrap(),
             vpn: VpnId::new(7).unwrap(),
-            available: profile != "unavailable",
+            available: !["unavailable", "fake_unavailable"].contains(&profile),
         });
         x.vpns.push(DesiredVpn {
             vpn: 7,
@@ -263,7 +273,7 @@ fn typed(profile: &str) -> (Policy, DnsPolicy, DesiredPlan) {
             available: profile != "zone_down",
         });
     }
-    let fake = profile == "fake";
+    let fake = matches!(profile, "fake" | "fake_private" | "fake_unavailable");
     if fake {
         x.fake_pools.push("198.18.0.0/15".into());
     }
@@ -295,7 +305,7 @@ fn outcome(e: Evaluation) -> Value {
             json!({"kind":"need_resolution","vpn":match path {ResolverPath::Policy=>0,ResolverPath::Vpn(v)=>v.get()}})
         }
         Evaluation::Rejected(f) => {
-            json!({"kind":"rejected","error":match f {PolicyFault::DnsPolicyUnresolved=>"dns_policy_unresolved",PolicyFault::DnsPolicyAmbiguous=>"dns_policy_ambiguous",PolicyFault::UnknownFakeMapping=>"unknown_fake_mapping",_=>panic!("unexpected fault {f:?}")}})
+            json!({"kind":"rejected","error":match f {PolicyFault::DnsPolicyUnresolved=>"dns_policy_unresolved",PolicyFault::DnsPolicyAmbiguous=>"dns_policy_ambiguous",PolicyFault::UnknownFakeMapping=>"unknown_fake_mapping",PolicyFault::WrongResolver=>"wrong_resolver",_=>panic!("unexpected fault {f:?}")}})
         }
         Evaluation::Decided { decision, vpn } => {
             json!({"kind":"decided","route":match decision.action {Route::Direct=>"direct",Route::Proxy=>"proxy",Route::Block=>"block",Route::PrivateVpn=>"private_vpn"},"origin":match decision.origin {RuleOrigin::User(id)=>format!("user:{id}"),RuleOrigin::Preset(id)=>format!("preset:{id}"),RuleOrigin::PrivateNetwork=>"private_network".into(),RuleOrigin::PrivateDomain=>"private_domain".into(),RuleOrigin::Lan=>"lan".into(),RuleOrigin::Default=>"default".into()},"vpn":vpn.map_or(0,VpnId::get)})
