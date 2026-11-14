@@ -159,7 +159,7 @@ fn malformed_transport_и_native_wire_не_обходят_отказ() {
 fn first_match_порядок_user_preset_default_сохранён() {
     for engine in [Engine::Xray, Engine::SingBox] {
         let mut p = policy(Some(&["tcp"]));
-        let mut next = p.user_rules[0].clone();
+        let mut next = policy(Some(&["tcp"])).user_rules.remove(0);
         next.id = 72;
         next.action = Action::Proxy;
         p.preset_rules.push(next);
