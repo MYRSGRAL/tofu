@@ -19,11 +19,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod inspect_codec;
+mod inspect_peer;
 mod kernel;
 mod lookup_channel;
 #[allow(dead_code)]
 mod lookup_codec;
 mod lookup_leaf;
+pub(crate) use inspect_peer::{PeerAttestation, VerifiedPeerSnapshot};
 mod remote;
 pub(crate) use lookup_codec::LookupBinding;
 pub(crate) use remote::RemoteLookup;

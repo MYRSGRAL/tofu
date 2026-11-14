@@ -65,6 +65,7 @@ pub(crate) struct CapturedBusScope {
     uid: u32,
     start: u64,
     nonce: [u8; 32],
+    observation: std::sync::Mutex<std::sync::Weak<broker::PeerAttestation>>,
 }
 impl CapturedBusScope {
     pub(crate) fn validate(&self) -> Result<(), AttributionFailure> {
@@ -107,6 +108,20 @@ impl CapturedBusPeer {
         if !bus.validate() {
             return Err(AttributionFailure::ProcessChanged);
         }
+        let slot = bus.capture_slot();
+        let mut cached = slot
+            .lock()
+            .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        if let Some(previous) = cached.upgrade() {
+            if previous.pid != bus.pid()
+                || previous.uid != bus.uid()
+                || !previous.bus.same_owner(&bus)
+            {
+                return Err(AttributionFailure::ProcessChanged);
+            }
+            previous.validate()?;
+            return Ok(Self(previous));
+        }
         let pid = bus.pid();
         let uid = bus.uid();
         let start = start_time(pid)?;
@@ -125,9 +140,12 @@ impl CapturedBusPeer {
             uid,
             start,
             nonce,
+            observation: std::sync::Mutex::new(std::sync::Weak::new()),
         };
         scope.validate()?;
-        Ok(Self(std::sync::Arc::new(scope)))
+        let scope = std::sync::Arc::new(scope);
+        *cached = std::sync::Arc::downgrade(&scope);
+        Ok(Self(scope))
     }
     pub(crate) fn uid(&self) -> u32 {
         self.0.uid
@@ -149,15 +167,150 @@ impl CapturedBusPeer {
     }
 }
 
-/// Идентичность поступает только от canonical bus daemon после авторизации.
+/// Raw captured candidate не считается verified: proof появляется только после
+/// actual canonical INSPECT_PEER handshake и четырёх kernel FDs.
 pub(crate) struct PeerProcess {
+    captured: Option<CapturedBusPeer>,
+    proof: std::sync::OnceLock<std::sync::Arc<broker::PeerAttestation>>,
+    #[cfg(test)]
+    fixture: Option<FixturePeerProcess>,
+}
+impl PeerProcess {
+    pub(crate) fn pending(captured: CapturedBusPeer) -> Self {
+        Self {
+            captured: Some(captured),
+            proof: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            fixture: None,
+        }
+    }
+    pub(crate) fn captured(&self) -> Result<&CapturedBusPeer, AttributionFailure> {
+        let captured = self
+            .captured
+            .as_ref()
+            .ok_or(AttributionFailure::NativeMechanismUnverified)?;
+        captured.validate()?;
+        Ok(captured)
+    }
+    pub(crate) fn attest(
+        &self,
+        verifier: crate::helper::native_bootstrap::VerifiedPeerVerifier,
+        source: crate::helper::native_bootstrap::VerifiedStaticInstalledImage,
+    ) -> Result<(), AttributionFailure> {
+        let captured = self.captured()?;
+        let reused = verifier.is_reused();
+        let (socket, lease) = verifier.into_parts();
+        let mut cached = captured
+            .0
+            .observation
+            .try_lock()
+            .map_err(|_| AttributionFailure::ProcUnavailable)?;
+        if let Some(existing) = cached.upgrade() {
+            if !existing.matches(&lease, &source) {
+                return Err(AttributionFailure::NativeMechanismUnverified);
+            }
+            // Закрываем только новый duplicate FD, без shutdown общего channel.
+            drop(socket);
+            existing.verify()?;
+            if let Some(own) = self.proof.get() {
+                if !std::sync::Arc::ptr_eq(own, &existing) {
+                    return Err(AttributionFailure::ProcessChanged);
+                }
+            } else {
+                self.proof
+                    .set(existing)
+                    .map_err(|_| AttributionFailure::ProcessChanged)?;
+            }
+            return Ok(());
+        }
+        if reused {
+            drop(socket);
+            return Err(AttributionFailure::ProcUnavailable);
+        }
+        let observation =
+            broker::PeerAttestation::connect(socket, lease, captured.retained_scope(), source)?;
+        *cached = std::sync::Arc::downgrade(&observation);
+        self.proof
+            .set(observation)
+            .map_err(|_| AttributionFailure::ProcessChanged)
+    }
+    pub(crate) fn verify_identity(&self) -> Result<(), AttributionFailure> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.verify_identity();
+        }
+        self.captured()?.validate()?;
+        self.proof
+            .get()
+            .ok_or(AttributionFailure::NativeMechanismUnverified)?
+            .verify()
+    }
+    pub(crate) fn verified_uid(&self) -> Result<u32, AttributionFailure> {
+        self.verify_identity()?;
+        Ok(self.uid())
+    }
+    fn uid(&self) -> u32 {
+        if let Some(captured) = &self.captured {
+            return captured.uid();
+        }
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.uid;
+        }
+        0
+    }
+    pub(crate) fn lookup_view(&self) -> Result<[(u64, u64); 3], AttributionFailure> {
+        self.verify_identity()?;
+        self.proof
+            .get()
+            .map(|proof| proof.view())
+            .ok_or(AttributionFailure::NativeMechanismUnverified)
+    }
+    pub(crate) fn identity_digest(&self) -> [u8; 32] {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture.identity_digest();
+        }
+        use sha2::{Digest, Sha256};
+        let (Some(captured), Some(proof)) = (&self.captured, self.proof.get()) else {
+            return [0; 32];
+        };
+        let mut hash = Sha256::new();
+        hash.update(b"yonik-attested-peer-v2\0");
+        hash.update(captured.pid().to_be_bytes());
+        hash.update(captured.uid().to_be_bytes());
+        hash.update(captured.start().to_be_bytes());
+        hash.update(captured.0.bus.owner().as_bytes());
+        proof.append_identity(&mut hash);
+        hash.finalize().into()
+    }
+    #[cfg(test)]
+    pub(crate) fn capture(pid: u32, uid: u32) -> Result<Self, AttributionFailure> {
+        Ok(Self {
+            captured: None,
+            proof: std::sync::OnceLock::new(),
+            fixture: Some(FixturePeerProcess::capture(pid, uid)?),
+        })
+    }
+    #[cfg(test)]
+    fn corrupt_start(&mut self) {
+        if let Some(fixture) = &mut self.fixture {
+            fixture.start += 1;
+        }
+    }
+}
+
+/// Только прежняя test-only observation своего процесса, не canonical unit proof.
+#[cfg(test)]
+struct FixturePeerProcess {
     pid: u32,
     uid: u32,
     start: u64,
     pidfd: std::os::fd::OwnedFd,
     namespaces: [std::path::PathBuf; 3],
 }
-impl PeerProcess {
+#[cfg(test)]
+impl FixturePeerProcess {
     pub(crate) fn identity_digest(&self) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut hash = Sha256::new();
@@ -280,29 +433,8 @@ pub(crate) async fn preflight(
         return Ok(PreflightStage::NotRequired);
     }
     let peer = peer.ok_or(AttributionFailure::ProcUnavailable)?;
-    peer.verify_pidfd()?;
-    if start_time(peer.pid)? != peer.start
-        || fs::metadata(format!("/proc/{}", peer.pid))
-            .map_err(|_| AttributionFailure::ProcUnavailable)?
-            .uid()
-            != peer.uid
-    {
-        return Err(AttributionFailure::ProcessChanged);
-    }
-    for (name, expected) in ["net", "pid", "mnt"].iter().zip(&peer.namespaces) {
-        if fs::read_link(format!("/proc/{}/ns/{name}", peer.pid))
-            .map_err(|_| AttributionFailure::ProcUnavailable)?
-            != *expected
-        {
-            return Err(AttributionFailure::ProcessChanged);
-        }
-    }
-    probe_process(peer.pid)?;
-    peer.verify_pidfd()?;
-    // Helper с CAP_NET_ADMIN не имеет CAP_SETUID/CAP_SETGID для запуска
-    // диагностического child от worker UID. Его собственный успешный lookup
-    // не подтверждает worker proc-view, namespaces и native owner lookup.
-    if worker_uid == peer.uid {
+    peer.verify_identity()?;
+    if worker_uid == peer.uid() {
         return Err(AttributionFailure::WorkerIsCaller);
     }
     // Production callers уже выполняются внутри tracked blocking actor job
@@ -340,7 +472,7 @@ mod tests {
             preflight(true, Some(&peer), 1002).await,
             Err(AttributionFailure::NativeMechanismUnverified)
         );
-        peer.start += 1;
+        peer.corrupt_start();
         assert_eq!(
             preflight(true, Some(&peer), 1002).await,
             Err(AttributionFailure::ProcessChanged)
@@ -394,3 +526,5 @@ mod static_preflight_tests {
         }
     }
 }
+
+pub(crate) use broker::VerifiedPeerSnapshot;

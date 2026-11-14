@@ -20,11 +20,15 @@ pub(super) fn run() -> Result<(), Unavailable> {
     if !packet.rights.is_empty() {
         return Err(Unavailable::Malformed);
     }
+    if packet.bytes.get(..8) == Some(super::inspect_codec::MAGIC.as_slice()) {
+        return super::inspect_peer::serve(channel, packet, bootstrap);
+    }
     let binding = LookupBinding::decode_hello(&packet.bytes)?;
     credentials(packet.credentials, binding.server_pid, 0)?;
     if super::start(binding.server_pid)? != binding.server_start {
         return Err(Unavailable::Authority);
     }
+    validate_identity(binding.target_uid)?;
     let mut broker = Broker::lookup_leaf(&binding)?;
     let files = [
         File::open("/proc/self/ns/net"),
@@ -76,6 +80,7 @@ pub(super) fn run() -> Result<(), Unavailable> {
         }
         last = id;
         binding.validate(&packet.bytes, LOOKUP, id, FRAME)?;
+        validate_identity(binding.target_uid)?;
         let flow = binding.flow(&packet.bytes, id)?;
         let deadline = Instant::now() + DEADLINE;
         let result = broker.lookup_and_project(flow, binding.epoch);
@@ -115,5 +120,67 @@ pub(super) fn run() -> Result<(), Unavailable> {
         fence(deadline)?;
         channel.send(&response, &rights, deadline)?;
         response.fill(0);
+    }
+}
+
+pub(super) fn validate_identity(uid: u32) -> Result<(), Unavailable> {
+    let status = super::bounded("/proc/self/status")?;
+    validate_status(&status, uid)?;
+    if rustix::process::getuid().as_raw() != uid || rustix::process::geteuid().as_raw() != uid {
+        return Err(Unavailable::Authority);
+    }
+    Ok(())
+}
+fn validate_status(status: &str, uid: u32) -> Result<(), Unavailable> {
+    if uid == 0 {
+        return Err(Unavailable::Authority);
+    }
+    for name in [
+        "Uid:",
+        "CapInh:",
+        "CapPrm:",
+        "CapEff:",
+        "CapBnd:",
+        "CapAmb:",
+        "NoNewPrivs:",
+    ] {
+        let mut values = status.lines().filter_map(|line| line.strip_prefix(name));
+        let value = values.next().ok_or(Unavailable::Authority)?;
+        if values.next().is_some() {
+            return Err(Unavailable::Authority);
+        }
+        let valid = if name == "Uid:" {
+            let ids = value
+                .split_whitespace()
+                .map(str::parse::<u32>)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| Unavailable::Authority)?;
+            ids == [uid; 4]
+        } else if name == "NoNewPrivs:" {
+            value.trim() == "1"
+        } else {
+            u64::from_str_radix(value.trim(), 16).ok() == Some(0)
+        };
+        if !valid {
+            return Err(Unavailable::Authority);
+        }
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn pure_leaf_status_checks_saved_fs_uid_bounding_caps_and_nnp() {
+        let status = "Uid: 1000 1000 1000 1000\nCapInh: 0\nCapPrm: 0\nCapEff: 0\nCapBnd: 0\nCapAmb: 0\nNoNewPrivs: 1\n";
+        assert_eq!(validate_status(status, 1000), Ok(()));
+        for bad in [
+            status.replace("1000 1000 1000 1000", "1000 1000 0 1000"),
+            status.replace("CapBnd: 0", "CapBnd: 1"),
+            status.replace("NoNewPrivs: 1", "NoNewPrivs: 0"),
+            format!("{status}CapEff: 1\n"),
+        ] {
+            assert!(validate_status(&bad, 1000).is_err());
+        }
     }
 }

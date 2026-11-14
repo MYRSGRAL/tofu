@@ -13,6 +13,7 @@ pub(super) struct PeerPresence {
     sender: String,
     uid: u32,
     revoked: AtomicBool,
+    capture: Arc<Mutex<Weak<crate::attribution::CapturedBusScope>>>,
 }
 pub(crate) struct BusPeerIdentity {
     presence: Arc<PeerPresence>,
@@ -30,6 +31,9 @@ impl BusPeerIdentity {
     }
     pub(crate) fn validate(&self) -> bool {
         !self.presence.revoked.load(Ordering::Acquire)
+    }
+    pub(crate) fn capture_slot(&self) -> Arc<Mutex<Weak<crate::attribution::CapturedBusScope>>> {
+        Arc::clone(&self.presence.capture)
     }
     pub(crate) fn same_owner(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.presence, &other.presence)
@@ -62,6 +66,7 @@ impl PeerTracker {
             sender: sender.into(),
             uid,
             revoked: AtomicBool::new(false),
+            capture: Arc::new(Mutex::new(Weak::new())),
         });
         entries.insert(sender.into(), Arc::downgrade(&value));
         Ok(value)
