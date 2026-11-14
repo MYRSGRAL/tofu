@@ -151,6 +151,68 @@ def check_matrix(compiler: Path, binary: Path, engine: str, workspace: Path) -> 
     )
 
 
+def check_ss2022(compiler: Path, binary: Path, engine: str, workspace: Path) -> None:
+    """Focused SS2022: только синтетический config-check без запуска трафика."""
+    import base64
+
+    method = "2022-blake3-aes-128-gcm"
+    key = base64.b64encode(b"0123456789abcdef").decode()
+    source = f"ss://{method}:{key}@127.0.0.1:24443"
+    data = generated(compiler, engine, source)
+    outbound = json.loads(data)["outbounds"][0]
+    credentials = outbound["settings"]["servers"][0] if engine == "xray" else outbound
+    if credentials["method"] != method or credentials["password"] != key:
+        raise RuntimeError("Компилятор изменил SS2022 method/password")
+    config = workspace / f"{engine}-ss2022.json"
+    config.write_bytes(data)
+    config.chmod(0o600)
+    command = (
+        [str(binary), "run", "-test", "-c", str(config)]
+        if engine == "xray"
+        else [str(binary), "check", "-c", str(config)]
+    )
+    result = subprocess.run(command, capture_output=True, timeout=10)
+    (workspace / f"{engine}-checker.log").write_bytes(result.stdout + result.stderr)
+    (workspace / f"{engine}-exit.json").write_text(
+        json.dumps({"argv": command, "exit": result.returncode}) + "\n"
+    )
+    result.check_returncode()
+    negatives = [
+        f"ss://{method}:{base64.b64encode(bytes(15)).decode()}@127.0.0.1:24443"
+    ]
+    if engine == "xray":
+        negatives.append(
+            "ss://2022-blake3-chacha20-poly1305:"
+            + base64.b64encode(bytes(32)).decode()
+            + "@127.0.0.1:24443"
+        )
+    negative_results = []
+    for source in negatives:
+        result = subprocess.run(
+            [str(compiler), engine, "--emit-secret-config"],
+            input=source.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        negative_results.append(
+            {
+                "uri": source,
+                "exit": result.returncode,
+                "stderr": result.stderr.decode(errors="replace"),
+            }
+        )
+        if result.returncode == 0 or result.stdout:
+            raise RuntimeError("Негативный SS2022 gate пропустил конфигурацию")
+    (workspace / f"{engine}-negative.json").write_text(
+        json.dumps(negative_results, indent=2) + "\n"
+    )
+    LOG.info(
+        "%s: SS2022 exact method/key, checker exit=0, negative gates=%d",
+        engine,
+        len(negatives),
+    )
+
+
 def traffic(compiler: Path, binary: Path, engine: str, workspace: Path) -> None:
     if engine == "xray":
         server = {

@@ -64,11 +64,20 @@ pub struct HostConfig {
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
     #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
+    #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
     #[cfg(feature = "test-support")]
     scheduler_owner_seed: Option<u64>,
     #[cfg(feature = "test-support")]
     scheduler_interval: Option<Duration>,
+    #[cfg(feature = "test-support")]
+    test_subscription_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    #[cfg(feature = "test-support")]
+    schedule_trace: Option<(
+        std::sync::mpsc::SyncSender<serde_json::Value>,
+        Arc<AtomicBool>,
+    )>,
 }
 impl HostConfig {
     pub fn new(data_dir: PathBuf, engine_dir: PathBuf) -> Self {
@@ -83,12 +92,43 @@ impl HostConfig {
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
+            catalog_observer: None,
+            #[cfg(feature = "test-support")]
             scheduler_capacity: None,
             #[cfg(feature = "test-support")]
             scheduler_owner_seed: None,
             #[cfg(feature = "test-support")]
             scheduler_interval: None,
+            #[cfg(feature = "test-support")]
+            test_subscription_fetch: None,
+            #[cfg(feature = "test-support")]
+            schedule_trace: None,
         }
+    }
+    /// Concrete socket transport отдельного subscription fixture; не native authority.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_subscription_fetch(mut self, fetch: Arc<yonik_linux::FetchHost>) -> Self {
+        self.test_subscription_fetch = Some(fetch);
+        self
+    }
+    /// Bounded read-only trace; overflow/disconnect запрещают acceptance fixture.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_schedule_trace(
+        mut self,
+        sender: std::sync::mpsc::SyncSender<serde_json::Value>,
+        overflow: Arc<AtomicBool>,
+    ) -> Self {
+        self.schedule_trace = Some((sender, overflow));
+        self
+    }
+    /// Только наблюдение реального producer в отдельном test-support стенде.
+    #[cfg(feature = "test-support")]
+    pub fn with_catalog_observer(
+        mut self,
+        observer: yonik_linux::applications::CatalogObserver,
+    ) -> Self {
+        self.catalog_observer = Some(observer);
+        self
     }
     /// Отдельный ephemeral GUI-стенд: только уменьшение capacity, без GUI/env API.
     #[cfg(feature = "test-support")]
@@ -269,6 +309,8 @@ enum Command {
         target: String,
     },
     RoutingCatalog {
+        #[serde(default)]
+        request_id: u64,
         processes: bool,
         query: String,
         offset: usize,
@@ -1457,7 +1499,51 @@ async fn open(
     Ok((SubscriptionService::new(repo.clone()), lock, repo))
 }
 
+fn catalog_response(request_id: u64, mut page: serde_json::Value) -> serde_json::Value {
+    if request_id != 0 {
+        page["request_id"] = request_id.into();
+    }
+    page
+}
+
+#[cfg(test)]
+mod catalog_correlation_tests {
+    #[test]
+    fn legacy_shape_and_positive_reply_identity() {
+        let page = serde_json::json!({"items":[],"offset":0,"total":0,"incomplete":false});
+        assert_eq!(super::catalog_response(0, page.clone()), page);
+        let reply = super::catalog_response(9_007_199_254_740_991, page.clone());
+        assert_eq!(reply["request_id"], 9_007_199_254_740_991_u64);
+        let mut restored = reply;
+        restored
+            .as_object_mut()
+            .expect("catalog object")
+            .remove("request_id");
+        assert_eq!(restored, page);
+    }
+    #[test]
+    fn missing_id_remains_legacy_and_invalid_ids_are_rejected() {
+        let legacy = r#"{"command":"routing_catalog","processes":false,"query":"","offset":0}"#;
+        assert!(matches!(
+            serde_json::from_str::<super::Command>(legacy),
+            Ok(super::Command::RoutingCatalog { request_id: 0, .. })
+        ));
+        for id in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("text"),
+            serde_json::Value::Null,
+        ] {
+            let mut input: serde_json::Value = serde_json::from_str(legacy).expect("legacy JSON");
+            input["request_id"] = id;
+            assert!(serde_json::from_value::<super::Command>(input).is_err());
+        }
+    }
+}
+
 struct Actor {
+    #[cfg(feature = "test-support")]
+    catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     presets: Option<Arc<presets::Controller>>,
     logs_save: logs::SaveJob,
     event_log: yonik_linux::event_log::EventLog,
@@ -2413,12 +2499,22 @@ impl Actor {
                 result.map(|_| ())
             }
             Command::RoutingCatalog {
+                request_id,
                 processes,
                 query,
                 offset,
             } => {
+                #[cfg(feature = "test-support")]
+                let observer = self.catalog_observer.clone();
                 self.state.routing_catalog = tokio::task::spawn_blocking(move || {
-                    crate::editor::catalog(processes, &query, offset)
+                    crate::editor::catalog(
+                        processes,
+                        &query,
+                        offset,
+                        #[cfg(feature = "test-support")]
+                        observer,
+                    )
+                    .map(|page| catalog_response(request_id, page))
                 })
                 .await
                 .map_err(|_| {
@@ -2946,6 +3042,8 @@ mod settings_tests {
         let (service, _lock, routing_repository) = open(&mut config).await.expect("тестовая БД");
         let (preferences_store, preferences, _) = Store::open(&directory.0);
         let mut actor = Actor {
+            #[cfg(feature = "test-support")]
+            catalog_observer: None,
             presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
                 .ok()
                 .map(Arc::new),
@@ -3334,6 +3432,52 @@ type RefreshTask = (
     String,
 );
 
+#[cfg(feature = "test-support")]
+#[derive(Default)]
+struct ScheduleTrace {
+    window_origin: Option<Duration>,
+    drain_id: u64,
+    previous: Option<serde_json::Value>,
+}
+#[cfg(feature = "test-support")]
+impl ScheduleTrace {
+    fn emit(
+        &mut self,
+        config: &HostConfig,
+        scheduled: &DesktopSchedule,
+        lease: ProxyLease,
+        now: Duration,
+        phase: &'static str,
+    ) {
+        let Some((sender, overflow)) = &config.schedule_trace else {
+            return;
+        };
+        if scheduled.window_until.is_none() {
+            self.window_origin = None;
+        }
+        let row = serde_json::json!({"phase":phase,"window_origin_ns":self.window_origin.map(|d| d.as_nanos()),"window_deadline_ns":scheduled.window_until.map(|d|d.as_nanos()),"scheduled_generation":scheduled.generation,"lease_generation":lease.map(|l|l.0),"drain_id":self.drain_id,"fetching":scheduled.fetching});
+        if self.previous.as_ref() == Some(&row) {
+            return;
+        }
+        self.previous = Some(row.clone());
+        let mut event = row;
+        event["at_ns"] = serde_json::json!(now.as_nanos());
+        if sender.try_send(event).is_err() {
+            overflow.store(true, Ordering::Release);
+        }
+    }
+    fn begin_drain(&mut self, config: &HostConfig) {
+        match self.drain_id.checked_add(1) {
+            Some(id) => self.drain_id = id,
+            None => {
+                if let Some((_, overflow)) = &config.schedule_trace {
+                    overflow.store(true, Ordering::Release);
+                }
+            }
+        }
+    }
+}
+
 type ProxyLease = Option<(u64, SocketAddr)>;
 
 /// Снимок подтверждённой сессии на операцию; изменение watch отзывает путь.
@@ -3342,18 +3486,39 @@ struct DesktopFetch {
     proxy_fetch_dns: Option<SocketAddr>,
     current: watch::Receiver<ProxyLease>,
     proxy_used: AtomicBool,
+    #[cfg(feature = "test-support")]
+    test_fetch: Option<Arc<yonik_linux::FetchHost>>,
 }
 impl DesktopFetch {
     fn new(current: &watch::Sender<ProxyLease>, proxy_fetch_dns: Option<SocketAddr>) -> Arc<Self> {
+        Self::subscription(
+            current,
+            proxy_fetch_dns,
+            #[cfg(feature = "test-support")]
+            None,
+        )
+    }
+    fn subscription(
+        current: &watch::Sender<ProxyLease>,
+        proxy_fetch_dns: Option<SocketAddr>,
+        #[cfg(feature = "test-support")] test_fetch: Option<Arc<yonik_linux::FetchHost>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             lease: *current.borrow(),
             proxy_fetch_dns,
             current: current.subscribe(),
             proxy_used: AtomicBool::new(false),
+            #[cfg(feature = "test-support")]
+            test_fetch,
         })
     }
     fn stale(&self) -> bool {
-        self.proxy_used.load(Ordering::Acquire) && *self.current.borrow() != self.lease
+        let revoked = *self.current.borrow() != self.lease;
+        // Stop уведомляет тот же watch даже при None→None: fixture не теряет revoke.
+        #[cfg(feature = "test-support")]
+        let revoked =
+            revoked || (self.test_fetch.is_some() && self.current.has_changed().unwrap_or(true));
+        self.proxy_used.load(Ordering::Acquire) && revoked
     }
 }
 impl yonik_linux::SubscriptionFetch for DesktopFetch {
@@ -3372,6 +3537,23 @@ impl yonik_linux::SubscriptionFetch for DesktopFetch {
         >,
     > {
         Box::pin(async move {
+            #[cfg(feature = "test-support")]
+            if let Some(host) = &self.test_fetch {
+                if route == FetchRoute::Proxy {
+                    self.proxy_used.store(true, Ordering::Release);
+                }
+                if self.stale() {
+                    return Err(FetchError::Cancelled);
+                }
+                let mut current = self.current.clone();
+                return tokio::select! {
+                    biased;
+                    _ = current.changed() => Err(FetchError::Cancelled),
+                    result = host.fetch(source, route, validators, cancel) => {
+                        if self.stale() { Err(FetchError::Cancelled) } else { result }
+                    }
+                };
+            }
             let mut host = yonik_linux::FetchHost::new(Duration::from_secs(30))?;
             if route == FetchRoute::Direct {
                 return host.fetch(source, route, validators, cancel).await;
@@ -3873,6 +4055,8 @@ async fn run(
     let (event_log, disk_log) =
         yonik_linux::event_log::EventLog::with_disk(config.data_dir.clone());
     let mut actor = Actor {
+        #[cfg(feature = "test-support")]
+        catalog_observer: config.catalog_observer.clone(),
         presets: crate::backend::presets::Controller::open(&config.data_dir.join("presets"))
             .ok()
             .map(Arc::new),
@@ -4019,9 +4203,24 @@ async fn run(
     }
     let mut session_generation = 0_u64;
     let mut manual_host: Option<Arc<DesktopFetch>> = None;
-    let mut schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+    let mut schedule_host = DesktopFetch::subscription(
+        &proxy_session,
+        actor.preferences.proxy_fetch_dns,
+        #[cfg(feature = "test-support")]
+        config.test_subscription_fetch.clone(),
+    );
     let mut maintenance_controller = maintenance::Controller::default();
+    #[cfg(feature = "test-support")]
+    let mut schedule_trace = ScheduleTrace::default();
     loop {
+        #[cfg(feature = "test-support")]
+        schedule_trace.emit(
+            &config,
+            &scheduled,
+            *proxy_session.borrow(),
+            origin.elapsed(),
+            "state",
+        );
         let interval = Duration::from_secs(actor.preferences.subscription_interval_seconds as u64);
         scheduled.background_enabled = actor.preferences.subscription_background;
         #[cfg(feature = "test-support")]
@@ -4040,7 +4239,31 @@ async fn run(
                     || policy.metered
                     || policy.battery_saver))
         {
-            if let Err(error) = scheduled.close_window(actor.service(), now).await {
+            #[cfg(feature = "test-support")]
+            {
+                schedule_trace.begin_drain(&config);
+                schedule_trace.emit(
+                    &config,
+                    &scheduled,
+                    *proxy_session.borrow(),
+                    origin.elapsed(),
+                    "window_drain_begin",
+                );
+            }
+            let closed = scheduled.close_window(actor.service(), now).await;
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                if closed.is_ok() {
+                    "window_closed"
+                } else {
+                    "window_close_failed"
+                },
+            );
+            if let Err(error) = closed {
                 actor
                     .state
                     .schedule_error(error, Some(scheduled.generation));
@@ -4061,14 +4284,23 @@ async fn run(
         // Production Stop по-прежнему единственный источник его отзыва.
         #[cfg(test)]
         let lease = lease.or_else(|| proxy_fixture.as_ref().and_then(|_| *proxy_session.borrow()));
-        proxy_session.send_if_modified(|current| {
+        if proxy_session.send_if_modified(|current| {
             if *current == lease {
                 false
             } else {
                 *current = lease;
                 true
             }
-        });
+        }) {
+            #[cfg(feature = "test-support")]
+            schedule_trace.emit(
+                &config,
+                &scheduled,
+                *proxy_session.borrow(),
+                origin.elapsed(),
+                "lease_published",
+            );
+        }
         if manual_host.as_ref().is_some_and(|host| host.stale()) {
             actor.pending = None;
             if scheduled.review.is_none() {
@@ -4097,7 +4329,12 @@ async fn run(
                 actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
             }
-            schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+            schedule_host = DesktopFetch::subscription(
+                &proxy_session,
+                actor.preferences.proxy_fetch_dns,
+                #[cfg(feature = "test-support")]
+                config.test_subscription_fetch.clone(),
+            );
         }
         let allowed = !quitting
             && local_task.is_none()
@@ -4135,13 +4372,15 @@ async fn run(
                 if let Some(session) = running.as_ref() { session.cancel.send_replace(true); }
                 if let Some(batch) = batch_running.as_mut() { batch.stop(); actor.state.batch.cancelled = true; actor.emit(); }
                 if let Some(tcp) = tcp_running.as_ref() { tcp.cancel.send_replace(true); }
-                if let Err(error) = scheduled.shutdown(origin.elapsed()).await { actor.state.schedule_error(error, Some(scheduled.generation)); }
+                #[cfg(feature = "test-support")]
+                { schedule_trace.begin_drain(&config); schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), "stop_drain_begin"); }
+                let shutdown = scheduled.shutdown(origin.elapsed()).await;
+                #[cfg(feature = "test-support")]
+                schedule_trace.emit(&config, &scheduled, None, origin.elapsed(), if shutdown.is_ok() { "stop_drain_complete" } else { "stop_drain_failed" });
+                if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
-                    let policy = scheduled.policy;
-                    let visible = scheduled.visible;
-                    if let Ok(mut replacement) = DesktopSchedule::new() {
-                        replacement.policy = policy; replacement.visible = visible;
+                    if let Ok(mut replacement) = scheduled.replacement() {
                         if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
                         actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
@@ -4267,9 +4506,17 @@ async fn run(
             } => {
                 // На границе окна сначала closing ACK в начале следующей итерации.
                 if scheduled.window_until.is_none_or(|until| origin.elapsed() < until) {
-                    schedule_host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns);
+                    schedule_host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone());
                     let host = &schedule_host;
-                    scheduled.open_window(origin.elapsed());
+                    let window_now = origin.elapsed();
+                    #[cfg(feature = "test-support")]
+                    let was_closed = scheduled.window_until.is_none();
+                    scheduled.open_window(window_now);
+                    #[cfg(feature = "test-support")]
+                    {
+                        if was_closed && scheduled.window_until.is_some() { schedule_trace.window_origin = Some(window_now); }
+                        schedule_trace.emit(&config, &scheduled, *proxy_session.borrow(), origin.elapsed(), "dispatch");
+                    }
                     let policy = scheduled.policy();
                     match scheduled.runtime.dispatch(origin.elapsed(), policy, actor.service(), host.clone()) {
                         Ok(()) => scheduled.fetching = true,
@@ -4807,7 +5054,7 @@ async fn run(
                             match actor.source_command(Command::AddSource { name, url, local_exception, route, hwid_enabled }).await {
                                 Ok(()) => {
                                     actor.state.search.clear(); actor.state.favorites_only = false;
-                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                    match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                         Ok(task) => { refreshing = Some(task); Ok(()) }
                                         Err(error) => Err(error),
                                     }
@@ -4820,7 +5067,7 @@ async fn run(
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
                         else {
                             match actor.source_command(Command::SetSourceHwid { enabled }).await {
-                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                                Ok(()) => match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                                     Ok(task) => { refreshing = Some(task); Ok(()) }
                                     Err(error) => Err(error),
                                 },
@@ -4874,7 +5121,7 @@ async fn run(
                     }
                     Command::Refresh => {
                         if refreshing.is_some() { Err(DesktopError("busy").into()) }
-                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::new(&proxy_session, actor.preferences.proxy_fetch_dns); manual_host = Some(host.clone()); host }).await {
+                        else { match actor.refresh(envelope.generation, scheduled.generation, { let host = DesktopFetch::subscription(&proxy_session, actor.preferences.proxy_fetch_dns, #[cfg(feature = "test-support")] config.test_subscription_fetch.clone()); manual_host = Some(host.clone()); host }).await {
                             Ok(task) => { refreshing = Some(task); Ok(()) }
                             Err(error) => Err(error),
                         } }
@@ -5166,6 +5413,8 @@ mod routing_regressions {
         let (preferences_store, preferences, _) = Store::open(&path);
         (
             Actor {
+                #[cfg(feature = "test-support")]
+                catalog_observer: None,
                 presets: None,
                 event_log: yonik_linux::event_log::EventLog::new(),
                 logs_save: crate::backend::logs::SaveJob::default(),

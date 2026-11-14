@@ -1,0 +1,48 @@
+{
+  "source": "6e73f01958d677cb4fec4257ccf9878723bcda4f",
+  "execution_binding": "/home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1/execution-binding.json",
+  "execution_binding_sha256": "543e3f9b81f8194aca3f85776fa05d5b3a72454ea45b4a61c71c79c7d0ce917c",
+  "evidence_root": "/home/myrs/projects/yonik/local/evidence/p05-p10-actual-20261114-v1",
+  "source_archive_sha256": "3984f44a49df5e0340adacf2bd45da2afb7b4cfadf8b9ae766c6806f0853814e",
+  "source_manifest_sha256": "02a2d8cde0641900bdba85b005b396477ea279a6d24051ab1557115c108c6140",
+  "artifact_sha256": "9e2899d5c00d928e00d3b883e161e1e48226630c437188555573a3b02c8e1319",
+  "checks": {
+    "unit_passed": 113,
+    "unit_ignored": 1,
+    "unit_failed": 0,
+    "actual_integration_passed": 1,
+    "clippy_all_targets": true,
+    "default_no_feature_check": true,
+    "rustfmt": true,
+    "ruff_check": true,
+    "ruff_format": true
+  },
+  "fixture_counts": {
+    "origin_requests": 6,
+    "socks_requests": 6,
+    "held_started": true,
+    "held_closed": true
+  },
+  "all_owned_reaped": true,
+  "transient_root_removed": true,
+  "historical_binding": "binding.json",
+  "historical_executions_reassigned": false,
+  "independent_review": "pending",
+  "native_engine": false,
+  "hardware_power": null,
+  "p11_static_freshness_tests": {
+    "passed": 2,
+    "failed": 0
+  },
+  "p11_full_historical_gate": {
+    "passed": 5,
+    "errors": 1,
+    "missing": "local/validation/desktop-reviewed-integration/source-binding.json",
+    "canonical_external_exists": false
+  },
+  "supplementary_hashes": {
+    "p11-freshness-check.log": "92b391eabf11e0e952252fb6ee05522765579df0b6b0a838ff1f3e4150550b42",
+    "p11-ledger-check.log": "bdf9823814988b62aeb3cb4d7611e28c3e3fd275151ac3165c0f1010159dfffe",
+    "cleanup-final.json": "e2a23027ebf8b7e7e1949035233b7e6150ba9f0df2dfef19d6f7b7d4854d17fc"
+  }
+}

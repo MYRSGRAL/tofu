@@ -1,0 +1,13 @@
+
+running 9 tests
+test native_details::tests::elapsed_roundtrip_and_closed_bounds ... ok
+test native_details::tests::normal_generated_info_without_timestamp ... ok
+test native_details::tests::timestamp_calendar_and_prefix_are_closed ... ok
+test native_details::tests::no_secret_or_control_can_extend_a_template ... ok
+test native_details::tests::retained_runtime_constants ... ok
+test native_details::tests::oversize_discards_through_lf_and_counters_saturate ... ok
+test native_details::tests::startup_exact_body ... ok
+test native_details::tests::fragments_oversize_resync_loss_and_stop ... ok
+test native_details::tests::turn_and_counter_bounds ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

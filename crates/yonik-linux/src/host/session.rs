@@ -87,6 +87,7 @@ impl CheckedConfig {
         if binary.engine != config.engine() {
             return Err(HostError::ConfigRejected);
         }
+        let config = config.with_local_runtime_logging();
         let port = config.listen_port();
         let probe_port = config.probe_port();
         let mut output = ConfigBuffer(Vec::new());
@@ -118,6 +119,7 @@ pub struct LocalSession {
     session: Session,
     active: Option<Token>,
     child: Option<Child>,
+    readers: Option<process::RuntimeReaders>,
     binary: Option<BinarySnapshot>,
     port: Option<NonZeroU16>,
     probe_port: Option<NonZeroU16>,
@@ -143,6 +145,7 @@ impl LocalSession {
             event_log: None,
             active: None,
             child: None,
+            readers: None,
             binary: None,
             port: None,
             probe_port: None,
@@ -231,6 +234,9 @@ impl LocalSession {
         let result = async {
             let binary = self.binary.as_ref().ok_or(HostError::State)?;
             self.child = Some(process::spawn(binary, false)?);
+            self.readers = Some(process::RuntimeReaders::attach(
+                self.child.as_mut().ok_or(HostError::State)?, binary.engine, self.event_log.clone(),
+            )?);
             self.log(crate::event_log::EventCode::ProcessSpawned);
             let child = self.child.as_mut().ok_or(HostError::State)?;
             process::write_config(child, &checked.bytes, cancel).await?;
@@ -321,6 +327,9 @@ impl LocalSession {
         self.release().await
     }
     async fn release(&mut self) -> Result<(), HostError> {
+        if let Some(readers) = self.readers.take() {
+            readers.stop().await;
+        }
         #[cfg(feature = "test-support")]
         if self.child.is_some()
             && self

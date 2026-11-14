@@ -1,0 +1,14 @@
+{
+  "inspected_head": "dbbd66814daede7659bd1b3b8cfbc735870eacab",
+  "kind": "static Stop/window contract gap; no execution",
+  "blobs": {
+    "crates/yonik-desktop/src/backend.rs": "7f88e0b7818373fb717a3d4f66bad865a8b40ec0",
+    "crates/yonik-desktop/src/desktop_schedule.rs": "bd25055d78c25bec80962642fccfb7c794f08485"
+  },
+  "working_files_exact": {
+    "crates/yonik-desktop/src/backend.rs": true,
+    "crates/yonik-desktop/src/desktop_schedule.rs": true
+  },
+  "new_code_or_build_or_runtime": false,
+  "proposal": "stop-window-proposal.md"
+}

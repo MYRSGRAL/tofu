@@ -1,0 +1,142 @@
+{
+  "scope": "LocalSocks technical details only; NOT full FR16 PASS",
+  "build_source_base": "6dd2a9371357edf1e8947e279018aee48ec72440",
+  "compiled_source_hashes": {
+    "crates/yonik-desktop/qml/LogsView.qml": "b6c4d4cd36f13b744b376ef9fee06d8815e58bea6a8f769fb52b312e4848f648",
+    "crates/yonik-desktop/src/logs.rs": "ee392a7bb8221b7475406e75ec8f01d284ad0b68ba0fd1a49dbeefb5896dcba0",
+    "crates/yonik-engine/src/lib.rs": "e0588f6d1c0bae71c91750578ddc7f3e4c3a943b8d30662d3341f36daad48f36",
+    "crates/yonik-engine/tests/local_logging.rs": "f203d98396b8353c9887fbdcf632b813dafabd39550ea68b1bafffb33ff7d6a3",
+    "crates/yonik-linux/src/event_log.rs": "6eda7b1600bc0852ebf56fe7c499e4d3d00f2b8c7a1e8f0f8ffcfbc1c8e92cbb",
+    "crates/yonik-linux/src/event_log/disk.rs": "db6a000130f6493a27bbb92c337ecc9fa02257417bb2e68f4e992c893a9bf25b",
+    "crates/yonik-linux/src/event_log/native_details.rs": "2fbe23236365446dffbc0953c9b95228acdabe9c3e93ea799d0267a32704295c",
+    "crates/yonik-linux/src/host/process.rs": "f7bf3b12e8536c424a5b909dcea835fca46daa892204df49fbbf69add003c28d",
+    "crates/yonik-linux/src/host/session.rs": "80a1b3028c4cb1d1a961f85bd019e00953ea53abd0aa288c2f535c8d9b3351d2",
+    "crates/yonik-linux/src/host/session_tests.rs": "5b40b88c58627eeffe05f89f78fe30a702847db459a0acf275c85aa52b6c8a74"
+  },
+  "artifact": {
+    "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/yonik-desktop-feature",
+    "sha256": "386e01c00cf675b931be99daa46f94a84d7639b9c338e700c03208e6fd46acd3"
+  },
+  "engines": {
+    "xray-26.10.31/xray": "cc4b84d3069569f297a61f04b914f2bb37e9d202fd7b84cb50def1fc30fd40e1",
+    "sing-box-1.14.4/sing-box": "1264361b5f8868c8768f7555d3e77e20118bf503c41ac08bb290a0d99056aa3a"
+  },
+  "root_post_build_comment_test_doc_commits": [
+    "cec78bb",
+    "55c9008"
+  ],
+  "merged_head_execution_claimed": false,
+  "changed_owned_paths": [
+    "crates/yonik-desktop/qml/LogsView.qml",
+    "crates/yonik-desktop/src/logs.rs",
+    "crates/yonik-desktop/tests/fr16_local_native.py",
+    "crates/yonik-desktop/tests/logs_native.py",
+    "crates/yonik-engine/src/lib.rs",
+    "crates/yonik-engine/tests/local_logging.rs",
+    "crates/yonik-linux/src/event_log.rs",
+    "crates/yonik-linux/src/event_log/disk.rs",
+    "crates/yonik-linux/src/event_log/native_details.rs",
+    "crates/yonik-linux/src/host/process.rs",
+    "crates/yonik-linux/src/host/session.rs",
+    "crates/yonik-linux/src/host/session_tests.rs"
+  ],
+  "checks": {
+    "reader_tests": "3 PASS",
+    "desktop_logs_lib": "5 PASS",
+    "config": "1 PASS",
+    "all_target_clippy": "Rust1.85.1 PASS -D warnings",
+    "actual_runtime": "both pinned cores PASS",
+    "producer_mutation": "RED -> byte exact restore -> GREEN",
+    "oracle_mutations": "wrapper-only and numeric-export-only rejected for both"
+  },
+  "evidence": [
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/execution-binding.json",
+      "sha256": "c90dd18f2ab4cfd5ab7af6dd7b5e6976a688297a3f596427f4b4e70099da3a72"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/feature-source-overlay.tar",
+      "sha256": "62e9f70af54be33e3e97d987d5ee85b4f61c70e27ab0571f15f8b765d818a79b"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/producer-mutation.json",
+      "sha256": "a6d75942c5977caf6ad0285f613a139d30d52fe54c1ae8c087ef16ac4da30f84"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/clippy.log",
+      "sha256": "6d36117e5a8be7debb74d37ffbe8ffd4be96df04d41da47ccff82afb84094d1f"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/reader-tests.log",
+      "sha256": "ca591d6a5ba5de261bcaa831752d36e3587d68a052af2d37d2acea1bbec2d596"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/desktop-lib-tests.log",
+      "sha256": "2ee625ecb874914e5c034e418ba73585c1786433946e32cf479c8e6f866baa43"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/config-tests.log",
+      "sha256": "b87a9927816a24de19462d927179eb88216c3d1230dfb2540bf5f94c57ef55f1"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/producer-mutation-red.log",
+      "sha256": "7c37f7b132bd052427553d85fdf9e119adc57a066f76c185730d9afdf52e9464"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/restored-producer-green.log",
+      "sha256": "138d70a824fce923632a98fe339aa59d1584f1a9ecb6525b76b6164f5371aa41"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/harness-reviewed-post-execution.patch",
+      "sha256": "8301adc5c1eaba6cac41923bbebc5d6076fabb328bcc26bd3455f799c0ed26ff"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/result.json",
+      "sha256": "f655ba9f2a4c187c3d12aae6274671f1437e359dcbe978c541f0cb065b369d4f"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/events.txt",
+      "sha256": "e35b90728a5144da8308aaebf9c53a37efaf402d08d60d08d63307a8a7d66d8f"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/events.log",
+      "sha256": "b7f230416374d8fbf41d36072308d0ce5987485fd0e3711c94e3328bed7758d1"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/native-ru.png",
+      "sha256": "00e78ad1306bafb4e5772ad38df2003e6a772d90a0ddd5d2c14cfadb2dc780f1"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/native-en.png",
+      "sha256": "5b019d78e197d1ec8f998dc3b7e7f59d25b16fb9691f0873f92a167689b06eac"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/xray/trace.jsonl",
+      "sha256": "1e85e7411666ac643ad5cb640f3bcdf4fbdd9ecb47a0a88ffd1c9e3629ecffc4"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/result.json",
+      "sha256": "d06b75aeb2bf4e5283630bf7e7e8d1c9db79d051c9f2a2410af474ff8775c057"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/events.txt",
+      "sha256": "3fea787edabad73d48d027e78ec1b233ebb1d8b1feae08acd7dc5c5a62123a8c"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/events.log",
+      "sha256": "ec57051d8e7e960d4e2dfa482e2a47139596b09576df0f2d556893da62a2078d"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/native-ru.png",
+      "sha256": "2988a796f4a4582bc6ae27d6dfc51e5dd6d511e91ed4600ec65aee9b0c9486cd"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/native-en.png",
+      "sha256": "ffb5cf4c829cd21d039a65509247eb569b3e6e2c321e949dcdfd70ae92af40cb"
+    },
+    {
+      "path": "/home/myrs/projects/yonik/local/evidence/fr16-local-c111/runtime/sing-box/trace.jsonl",
+      "sha256": "99ef1f4e1e03aac25c4629464b8e2ddc1f33e50c20b43d284d1675f9037feb71"
+    }
+  ]
+}

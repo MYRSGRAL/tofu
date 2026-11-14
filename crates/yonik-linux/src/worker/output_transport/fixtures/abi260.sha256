@@ -1,0 +1,3 @@
+c916294fe109822897f60a46e53a532e3aee88ecd422b112d75b658d896525d1  crates/yonik-linux/src/attribution/native_wire.rs
+d9241db92d0b07371d05ddd653dfbf42bbb2b8eb6f1b652b6c30eeb0818c4216  tests/fixtures/native-broker-v1.json
+f3f13a798682386288518430f1a47653c6edffd29561998fc3eb99e8be17c3f7  docs/specs/native-broker-bootstrap-v1.md
