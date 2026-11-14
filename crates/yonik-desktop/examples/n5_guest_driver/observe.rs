@@ -209,6 +209,45 @@ impl Drop for OwnedChild {
         }
     }
 }
+async fn read_tcp_frame<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    deadline: tokio::time::Instant,
+    limit: usize,
+) -> Result<Vec<u8>> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    let mut frame = Vec::new();
+    let mut bounded = BufReader::new(reader.take(limit as u64 + 2));
+    tokio::time::timeout_at(deadline, bounded.read_until(b'\n', &mut frame))
+        .await
+        .map_err(|_| "TCP_READ_TIMEOUT")?
+        .map_err(|_| "TCP_READ")?;
+    if frame.len() > limit + 1 || frame.last() != Some(&b'\n') {
+        return Err("TCP_FRAME");
+    }
+    frame.pop();
+    Ok(frame)
+}
+fn read_observer_frame(mut read: impl FnMut(&mut [u8]) -> Result<usize>) -> Result<Vec<u8>> {
+    let mut frame = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        let count = read(&mut chunk)?;
+        if count == 0 {
+            return Err("FLOW_CAPTURE_TRUNCATED");
+        }
+        frame.extend_from_slice(&chunk[..count]);
+        if frame.len() > 4096 {
+            return Err("FLOW_CAPTURE_BOUND");
+        }
+        if let Some(index) = frame.iter().position(|byte| *byte == b'\n') {
+            if index != frame.len() - 1 {
+                return Err("FLOW_CAPTURE_TRAILING");
+            }
+            frame.pop();
+            return Ok(frame);
+        }
+    }
+}
 pub fn flow_child(flow: &Flow, nonce: &str) -> Result<Value> {
     let payload = format!("{}:{nonce}", flow.token);
     let mut buffer = [0u8; 1024];
@@ -218,20 +257,26 @@ pub fn flow_child(flow: &Flow, nonce: &str) -> Result<Value> {
             .build()
             .map_err(|_| "FLOW_RUNTIME")?;
         return runtime.block_on(async {
-            use tokio::io::{AsyncReadExt,AsyncWriteExt};
-            let socket=if flow.endpoint.is_ipv4(){tokio::net::TcpSocket::new_v4()}else{tokio::net::TcpSocket::new_v6()}.map_err(|_|"TCP_SOCKET")?;
-            socket.bind(std::net::SocketAddr::new(flow.source_ip,0)).map_err(|_|"TCP_BIND")?;
-            let local=socket.local_addr().map_err(|_|"TCP_LOCAL")?;
-            let result=tokio::time::timeout(IO,socket.connect(flow.endpoint)).await;
-            let mut socket=match result {
-                Ok(Ok(socket))=>socket,
-                Err(_)=>return Ok(json!({"local":local.to_string(),"remote":flow.endpoint.to_string(),"transport":"tcp","received":false,"reply":""})),
-                _=>return Err("TCP_CONNECT"),
+            use tokio::io::AsyncWriteExt;
+            let deadline = tokio::time::Instant::now() + IO;
+            let socket = if flow.endpoint.is_ipv4() {
+                tokio::net::TcpSocket::new_v4()
+            } else {
+                tokio::net::TcpSocket::new_v6()
+            }.map_err(|_| "TCP_SOCKET")?;
+            socket.bind(std::net::SocketAddr::new(flow.source_ip, 0)).map_err(|_| "TCP_BIND")?;
+            let local = socket.local_addr().map_err(|_| "TCP_LOCAL")?;
+            let mut socket = match tokio::time::timeout_at(deadline, socket.connect(flow.endpoint)).await {
+                Ok(Ok(socket)) => socket,
+                Err(_) => return Ok(json!({"local":local.to_string(),"remote":flow.endpoint.to_string(),"transport":"tcp","received":false,"reply":""})),
+                _ => return Err("TCP_CONNECT"),
             };
-            tokio::time::timeout(IO,socket.write_all(payload.as_bytes())).await.map_err(|_|"TCP_WRITE_TIMEOUT")?.map_err(|_|"TCP_WRITE")?;
-            let (received,reply)=match tokio::time::timeout(IO,socket.read(&mut buffer)).await {
-                Ok(Ok(n))=>(true,String::from_utf8(buffer[..n].to_vec()).map_err(|_|"FLOW_UTF8")?),
-                Err(_)=>(false,String::new()), _=>return Err("TCP_READ"),
+            let framed = format!("{payload}\n");
+            tokio::time::timeout_at(deadline, socket.write_all(framed.as_bytes())).await.map_err(|_| "TCP_WRITE_TIMEOUT")?.map_err(|_| "TCP_WRITE")?;
+            let (received, reply) = match read_tcp_frame(&mut socket, deadline, 1024).await {
+                Ok(bytes) => (true, String::from_utf8(bytes).map_err(|_| "FLOW_UTF8")?),
+                Err("TCP_READ_TIMEOUT") => (false, String::new()),
+                Err(error) => return Err(error),
             };
             Ok(json!({"local":local.to_string(),"remote":flow.endpoint.to_string(),"transport":"tcp","received":received,"reply":reply}))
         });
@@ -345,23 +390,29 @@ pub fn run_flows(f: &VerifiedFixture) -> Result<Value> {
             return Err("CHILD_OUTPUT_BOUND");
         }
         let client = super::protocol::strict_json(&output)?;
+        let observer_deadline = Instant::now() + IO;
         let mut observer = TcpStream::connect_timeout(&f.controls().flow_observer, IO)
             .map_err(|_| "FLOW_OBSERVER")?;
         observer
             .set_read_timeout(Some(IO))
             .map_err(|_| "FLOW_OBSERVER")?;
         observer
-            .set_write_timeout(Some(IO))
+            .set_write_timeout(Some(
+                observer_deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or("FLOW_OBSERVER_TIMEOUT")?,
+            ))
             .map_err(|_| "FLOW_OBSERVER")?;
         writeln!(observer,"{}",json!({"token":format!("{}:{nonce}",flow.token),"transport":flow.transport,"endpoint":flow.endpoint.to_string()})).map_err(|_|"FLOW_OBSERVER")?;
-        let mut capture = Vec::new();
-        observer
-            .take(4097)
-            .read_to_end(&mut capture)
-            .map_err(|_| "FLOW_OBSERVER")?;
-        if capture.len() > 4096 {
-            return Err("FLOW_CAPTURE_BOUND");
-        }
+        let capture = read_observer_frame(|buffer| {
+            let remaining = observer_deadline
+                .checked_duration_since(Instant::now())
+                .ok_or("FLOW_OBSERVER_TIMEOUT")?;
+            observer
+                .set_read_timeout(Some(remaining))
+                .map_err(|_| "FLOW_OBSERVER")?;
+            observer.read(buffer).map_err(|_| "FLOW_OBSERVER")
+        })?;
         let capture = super::protocol::strict_json(&capture)?;
         validate_flow(flow, &nonce, &client, &capture)?;
         results.push(json!({"class":"ACTUAL","flow":flow,"pid":pid,"start":start,"uid":f.controls().caller_uid,"executable":executable,"client":client,"endpoint_capture":capture,"child_reaped":true}));
@@ -436,5 +487,51 @@ mod flow_tests {
         let capture =
             json!({"token":"token:n","transport":"tcp","endpoint":"10.0.0.4:100","seen":1});
         assert!(validate_flow(&f, "n", &client, &capture).is_err());
+    }
+}
+
+#[cfg(test)]
+mod framing_tests {
+    use super::*;
+    #[test]
+    fn observer_accepts_split_frame_and_rejects_truncated_frame() {
+        let mut chunks = [b"{\"seen\":".as_slice(), b"0}\n".as_slice()].into_iter();
+        let result = read_observer_frame(|buffer| {
+            let part = chunks.next().unwrap_or_default();
+            buffer[..part.len()].copy_from_slice(part);
+            Ok(part.len())
+        });
+        assert_eq!(result, Ok(b"{\"seen\":0}".to_vec()));
+        assert!(read_observer_frame(|_| Ok(0)).is_err());
+        assert!(read_observer_frame(|buffer| {
+            buffer.fill(b'x');
+            Ok(buffer.len())
+        })
+        .is_err());
+    }
+    #[tokio::test]
+    async fn tcp_response_frame_supports_fragmented_memory_stream() {
+        use tokio::io::AsyncWriteExt;
+        let (mut sender, mut receiver) = tokio::io::duplex(64);
+        let writer = tokio::spawn(async move {
+            sender.write_all(b"token:n:").await.unwrap();
+            tokio::task::yield_now().await;
+            sender.write_all(b"server\n").await.unwrap();
+        });
+        let frame = read_tcp_frame(&mut receiver, tokio::time::Instant::now() + IO, 1024).await;
+        assert_eq!(frame, Ok(b"token:n:server".to_vec()));
+        writer.await.unwrap();
+        let mut partial = b"partial".as_slice();
+        assert!(
+            read_tcp_frame(&mut partial, tokio::time::Instant::now() + IO, 1024)
+                .await
+                .is_err()
+        );
+        let mut oversized = b"oversized\n".as_slice();
+        assert!(
+            read_tcp_frame(&mut oversized, tokio::time::Instant::now() + IO, 2)
+                .await
+                .is_err()
+        );
     }
 }

@@ -4,18 +4,56 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import socket
 import sys
+import time
+
+
+def parse_endpoint(value: str) -> tuple[str, int]:
+    host, port = value.rsplit(":", 1)
+    address = str(ipaddress.ip_address(host.strip("[]")))
+    number = int(port)
+    if not 1 <= number <= 65535:
+        raise ValueError("FLOW_PORT")
+    return address, number
+
+
+def normalize_flow(flow: dict) -> dict:
+    result = dict(flow)
+    host, port = parse_endpoint(result["endpoint"])
+    result["endpoint"] = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+    for name in ("source_ip", "expected_peer_ip"):
+        result[name] = str(ipaddress.ip_address(result[name]))
+    return result
+
+
+def read_frame(connection: socket.socket, deadline: float, limit: int) -> bytes:
+    """Один bounded newline frame; каждый fragment использует исходный deadline."""
+    data = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("FRAME_DEADLINE")
+        connection.settimeout(remaining)
+        chunk = connection.recv(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            raise ValueError("FRAME_TRUNCATED")
+        data.extend(chunk)
+        if len(data) > limit:
+            raise ValueError("FRAME_BOUND")
+        if b"\n" in data:
+            if data.index(10) != len(data) - 1:
+                raise ValueError("FRAME_TRAILING")
+            return bytes(data[:-1])
 
 
 def exchange(flow: dict, nonce: str) -> dict:
+    flow = normalize_flow(flow)
     endpoint = flow["endpoint"]
-    if endpoint.startswith("["):
-        host, port = endpoint[1:].split("]:")
-    else:
-        host, port = endpoint.rsplit(":", 1)
+    host, port = parse_endpoint(endpoint)
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     transport = socket.SOCK_STREAM if flow["transport"] == "tcp" else socket.SOCK_DGRAM
     with socket.socket(family, transport) as client:
@@ -24,9 +62,16 @@ def exchange(flow: dict, nonce: str) -> dict:
         local = client.getsockname()
         received, reply = False, ""
         try:
-            client.connect((host, int(port)))
-            client.sendall(f"{flow['token']}:{nonce}".encode("ascii"))
-            reply = client.recv(1024).decode("ascii")
+            deadline = time.monotonic() + 2
+            client.connect((host, port))
+            message = f"{flow['token']}:{nonce}".encode("ascii")
+            if transport == socket.SOCK_STREAM:
+                client.settimeout(max(deadline - time.monotonic(), 0.000001))
+                client.sendall(message + b"\n")
+                reply = read_frame(client, deadline, 1024).decode("ascii")
+            else:
+                client.sendall(message)
+                reply = client.recv(1024).decode("ascii")
             received = True
         except TimeoutError:
             pass
@@ -90,7 +135,8 @@ def main() -> None:
     value = json.loads(raw)
     if set(value) != {"flow", "nonce"}:
         raise ValueError("FLOW_PROTOCOL")
-    if value["flow"] not in controls["flows"]:
+    value["flow"] = normalize_flow(value["flow"])
+    if value["flow"] not in [normalize_flow(flow) for flow in controls["flows"]]:
         raise ValueError("FLOW_NOT_SEALED")
     print(json.dumps(exchange(value["flow"], value["nonce"]), separators=(",", ":")))
 

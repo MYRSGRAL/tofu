@@ -9,10 +9,41 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import selectors
 import socket
 import time
+
+
+def read_frame(connection: socket.socket, deadline: float, limit: int) -> bytes:
+    """Один bounded newline frame; каждый fragment использует исходный deadline."""
+    data = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("FRAME_DEADLINE")
+        connection.settimeout(remaining)
+        chunk = connection.recv(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            raise ValueError("FRAME_TRUNCATED")
+        data.extend(chunk)
+        if len(data) > limit:
+            raise ValueError("FRAME_BOUND")
+        if b"\n" in data:
+            if data.index(10) != len(data) - 1:
+                raise ValueError("FRAME_TRAILING")
+            return bytes(data[:-1])
+
+
+def parse_endpoint(value: str) -> tuple[str, int]:
+    host, port = value.rsplit(":", 1)
+    return str(ipaddress.ip_address(host.strip("[]"))), int(port)
+
+
+def endpoint_key(value: str) -> str:
+    host, port = parse_endpoint(value)
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
 def main() -> None:
@@ -54,12 +85,8 @@ def main() -> None:
     controls = launch["controls"]
     endpoints = {}
 
-    def address(value: str) -> tuple[str, int]:
-        host, port = value.rsplit(":", 1)
-        return host.strip("[]"), int(port)
-
     for flow in controls["flows"]:
-        host, port = address(flow["endpoint"])
+        host, port = parse_endpoint(flow["endpoint"])
         identity = (host, port, flow["transport"])
         item = {
             "host": host,
@@ -71,7 +98,7 @@ def main() -> None:
             raise ValueError("ENDPOINT_IDENTITY")
         endpoints[identity] = item
     config = {
-        "observer": address(controls["flow_observer"]),
+        "observer": parse_endpoint(controls["flow_observer"]),
         "endpoints": list(endpoints.values()),
     }
     selector = selectors.DefaultSelector()
@@ -106,15 +133,19 @@ def main() -> None:
                 else:
                     connection, peer = server.accept()
                     connection.settimeout(2)
-                    data = connection.recv(4096)
+                    data = read_frame(connection, time.monotonic() + 2, 4096)
                 if endpoint["transport"] == "observer":
                     query = json.loads(data)
                     record = ledger.get(
-                        (query["token"], query["transport"], query["endpoint"])
+                        (
+                            query["token"],
+                            query["transport"],
+                            endpoint_key(query["endpoint"]),
+                        )
                     )
                     result = record or {**query, "seen": 0, "server": "", "peer_ip": ""}
                     connection.sendall(
-                        json.dumps(result, separators=(",", ":")).encode()
+                        json.dumps(result, separators=(",", ":")).encode() + b"\n"
                     )
                 else:
                     token = data.decode("ascii")
@@ -138,7 +169,7 @@ def main() -> None:
                     }
                     response = f"{token}:{endpoint['server']}".encode("ascii")
                     if connection:
-                        connection.sendall(response)
+                        connection.sendall(response + b"\n")
                     else:
                         server.sendto(response, peer)
                     if len(ledger) > 4096:
