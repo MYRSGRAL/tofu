@@ -489,18 +489,24 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
-      "source": "f0a1d13fb69facfb84bda5f68ba37db6cff92380",
-      "blob": "8f9d41384277888f98143e37bcc64a9899f9fc39",
-      "scope": "Approved actual Stop window fix + nondefault read-only scheduler trace; historical producer_execution не перепривязан",
-      "review": "Root approved exact replacement policy delta; actual RED/2-core GREEN retained; narrow independent review нового source pending",
-      "review_pending": true,
-      "execution": "docs/validation/p05-p10-accepted-witness/legacy-stop-binding.json"
+      "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
+      "blob": "d69061a02d0f02c6b8ed9059c7635dceb077626a",
+      "scope": "P11: publish typed replacement failure in both actual callers; initialize has no allocated generation. Prior Stop window/A08/FR16 source changes preserved. Historical execution not rebound.",
+      "review": "R2 932b7107 CLEAN cc66e4a→eebb316 and exact unions7f7ee5f/964a873. Prior Stop R1 ba52d5f3, A08 R2 2438daab and LocalSocks R2 758868c1/R1 55bf18b6 CLEAN retained.",
+      "review_pending": false,
+      "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
     },
     "crates/yonik-desktop/qml/Main.qml": {
       "source": "a73e12ed21c5acd7828426cf22d17d3d85565681",
       "blob": "07173aad0da38aec95446226a0724fad9785dd8c",
       "scope": "A08: только routing catalog correlation/display guard, safe request counter и labels/objectNames; P11 diagnostic/source rendering unchanged. Original producer evidence remains historical.",
-      "review": "Scoped self-review 03bdf96..a73e12e Main.qml diff; actual original-qrc RED/GREEN and query/mode/page/overflow checks passed, translation check passed. Root independent review pending."
+      "review": "R2 2438daab CLEAN A08 correlation/display scope; historical P11 producer rendering and execution binding preserved."
+    },
+    "crates/yonik-desktop/src/desktop_schedule.rs": {
+      "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
+      "blob": "b81cda321c99f24261bb2cb9f4d1fe2e0f6c4a45",
+      "scope": "Only added cfg(test) allocator→Snapshot→strictV2 regression; production scheduler unchanged, historical execution preserved.",
+      "review": "R2 932b7107 CLEAN: old assertions unchanged, final118PASS1ignored, assertion mutant RED; source archive/ELF/pre-post hashes checked."
     }
   },
   "prior_reviewed_source_updates": [
@@ -518,6 +524,22 @@
         "blob": "cce0cbfe0c508b2d2d2d0092fa6979c490e3f7ae",
         "scope": "A08: optional cfg(test-support) Catalog observer и wiring конструктора/producer; старый producer execution сохраняет прежнюю source-привязку",
         "review": "Scoped self-review d325033..d790042: только согласованные observer additions и None в test constructors; normal commands/JSON/bridge неизменны. Независимый review root ещё не выполнен; gui/test-support all-targets clippy и no-default-feature check прошли."
+      }
+    },
+    {
+      "crates/yonik-desktop/src/backend.rs": {
+        "source": "f0a1d13fb69facfb84bda5f68ba37db6cff92380",
+        "blob": "8f9d41384277888f98143e37bcc64a9899f9fc39",
+        "scope": "Approved actual Stop window fix + nondefault read-only scheduler trace; historical producer_execution не перепривязан",
+        "review": "Root approved exact replacement policy delta; actual RED/2-core GREEN retained; narrow independent review нового source pending",
+        "review_pending": true,
+        "execution": "docs/validation/p05-p10-accepted-witness/legacy-stop-binding.json"
+      },
+      "crates/yonik-desktop/qml/Main.qml": {
+        "source": "a73e12ed21c5acd7828426cf22d17d3d85565681",
+        "blob": "07173aad0da38aec95446226a0724fad9785dd8c",
+        "scope": "A08: только routing catalog correlation/display guard, safe request counter и labels/objectNames; P11 diagnostic/source rendering unchanged. Original producer evidence remains historical.",
+        "review": "Scoped self-review 03bdf96..a73e12e Main.qml diff; actual original-qrc RED/GREEN and query/mode/page/overflow checks passed, translation check passed. Root independent review pending."
       }
     }
   ],
