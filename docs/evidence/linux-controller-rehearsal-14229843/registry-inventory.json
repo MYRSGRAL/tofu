@@ -1,0 +1,67 @@
+[
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/sing-box/manifest.json",
+    "size": 4327,
+    "sha256": "5208bd900fce6f7e28709fedaa060bb6c4d31656276d54b1445be8eb4dbe8481"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/sing-box/prebuild.json",
+    "size": 3531,
+    "sha256": "a78317d943dbfe2d233d4c7c8c2db4e3adef92f4313e614e5d370589f2a27664"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/sing-box/sing-box",
+    "size": 117515499,
+    "sha256": "8a1683227b52a94ef904f8cdfbb676b16f9cf4409e68c046d3a5c7acebe591b5"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/xray/manifest.json",
+    "size": 3663,
+    "sha256": "e796a1663878e51e248764166daeee2e162551862729179495c48bbeca79656d"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/xray/prebuild.json",
+    "size": 3378,
+    "sha256": "2919fe67b57ff3ac89c2d3745fc474bc1ff9b4570f4de514694fe1c4ea39db9a"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/accepted-cores/xray/xray",
+    "size": 47796943,
+    "sha256": "68d802801b6be344f6fda5546803f2f38d49ace1cc50c4e37155fd0818d6083d"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/controller-logs/0.command.json",
+    "size": 166,
+    "sha256": "7606a5920299cbd613b12e165c64e50cfb9db3e87f6dc2eee536ff4b2c5c3fce"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/controller-logs/0.stderr",
+    "size": 140,
+    "sha256": "ade228a181d2d79f96cb1ebc9e52210ae3804fde4f9f0ce2ec06f6c8abd4bd46"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/controller-logs/0.stdout",
+    "size": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/failure.json",
+    "size": 266,
+    "sha256": "53cee22ab21ce6fcb69d542df885f1abd281edc540c1af5dfbaa091903f09f57"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/frozen.json",
+    "size": 1892,
+    "sha256": "f250cfedeb7f3a318cb9e770282eac4463d3fb53dc587131584fb41c4b2d5818"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/source.tar",
+    "size": 17223680,
+    "sha256": "d2aa23f29622280fbc2c826e200ae3d99ed1067391aabc854808b8062770f74c"
+  },
+  {
+    "path": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843/trusted-core-job.json",
+    "size": 444,
+    "sha256": "4899939a867c697147940eedb586e0b7b6764afd07e9cc058e1b4eb8abba8454"
+  }
+]

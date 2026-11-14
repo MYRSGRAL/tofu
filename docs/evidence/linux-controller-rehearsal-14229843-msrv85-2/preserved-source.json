@@ -1,0 +1,6 @@
+{
+  "path": "/home/myrs/projects/yonik/local/evidence/linux-controller-rehearsal-14229843-msrv85-2/patched-source-xray.tar",
+  "sha256": "e5184047fd1380472f69114fb8173a0adfd8c50970560eceb9c87fcba0bb35e9",
+  "size": 8048640,
+  "frozen_product_archive": "/home/myrs/projects/yonik/local/release-controller/linux-controller-rehearsal-14229843-msrv85-2/source.tar"
+}

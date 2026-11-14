@@ -1,0 +1,8 @@
+{
+  "argv": [
+    "rustc",
+    "--version"
+  ],
+  "cwd": "/var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843/source",
+  "exit": 1
+}

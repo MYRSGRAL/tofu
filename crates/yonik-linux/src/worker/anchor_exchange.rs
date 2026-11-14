@@ -18,6 +18,7 @@ use std::{
 };
 
 const OFFER: &[u8; 8] = b"YNKANC01";
+const V3_OFFER: &[u8; 8] = b"YNKANC03";
 const FRAME: usize = 128;
 const _: () = assert!(FRAME <= 256);
 const DEADLINE: Duration = Duration::from_secs(1);
@@ -49,6 +50,30 @@ impl Challenge {
             deadline: Instant::now() + DEADLINE,
         })
     }
+    /// Только opaque owner token; это transport binding, не namespace admission.
+    pub(crate) fn for_authorization(
+        authorization: &crate::helper::run_authorization::RunAuthorization,
+        digest: [u8; 32],
+        invocation: [u8; 16],
+    ) -> Result<Self, WorkerError> {
+        let (nonce, session, generation) = authorization
+            .challenge_context()
+            .map_err(|_| WorkerError::Protocol)?;
+        if digest == [0; 32] || invocation == [0; 16] {
+            return Err(WorkerError::Protocol);
+        }
+        let mut bytes = [0; FRAME];
+        bytes[..8].copy_from_slice(b"YNKNS001");
+        bytes[8..40].copy_from_slice(&nonce);
+        bytes[40..72].copy_from_slice(&digest);
+        bytes[72..88].copy_from_slice(&session);
+        bytes[88..96].copy_from_slice(&generation.to_be_bytes());
+        bytes[96..112].copy_from_slice(&invocation);
+        Ok(Self {
+            bytes,
+            deadline: Instant::now() + DEADLINE,
+        })
+    }
     /// Вызывается только helper для уже проверенного fixed unit PID/UID.
     /// Возвращаемое наблюдение само по себе НЕ разрешает admission.
     pub fn exchange(
@@ -58,6 +83,16 @@ impl Challenge {
         uid: u32,
     ) -> Result<NamespaceObservation, WorkerError> {
         self.exchange_marker(stream, pid, uid, OFFER)
+    }
+    /// Отдельное ожидаемое v3 состояние: legacy fallback здесь невозможен.
+    pub(crate) fn exchange_kernel(
+        mut self,
+        stream: &UnixStream,
+        pid: u32,
+        uid: u32,
+    ) -> Result<NamespaceObservation, WorkerError> {
+        self.bytes[..8].copy_from_slice(b"YNKNS003");
+        self.exchange_marker(stream, pid, uid, V3_OFFER)
     }
     /// Binding формируется из уже свежего namespace challenge. Поля server остаются
     /// наблюдением issuer до отдельного canonical PID1/kernel admission.
@@ -153,6 +188,18 @@ impl Challenge {
         }
         drop(tx);
         send(&rx, &self.bytes, &[])?;
+        let report = if offer == V3_OFFER {
+            let (bytes, fds, credentials) = receive(&rx, self.deadline)?;
+            if !fds.is_empty()
+                || credentials.pid.as_raw_pid() as u32 != pid
+                || credentials.uid.as_raw() != uid
+            {
+                return Err(WorkerError::Peer);
+            }
+            Some(KernelObservation::decode(bytes, &self.bytes)?)
+        } else {
+            None
+        };
         let (bytes, mut fds, credentials) = receive(&rx, self.deadline)?;
         if bytes != self.bytes
             || fds.len() != 3
@@ -202,7 +249,73 @@ impl Challenge {
         }
         send(&rx, &closed, &[])?;
         let net_pid: [OwnedFd; 2] = fds.try_into().map_err(|_| WorkerError::Protocol)?;
-        NamespaceObservation::new(net_pid, identities, self.deadline)
+        let observation = NamespaceObservation::new(net_pid, identities, self.deadline)?;
+        {
+            let fds = observation
+                .custody
+                .fds
+                .lock()
+                .map_err(|_| WorkerError::Protocol)?;
+            if fds.is_none() || Instant::now() >= self.deadline {
+                return Err(WorkerError::Timeout);
+            }
+            *observation
+                .custody
+                .kernel
+                .lock()
+                .map_err(|_| WorkerError::Protocol)? = report;
+        }
+        Ok(observation)
+    }
+}
+
+/// Opaque authenticated observation, никогда не admission authority.
+struct KernelObservation([u8; FRAME], Option<u64>);
+impl KernelObservation {
+    fn encode(challenge: &[u8; FRAME], report: yonik_nsfs::kernel_probe::Report) -> [u8; FRAME] {
+        let mut bytes = *challenge;
+        bytes[..8].copy_from_slice(b"YNKPR003");
+        for (offset, errno) in [
+            (112, report.unshare),
+            (116, report.setns),
+            (120, report.clone3),
+        ] {
+            bytes[offset..offset + 4].copy_from_slice(&errno.to_be_bytes());
+        }
+        bytes[124..].fill(0);
+        bytes
+    }
+    fn decode(bytes: [u8; FRAME], challenge: &[u8; FRAME]) -> Result<Self, WorkerError> {
+        if &challenge[..8] != b"YNKNS003"
+            || challenge[112..] != [0; 16]
+            || &bytes[..8] != b"YNKPR003"
+            || bytes[8..112] != challenge[8..112]
+            || bytes[124..] != [0; 4]
+        {
+            return Err(WorkerError::Protocol);
+        }
+        for (offset, allowed) in [
+            (112, &[1, 22][..]),
+            (116, &[1, 9][..]),
+            (120, &[1, 22, 38][..]),
+        ] {
+            let errno = i32::from_be_bytes(
+                bytes[offset..offset + 4]
+                    .try_into()
+                    .map_err(|_| WorkerError::Protocol)?,
+            );
+            if !allowed.contains(&errno) {
+                return Err(WorkerError::Protocol);
+            }
+        }
+        Ok(Self(bytes, None))
+    }
+}
+impl Drop for KernelObservation {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.0.zeroize();
+        self.1 = None;
     }
 }
 
@@ -219,6 +332,13 @@ pub struct NamespaceIdentity([(u64, u64); 3]);
 struct NamespaceCustody {
     fds: Mutex<Option<[OwnedFd; 2]>>,
     expires: Instant,
+    kernel: Mutex<Option<KernelObservation>>,
+}
+pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
+impl NamespaceRevocation {
+    pub(crate) fn revoke(&self) {
+        self.0.close();
+    }
 }
 impl NamespaceCustody {
     fn close(&self) {
@@ -228,6 +348,10 @@ impl NamespaceCustody {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         fds.take();
+        self.kernel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
     }
 }
 impl NamespaceObservation {
@@ -242,6 +366,7 @@ impl NamespaceObservation {
         let custody = Arc::new(NamespaceCustody {
             fds: Mutex::new(Some(net_pid)),
             expires,
+            kernel: Mutex::new(None),
         });
         let timer = Arc::downgrade(&custody);
         // Не продлевает namespace custody: timer содержит только Weak, FD не dup.
@@ -259,6 +384,65 @@ impl NamespaceObservation {
             custody,
             identities: NamespaceIdentity(identities),
         })
+    }
+    #[cfg(test)]
+    pub(crate) fn test_kernel_observation(session: [u8; 16], generation: u64) -> Self {
+        let mut challenge = Challenge::new([1; 32], session, generation, [3; 16])
+            .unwrap()
+            .bytes;
+        challenge[..8].copy_from_slice(b"YNKNS003");
+        challenge[8..40].copy_from_slice(&[4; 32]);
+        let report = KernelObservation::decode(
+            KernelObservation::encode(
+                &challenge,
+                yonik_nsfs::kernel_probe::Report {
+                    unshare: 22,
+                    setns: 9,
+                    clone3: 22,
+                },
+            ),
+            &challenge,
+        )
+        .unwrap();
+        let observation = Self::new(
+            ["net", "pid"]
+                .map(|kind| OwnedFd::from(File::open(format!("/proc/self/ns/{kind}")).unwrap())),
+            [(1, 1); 3],
+            Instant::now() + DEADLINE,
+        )
+        .unwrap();
+        *observation.custody.kernel.lock().unwrap() = Some(report);
+        observation
+    }
+    pub(crate) fn bind_run(
+        &self,
+        nonce: [u8; 32],
+        session: [u8; 16],
+        generation: u64,
+        epoch: u64,
+    ) -> Result<(), WorkerError> {
+        let fds = self.custody.fds.lock().map_err(|_| WorkerError::Protocol)?;
+        if fds.is_none() || Instant::now() >= self.custody.expires || epoch == 0 {
+            return Err(WorkerError::Timeout);
+        }
+        let mut kernel = self
+            .custody
+            .kernel
+            .lock()
+            .map_err(|_| WorkerError::Protocol)?;
+        let report = kernel.as_mut().ok_or(WorkerError::Protocol)?;
+        if report.0[8..40] != nonce
+            || report.1.is_some()
+            || report.0[72..88] != session
+            || report.0[88..96] != generation.to_be_bytes()
+        {
+            return Err(WorkerError::Protocol);
+        }
+        report.1 = Some(epoch);
+        Ok(())
+    }
+    pub(crate) fn revocation(&self) -> NamespaceRevocation {
+        NamespaceRevocation(Arc::clone(&self.custody))
     }
     pub fn identity(&self) -> &NamespaceIdentity {
         &self.identities
@@ -381,7 +565,8 @@ pub(crate) fn bootstrap(
         return Err(WorkerError::Protocol);
     }
     let v2 = &marker == super::role_handoff::OFFER;
-    if &marker != OFFER && !v2 {
+    let v3 = &marker == V3_OFFER;
+    if &marker != OFFER && !v2 && !v3 {
         return Ok(None);
     }
     if mode != WorkerMode::Run {
@@ -412,7 +597,9 @@ pub(crate) fn bootstrap(
     }
     if msg.bytes != 8
         || &marker
-            != if v2 {
+            != if v3 {
+                V3_OFFER
+            } else if v2 {
                 super::role_handoff::OFFER
             } else {
                 OFFER
@@ -435,10 +622,17 @@ pub(crate) fn bootstrap(
     if !extra.is_empty()
         || c.pid != peer.pid
         || !c.uid.is_root()
-        || &challenge[..8] != b"YNKNS001"
+        || &challenge[..8] != if v3 { b"YNKNS003" } else { b"YNKNS001" }
         || challenge[112..] != [0; 16]
     {
         return Err(WorkerError::Peer);
+    }
+    if v3 {
+        let report = yonik_nsfs::kernel_probe::observe().map_err(|_| WorkerError::Protocol)?;
+        let bytes = KernelObservation::encode(&challenge, report);
+        KernelObservation::decode(bytes, &challenge)?;
+        timeout(&socket, deadline)?;
+        send(&socket, &bytes, &[])?;
     }
     let files = [
         File::open("/proc/self/ns/net"),
@@ -480,6 +674,206 @@ pub(crate) fn bootstrap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn v3_peer(stream: UnixStream, attack: &'static str) {
+        let mut marker = [0; 8];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+        let msg = recvmsg(
+            &stream,
+            &mut [IoSliceMut::new(&mut marker)],
+            &mut ancillary,
+            RecvFlags::CMSG_CLOEXEC,
+        )
+        .unwrap();
+        assert_eq!(msg.bytes, 8);
+        assert_eq!(&marker, V3_OFFER);
+        let socket = ancillary
+            .drain()
+            .find_map(|part| match part {
+                RecvAncillaryMessage::ScmRights(mut fds) => fds.next(),
+                _ => None,
+            })
+            .unwrap();
+        let deadline = Instant::now() + DEADLINE;
+        let (challenge, extra, _) = receive(&socket, deadline).unwrap();
+        assert!(extra.is_empty());
+        let mut report =
+            KernelObservation::encode(&challenge, yonik_nsfs::kernel_probe::observe().unwrap());
+        match attack {
+            "nonce" => report[8] ^= 1,
+            "digest" => report[40] ^= 1,
+            "session" => report[72] ^= 1,
+            "generation" => report[88] ^= 1,
+            "invocation" => report[96] ^= 1,
+            "reserved" => report[127] = 1,
+            "unknown" => report[112..116].copy_from_slice(&1234i32.to_be_bytes()),
+            "success" => report[112..116].fill(0),
+            "version" => report[7] = b'2',
+            "missing" => report = challenge,
+            "late" => std::thread::sleep(DEADLINE + Duration::from_millis(30)),
+            _ => (),
+        }
+        let file = File::open("/dev/null").unwrap();
+        let rights = [file.as_fd()];
+        if attack == "short" || attack == "long" {
+            let mut bytes = report.to_vec();
+            if attack == "short" {
+                bytes.pop();
+            } else {
+                bytes.push(0);
+            }
+            let mut space = [];
+            let _ = sendmsg(
+                &socket,
+                &[IoSlice::new(&bytes)],
+                &mut SendAncillaryBuffer::new(&mut space),
+                SendFlags::NOSIGNAL,
+            );
+            return;
+        }
+        if send(&socket, &report, if attack == "fd" { &rights } else { &[] }).is_err() {
+            return;
+        }
+        if attack == "duplicate" {
+            let _ = send(&socket, &report, &[]);
+        }
+        let files =
+            ["net", "pid", "mnt"].map(|kind| File::open(format!("/proc/self/ns/{kind}")).unwrap());
+        if send(
+            &socket,
+            &challenge,
+            &files.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
+        )
+        .is_err()
+        {
+            return;
+        }
+        drop(files);
+        let mut closed = challenge;
+        closed[..8].copy_from_slice(b"YNKCLOSE");
+        if send(&socket, &closed, &[]).is_err() {
+            return;
+        }
+        let result = receive(&socket, deadline);
+        if attack == "valid" {
+            assert!(result.is_ok());
+        }
+    }
+    #[test]
+    fn authorized_challenge_uses_owner_nonce_and_rejects_revoke() {
+        let owner = crate::helper::run_authorization::RunAuthority::new([2; 16], 7, 9).unwrap();
+        let auth = owner.authorize([4; 32]).unwrap();
+        let challenge = Challenge::for_authorization(&auth, [1; 32], [3; 16]).unwrap();
+        assert_eq!(&challenge.bytes[8..40], &[4; 32]);
+        assert_eq!(&challenge.bytes[72..88], &[2; 16]);
+        assert_eq!(&challenge.bytes[88..96], &7u64.to_be_bytes());
+        owner.revoke();
+        assert!(Challenge::for_authorization(&auth, [1; 32], [3; 16]).is_err());
+    }
+
+    #[test]
+    fn actual_v3_bound_report_channel() {
+        const CHILD: &str = "YONIK_V3_REPORT_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // FD oracle охватывает весь процесс; соседние lib-тесты меняют его FD.
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "worker::anchor_exchange::tests::actual_v3_bound_report_channel",
+                    "--exact",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success(), "изолированный v3 FD oracle");
+            return;
+        }
+        for attack in [
+            "valid",
+            "nonce",
+            "digest",
+            "session",
+            "generation",
+            "invocation",
+            "reserved",
+            "unknown",
+            "success",
+            "version",
+            "missing",
+            "fd",
+            "duplicate",
+            "late",
+            "pid",
+            "uid",
+            "short",
+            "long",
+        ] {
+            let before = std::fs::read_dir("/proc/self/fd").unwrap().count();
+            let (helper, worker) = UnixStream::pair().unwrap();
+            let peer = std::thread::spawn(move || v3_peer(worker, attack));
+            let result = Challenge::new([1; 32], [2; 16], 7, [3; 16])
+                .unwrap()
+                .exchange_kernel(
+                    &helper,
+                    std::process::id() + u32::from(attack == "pid"),
+                    rustix::process::getuid().as_raw() + u32::from(attack == "uid"),
+                );
+            if attack == "valid" {
+                let observation = result.unwrap();
+                assert_eq!(observation.retained_namespace_count(), 2);
+                assert!(observation.custody.kernel.lock().unwrap().is_some());
+                observation.revoke();
+                assert_eq!(observation.retained_namespace_count(), 0);
+                assert!(observation.custody.kernel.lock().unwrap().is_none());
+            } else {
+                assert!(result.is_err(), "{attack}");
+            }
+            drop(helper);
+            peer.join().unwrap();
+            assert_eq!(
+                std::fs::read_dir("/proc/self/fd").unwrap().count(),
+                before,
+                "{attack}"
+            );
+        }
+    }
+    #[test]
+    fn kernel_report_expiry_discards_evidence_and_descriptors() {
+        let observation = NamespaceObservation::test_kernel_observation([2; 16], 7);
+        observation.bind_run([4; 32], [2; 16], 7, 9).unwrap();
+        std::thread::sleep(DEADLINE + Duration::from_millis(30));
+        assert_eq!(observation.retained_namespace_count(), 0);
+        assert!(observation.custody.kernel.lock().unwrap().is_none());
+        assert!(observation.bind_run([4; 32], [2; 16], 7, 10).is_err());
+    }
+    #[test]
+    fn v3_report_exact_binding_and_closed_errno_set() {
+        let mut challenge = Challenge::new([1; 32], [2; 16], 7, [3; 16]).unwrap().bytes;
+        challenge[..8].copy_from_slice(b"YNKNS003");
+        for unshare in [1, 22] {
+            for setns in [1, 9] {
+                for clone3 in [1, 22, 38] {
+                    let report = KernelObservation::encode(
+                        &challenge,
+                        yonik_nsfs::kernel_probe::Report {
+                            unshare,
+                            setns,
+                            clone3,
+                        },
+                    );
+                    assert!(KernelObservation::decode(report, &challenge).is_ok());
+                    for index in 0..FRAME {
+                        let mut malformed = report;
+                        malformed[index] ^= 128;
+                        assert!(
+                            KernelObservation::decode(malformed, &challenge).is_err(),
+                            "{index}"
+                        );
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn check_rejects_v2_before_accepting_descriptors() {
         use std::io::Write;

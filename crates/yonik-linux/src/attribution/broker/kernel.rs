@@ -1155,3 +1155,16 @@ mod tests {
 #[cfg(test)]
 #[path = "diag_tests.rs"]
 mod diag_tests;
+
+#[cfg(test)]
+#[path = "cold_tests.rs"]
+mod cold_tests;
+
+#[cfg(test)]
+pub(in crate::attribution) fn report_cold_witnesses() {
+    {
+        let count = WITNESSES.with(|n| n.get());
+        assert_eq!(count, 3, "cold wire требует три настоящих witness");
+        eprintln!("cold wire witnesses={count}");
+    }
+}

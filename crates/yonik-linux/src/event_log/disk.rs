@@ -501,6 +501,22 @@ mod tests {
     }
     #[test]
     fn rotation_restart_and_bounds() {
+        const CHILD: &str = "YONIK_DISK_ROTATION_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // Соседний fork может удерживать OFD до exec при CLOEXEC и drop(sink).
+            // Exact child не запускает соседние тесты в окне drop → reopen.
+            let status = std::process::Command::new(std::env::current_exe().expect("libtest"))
+                .args([
+                    "--exact",
+                    "event_log::disk::tests::rotation_restart_and_bounds",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .expect("изолированный тест ротации");
+            assert!(status.success(), "дочерний тест ротации: {status}");
+            return;
+        }
         let root = Fixture::new();
         let state = State::default();
         let mut sink = Sink::open(&root.0, &state).expect("sink");

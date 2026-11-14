@@ -415,10 +415,13 @@ async fn cancelled_cleanup_retains_transfer_until_recovery_waits_for_it() {
     let (release, wait) = std::sync::mpsc::channel();
     fixture.supervisor.transfer = Some(tokio::task::spawn_blocking(move || {
         wait.recv().unwrap();
-        Ok(WorkerAck {
-            pid: 42,
-            status: WorkerStatus::Accepted,
-        })
+        Ok((
+            WorkerAck {
+                pid: 42,
+                status: WorkerStatus::Accepted,
+            },
+            None,
+        ))
     }));
     let (_sender, mut cancel) = Cancellation::new();
     let result = fixture
@@ -611,27 +614,8 @@ fn missing_cgroup_is_empty_but_symlink_and_wrong_type_are_unknown() {
 
 #[tokio::test]
 async fn copy_reservation_survives_cancel_and_populated_cgroup_until_empty() {
-    use sha2::Digest;
     let mut fixture = Fixture::new().await;
-    let path = std::path::Path::new("/usr/bin/true");
-    let bytes = std::fs::read(path).unwrap();
-    let binary = crate::BinarySnapshot::load(
-        path,
-        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
-        yonik_engine::Engine::SingBox,
-    )
-    .unwrap();
-    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
-        .unwrap()
-        .servers
-        .remove(0);
-    let config = yonik_engine::compile(
-        &server,
-        yonik_engine::Engine::SingBox,
-        std::num::NonZeroU16::new(10808).unwrap(),
-    )
-    .unwrap();
-    let payload = Arc::new(WorkerPayload::new(binary, config).unwrap());
+    let payload = binding_test_payload();
     let weak = Arc::downgrade(&payload);
     fixture.supervisor.retained_copy = Some(payload);
     fixture.state.lock().unwrap().populated = true;
@@ -784,7 +768,34 @@ async fn actual_controlled_bootstrap_transport_without_ptrace() -> Result<()> {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let bootstrap = supervisor.inspect_anchor_bootstrap().await?;
+        let mut bootstrap = supervisor.inspect_anchor_bootstrap().await?;
+        let mut canonical = supervisor.state(WorkerMode::Run).await?;
+        bootstrap.validate_identity()?;
+        bootstrap.validate_state(&canonical)?;
+        canonical.invocation[0] ^= 1;
+        assert_eq!(
+            bootstrap.validate_state(&canonical),
+            Err(WorkerSupervisorError::Stale)
+        );
+        canonical.invocation[0] ^= 1;
+        canonical.pid = canonical.pid.saturating_add(1);
+        assert_eq!(
+            bootstrap.validate_state(&canonical),
+            Err(WorkerSupervisorError::Stale)
+        );
+        bootstrap.start += 1;
+        assert_eq!(
+            bootstrap.validate_identity(),
+            Err(WorkerSupervisorError::Stale)
+        );
+        bootstrap.start -= 1;
+        let expires = bootstrap.expires;
+        bootstrap.expires = Instant::now();
+        assert_eq!(
+            bootstrap.validate_identity(),
+            Err(WorkerSupervisorError::UnitProofGap)
+        );
+        bootstrap.expires = expires;
         let stream = stream.into_std().map_err(unavailable)?;
         stream.set_nonblocking(false).map_err(unavailable)?;
         let witness = bootstrap.exchange(&stream, [1; 32], [2; 16], 7)?;
@@ -801,4 +812,287 @@ async fn actual_controlled_bootstrap_transport_without_ptrace() -> Result<()> {
         .await;
     result?;
     cleanup
+}
+
+#[test]
+fn run_authority_is_single_use_and_revokes_outstanding_token() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    assert!(token.validate().is_ok());
+    assert!(owner.authorize([2; 32]).is_err());
+    owner.revoke();
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+#[test]
+fn dropping_run_owner_revokes_token() {
+    let token = {
+        let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+        owner.authorize([2; 32]).unwrap()
+    };
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+use super::super::run_authorization::{RunAuthority, RunAuthorizationError};
+
+#[test]
+fn dropping_attempt_guard_revokes_outstanding_token() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    let guard = token.guard();
+    drop(guard);
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+    assert!(owner.authorize([3; 32]).is_err());
+}
+
+#[test]
+fn authority_rejects_zero_context_and_nonce() {
+    assert!(RunAuthority::new([0; 16], 7, 9).is_err());
+    assert!(RunAuthority::new([1; 16], 0, 9).is_err());
+    assert!(RunAuthority::new([1; 16], 7, 0).is_err());
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    assert!(owner.authorize([0; 32]).is_err());
+    assert!(owner.authorize([2; 32]).is_ok());
+}
+
+#[test]
+fn run_authority_cannot_issue_after_revoke() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    owner.revoke();
+    owner.revoke();
+    assert!(matches!(
+        owner.authorize([2; 32]),
+        Err(RunAuthorizationError::Revoked)
+    ));
+}
+
+#[test]
+fn concurrent_authorization_has_exactly_one_winner() {
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    std::thread::scope(|scope| {
+        let left = scope.spawn(|| owner.authorize([2; 32]));
+        let right = scope.spawn(|| owner.authorize([3; 32]));
+        let left = left.join().unwrap();
+        let right = right.join().unwrap();
+        assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    });
+}
+
+fn binding_test_payload() -> Arc<WorkerPayload> {
+    use sha2::Digest;
+    let path = std::path::Path::new("/usr/bin/true");
+    let bytes = std::fs::read(path).unwrap();
+    let binary = crate::BinarySnapshot::load(
+        path,
+        crate::Sha256(sha2::Sha256::digest(&bytes).into()),
+        yonik_engine::Engine::SingBox,
+    )
+    .unwrap();
+    let server = yonik_import::import_bytes(b"socks5://127.0.0.1:10999".to_vec())
+        .unwrap()
+        .servers
+        .remove(0);
+    let config = yonik_engine::compile(
+        &server,
+        yonik_engine::Engine::SingBox,
+        std::num::NonZeroU16::new(10808).unwrap(),
+    )
+    .unwrap();
+    Arc::new(WorkerPayload::new(binary, config).unwrap())
+}
+
+#[test]
+fn actual_payload_transfer_rejects_late_ack_after_revocation() {
+    use std::io::{Read, Write};
+    let payload = binding_test_payload();
+    let owner = RunAuthority::new([1; 16], 7, 9).unwrap();
+    let token = owner.authorize([2; 32]).unwrap();
+    let guard = token.guard();
+    let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+    let (received, wait_received) = std::sync::mpsc::channel();
+    let (release, wait_release) = std::sync::mpsc::channel();
+    let receiver = std::thread::spawn(move || {
+        let mut header = Vec::new();
+        server.read_to_end(&mut header).unwrap();
+        assert!(!header.is_empty());
+        received.send(()).unwrap();
+        wait_release.recv().unwrap();
+        let mut ack = b"YNKA".to_vec();
+        ack.extend_from_slice(&42u32.to_be_bytes());
+        ack.push(2);
+        server.write_all(&ack).unwrap();
+    });
+    let transfer =
+        std::thread::spawn(move || InvocationBinding::transfer_payload(&payload, &token, &client));
+    wait_received.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(guard);
+    release.send(()).unwrap();
+    assert_eq!(transfer.join().unwrap(), Err(WorkerSupervisorError::Stale));
+    receiver.join().unwrap();
+    assert!(owner.authorize([3; 32]).is_err());
+}
+
+#[test]
+fn kernel_report_shares_run_epoch_revocation() {
+    use crate::worker::anchor_exchange::NamespaceObservation;
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let mismatch = NamespaceObservation::test_kernel_observation([5; 16], 7);
+    assert!(token.bind_custody(&mismatch).is_err());
+    assert_eq!(mismatch.retained_namespace_count(), 0);
+    assert!(token.validate().is_err());
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let observation = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    token.bind_custody(&observation).unwrap();
+    assert_eq!(observation.retained_namespace_count(), 2);
+    owner.revoke();
+    assert_eq!(observation.retained_namespace_count(), 0);
+    assert!(token.bind_custody(&observation).is_err());
+}
+
+#[test]
+fn duplicate_kernel_report_revokes_all_custody() {
+    use crate::worker::anchor_exchange::NamespaceObservation;
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let first = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    let second = NamespaceObservation::test_kernel_observation([2; 16], 7);
+    token.bind_custody(&first).unwrap();
+    assert!(token.bind_custody(&second).is_err());
+    assert_eq!(first.retained_namespace_count(), 0);
+    assert_eq!(second.retained_namespace_count(), 0);
+    assert!(token.validate().is_err());
+}
+
+fn authorized_result_fixture() -> (RunAuthority, AuthorizedRun) {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let authorization = owner.authorize([4; 32]).unwrap();
+    let guard = authorization.guard();
+    let kernel =
+        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
+    authorization.bind_custody(&kernel).unwrap();
+    let payload = binding_test_payload();
+    let binding = InvocationBinding {
+        authorization,
+        observation: BootstrapUnitObservation {
+            pid: 42,
+            uid: 0,
+            gid: 0,
+            start: 1,
+            invocation: [3; 16],
+            expires: Instant::now() + DEADLINE,
+            pidfd: std::fs::File::open("/dev/null").unwrap().into(),
+        },
+        digest: payload.digest(),
+        payload,
+        kernel: Some(kernel),
+    };
+    // Только ownership fixture: не имитирует successful canonical verification/mint.
+    let result = AuthorizedRun {
+        ticket: WorkerTicket {
+            pid: 42,
+            invocation: [3; 16],
+        },
+        lease: AuthorizedLease {
+            binding,
+            _guard: guard,
+        },
+    };
+    (owner, result)
+}
+
+#[test]
+fn authorized_result_retains_guard_binding_and_custody_until_drop() {
+    let (owner, result) = authorized_result_fixture();
+    assert!(result.lease.binding.authorization.validate().is_ok());
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        2
+    );
+    assert_eq!(result.ticket.pid(), 42);
+    assert!(!owner.is_revoked());
+    drop(result);
+    // Повторный revoke безопасен, а повторная выдача owner закрыта.
+    assert!(owner.is_revoked());
+
+    assert!(owner.authorize([5; 32]).is_err());
+}
+
+#[tokio::test]
+async fn dropping_pending_authorized_future_revokes_token() {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([4; 32]).unwrap();
+    let mut future = Box::pin(async {
+        let _guard = token.guard();
+        std::future::pending::<()>().await;
+    });
+    assert!(futures_util::poll!(future.as_mut()).is_pending());
+    drop(future);
+    assert_eq!(token.validate(), Err(RunAuthorizationError::Revoked));
+}
+
+#[test]
+fn custody_rejects_owner_nonce_mismatch() {
+    let owner = RunAuthority::new([2; 16], 7, 9).unwrap();
+    let token = owner.authorize([5; 32]).unwrap();
+    let observation =
+        crate::worker::anchor_exchange::NamespaceObservation::test_kernel_observation([2; 16], 7);
+    assert!(token.bind_custody(&observation).is_err());
+    assert_eq!(observation.retained_namespace_count(), 0);
+    assert!(owner.is_revoked());
+}
+
+#[test]
+fn held_authorized_result_observes_owner_revoke() {
+    let (owner, result) = authorized_result_fixture();
+    owner.revoke();
+    assert!(matches!(result.ticket(), Err(WorkerSupervisorError::Stale)));
+    assert_eq!(
+        result.lease.binding.authorization.validate(),
+        Err(RunAuthorizationError::Revoked)
+    );
+    assert_eq!(
+        result
+            .lease
+            .binding
+            .kernel
+            .as_ref()
+            .unwrap()
+            .retained_namespace_count(),
+        0
+    );
+}
+
+#[test]
+fn accepted_binding_rejects_expiry_and_identity_drift() {
+    let (_owner, mut result) = authorized_result_fixture();
+    let state = WorkerState {
+        active: "active".into(),
+        pid: 42,
+        invocation: vec![8; 16],
+    };
+    assert_eq!(
+        result.lease.binding.validate_state(&state),
+        Err(WorkerSupervisorError::Stale)
+    );
+    result.lease.binding.observation.expires = Instant::now();
+    assert!(matches!(
+        result.ticket(),
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
+    let AuthorizedRun { lease, .. } = result;
+    assert!(matches!(
+        lease.binding.accept(WorkerAck {
+            pid: 42,
+            status: WorkerStatus::Accepted
+        }),
+        Err(WorkerSupervisorError::UnitProofGap)
+    ));
 }

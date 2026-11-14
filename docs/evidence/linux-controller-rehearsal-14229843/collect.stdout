@@ -1,0 +1,1 @@
+{"status": "BLOCKED", "final_linux_acceptance": false, "reason": "Command '['rustc', '--version']' returned non-zero exit status 1.; сохранён task /var/tmp/codex-myrs/transient/release-controller-linux-controller-rehearsal-14229843, 15781898 bytes"}

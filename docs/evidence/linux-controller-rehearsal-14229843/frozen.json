@@ -1,0 +1,61 @@
+{
+  "schema": 2,
+  "release_id": "linux-controller-rehearsal-14229843",
+  "state": "FROZEN",
+  "source": {
+    "commit": "14229843f9a11bf98ec4f5992df00f3247102ea2",
+    "tree": "7daa4ebb7cc25d3ceafab76809afc78753dc5ec3"
+  },
+  "archive_sha256": "d2aa23f29622280fbc2c826e200ae3d99ed1067391aabc854808b8062770f74c",
+  "recipe": {
+    "schema": 1,
+    "target": "x86_64-unknown-linux-gnu",
+    "native_spec_commit": "260bc50eeb4f3a40ac97cd9a54ff0ea943a833ef",
+    "rust_commands": [
+      [
+        "cargo",
+        "rustc",
+        "--locked",
+        "--release",
+        "-p",
+        "yonik-desktop",
+        "--features",
+        "gui",
+        "--bin",
+        "yonik-desktop",
+        "--",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_qml_module_cloud_highpriority_yonik",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_yonik_desktop",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt_lib",
+        "-C",
+        "link-arg=-Wl,--undefined=cxx_qt_init_crate_cxx_qt"
+      ],
+      [
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "-p",
+        "yonik-linux",
+        "--bin",
+        "yonik-helper",
+        "--bin",
+        "yonik-worker"
+      ]
+    ],
+    "core_members": {
+      "xray": "usr/lib/yonik/cores/xray",
+      "sing-box": "usr/lib/yonik/cores/sing-box"
+    }
+  },
+  "tooling_sha256": {
+    "release_controller.py": "19ecdbec269a62247b15c4b3efe2eed32c71ea97cda949308e6ea3096e832bf1",
+    "check_package_provenance.py": "52bde6fd17e3f8d24af16f213dde3dbb8f0b366bca57628ecb4c188d611278c7",
+    "check_arch_package.py": "92331ba14b763c76ab33e5c7b8a1774d90a2729171015532b7a0827b14f4e6cf",
+    "compile_notices.py": "fd886c96c9b2dabc19b63ab5b9a034d26c8b77736bb6a9db518bb6ef54fe22f5",
+    "check_linux_notices.py": "8aac9ccb50ac526ebb9f6b35134a953d96ca82f6a9b1b33bb56b543f6cffcb85"
+  }
+}

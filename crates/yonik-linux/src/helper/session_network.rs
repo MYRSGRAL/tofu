@@ -384,6 +384,21 @@ impl SessionNetworkPlan {
         }
         Ok(())
     }
+    pub(crate) async fn bind_queue(
+        &self,
+        executor: &TunExecutor,
+        journal: &Journal,
+        cancel: &mut crate::Cancellation,
+    ) -> Result<crate::managed_network::tun::BoundTun, TunError> {
+        let framing = if self.vnet_hdr {
+            yonik_nsfs::tun::Framing::Vnet10
+        } else {
+            yonik_nsfs::tun::Framing::Plain
+        };
+        executor
+            .bind_session_queue(journal, TUN, MTU, framing, cancel)
+            .await
+    }
     /// Host обязан сначала подтвердить пустую worker cgroup. Сам план не умеет
     /// подтверждать остановку процесса и не снимает публичную блокировку.
     pub async fn cleanup_after_worker(

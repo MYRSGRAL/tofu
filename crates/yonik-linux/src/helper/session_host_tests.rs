@@ -18,6 +18,7 @@ fn actor_fixture() -> super::super::SystemProtectionHost {
             supervisor: None,
             worker_uncertain: false,
             active: None,
+            tun_custody: None,
             registry: None,
             exited: std::sync::Arc::new(tokio::sync::Notify::new()),
             isolated: true,
@@ -266,6 +267,7 @@ async fn actual_backend_rejects_hostname_without_opening_journal_registry_or_wor
         supervisor: None,
         worker_uncertain: false,
         active: None,
+        tun_custody: None,
         registry: None,
         exited: std::sync::Arc::new(tokio::sync::Notify::new()),
         isolated: true,
@@ -820,4 +822,91 @@ async fn app_policy_denied_before_backend_resources() {
     assert!(backend.supervisor.is_none());
     assert!(!backend.worker_uncertain);
     assert!(backend.active.is_none());
+}
+
+#[tokio::test]
+#[ignore = "Только отдельный user/net namespace с YONIK_NFT_TEST_HOST_NETNS"]
+async fn real_backend_custody_unknown_stop_revoke_and_cleanup() {
+    use crate::managed_network::{Journal, Ownership, tun::TunExecutor};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let ns = std::fs::metadata("/proc/thread-self/ns/net").unwrap();
+    let owner = Ownership::new(
+        rustix::process::getuid().as_raw(),
+        77,
+        99,
+        ns.dev(),
+        ns.ino(),
+    )
+    .unwrap();
+    let mut executor = TunExecutor::isolated_fixture(owner).unwrap();
+    let (_keep, mut cancel) = crate::Cancellation::new();
+    let baseline = crate::read_topology(&mut cancel, super::DEADLINE)
+        .await
+        .unwrap();
+    let plan = crate::helper::SessionNetworkPlan::reserve_for_engine(
+        owner,
+        &baseline,
+        yonik_engine::Engine::Xray,
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!("yonik-backend-custody-{}", std::process::id()));
+    std::fs::create_dir(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut journal = Journal::open(&path, owner).unwrap();
+    let index = plan.configure(&mut executor, &mut journal).await.unwrap();
+    plan.capture(&mut executor, &mut journal, index)
+        .await
+        .unwrap();
+    let super::super::SystemProtectionHost {
+        backend, _monitor, ..
+    } = actor_fixture();
+    let mut backend = match std::sync::Arc::try_unwrap(backend) {
+        Ok(mutex) => mutex.into_inner().unwrap(),
+        Err(_) => panic!("Fixture не должен разделять Backend"),
+    };
+    backend.journal = Some(journal);
+    backend
+        .retain_canonical_queue(&plan, &executor, &mut cancel)
+        .await
+        .unwrap();
+    assert!(backend.active.is_none());
+    assert!(backend.has_session());
+    backend.worker_uncertain = true;
+    let mut recovery = super::BackendRecovery {
+        backend: &mut backend,
+        owner,
+    };
+    assert!(matches!(
+        recovery.cleanup_network().await,
+        Err(ServiceError::Busy)
+    ));
+    assert!(recovery.backend.tun_custody.is_some());
+    // Systemd stop здесь не запускается. Проверяется реальный revoke endpoint,
+    // который production вызывает только после подтверждения supervisor.recover.
+    recovery.backend.worker_uncertain = false;
+    recovery.backend.release_stopped_resources();
+    assert!(recovery.backend.tun_custody.is_none());
+    // В userns host-root /usr не отображён как uid0: production open правильно
+    // отказывает. Cleanup проверяется реальным существующим isolated executor.
+    plan.cleanup_after_worker(
+        &mut executor,
+        recovery.backend.journal.as_mut().unwrap(),
+        index,
+    )
+    .await
+    .unwrap();
+    assert!(
+        recovery
+            .backend
+            .journal
+            .as_ref()
+            .unwrap()
+            .records()
+            .iter()
+            .all(|r| r.scope() != crate::managed_network::Scope::Session)
+    );
+    backend.journal = None;
+    drop(backend);
+    std::fs::remove_file(path.join("journal.json")).unwrap();
+    std::fs::remove_dir(path).unwrap();
 }
