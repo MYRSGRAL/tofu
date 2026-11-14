@@ -1,10 +1,10 @@
 //! Закрытая проверка установленного producer; сама по себе не выдаёт admission.
 use super::systemd_worker::{
-    BootstrapUnitObservation, SystemWorkerSupervisor, WorkerSupervisorError as Error,
-    child, root, trusted, verify_installed, FILE_FLAGS,
+    BootstrapUnitObservation, FILE_FLAGS, SystemWorkerSupervisor, WorkerSupervisorError as Error,
+    child, root, trusted, verify_installed,
 };
 use crate::Cancellation;
-use rustix::fs::{openat, Mode};
+use rustix::fs::{Mode, openat};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read, os::unix::fs::MetadataExt};
@@ -44,9 +44,15 @@ struct FileStamp {
 }
 fn stamp(file: &File) -> Result<FileStamp> {
     let m = file.metadata().map_err(|_| Error::Unavailable)?;
-    Ok(FileStamp { dev: m.dev(), ino: m.ino(), len: m.len(),
-        mtime: m.mtime(), mtime_ns: m.mtime_nsec(),
-        ctime: m.ctime(), ctime_ns: m.ctime_nsec() })
+    Ok(FileStamp {
+        dev: m.dev(),
+        ino: m.ino(),
+        len: m.len(),
+        mtime: m.mtime(),
+        mtime_ns: m.mtime_nsec(),
+        ctime: m.ctime(),
+        ctime_ns: m.ctime_nsec(),
+    })
 }
 fn immutable(file: &File) -> Result<()> {
     trusted(file, false)?;
@@ -57,47 +63,69 @@ fn immutable(file: &File) -> Result<()> {
     Ok(())
 }
 fn fixed_file(directory: &File, name: &str) -> Result<File> {
-    let f = File::from(openat(directory, name, FILE_FLAGS, Mode::empty())
-        .map_err(|_| Error::Unavailable)?);
+    let f = File::from(
+        openat(directory, name, FILE_FLAGS, Mode::empty()).map_err(|_| Error::Unavailable)?,
+    );
     immutable(&f)?;
     Ok(f)
 }
 fn hash(file: &File, limit: u64, elf: bool) -> Result<[u8; 32]> {
     let before = stamp(file)?;
-    if before.len == 0 || before.len > limit { return Err(Error::Untrusted); }
+    if before.len == 0 || before.len > limit {
+        return Err(Error::Untrusted);
+    }
     let mut reader = file;
     let mut buf = [0u8; 16384];
     let mut digest = Sha256::new();
     let mut total = 0u64;
     loop {
         let n = reader.read(&mut buf).map_err(|_| Error::Unavailable)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         if total == 0 && elf && (n < 4 || &buf[..4] != b"\x7fELF") {
             return Err(Error::Untrusted);
         }
         total = total.checked_add(n as u64).ok_or(Error::Untrusted)?;
-        if total > limit { return Err(Error::Untrusted); }
+        if total > limit {
+            return Err(Error::Untrusted);
+        }
         digest.update(&buf[..n]);
     }
-    if total != before.len || stamp(file)? != before { return Err(Error::Stale); }
+    if total != before.len || stamp(file)? != before {
+        return Err(Error::Stale);
+    }
     Ok(digest.finalize().into())
 }
 fn parse(file: &File) -> Result<Deployment> {
     let before = stamp(file)?;
-    if before.len == 0 || before.len > MAX_METADATA { return Err(Error::Untrusted); }
+    if before.len == 0 || before.len > MAX_METADATA {
+        return Err(Error::Untrusted);
+    }
     let mut bytes = Vec::with_capacity(before.len as usize);
-    file.take(MAX_METADATA + 1).read_to_end(&mut bytes).map_err(|_| Error::Unavailable)?;
+    file.take(MAX_METADATA + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::Unavailable)?;
     if bytes.len() as u64 != before.len || stamp(file)? != before {
         return Err(Error::Stale);
     }
     let value: Deployment = serde_json::from_slice(&bytes).map_err(|_| Error::Untrusted)?;
-    if value.schema != 1 || value.policy_id != POLICY || value.kernel_abi != ABI
-        || value.worker_sha256 == [0; 32] || value.source_archive_sha256 == [0; 32]
+    if value.schema != 1
+        || value.policy_id != POLICY
+        || value.kernel_abi != ABI
+        || value.worker_sha256 == [0; 32]
+        || value.source_archive_sha256 == [0; 32]
         || value.policy_sha256 == [0; 32]
-        || value.kernel_release.is_empty() || value.kernel_release.len() > 128
-        || !value.kernel_release.bytes().all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+        || value.kernel_release.is_empty()
+        || value.kernel_release.len() > 128
+        || !value
+            .kernel_release
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
         || value.kernel_machine != std::env::consts::ARCH
-    { return Err(Error::Untrusted); }
+    {
+        return Err(Error::Untrusted);
+    }
     Ok(value)
 }
 
@@ -116,7 +144,9 @@ impl InstalledContract {
         let image = fixed_file(&directory, "yonik-worker")?;
         if image.metadata().map_err(|_| Error::Unavailable)?.mode() & 0o111 == 0
             || hash(&image, MAX_ELF, true)? != deployment.worker_sha256
-        { return Err(Error::Untrusted); }
+        {
+            return Err(Error::Untrusted);
+        }
         let source = fixed_file(&directory, "native-source-v1.tar")?;
         if hash(&source, MAX_SOURCE, false)? != deployment.source_archive_sha256 {
             return Err(Error::Untrusted);
@@ -127,14 +157,22 @@ impl InstalledContract {
         if release != format!("{}\n", deployment.kernel_release) {
             return Err(Error::Untrusted);
         }
-        Ok(Self { _metadata: metadata, _source: source, image, deployment })
+        Ok(Self {
+            _metadata: metadata,
+            _source: source,
+            image,
+            deployment,
+        })
     }
 }
 struct ExecutableIdentity {
     _actual: File,
 }
 impl ExecutableIdentity {
-    fn verify(observation: &BootstrapUnitObservation, installed: &InstalledContract) -> Result<Self> {
+    fn verify(
+        observation: &BootstrapUnitObservation,
+        installed: &InstalledContract,
+    ) -> Result<Self> {
         observation.validate_identity()?;
         // Единственная намеренная proc magic-link: actual exe canonical pidfd/start.
         // Никакой путь из sidecar или caller здесь не используется.
@@ -143,7 +181,9 @@ impl ExecutableIdentity {
         immutable(&actual)?;
         if stamp(&actual)? != stamp(&installed.image)?
             || hash(&actual, MAX_ELF, true)? != installed.deployment.worker_sha256
-        { return Err(Error::Untrusted); }
+        {
+            return Err(Error::Untrusted);
+        }
         observation.validate_identity()?;
         Ok(Self { _actual: actual })
     }
@@ -163,27 +203,42 @@ impl VerifiedInstalledProfile {
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<Self> {
-        supervisor.validate_native_profile_context(&observation, cancel, deadline).await?;
+        supervisor
+            .validate_native_profile_context(&observation, cancel, deadline)
+            .await?;
         let installed = InstalledContract::verify()?;
         let executable = ExecutableIdentity::verify(&observation, &installed)?;
-        supervisor.validate_native_profile_context(&observation, cancel, deadline).await?;
-        Ok(Self { observation, installed, _executable: executable })
+        supervisor
+            .validate_native_profile_context(&observation, cancel, deadline)
+            .await?;
+        Ok(Self {
+            observation,
+            installed,
+            _executable: executable,
+        })
     }
     /// Consuming recheck после await; старый token при ошибке уничтожается.
     /// Consumers удерживают возвращённый token до consume coverage/owner lease.
     pub(super) async fn revalidate(
-        self, supervisor: &SystemWorkerSupervisor,
-        cancel: &mut Cancellation, deadline: Instant,
+        self,
+        supervisor: &SystemWorkerSupervisor,
+        cancel: &mut Cancellation,
+        deadline: Instant,
     ) -> Result<Self> {
         let fresh = Self::verify(supervisor, self.observation, cancel, deadline).await?;
         if fresh.installed.deployment.worker_sha256 != self.installed.deployment.worker_sha256
-            || fresh.installed.deployment.source_archive_sha256 != self.installed.deployment.source_archive_sha256
+            || fresh.installed.deployment.source_archive_sha256
+                != self.installed.deployment.source_archive_sha256
             || fresh.installed.deployment.policy_sha256 != self.installed.deployment.policy_sha256
-        { return Err(Error::Stale); }
+        {
+            return Err(Error::Stale);
+        }
         Ok(fresh)
     }
     pub(super) fn policy_digest(&self) -> [u8; 32] {
         self.installed.deployment.policy_sha256
     }
-    pub(super) fn observation(&self) -> &BootstrapUnitObservation { &self.observation }
+    pub(super) fn observation(&self) -> &BootstrapUnitObservation {
+        &self.observation
+    }
 }

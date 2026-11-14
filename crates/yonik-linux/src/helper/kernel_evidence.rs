@@ -924,10 +924,14 @@ pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> R
     use sha2::{Digest, Sha256};
     use yonik_nsfs::fixed_self_fence::{PROFILE_DIGEST, PROGRAM_SHA256};
     let data = decode(frame, expected)?;
-    if expected.profile != PROFILE_DIGEST { return Err(Error::Profile); }
+    if expected.profile != PROFILE_DIGEST {
+        return Err(Error::Profile);
+    }
     let mut vector = [1; VECTOR];
     vector[2] = 38;
-    if data.observations != vector { return Err(Error::ObservationMismatch); }
+    if data.observations != vector {
+        return Err(Error::ObservationMismatch);
+    }
     if data.baseline_filters.checked_add(1) != Some(data.current_filters) {
         return Err(Error::IncompleteApplication);
     }
@@ -939,7 +943,9 @@ pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> R
     hash.update(PROGRAM_SHA256);
     hash.update(PROFILE_DIGEST);
     hash.update(canonical);
-    let computed: [u8;32] = hash.finalize().into();
-    if computed != reference { return Err(Error::Binding); }
+    let computed: [u8; 32] = hash.finalize().into();
+    if computed != reference {
+        return Err(Error::Binding);
+    }
     Ok(())
 }
