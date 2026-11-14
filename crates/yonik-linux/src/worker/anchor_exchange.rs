@@ -116,6 +116,21 @@ impl Challenge {
             .ok_or(WorkerError::Protocol)?;
         Ok((observation, data))
     }
+    /// Production DATA carrier: epoch задаёт owner, не ответ worker.
+    pub(crate) fn exchange_v4_bound(
+        mut self, stream: &UnixStream, pid: u32, uid: u32,
+        deadline: Instant, epoch: u64,
+    ) -> Result<(NamespaceObservation, [u8; 512]), WorkerError> {
+        if epoch == 0 { return Err(WorkerError::Protocol); }
+        self.deadline = self.deadline.min(deadline);
+        self.bytes[..8].copy_from_slice(b"YNKCH004");
+        self.bytes[112..120].copy_from_slice(&epoch.to_be_bytes());
+        let observation = self.exchange_marker(stream, pid, uid, b"YNKANC04")?;
+        let data = observation.custody.data_v4.lock()
+            .map_err(|_| WorkerError::Protocol)?.as_ref().copied()
+            .ok_or(WorkerError::Protocol)?;
+        Ok((observation, data))
+    }
     /// Binding формируется из уже свежего namespace challenge. Поля server остаются
     /// наблюдением issuer до отдельного canonical PID1/kernel admission.
     pub fn role_binding(
@@ -210,7 +225,6 @@ impl Challenge {
         }
         drop(tx);
         send(&rx, &self.bytes, &[])?;
-        #[cfg(test)]
         let data_v4 = if offer == b"YNKANC04" {
             let (bytes, fds, credentials) = receive_sized::<512>(&rx, self.deadline)?;
             if !fds.is_empty()
@@ -300,7 +314,6 @@ impl Challenge {
                 .lock()
                 .map_err(|_| WorkerError::Protocol)? = report;
         }
-        #[cfg(test)]
         {
             *observation
                 .custody
@@ -376,9 +389,7 @@ struct NamespaceCustody {
     fds: Mutex<Option<[OwnedFd; 2]>>,
     expires: Instant,
     kernel: Mutex<Option<KernelObservation>>,
-    #[cfg(test)]
     data_v4: Mutex<Option<[u8; 512]>>,
-    #[cfg(test)]
     bound_v4: Mutex<bool>,
 }
 pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
@@ -395,7 +406,6 @@ impl NamespaceCustody {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         fds.take();
-        #[cfg(test)]
         self.data_v4
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -419,9 +429,7 @@ impl NamespaceObservation {
             fds: Mutex::new(Some(net_pid)),
             expires,
             kernel: Mutex::new(None),
-            #[cfg(test)]
             data_v4: Mutex::new(None),
-            #[cfg(test)]
             bound_v4: Mutex::new(false),
         });
         let timer = Arc::downgrade(&custody);
@@ -481,7 +489,6 @@ impl NamespaceObservation {
         if fds.is_none() || Instant::now() >= self.custody.expires || epoch == 0 {
             return Err(WorkerError::Timeout);
         }
-        #[cfg(test)]
         if let Some(data) = self
             .custody
             .data_v4
