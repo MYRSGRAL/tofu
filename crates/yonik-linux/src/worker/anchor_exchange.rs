@@ -413,6 +413,11 @@ struct NamespaceCustody {
     bound_v4: Mutex<bool>,
 }
 pub(crate) struct NamespaceRevocation(Arc<NamespaceCustody>);
+/// Только lifetime FD: не предоставляет lookup/admission/use authority.
+pub(crate) struct NamespaceRetention {
+    _custody: Arc<NamespaceCustody>,
+}
+
 impl NamespaceRevocation {
     pub(crate) fn revoke(&self) {
         self.0.deny();
@@ -510,6 +515,11 @@ impl NamespaceObservation {
         .unwrap();
         *observation.custody.kernel.lock().unwrap() = Some(report);
         observation
+    }
+    pub(crate) fn retention(&self) -> NamespaceRetention {
+        NamespaceRetention {
+            _custody: Arc::clone(&self.custody),
+        }
     }
     pub(crate) fn same_custody(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.custody, &other.custody)

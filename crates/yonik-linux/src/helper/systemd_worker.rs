@@ -497,10 +497,15 @@ pub struct SystemWorkerSupervisor {
     native_runtime: Option<NativeRuntime>,
     native_transfer: Option<JoinHandle<Result<WorkerAck>>>,
     native_admission: Option<JoinHandle<NativeAdmission>>,
+    native_custody: Option<crate::worker::anchor_exchange::NamespaceRetention>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
         if !self.clean {
+            if let Some(custody) = self.native_custody.take() {
+                std::mem::forget(custody);
+            }
+
             if let Some(task) = self.native_admission.take() {
                 std::mem::forget(task);
             }
@@ -561,6 +566,7 @@ impl SystemWorkerSupervisor {
                 native_runtime: None,
                 native_transfer: None,
                 native_admission: None,
+                native_custody: None,
             };
             supervisor.validate_contract().await?;
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
@@ -782,6 +788,7 @@ impl SystemWorkerSupervisor {
             self.native_admission = None;
         }
         let (pending, custody, frame) = result?;
+        self.native_custody = Some(custody.retention());
         let coverage = pending
             .finish_receive(self, owner, custody, frame, cancel)
             .await?;
@@ -1224,12 +1231,15 @@ impl SystemWorkerSupervisor {
             bounded(cancel, deadline, self.unit_job("StopUnit", mode.socket())).await?;
         }
         if let Some(handle) = self.native_admission.as_mut() {
-            bounded(cancel, deadline, async {
-                let _result = handle.await.map_err(unavailable)?;
-                Ok(())
+            let result = bounded(cancel, deadline, async {
+                handle.await.map_err(unavailable)
             })
             .await?;
             self.native_admission = None;
+            if let Ok((pending, custody, frame)) = result {
+                self.native_custody = Some(custody.retention());
+                drop((pending, custody, frame));
+            }
         }
         if let Some(handle) = self.native_transfer.as_mut() {
             bounded(cancel, deadline, async {
@@ -1265,6 +1275,7 @@ impl SystemWorkerSupervisor {
                 self.clean = true;
                 self.retained_copy = None;
                 self.native_runtime = None;
+                self.native_custody = None;
                 return Ok(());
             }
             bounded(cancel, deadline, async {
