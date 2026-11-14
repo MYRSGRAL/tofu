@@ -218,18 +218,20 @@ impl PeerAttestation {
             binding,
             id: 0,
         };
-        let snapshot = Arc::new(protocol.observe(deadline.min(Instant::now() + DEADLINE), &lease)?);
+        let observation_deadline = deadline.min(Instant::now() + DEADLINE);
+        let snapshot = Arc::new(protocol.observe(observation_deadline, &lease)?);
         if snapshot.view != inspector.view {
             return Err(AttributionFailure::NativeMechanismUnverified);
         }
         captured.validate()?;
         source.validate().map_err(native)?;
         lease.validate().map_err(native)?;
-        fence(deadline).map_err(native)?;
+        fence(observation_deadline).map_err(native)?;
         // Canonical supervisor сохраняет readonly snapshot до confirmed-empty.
         lease
             .retain_snapshot(Arc::clone(&snapshot))
             .map_err(native)?;
+        fence(observation_deadline).map_err(native)?;
         pending.armed = false;
         drop(pending);
         Ok(Arc::new(Self {
