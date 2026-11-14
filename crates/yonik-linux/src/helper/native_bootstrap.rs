@@ -391,3 +391,20 @@ mod split_receive_tests {
         sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
     }
 }
+
+impl RuntimeScopeStamp {
+    pub(crate) fn lookup_binding_data(&self) -> crate::attribution::broker::LookupBinding {
+        let e = &self.inner.expected;
+        crate::attribution::broker::LookupBinding {
+            target_uid: self.owner.owner_uid(),
+            epoch: e.epoch,
+            nonce: e.nonce,
+            digest: e.digest,
+            generation: e.generation,
+            invocation: e.invocation,
+            server_pid: e.server_pid,
+            server_start: e.server_start,
+            network: self.owner.namespace(),
+        }
+    }
+}

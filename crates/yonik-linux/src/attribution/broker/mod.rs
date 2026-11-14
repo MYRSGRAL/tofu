@@ -20,6 +20,9 @@ use std::{
 };
 
 mod kernel;
+#[allow(dead_code)]
+mod lookup_codec;
+pub(crate) use lookup_codec::LookupBinding;
 
 pub const FRAME_BYTES: usize = 136;
 const CACHE_ENTRIES: usize = 64;
