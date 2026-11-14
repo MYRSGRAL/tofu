@@ -217,6 +217,8 @@ fn directory(path: &Path) -> io::Result<File> {
     Ok(dir)
 }
 struct Sink {
+    #[cfg(test)]
+    test_path: PathBuf,
     dir: File,
     file: File,
     size: u64,
@@ -251,7 +253,13 @@ impl Sink {
             None => create(&dir)?,
         };
         let size = file.metadata()?.len();
-        Ok(Self { dir, file, size })
+        Ok(Self {
+            #[cfg(test)]
+            test_path: path.to_owned(),
+            dir,
+            file,
+            size,
+        })
     }
     fn write(&mut self, record: Record) -> io::Result<()> {
         let text = encode(record);
@@ -271,6 +279,8 @@ impl Sink {
                     Err(e) => return Err(e.into()),
                 }
             }
+            #[cfg(test)]
+            acceptance::checkpoint(&self.test_path, acceptance::Phase::Renamed);
             self.file = create(&self.dir)?;
             self.size = 0;
             self.dir.sync_all()?;
@@ -401,6 +411,8 @@ fn consume(path: &Path, rx: Receiver<Option<Record>>, state: &State) {
         }
     };
     state.status.store(1, Ordering::Release);
+    #[cfg(test)]
+    acceptance::checkpoint(path, acceptance::Phase::Opened);
     let result = drain(&mut sink, &rx, state);
     conclude(state, result);
 }
@@ -464,9 +476,9 @@ mod tests {
     use super::*;
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    struct Fixture(PathBuf);
+    pub(super) struct Fixture(pub(super) PathBuf);
     impl Fixture {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let root =
                 PathBuf::from(std::env::var_os("HOME").expect("домашний каталог")).join(format!(
                     ".disk-log-test-{}-{}",
@@ -743,3 +755,6 @@ mod tests {
         assert_eq!(state.errors.load(Ordering::Relaxed), 1);
     }
 }
+
+#[cfg(test)]
+mod acceptance;
