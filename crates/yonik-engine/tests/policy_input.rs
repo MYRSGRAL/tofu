@@ -56,7 +56,7 @@ fn rejects_malformed_unknown_duplicate_and_missing_fields() {
 #[test]
 fn rejects_invalid_semantics() {
     for input in [
-        r#"{"version":3}"#,
+        r#"{"version":4}"#,
         r#"{"version":1,"lan":["10.1.2.3/8"]}"#,
         r#"{"version":1,"lan":["::ffff:192.0.2.0/120"]}"#,
         r#"{"version":1,"private_domains":[{"suffix":"*.example.com","vpn":1,"available":true}]}"#,

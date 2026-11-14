@@ -83,6 +83,7 @@ pub struct EvaluationContext<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyFault {
     UnsupportedSelector(u64),
+    TransportUnavailable(u64),
     DnsPolicyUnresolved,
     DnsPolicyAmbiguous,
     UnknownFakeMapping,
@@ -162,6 +163,21 @@ impl Policy {
         flow: &DestinationFlow<'_>,
         context: &EvaluationContext<'_>,
         resources: &impl crate::ResourceConditions,
+    ) -> Evaluation {
+        self.evaluate_transport(
+            flow,
+            context,
+            resources,
+            crate::TransportWitness::Unavailable,
+        )
+    }
+
+    pub fn evaluate_transport(
+        &self,
+        flow: &DestinationFlow<'_>,
+        context: &EvaluationContext<'_>,
+        resources: &impl crate::ResourceConditions,
+        transport: crate::TransportWitness,
     ) -> Evaluation {
         if let Some(id) = self.unsupported_selector() {
             return Evaluation::Rejected(PolicyFault::UnsupportedSelector(id));
@@ -293,6 +309,13 @@ impl Policy {
                 let condition = &rule.conditions;
                 if !rule.enabled || !condition.matches_source(flow.executable) {
                     continue;
+                }
+                match condition.transport.matches(transport) {
+                    Ok(false) => continue,
+                    Err(_) => {
+                        return Evaluation::Rejected(PolicyFault::TransportUnavailable(rule.id));
+                    }
+                    Ok(true) => {}
                 }
                 if (!condition.domains.is_empty() || resources.has_domains(resource_rule))
                     && !name.is_some_and(|name| {

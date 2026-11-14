@@ -1,0 +1,206 @@
+{
+  "base": "cc66e4a15009e77d92bf9215be53387e3c532ced",
+  "native_enforcement": "OPEN",
+  "gui": {
+    "binary_sha256": "8cf1c9cc4144afe5cc03f1b47446e83b95c3ff04418771e5ca107d58ae2c77ab",
+    "name_absent_before": true,
+    "before": {
+      "owner_pid": 2447957,
+      "owner_uid": 0,
+      "collection": "/org/freedesktop/secrets/collection/kdewallet",
+      "items": "ao 0",
+      "locked": false,
+      "attributes": []
+    },
+    "gui": {
+      "passed": true,
+      "processes": 3,
+      "disabled_saved_revision": 4,
+      "enabled_saved_revision": 5,
+      "activation_error": "unsupported_option",
+      "ordered_disabled": {
+        "version": 3,
+        "rules": [
+          {
+            "id": 42,
+            "enabled": true,
+            "executables": [],
+            "domains": [
+              "other.example.org"
+            ],
+            "destinations": [],
+            "action": "direct",
+            "platform_sources": []
+          },
+          {
+            "id": 41,
+            "enabled": false,
+            "executables": [
+              "/usr/bin/browser",
+              "/usr/bin/other"
+            ],
+            "domains": [
+              "example.org",
+              "*.example.net"
+            ],
+            "destinations": [
+              "192.0.2.0/24",
+              "2001:db8::/32"
+            ],
+            "action": "block",
+            "platform_sources": [],
+            "transport": {
+              "transport_protocols": [
+                "tcp"
+              ],
+              "destination_ports": [
+                [
+                  443,
+                  443
+                ],
+                [
+                  8000,
+                  8080
+                ]
+              ]
+            }
+          }
+        ],
+        "default_action": "proxy",
+        "ru_direct": null
+      },
+      "ordered_enabled": {
+        "version": 3,
+        "rules": [
+          {
+            "id": 42,
+            "enabled": true,
+            "executables": [],
+            "domains": [
+              "other.example.org"
+            ],
+            "destinations": [],
+            "action": "direct",
+            "platform_sources": []
+          },
+          {
+            "id": 41,
+            "enabled": true,
+            "executables": [
+              "/usr/bin/browser",
+              "/usr/bin/other"
+            ],
+            "domains": [
+              "example.org",
+              "*.example.net"
+            ],
+            "destinations": [
+              "192.0.2.0/24",
+              "2001:db8::/32"
+            ],
+            "action": "block",
+            "platform_sources": [],
+            "transport": {
+              "transport_protocols": [
+                "tcp"
+              ],
+              "destination_ports": [
+                [
+                  443,
+                  443
+                ],
+                [
+                  8000,
+                  8080
+                ]
+              ]
+            }
+          }
+        ],
+        "default_action": "proxy",
+        "ru_direct": null
+      },
+      "owners": [
+        {
+          "owner_pid": 2447957,
+          "owner_uid": 0,
+          "collection": "/org/freedesktop/secrets/collection/kdewallet",
+          "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+          "locked": false,
+          "attributes": [
+            "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+          ]
+        },
+        {
+          "owner_pid": 2447957,
+          "owner_uid": 0,
+          "collection": "/org/freedesktop/secrets/collection/kdewallet",
+          "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+          "locked": false,
+          "attributes": [
+            "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+          ]
+        },
+        {
+          "owner_pid": 2447957,
+          "owner_uid": 0,
+          "collection": "/org/freedesktop/secrets/collection/kdewallet",
+          "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+          "locked": false,
+          "attributes": [
+            "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+          ]
+        }
+      ],
+      "oracle": "exact snapshot conditions in scripts; production driver completion gates"
+    },
+    "after": {
+      "owner_pid": 2447957,
+      "owner_uid": 0,
+      "collection": "/org/freedesktop/secrets/collection/kdewallet",
+      "items": "ao 1 \"/org/freedesktop/secrets/collection/kdewallet/0\"",
+      "locked": false,
+      "attributes": [
+        "a{ss} 3 \"application\" \"cloud.highpriority.tofu\" \"purpose\" \"subscription-master-key\" \"schema\" \"1\""
+      ]
+    },
+    "stages_passed": true,
+    "name_absent_after": true,
+    "owned_processes_closed": true
+  },
+  "bindings": {
+    "p07_persistence": "8cf1c9cc4144afe5cc03f1b47446e83b95c3ff04418771e5ca107d58ae2c77ab",
+    "frozen-source.tar.gz": "7e42c556aef2105ced9a5da65ab3274c045419e02cf51040bff5db74345b9b05",
+    "frozen-sources.json": "2696e449b50d3e84b386f9fdba3cc5efb2c8eadc520c8011f2cb93a529968143",
+    "gui-gate-build.log": "7da825008411a30c96b0d2c6d73194d915580881939b0e3cb9f91bfdffc8e232",
+    "base": "cc66e4a15009e77d92bf9215be53387e3c532ced",
+    "runner_sha256": "aa3c4430f2b22e14062265ab91c73e94c82e8f316fb975ed087fd9dd82c9b646"
+  },
+  "evidence_directory": "/home/myrs/projects/yonik/local/orchestration/evidence/p07-port-feature",
+  "checks": {
+    "editor": "14 passed",
+    "linux_unit": "575 passed, 38 ignored",
+    "domain_engine": "passed; native-dependent tests retain their existing ignores",
+    "clippy": "all-targets four crates -D warnings passed; desktop rechecked after early gate fix",
+    "transport_final": "4 passed; domain all-targets clippy passed",
+    "ruff": "0.16.6 cached executable: check/format passed"
+  },
+  "logs_sha256": {
+    "red.log": "aa90652c0a47fd9d4bb6bd6861b8cb9a9fa76f684ae93f9b0cdced6b233c64ad",
+    "green.log": "c6fc14ff9488cd08c49681a4a47ca89e4209d9c644e19ab78d9f06300d926b28",
+    "green2.log": "1659445d054fb8f443fd61883d2d1ddfab7aa2fed65180ce5bc01035ea6df77f",
+    "green3.log": "2f5b41c320288d0be51a61bfbde6795f4e73bf3863dde766d9523e5682cf7bc2",
+    "green4.log": "a7165c1608193e2dbbc5d25fb9f5a0016396326e36ef0ca56a183487e13e8efc",
+    "editor-final.log": "b55a75edd561df6e9455e5bdf2d22b0ea23d4d1d5c53d60b685fd2c244bccbd8",
+    "final-build.log": "4e1c460d397816bdf797e26bcbd6a6ea6b06049985d9c7c4f90412754ba6813b",
+    "final-build2.log": "d9bcc787cfb8e6e50cad146c6ebfa37df9285e6ccda564ad0f5aef867275c5ff",
+    "final-build3.log": "582ac65957fadcd395b0e01a5bc2fcba411687e76370dd60678f20d959dc81eb",
+    "gui-final-build.log": "0596f17f4c821891630628571203afd779b3e76defb9b76f9df5ac2d55084aff",
+    "gui-run.log": "a0294493b074d0fc8a8f6dedb74f520ef63ebb0238257ecbb4e32492728f39c6",
+    "gui-gate-build.log": "7da825008411a30c96b0d2c6d73194d915580881939b0e3cb9f91bfdffc8e232",
+    "gui-final-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "transport-final.log": "2aee6ccade4c0d8b931ab3df2a9fef1fc54035e84716acdf8cf1769dcb721063"
+  },
+  "formatted_runner_sha256": "3949759cfe0bfaa185d14e21d7772aef31274d0e4f0207463ab2d7f779eacc70",
+  "executed_runner": "runner-executed.py в evidence_directory; hash соответствует bindings.runner_sha256"
+}

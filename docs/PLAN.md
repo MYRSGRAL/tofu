@@ -1,6 +1,6 @@
 # План завершения yonik
 
-Готовность исходных P04/P08 на принятом main `b25ed11`: [решение и границы](validation/2026-11-14-linux-p04-p08-readiness.md). Готовность исходных P06/P22 на принятом main `3247e6c`: [решение и границы доказательств](validation/2026-11-14-linux-p06-p22-readiness.md). Историческая delta до `d74e618` сохранена в [реестре 14 ноября](validation/2026-11-14-linux-accepted-delta.md).
+Готовность исходного P11 после проверки replacement/source freshness: [решение и границы](validation/2026-11-14-p11-replacement-integration.md). Готовность исходных P04/P08 на принятом main `b25ed11`: [решение и границы](validation/2026-11-14-linux-p04-p08-readiness.md). Готовность исходных P06/P22 на принятом main `3247e6c`: [решение и границы доказательств](validation/2026-11-14-linux-p06-p22-readiness.md). Историческая delta до `d74e618` сохранена в [реестре 14 ноября](validation/2026-11-14-linux-accepted-delta.md).
 
 Начальная инвентаризация: 10 ноября 2026, UI `85b2a8e`. Принятые срезы актуализированы 12 ноября 2026 по main `cceede520842a17e4ef548807f63f64b2be19226`; полные статусы требуют итогового аудита. Цель — пройти весь порядок из
 [спецификации](specs/validation-and-roadmap.md): рабочий Linux-продукт,
@@ -9,8 +9,8 @@
 
 ## Как считаем готовность
 
-Всего **26 пунктов**: **7 готовы**, **17 частично выполнены**, **2 отложены (Android)**.
-Остаётся полностью закрыть **19 пунктов**, включая отложенные Android P03/P26.
+Всего **26 пунктов**: **8 готовы**, **16 частично выполнены**, **2 отложены (Android)**.
+Остаётся полностью закрыть **18 пунктов**, включая отложенные Android P03/P26.
 Это учёт полных критериев, а не процент реализации Linux: частичные пункты
 различаются по объёму и не пересчитываются в процент готовности продукта.
 Частичные результаты учитываются в описаниях, но не получают условные 50–90%.
@@ -159,7 +159,7 @@ Arch-пакет и ранний Android gate. Завершение волны н
 | P08 | Capabilities и компиляторы обоих ядер | Готов | Исходный compiler-критерий покрыт заявленным набором профилей/правил, unit/property проверками и config-check закреплённых ядер, включая положительный SS2022 AES-128 witness. Неподдерживаемые options и DNS/routing contracts явно отклоняются без потери параметров. [Compiler evidence](validation/2026-11-09-engine-compiler.md), [SS2022](validation/p08-ss2022/README.md), [решение и границы](validation/2026-11-14-linux-p04-p08-readiness.md). Native activation, runtime DNS и handshake остаются P13–P15. |
 | P09 | Lifecycle сессии и PreparedPlan | Частично | Приняты reducer/generations, actual LocalSession cancellation обоих pinned cores и health cancellation с terminal process-group oracle, учитывающим zombie. DesktopHost Stop имеет actual Disconnected snapshot; это не request-ID ACK health cancellation. Полный production system lifecycle и связанные cleanup/recovery gates остаются. [Native cancellation](validation/2026-11-12-native-cancel-matrix.md), [health](validation/2026-11-12-health-probe-cancellation.md). |
 | P10 | Scheduler фоновых обновлений | Частично | Переносимый scheduler, DesktopHost dispatch/review/cancel, событийная NM/UPower policy, persisted due/retry budget и private-bus restart/reopen реализованы. Остаются фоновые окна и полная энергоприёмка. [Evidence](validation/2026-11-10-desktop-private-bus.md). |
-| P11 | Ошибки и переводы RU/EN | Частично | Приняты закрытые catalog/V2, typed scheduler causes и actual Corrupt/Full/IntervalInvalidLimits/InitializeExhausted → original Main → strict export/native clipboard RU/EN. Representative cases не требуют отдельного GUI-прогона каждого enum. Остаток — известные потери typed causes на producer boundaries и интеграция maintenance stale-fence proof. [Main copy](validation/2026-11-12-p11-production-ui.md), [interval](validation/2026-11-12-p11-interval-production-ui.md), [owner](validation/2026-11-12-p11-owner-exhaustion.md). |
+| P11 | Ошибки и переводы RU/EN | Готов | Исходный human-error критерий покрыт закрытыми RU/EN catalog/V2, typed producer/context proofs и actual representative Main/export/clipboard. Final source freshness gate 6/6; replacement failure обоих callers публикует typed initialize cause без выдуманного generation, library 118 PASS/1 ignored и assertion mutant RED. [Решение, CI/merge condition и source bounds](validation/2026-11-14-p11-replacement-integration.md). Исторические producer bindings и P11_main_closed=false сохранены; native issuer, FR16 worker availability и whole merged-runtime отдельно не приняты. |
 
 ## Linux-сеть
 

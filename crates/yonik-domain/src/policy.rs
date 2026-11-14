@@ -68,6 +68,7 @@ impl PlatformSource {
 }
 #[derive(Debug, Default)]
 pub struct Conditions {
+    pub transport: crate::TransportConditions,
     pub executables: Vec<String>,
     pub platform_sources: Vec<PlatformSource>,
     pub destinations: Vec<Cidr>,
@@ -123,6 +124,13 @@ pub struct Decision {
 }
 
 impl Policy {
+    pub fn unsupported_transport(&self) -> Option<u64> {
+        self.user_rules
+            .iter()
+            .chain(&self.preset_rules)
+            .find(|r| r.enabled && r.conditions.transport.constrained())
+            .map(|r| r.id)
+    }
     pub fn unsupported_selector(&self) -> Option<u64> {
         self.user_rules
             .iter()

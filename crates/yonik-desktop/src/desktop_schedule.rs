@@ -1434,6 +1434,30 @@ mod owner_allocator_tests {
     }
 
     #[test]
+    fn replacement_allocator_failure_preserves_typed_initialize_context() {
+        let counter = AtomicU64::new(u64::MAX);
+        let failure = DesktopSchedule::from_owner_counter(&counter, 20_000);
+        let mut state = super::super::Snapshot::new(true);
+        assert!(state.schedule_replacement(failure, 77).is_none());
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let output = captured.clone();
+        let callback: super::super::Callback = std::sync::Arc::new(move |raw| {
+            *output.lock().unwrap() = raw;
+        });
+        state.emit(&callback);
+        let export = crate::diagnostics::export_snapshot_v2(&captured.lock().unwrap())
+            .expect("отказ replacement публикует V2");
+        let value: serde_json::Value = serde_json::from_str(&export).unwrap();
+        let errors = value["errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 2);
+        for error in errors {
+            assert_eq!(error["reason"], "scheduler_initialize_exhausted");
+            assert_eq!(error["stage"], "scheduler_initialize");
+            assert!(error["generation"].is_null());
+        }
+    }
+
+    #[test]
     fn local_counter_allocates_last_supported_identity() {
         let counter = AtomicU64::new(u64::MAX - 1);
         let owner = DesktopSchedule::from_owner_counter(&counter, 20_000)

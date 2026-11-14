@@ -1292,6 +1292,24 @@ impl Snapshot {
                 .set_generation(Slot::Source, cause, generation);
         }
     }
+    fn schedule_replacement(
+        &mut self,
+        replacement: std::result::Result<DesktopSchedule, desktop_schedule::ScheduleFailure>,
+        previous_generation: u64,
+    ) -> Option<DesktopSchedule> {
+        match replacement {
+            Ok(schedule) => Some(schedule),
+            Err(failure) => {
+                // При отказе initialize новое поколение ещё не выделено.
+                let generation = failure
+                    .cause
+                    .filter(|cause| cause.needs_generation())
+                    .map(|_| previous_generation);
+                self.schedule_error(failure, generation);
+                None
+            }
+        }
+    }
     fn session_error(&mut self, cause: Cause, generation: u64) {
         self.contextual_error(false, ContextFailure::new(cause));
         self.error_contexts
@@ -1665,7 +1683,15 @@ impl Actor {
         let expected = self
             .routing_revision
             .ok_or(DesktopError("routing_storage"))?;
-        let revision = if candidate.version == 2 {
+        let revision = if candidate.version == 3 {
+            self.routing_repository()
+                .save_routing_draft_v3(
+                    expected,
+                    candidate.json().into_bytes(),
+                    self.format4_backup.clone(),
+                )
+                .await
+        } else if candidate.version == 2 {
             self.routing_repository()
                 .save_routing_draft_v2(
                     expected,
@@ -4320,7 +4346,10 @@ async fn run(
                     .state
                     .schedule_error(error, Some(scheduled.generation));
             }
-            if let Ok(mut replacement) = scheduled.replacement() {
+            if let Some(mut replacement) = actor
+                .state
+                .schedule_replacement(scheduled.replacement(), scheduled.generation)
+            {
                 if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await {
                     actor
                         .state
@@ -4380,7 +4409,7 @@ async fn run(
                 if let Err(error) = shutdown { actor.state.schedule_error(error, Some(scheduled.generation)); }
                 scheduled.fetching = false; scheduled.review = None; scheduled.deferred = None;
                 if !quitting {
-                    if let Ok(mut replacement) = scheduled.replacement() {
+                    if let Some(mut replacement) = actor.state.schedule_replacement(scheduled.replacement(), scheduled.generation) {
                         if let Err(error) = replacement.load(actor.service(), origin.elapsed()).await { actor.state.schedule_error(error, Some(replacement.generation)); }
                         actor.state.scheduler_generation = Some(replacement.generation);
                 scheduled = replacement;
@@ -5140,7 +5169,7 @@ async fn run(
                     }
                     Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage").into()),
                     Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage").into()),
-                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector()).is_some() => Err(DesktopError("unsupported_option").into()),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector().or_else(|| p.unsupported_transport())).is_some() => Err(DesktopError("unsupported_option").into()),
                     command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
                         let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
                         if let Err(error) = actor.check_routing_apply(&command).await { Err(error.into()) }
@@ -6308,10 +6337,17 @@ mod inline_policy_conversion {
     use yonik_engine::policy_wire::SystemPolicy;
     use yonik_linux::system_policy::InlinePolicy;
     pub(crate) fn inline_policy(policy: &Policy) -> Result<InlinePolicy, ClientError> {
-        if policy.unsupported_selector().is_some() {
+        if policy.unsupported_selector().is_some() || policy.unsupported_transport().is_some() {
             return Err(ClientError::Unsupported);
         }
         let version = if policy
+            .user_rules
+            .iter()
+            .chain(&policy.preset_rules)
+            .any(|r| r.conditions.transport.constrained())
+        {
+            3
+        } else if policy
             .user_rules
             .iter()
             .chain(&policy.preset_rules)
@@ -6328,6 +6364,8 @@ mod inline_policy_conversion {
         }
         #[derive(Serialize)]
         struct WireRule<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            transport: Option<yonik_engine::transport::TransportInput>,
             id: u64,
             enabled: bool,
             action: &'static str,
@@ -6355,6 +6393,9 @@ mod inline_policy_conversion {
                 }
             }
             WireRule {
+                transport: value.conditions.transport.constrained().then(|| {
+                    yonik_engine::transport::TransportInput::from_typed(&value.conditions.transport)
+                }),
                 id: value.id,
                 enabled: value.enabled,
                 action: action(value.action),
@@ -6367,7 +6408,7 @@ mod inline_policy_conversion {
                     .map(ToString::to_string)
                     .collect(),
                 executable_paths: &value.conditions.executables,
-                platform_sources: (version == 2).then(|| {
+                platform_sources: (version >= 2).then(|| {
                     value
                         .conditions
                         .platform_sources
@@ -6464,6 +6505,7 @@ mod inline_policy_conversion {
                     enabled: true,
                     action: Action::Block,
                     conditions: Conditions {
+                        transport: Default::default(),
                         platform_sources: Vec::new(),
                         executables: vec!["/usr/bin/browser".into()],
                         destinations: vec!["192.0.2.0/24".parse().unwrap()],
