@@ -66,7 +66,11 @@ fn receive_inner(
                 if msg.bytes == 0 {
                     return Err(Unavailable::Disconnected);
                 }
-                fence(deadline, cancel)?;
+                if let Some(deadline) = deadline {
+                    fence(deadline, cancel)?;
+                } else if cancel.load(Ordering::Acquire) {
+                    return Err(Unavailable::Cancelled);
+                }
                 return Ok(bytes[..msg.bytes].to_vec());
             }
             Err(rustix::io::Errno::AGAIN) => std::thread::sleep(TICK),

@@ -71,6 +71,8 @@ impl Session {
     ) -> Result<Self, Unavailable> {
         let (scope, queue, worker) = role.into_parts();
         scope.validate().map_err(|_| Unavailable::Authority)?;
+        let lookup = super::broker::VerifiedLookupScope::verify(scope.fork_lookup())?;
+        let broker = Broker::from_verified(lookup)?;
         let (nonce, session, generation, invocation, epoch, digest) = scope.context();
         Ok(Self {
             phase: Phase::Hello,
@@ -84,7 +86,7 @@ impl Session {
             roles: Some(Roles {
                 tun: TunRole::Bound(queue),
                 worker: worker,
-                broker: None,
+                broker: Some(broker),
             }),
             sequence: Sequence::default(),
             scope: Some(scope),
