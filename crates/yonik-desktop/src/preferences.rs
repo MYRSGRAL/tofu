@@ -16,6 +16,15 @@ fn default_interval() -> u32 {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Preferences {
     pub version: u8,
+    /// Ревизия startup-настроек; остальные настройки не повышают её.
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub autostart_into_tray: bool,
+    #[serde(default)]
+    pub autoconnect: bool,
+    #[serde(default)]
+    pub autoconnect_target: Option<crate::startup_policy::Target>,
     pub engine: String,
     pub port: Option<std::num::NonZeroU16>,
     pub probe_url: String,
@@ -31,7 +40,11 @@ pub(crate) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
+            revision: 0,
+            autostart_into_tray: false,
+            autoconnect: false,
+            autoconnect_target: None,
             engine: "xray".into(),
             port: None,
             probe_url: super::backend::DEFAULT_PROBE_URL.into(),
@@ -71,7 +84,11 @@ impl Store {
                     .ok()
                     .filter(valid);
                 store.original = Some(bytes);
-                parsed
+                parsed.map(|mut settings| {
+                    // Только read migration: original bytes остаются нетронутыми.
+                    settings.version = 2;
+                    settings
+                })
             }
             Err(_) => None,
         };
@@ -106,8 +123,45 @@ impl Store {
         }
         Ok(Some(bytes))
     }
+    /// CAS только для сериализованного owner под host single-instance lock.
+    /// Store не захватывает общий lock: external writers могут гоняться с rename.
+    /// Не подключён к production dispatcher до отдельного integration leaf.
+    #[allow(dead_code)]
+    pub fn save_startup(
+        &mut self,
+        expected_revision: u64,
+        autostart_into_tray: bool,
+        autoconnect: bool,
+        target: Option<crate::startup_policy::Target>,
+    ) -> std::io::Result<(Preferences, SaveOutcome)> {
+        let mut settings = match &self.original {
+            Some(bytes) => serde_json::from_slice::<Preferences>(bytes)?,
+            None => Preferences::default(),
+        };
+        if self.blocked || !valid(&settings) || settings.revision != expected_revision {
+            return Err(std::io::Error::other("конфликт startup-настроек"));
+        }
+        settings.version = 2;
+        settings.revision = expected_revision
+            .checked_add(1)
+            .ok_or_else(|| std::io::Error::other("ревизия startup исчерпана"))?;
+        settings.autostart_into_tray = autostart_into_tray;
+        settings.autoconnect = autoconnect;
+        settings.autoconnect_target = target;
+        let outcome = self.save(&settings)?;
+        Ok((settings, outcome))
+    }
     pub fn save(&mut self, settings: &Preferences) -> std::io::Result<SaveOutcome> {
-        if self.blocked || !valid(settings) || self.read()? != self.original {
+        let previous_revision = self
+            .original
+            .as_deref()
+            .and_then(|bytes| serde_json::from_slice::<Preferences>(bytes).ok())
+            .map_or(0, |settings| settings.revision);
+        if self.blocked
+            || !valid(settings)
+            || settings.revision < previous_revision
+            || self.read()? != self.original
+        {
             return Err(std::io::Error::other(
                 "исходник настроек сохранён; запись заблокирована",
             ));
@@ -156,7 +210,15 @@ impl Store {
     }
 }
 fn valid(p: &Preferences) -> bool {
-    p.version == 1
+    matches!(p.version, 1 | 2)
+        && (p.version != 1
+            || (p.revision == 0
+                && !p.autostart_into_tray
+                && !p.autoconnect
+                && p.autoconnect_target.is_none()))
+        && p.autoconnect_target
+            .as_ref()
+            .is_none_or(crate::startup_policy::Target::valid)
         && p.subscription_interval_seconds >= default_interval()
         && p.proxy_fetch_dns.is_none_or(valid_proxy_fetch_dns)
         && matches!(p.engine.as_str(), "xray" | "sing-box")
@@ -298,5 +360,96 @@ mod tests {
         assert!(broken.save(&p).is_err());
         assert_eq!(fs::read(&victim).expect("fixture"), "чужой файл".as_bytes());
         fs::remove_dir_all(dir).expect("очистка fixture");
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::{Preferences, SaveOutcome, Store, fs};
+    #[test]
+    fn миграция_и_четыре_комбинации() {
+        let root = std::env::temp_dir().join(format!("yonik-startup-prefs-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, mut p, _) = Store::open(&root);
+        assert_eq!(p.version, 2);
+        assert!(!p.autostart_into_tray && !p.autoconnect);
+        for (a, c) in [(false, false), (true, false), (false, true), (true, true)] {
+            p = store.save_startup(p.revision, a, c, None).expect("CAS").0;
+            let (_, reopened, warning) = Store::open(&root);
+            assert!(!warning);
+            assert_eq!((reopened.autostart_into_tray, reopened.autoconnect), (a, c));
+        }
+        assert!(store.save_startup(0, false, false, None).is_err());
+        let mut legacy = serde_json::to_value(Preferences::default()).expect("json");
+        legacy["version"] = 1.into();
+        for key in [
+            "revision",
+            "autostart_into_tray",
+            "autoconnect",
+            "autoconnect_target",
+        ] {
+            legacy.as_object_mut().expect("object").remove(key);
+        }
+        let raw = serde_json::to_vec(&legacy).expect("json");
+        fs::write(root.join("preferences.json"), &raw).expect("write");
+        let (_, migrated, warning) = Store::open(&root);
+        assert!(!warning);
+        assert_eq!(migrated.version, 2);
+        assert_eq!(migrated.revision, 0);
+        assert!(!migrated.autostart_into_tray && !migrated.autoconnect);
+        assert_eq!(fs::read(root.join("preferences.json")).expect("read"), raw);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+    #[test]
+    fn испорченный_исходник_выключен_и_заблокирован() {
+        let root =
+            std::env::temp_dir().join(format!("yonik-startup-invalid-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, p, _) = Store::open(&root);
+        store.save(&p).expect("seed");
+        for raw in [
+            b"{".to_vec(),
+            br#"{"version":99,"autoconnect":true}"#.to_vec(),
+        ] {
+            fs::write(root.join("preferences.json"), &raw).expect("fixture");
+            let (mut store, p, warning) = Store::open(&root);
+            assert!(warning);
+            assert!(!p.autoconnect && !p.autostart_into_tray);
+            assert!(store.save_startup(0, true, true, None).is_err());
+            assert_eq!(fs::read(root.join("preferences.json")).expect("read"), raw);
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+    #[test]
+    fn stale_owner_и_durability_unknown() {
+        let root = std::env::temp_dir().join(format!("yonik-startup-stale-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, old, _) = Store::open(&root);
+        store.save(&old).expect("seed");
+        let (mut other, _, _) = Store::open(&root);
+        store.sync_directory = |_| Err(std::io::Error::other("fixture"));
+        let (new, outcome) = store.save_startup(0, true, false, None).expect("published");
+        assert_eq!(outcome, SaveOutcome::PublishedDurabilityUnknown);
+        assert_eq!(new.revision, 1);
+        assert!(store.save(&old).is_err());
+        assert!(other.save_startup(0, false, true, None).is_err());
+        assert!(Store::open(&root).1.autostart_into_tray);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+    #[test]
+    fn переполнение_сохраняет_исходник() {
+        let root =
+            std::env::temp_dir().join(format!("yonik-startup-overflow-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, mut p, _) = Store::open(&root);
+        p.revision = u64::MAX;
+        store.save(&p).expect("seed");
+        let before = fs::read(root.join("preferences.json")).expect("read");
+        assert!(store.save_startup(u64::MAX, true, true, None).is_err());
+        assert_eq!(
+            before,
+            fs::read(root.join("preferences.json")).expect("read")
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }
