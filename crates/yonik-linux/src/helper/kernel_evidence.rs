@@ -11,7 +11,7 @@ const KNOWN8: [u32; 8] = [
 ];
 
 #[derive(Debug, PartialEq, Eq)]
-enum Error {
+pub(super) enum Error {
     Revoked,
     Expired,
     Transport,
@@ -100,19 +100,19 @@ struct DiagnosticCounts {
 }
 
 /// Значения поступают из private pending context, никогда из report.
-struct Expected {
-    nonce: [u8; 32],
-    digest: [u8; 32],
-    session: [u8; 16],
-    generation: u64,
-    invocation: [u8; 16],
-    epoch: u64,
-    task_pid: u32,
-    task_start: u64,
-    server_pid: u32,
-    server_start: u64,
-    profile: [u8; 32],
-    observations: [u32; VECTOR],
+pub(super) struct Expected {
+    pub(super) nonce: [u8; 32],
+    pub(super) digest: [u8; 32],
+    pub(super) session: [u8; 16],
+    pub(super) generation: u64,
+    pub(super) invocation: [u8; 16],
+    pub(super) epoch: u64,
+    pub(super) task_pid: u32,
+    pub(super) task_start: u64,
+    pub(super) server_pid: u32,
+    pub(super) server_start: u64,
+    pub(super) profile: [u8; 32],
+    pub(super) observations: [u32; VECTOR],
 }
 struct ParsedReport {
     receipt_reference: Option<[u8; 32]>,
@@ -916,4 +916,30 @@ mod tests {
         drop(pending(&owner, Instant::now() + Duration::from_secs(1)));
         assert!(owner.is_revoked());
     }
+}
+
+/// Проверка покрытия после authenticated v4 transport и immutable producer validation.
+/// Хеш ссылки не подпись: доверие producer проверяется отдельно до вызова.
+pub(super) fn verify_fixed_report(frame: &[u8; FRAME], expected: &Expected) -> Result<(), Error> {
+    use sha2::{Digest, Sha256};
+    use yonik_nsfs::fixed_self_fence::{PROFILE_DIGEST, PROGRAM_SHA256};
+    let data = decode(frame, expected)?;
+    if expected.profile != PROFILE_DIGEST { return Err(Error::Profile); }
+    let mut vector = [1; VECTOR];
+    vector[2] = 38;
+    if data.observations != vector { return Err(Error::ObservationMismatch); }
+    if data.baseline_filters.checked_add(1) != Some(data.current_filters) {
+        return Err(Error::IncompleteApplication);
+    }
+    let reference = data.receipt_reference.ok_or(Error::EvidenceUnavailable)?;
+    let mut canonical = *frame;
+    canonical[184..216].fill(0);
+    let mut hash = Sha256::new();
+    hash.update(b"yonik/fixed-self-fence/v2/local-delta1/receipt\0");
+    hash.update(PROGRAM_SHA256);
+    hash.update(PROFILE_DIGEST);
+    hash.update(canonical);
+    let computed: [u8;32] = hash.finalize().into();
+    if computed != reference { return Err(Error::Binding); }
+    Ok(())
 }
