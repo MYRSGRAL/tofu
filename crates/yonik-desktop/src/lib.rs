@@ -26,3 +26,8 @@ pub use backend::StartupPhase;
 pub mod local_import;
 
 pub mod startup_policy;
+
+#[cfg(target_os = "linux")]
+mod startup_identity;
+#[cfg(target_os = "linux")]
+mod startup_xdg;

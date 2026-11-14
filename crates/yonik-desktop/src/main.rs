@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut listen_port = None;
     let mut explicit_data_dir = false;
     let mut smoke_test = false;
+    let mut start_hidden = false;
     let mut screenshot = None;
     let mut script = None;
     let mut trace = None;
@@ -34,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 explicit_data_dir = true;
             }
             Some("--smoke-test") => smoke_test = true,
+            Some("--start-hidden") => start_hidden = true,
             Some("--smoke-script") => {
                 script = Some(PathBuf::from(
                     arguments.next().ok_or("Не задан --smoke-script")?,
@@ -79,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .create(&data_dir)?;
     let data_dir = std::fs::canonicalize(data_dir)?;
     let engine_dir = engine_dir.unwrap_or_else(|| data_dir.join("engines"));
-    let mut config = HostConfig::new(data_dir.clone(), engine_dir);
+    let mut config = HostConfig::new(data_dir.clone(), engine_dir).with_start_hidden(start_hidden);
     if let Some(port) = listen_port {
         config = config.with_listen_port(port);
     }

@@ -460,13 +460,16 @@ fn health_target_settings_are_validated_without_disclosing_url() {
     let initial = app.wait(|v| v["ready"] == true);
     assert_eq!(initial["probe_custom"], false);
     assert_eq!(initial["probe_expected_status"], 204);
-    app.send(json!({"command":"set_probe_target","url":"https://health.invalid/private?health-token=hidden","expected_status":200}));
+    // Уникальный canary проверяет приватное значение, не публичный ключ start_hidden.
+    const PRIVATE_QUERY_CANARY: &str = "yonik-health-private-canary-746e55b7";
+    app.send(json!({"command":"set_probe_target","url":format!("https://health.invalid/private?health-token={PRIVATE_QUERY_CANARY}"),"expected_status":200}));
     let custom = app.wait(|v| v["probe_custom"] == true);
     assert_eq!(custom["probe_expected_status"], 200);
     assert_eq!(custom["probe_persistent"], false);
     let stored = fs::read_to_string(directory.0.join("preferences.json")).expect("настройки");
     assert!(!stored.contains("health-token"));
     assert!(!stored.contains("health.invalid"));
+    assert!(!stored.contains(PRIVATE_QUERY_CANARY));
     for (url, status) in [
         ("http://health.invalid/", 204),
         ("https://user:secret@health.invalid/", 204),
@@ -483,7 +486,12 @@ fn health_target_settings_are_validated_without_disclosing_url() {
     });
     app.close();
     for snapshot in &app.snapshots {
-        for secret in ["health.invalid", "health-token", "hidden", "user:secret"] {
+        for secret in [
+            "health.invalid",
+            "health-token",
+            PRIVATE_QUERY_CANARY,
+            "user:secret",
+        ] {
             assert!(!snapshot.contains(secret));
         }
     }
