@@ -20,6 +20,7 @@ enum Error {
     Profile,
     EvidenceUnavailable,
     ObservationMismatch,
+    IncompleteApplication,
     Consumed,
 }
 
@@ -116,6 +117,10 @@ struct PendingReport<'a> {
 struct ConsumedRecord {
     data: ParsedReport,
     _guard: RunRevocationGuard,
+    #[cfg(test)]
+    custody: Option<crate::worker::anchor_exchange::NamespaceObservation>,
+    #[cfg(test)]
+    unit_profile: Option<UnitProfile>,
 }
 impl PendingReport<'_> {
     fn consume(&self, frame: &[u8]) -> Result<ConsumedRecord, Error> {
@@ -156,8 +161,157 @@ impl PendingReport<'_> {
         result.map(|data| ConsumedRecord {
             data,
             _guard: guard,
+            #[cfg(test)]
+            custody: None,
+            #[cfg(test)]
+            unit_profile: None,
         })
     }
+}
+
+#[cfg(test)]
+impl PendingReport<'_> {
+    /// Единый UNIT путь. Guard остаётся в pending на всём blocking exchange.
+    fn receive_unit(
+        &self,
+        stream: &std::os::unix::net::UnixStream,
+        uid: u32,
+        profile: UnitProfile,
+    ) -> Result<ConsumedRecord, Error> {
+        let result = (|| {
+            self.authorization
+                .validate_owner(self.owner)
+                .map_err(|_| Error::Revoked)?;
+            if Instant::now() >= self.deadline {
+                return Err(Error::Expired);
+            }
+            let challenge = crate::worker::anchor_exchange::Challenge::for_authorization(
+                &self.authorization,
+                self.expected.digest,
+                self.expected.invocation,
+            )
+            .map_err(|_| Error::Binding)?;
+            let transport =
+                challenge.exchange_v4(stream, self.expected.task_pid, uid, self.deadline);
+            self.authorization
+                .validate_owner(self.owner)
+                .map_err(|_| Error::Revoked)?;
+            if Instant::now() >= self.deadline {
+                return Err(Error::Expired);
+            }
+            let (custody, frame) = transport.map_err(|_| Error::Transport)?;
+            let mut record = self.consume(&frame)?;
+            profile.verify(&record.data, &self.expected)?;
+            record.unit_profile = Some(profile);
+            self.authorization
+                .bind_custody(&custody)
+                .map_err(|_| Error::Binding)?;
+            self.authorization
+                .validate_owner(self.owner)
+                .map_err(|_| Error::Revoked)?;
+            if Instant::now() >= self.deadline {
+                return Err(Error::Expired);
+            }
+            record.custody = Some(custody);
+            Ok(record)
+        })();
+        if result.is_err() {
+            self.owner.revoke();
+            self.slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+        }
+        result
+    }
+}
+
+/// Закрытая UNIT модель retained formal obligations; не production allowlist.
+#[cfg(test)]
+enum UnitProfile {
+    Unknown,
+    Incomplete,
+    Alternative {
+        manifest: [u8; 32],
+        formal_reference: [u8; 32],
+    },
+    Count {
+        baseline: Option<u32>,
+        maxima: Vec<u32>,
+    },
+}
+#[cfg(test)]
+impl UnitProfile {
+    fn verify(&self, data: &ParsedReport, expected: &Expected) -> Result<(), Error> {
+        // Ненулевой lookup key без independently retained record не принимается.
+        if data.receipt_reference.is_some() {
+            return Err(Error::EvidenceUnavailable);
+        }
+        match self {
+            Self::Unknown => Err(Error::EvidenceUnavailable),
+            Self::Incomplete => Err(Error::IncompleteApplication),
+            Self::Alternative {
+                manifest,
+                formal_reference,
+            } if *manifest == expected.profile && *formal_reference == [0x55; 32] => Ok(()),
+            Self::Alternative { .. } => Err(Error::EvidenceUnavailable),
+            Self::Count { baseline, maxima } => {
+                let baseline = baseline.ok_or(Error::EvidenceUnavailable)?;
+                let count = maxima
+                    .iter()
+                    .try_fold(baseline, |n, k| n.checked_add(*k))
+                    .ok_or(Error::EvidenceUnavailable)?;
+                if data.baseline_filters != baseline || data.current_filters != count {
+                    return Err(Error::EvidenceUnavailable);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Только типизированные UNIT observations. Не supported-profile registry/issuer.
+#[cfg(test)]
+struct UnitObservations {
+    baseline: u32,
+    current: u32,
+    vector: [u32; VECTOR],
+}
+#[cfg(test)]
+fn encode_unit(e: &Expected, observation: UnitObservations) -> Result<[u8; FRAME], Error> {
+    let mut f = [0; FRAME];
+    f[..8].copy_from_slice(b"YNKNS004");
+    for (o, v) in [
+        (8, e.nonce.as_slice()),
+        (40, &e.digest),
+        (72, &e.session),
+        (96, &e.invocation),
+        (152, &e.profile),
+    ] {
+        f[o..o + v.len()].copy_from_slice(v);
+    }
+    for (o, v) in [
+        (88, e.generation),
+        (112, e.epoch),
+        (128, e.task_start),
+        (144, e.server_start),
+    ] {
+        f[o..o + 8].copy_from_slice(&v.to_be_bytes());
+    }
+    for (o, v) in [
+        (120, e.task_pid),
+        (136, e.server_pid),
+        (216, 2),
+        (220, observation.baseline),
+        (224, observation.current),
+    ] {
+        f[o..o + 4].copy_from_slice(&v.to_be_bytes());
+    }
+    for (i, v) in observation.vector.iter().enumerate() {
+        f[232 + i * 4..236 + i * 4].copy_from_slice(&v.to_be_bytes());
+    }
+    decode(&f, e)?;
+    Ok(f)
 }
 
 #[cfg(test)]
@@ -181,33 +335,17 @@ mod tests {
         }
     }
     fn frame(e: &Expected) -> [u8; FRAME] {
-        let mut f = [0; FRAME];
-        f[..8].copy_from_slice(b"YNKNS004");
-        for (o, v) in [
-            (8, e.nonce.as_slice()),
-            (40, &e.digest),
-            (72, &e.session),
-            (96, &e.invocation),
-            (152, &e.profile),
-        ] {
-            f[o..o + v.len()].copy_from_slice(v);
-        }
-        for (o, v) in [
-            (88, e.generation),
-            (112, e.epoch),
-            (128, e.task_start),
-            (144, e.server_start),
-        ] {
-            f[o..o + 8].copy_from_slice(&v.to_be_bytes());
-        }
-        for (o, v) in [(120, e.task_pid), (136, e.server_pid), (216, 2)] {
-            f[o..o + 4].copy_from_slice(&v.to_be_bytes());
-        }
-        for (i, v) in e.observations.iter().enumerate() {
-            f[232 + i * 4..236 + i * 4].copy_from_slice(&v.to_be_bytes());
-        }
-        f
+        encode_unit(
+            e,
+            UnitObservations {
+                baseline: 0,
+                current: 0,
+                vector: e.observations,
+            },
+        )
+        .unwrap()
     }
+
     fn pending(owner: &RunAuthority, deadline: Instant) -> PendingReport<'_> {
         let authorization = owner.authorize([2; 32]).unwrap();
         let guard = authorization.guard();
@@ -221,6 +359,155 @@ mod tests {
     }
     fn error(f: &[u8], e: &Expected) -> Error {
         decode(f, e).err().expect("отказ DATA")
+    }
+    #[test]
+    fn unit_encode_transport_decode_consume_retains_custody() {
+        use crate::worker::anchor_exchange::unit_v4_peer;
+        for attack in [
+            "valid",
+            "short",
+            "long",
+            "old3",
+            "nonce",
+            "epoch",
+            "profile",
+            "vector",
+            "uid",
+            "unknown-profile",
+            "incomplete",
+            "count-missing",
+            "count-overflow",
+            "count-valid",
+            "count-wrong",
+            "alternative-counts",
+            "receipt",
+            "fd",
+        ] {
+            let owner = RunAuthority::new([1; 16], 1, 9).unwrap();
+            let mut p = pending(&owner, Instant::now() + Duration::from_secs(1));
+            p.expected.task_pid = std::process::id();
+            let profile = match attack {
+                "unknown-profile" => UnitProfile::Unknown,
+                "incomplete" => UnitProfile::Incomplete,
+                "count-missing" => UnitProfile::Count {
+                    baseline: None,
+                    maxima: vec![1],
+                },
+                "count-overflow" => UnitProfile::Count {
+                    baseline: Some(u32::MAX),
+                    maxima: vec![1],
+                },
+                "count-valid" | "count-wrong" => UnitProfile::Count {
+                    baseline: Some(4),
+                    maxima: vec![1, 2],
+                },
+                _ => UnitProfile::Alternative {
+                    manifest: p.expected.profile,
+                    formal_reference: [0x55; 32],
+                },
+            };
+            let mut data = frame(&p.expected).to_vec();
+            match attack {
+                "short" => {
+                    data.pop();
+                }
+                "long" => data.push(0),
+                "old3" => {
+                    data.truncate(128);
+                    data[..8].copy_from_slice(b"YNKPR003");
+                }
+                "nonce" => data[8] ^= 1,
+                "epoch" => data[119] ^= 1,
+                "profile" => data[152] ^= 1,
+                "vector" => data[235] ^= 1,
+                "count-valid" | "count-wrong" => {
+                    data[220..224].copy_from_slice(&4u32.to_be_bytes());
+                    data[224..228].copy_from_slice(
+                        &(if attack == "count-valid" { 7u32 } else { 6u32 }).to_be_bytes(),
+                    );
+                }
+                "alternative-counts" => {
+                    data[220..228].fill(255);
+                }
+                "receipt" => data[184..216].fill(7),
+                _ => (),
+            }
+            let (helper, peer) = std::os::unix::net::UnixStream::pair().unwrap();
+            let worker = std::thread::spawn(move || {
+                unit_v4_peer(peer, |challenge| {
+                    assert_eq!(&challenge[8..40], &[2; 32]);
+                    (data, usize::from(attack == "fd"))
+                })
+            });
+            let result = p.receive_unit(
+                &helper,
+                rustix::process::getuid().as_raw() + u32::from(attack == "uid"),
+                profile,
+            );
+            if matches!(attack, "valid" | "count-valid" | "alternative-counts") {
+                let record = result.unwrap();
+                assert_eq!(
+                    record.custody.as_ref().unwrap().retained_namespace_count(),
+                    2
+                );
+                assert_eq!(
+                    record.data.supported_profile(),
+                    Err(Error::EvidenceUnavailable)
+                );
+                assert!(matches!(p.consume(&[]), Err(Error::Consumed)));
+                drop(p);
+                assert!(!owner.is_revoked());
+                owner.revoke();
+                assert_eq!(
+                    record.custody.as_ref().unwrap().retained_namespace_count(),
+                    0
+                );
+                drop(record);
+            } else {
+                assert!(result.is_err(), "{attack}");
+                assert!(owner.is_revoked(), "{attack}");
+            }
+            drop(helper);
+            worker.join().unwrap();
+        }
+    }
+    #[test]
+    fn unit_transport_late_and_cancelled_results_are_destroyed() {
+        use crate::worker::anchor_exchange::unit_v4_peer;
+        for cancelled in [false, true] {
+            let owner = RunAuthority::new([1; 16], 1, 9).unwrap();
+            let mut p = pending(&owner, Instant::now() + Duration::from_millis(60));
+            p.expected.task_pid = std::process::id();
+            let data = frame(&p.expected);
+            let cancel = cancelled.then(|| p.authorization.guard());
+            let (helper, peer) = std::os::unix::net::UnixStream::pair().unwrap();
+            std::thread::scope(|scope| {
+                let worker = scope.spawn(|| {
+                    unit_v4_peer(peer, |_| {
+                        if cancelled {
+                            drop(cancel);
+                        } else {
+                            std::thread::sleep(Duration::from_millis(90));
+                        }
+                        (data.to_vec(), 0)
+                    })
+                });
+                let result = p.receive_unit(
+                    &helper,
+                    rustix::process::getuid().as_raw(),
+                    UnitProfile::Alternative {
+                        manifest: p.expected.profile,
+                        formal_reference: [0x55; 32],
+                    },
+                );
+                assert!(
+                    matches!(result, Err(e) if e == if cancelled {Error::Revoked} else {Error::Expired})
+                );
+                assert!(owner.is_revoked());
+                drop(helper);
+                worker.join().unwrap();
+            });
+        }
     }
     #[test]
     fn framing_bounds_reserved_and_arbitrary() {
