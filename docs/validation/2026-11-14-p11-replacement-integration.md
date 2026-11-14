@@ -49,4 +49,4 @@ Backend добавляет format5 save/native Unsupported и typed transport se
 Main — transport fields и четыре закрытых RU/EN validation strings. P11
 replacement/error publication и существующий render/export сохраняются.
 Effective source bindings обновлены на combined source, старые updates сохранены.
-Это не новое исполнение historical binary. Финальный narrow recheck нужен до merge.
+Это не новое исполнение historical binary. Финальный narrow recheck R2 `824cd624` на `fcc44e3` — CLEAN; CI итогового head обязателен до merge.

@@ -492,16 +492,16 @@
       "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
       "blob": "c165b3f411f60ca802d56e20bb34abb6ac89efec",
       "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
-      "review": "R1 188f726b CLEAN port feature; R2 932b7107 CLEAN typed replacement and prior union. Root exact remerge-diff empty; final narrow P11 connections recheck pending.",
-      "review_pending": true,
+      "review": "R2 824cd624 CLEAN combined P11/port source and bindings on fcc44e3; prior R1 188f726b CLEAN port feature and R2 932b7107 CLEAN typed replacement/A4 union. Historical runtime remains bound to original producer.",
+      "review_pending": false,
       "execution": "docs/validation/2026-11-14-p11-replacement-integration.md"
     },
     "crates/yonik-desktop/qml/Main.qml": {
       "source": "f90f5bb1caf66fd423efb32f31b6624e4f9d8ebc",
       "blob": "8f46cc93fc5ec1056fba32f67776d5ac01710e76",
       "scope": "Port/wirev3/format5 integration plus preserved P11 replacement fix; error publication/render/export unchanged outside reviewed fix. Historical producer runtime not rebound.",
-      "review": "R1 188f726b CLEAN port feature; R2 932b7107 CLEAN typed replacement and prior union. Root exact remerge-diff empty; final narrow P11 connections recheck pending.",
-      "review_pending": true
+      "review": "R2 824cd624 CLEAN combined P11/port source and bindings on fcc44e3; prior R1 188f726b CLEAN port feature and R2 932b7107 CLEAN typed replacement/A4 union. Historical runtime remains bound to original producer.",
+      "review_pending": false
     },
     "crates/yonik-desktop/src/desktop_schedule.rs": {
       "source": "eebb316aa2e25bb24a7a55007f154bee0ed54a05",
