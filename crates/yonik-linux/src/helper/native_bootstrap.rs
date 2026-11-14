@@ -307,3 +307,9 @@ impl RuntimeScopeStamp {
         }
     }
 }
+
+impl RuntimeScopeStamp {
+    pub(crate) fn owns_observation(&self, observation: &NamespaceObservation) -> bool {
+        self.inner.custody.same_custody(observation)
+    }
+}

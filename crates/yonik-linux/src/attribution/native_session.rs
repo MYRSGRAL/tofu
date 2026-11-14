@@ -82,10 +82,10 @@ impl Session {
             session,
             generation,
             invocation,
-            app_required: false,
+            app_required: true,
             roles: Some(Roles {
                 tun: TunRole::Bound(queue),
-                worker: worker,
+                worker,
                 broker: Some(broker),
             }),
             sequence: Sequence::default(),
