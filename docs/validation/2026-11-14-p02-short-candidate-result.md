@@ -1,4 +1,8 @@
-# P02 SHORT: завершённый candidate workload
+# P02 SHORT: исторический candidate workload
+
+> Обновление: [qualified six-pair join](2026-11-14-p02-six-pair-final-join.md)
+> исключает старую noisy SB2 pair из сравнения и использует одну reviewed replacement.
+> Ниже сохранён исторический результат исходного campaign; его refs не изменены.
 
 **CANDIDATE_NOT_ACCEPTED**. 12 окон по 900.001–900.029 s: три пары на core.
 Measurement source `35408d531a86ec858e1d2fc3489e8e092fda5d27`; posthoc validator

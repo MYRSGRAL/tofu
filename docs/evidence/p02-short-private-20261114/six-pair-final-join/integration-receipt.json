@@ -1,0 +1,178 @@
+{
+  "new_runtime": false,
+  "prepared_head": "004eec534f60a613f423d199349bad10b78f8fa2",
+  "accepted_main": "a3f609e66e5a95b978c0bf3da34ade4f1445e219",
+  "integration_commit": "c1b04d55e7ed0bb1e1aa24ca87f04c379d16e11b",
+  "integration_parents": [
+    "004eec534f60a613f423d199349bad10b78f8fa2",
+    "a3f609e66e5a95b978c0bf3da34ade4f1445e219"
+  ],
+  "integration_tree": "b8b1494d64b5f74385b4fc38e3364d48fcb5a0aa",
+  "product_tree_preserved_from_accepted_main": true,
+  "p11_blobs_preserved": 59,
+  "p11_blob_receipt": [
+    "100644 blob a53977bf84e2fe79ec0937b45d7444bb4713927f\tcrates/yonik-desktop/examples/p11schedulerE2E.rs",
+    "100644 blob 69748ccad84fb9f3d6ca81c6867bbcc776948f30\tcrates/yonik-desktop/examples/p11schedulerFullE2E.rs",
+    "100644 blob 473aa380ed9a7d9d66673014ec31c192896f2ab9\tcrates/yonik-desktop/examples/p11schedulerImportE2E.rs",
+    "100644 blob 07d9ea64e6f224e1ee95a6c8dddfd711cb08d3c2\tcrates/yonik-desktop/examples/p11schedulerIntervalE2E.rs",
+    "100644 blob e372e19bd6f1e0e74b998235a95148f089d19849\tcrates/yonik-desktop/examples/p11schedulerOwnerE2E.rs",
+    "100644 blob 2846340f87d94f390cfee683725bafc44667201e\tdocs/evidence/p11-actual-copy.log",
+    "100644 blob 0142b496b22125c40b3eccf7dfb695a814b36ac7\tdocs/evidence/p11-binary.sha256",
+    "100644 blob 92e7d9bfc4a04b1173e4b0caa0b94b4d88f3c831\tdocs/evidence/p11-clean.log",
+    "100644 blob 4c138fee6bc88c426152c5efbc8e98a473a52f25\tdocs/evidence/p11-clippy.log",
+    "100644 blob b49ec71c045138e2572536a893a15ca2733b8b32\tdocs/evidence/p11-closure/incoming-contracts.log",
+    "100644 blob 28b31107b19287efc067ec0dcd73e4c24f75e278\tdocs/evidence/p11-closure/python.log",
+    "100644 blob 29e7e6569e20efbf944b8ea1905f228e0dbe3aa7\tdocs/evidence/p11-closure/source-blobs.json",
+    "100644 blob 5404865513b5075bc03bb3d9f98bb07fb3c42386\tdocs/evidence/p11-closure/translations.log",
+    "100644 blob a2fb2ce4cd6a7b5d9f277a84158e7952f4b9c1de\tdocs/evidence/p11-gui-build.log",
+    "100644 blob 7f0ff2cf98d2578e26dab0bf441be0e540832a90\tdocs/evidence/p11-gui88-error-reference.txt",
+    "100644 blob 389b69c672fd253ccb9b8aea9ba043debc0805fe\tdocs/evidence/p11-python.log",
+    "100644 blob 263c5b1679e49849463b43bcd6447dc199ab8af0\tdocs/evidence/p11-qt.log",
+    "100644 blob 884560dc1b8b7bd18f626eebde6b0192fc751bf0\tdocs/evidence/p11-red.log",
+    "100644 blob 1f5f344d054fae10f39140fb7199c99321d9190a\tdocs/evidence/p11-ruff.log",
+    "100644 blob e8bfad2edb0f1f547145e32e37b5e79093cd4481\tdocs/evidence/p11-rust.log",
+    "100644 blob 23830d4b2e0df3e5bfcc2b5389cbfaa3a9af8487\tdocs/evidence/p11-translation-cli.log",
+    "100644 blob 0ca5c15118341932648ea4b03e2930e84e5cb7bf\tdocs/evidence/p11-translations.log",
+    "100644 blob 086e2313764e12de479718ae2d5703df26a8770d\tdocs/evidence/p11-visible/README.md",
+    "100644 blob e14cc74942bd54cd867b7432ec9e7707570bab04\tdocs/evidence/p11-visible/checker-tests.log",
+    "100644 blob d384ffcc96bce73fba84bd4599c9d5b574fc6f49\tdocs/evidence/p11-visible/green.log",
+    "100644 blob 7b0b128b09df831d45468c1da77533fa20572382\tdocs/evidence/p11-visible/red.log",
+    "100644 blob 43aa848b069d57345c30fef7d2e40e9755c0c4f0\tdocs/validation/2026-11-11-p11-actual-desktop-failure.md",
+    "100644 blob 5d5b8f0c33bfc227e1e843af78edbaeb42bd4d6a\tdocs/validation/2026-11-11-p11-message-catalog.md",
+    "100644 blob 3b553becfcca443f7e2730ef11e1527a93ec848a\tdocs/validation/2026-11-11-p11-v2-error-context.md",
+    "100644 blob c1b7c7863a6b115475703fcaa43b3c28cea42c34\tdocs/validation/2026-11-11-p11-visible.md",
+    "100644 blob 280d5bcc29f376863dfb80e80b7151b00091e223\tdocs/validation/2026-11-12-p11-interval-production-ui.md",
+    "100644 blob 2fae3553b8006cb1b2a4a1b42a01c06cb2cec4a9\tdocs/validation/2026-11-12-p11-maintenance-admission.md",
+    "100644 blob c1d36fb115b99d39b56825645798e3c00dcf25b9\tdocs/validation/2026-11-12-p11-maintenance-causes.md",
+    "100644 blob a27b2754b3f0462304d4035efbbdf3dff0b30f3b\tdocs/validation/2026-11-12-p11-maintenance-generation.md",
+    "100644 blob 1ba1842fb58a1f89698cc370ff7d2e47cdc5de17\tdocs/validation/2026-11-12-p11-manual-source-context.md",
+    "100644 blob 77ee7800b365ef0c8bc9c115c49f1c82bbbbab82\tdocs/validation/2026-11-12-p11-owner-exhaustion.md",
+    "100644 blob ebdbc04753993216d8f3a868486c5b4ad37b1a44\tdocs/validation/2026-11-12-p11-probe-context.md",
+    "100644 blob d2b4375c909deb65f1cb8c0f8f767eaa51fefcde\tdocs/validation/2026-11-12-p11-production-ui.md",
+    "100644 blob 9bd4a6f8760ae76eb47510740b127d083f05d4a3\tdocs/validation/2026-11-12-p11-scheduler-context.md",
+    "100644 blob e5b5eeada44562e8ffdc0ba61219f84038d4b34a\tdocs/validation/2026-11-12-p11-scheduler-fetch-causes.md",
+    "100644 blob c2545f909f0676e9920249dce1d77e29cdbd4d97\tdocs/validation/2026-11-12-p11-scheduler-full.md",
+    "100644 blob f51c5df19311c59d3d9073444d19d62ac2478d0f\tdocs/validation/2026-11-12-p11-service-context.md",
+    "100644 blob deb0d5322e8516a04688211119194aa8cfe66082\tdocs/validation/2026-11-12-p11-service-import.md",
+    "100644 blob c946dca2b2e5f3a7c8f5f8ab1c576f4310c36a61\tdocs/validation/2026-11-12-p11schedulerE2E.md",
+    "100644 blob 68d2f89ac38870f2ee0527f103bc99d2a5ea2e50\tdocs/validation/2026-11-13-p11-acceptance-closure.md",
+    "100644 blob 8e66231ece9be44a73aa57374c24c6bdbb36fb07\tdocs/validation/2026-11-14-p11-integrated-candidate.md",
+    "100644 blob ef34dbc8d7df678a301405d97fadebe017e7ec91\tdocs/validation/2026-11-14-p11-replacement-integration.md",
+    "100644 blob e4440bdb0fb1ac716277e72c1e0e08b0bcdfeb4f\tdocs/validation/p05-p10-accepted-witness/p11-historical-reconciliation.json",
+    "100644 blob be108b4ca54b8ea4c7963ad9a2719bf1a23e6e0e\tdocs/validation/p11-acceptance-closure.json",
+    "100644 blob e2f5d6d779090370c23764a9ee5bd8888a8ce95b\tdocs/validation/p11-integrated-candidate.json",
+    "100644 blob 83ce0ee6c3ce041c030b4199c3029d9be835b20f\tdocs/validation/p11-replacement-integration.json",
+    "100644 blob 79c2a0625a398947a488d12b97399dbb05d4c311\ttests/qml/p11/run.py",
+    "100644 blob bf434d41d2dc4e519fcbe9299b3fee5822b638f8\ttools/tests/check_p11schedulerE2E.py",
+    "100644 blob cd7c76769971f78b5713497ddc08eed317b43b70\ttools/tests/check_p11schedulerFullE2E.py",
+    "100644 blob a48b53a8be116dd8fd82e828a10fbe08d18b6208\ttools/tests/check_p11schedulerImportE2E.py",
+    "100644 blob ec85c4fd72c54eae6d8a5907afed69eb5a9dc688\ttools/tests/check_p11schedulerOwnerE2E.py",
+    "100644 blob 7e8bb13323fc17584d43b3bc1738774afc04bfa5\ttools/tests/test_p11_acceptance_closure.py",
+    "100644 blob bac4b7358239c5150b4c8796ba0919b996f6253d\ttools/tests/test_p11_factory_coverage.py",
+    "100644 blob f0e0278ac03d102f87928721940d4371bb64b981\ttools/tests/test_p11_integrated_candidate.py"
+  ],
+  "historical_source_refs_preserved": true,
+  "r2_review": "14f72ca8 qualified CLEAN (trusted handoff)",
+  "selector_review": "R1 pure six mock tests; b1b9ce1; driver 51fd",
+  "full_native_or_whole_head_validation": false,
+  "checks": {
+    "selector_pure_tests": 6,
+    "data_replay": "PASS: 297 pins, 12 windows, five negative cases",
+    "ruff_check": "PASS Ruff 0.17.4",
+    "ruff_format": "PASS on copied reproducer"
+  },
+  "source_artifacts_sha256": "47b9a556129417153bb4c35028747794d59f6ae88e54ef50bfe9cb09c4aba11e",
+  "source_pin_count": 297,
+  "source_artifact_count": 7,
+  "copied_script_changes": "Ruff format; report ctx lambda replaced by typed def; comparison/report bytes unchanged",
+  "new_pair_terminal": {
+    "native_handle": 21523,
+    "exit_code": 0,
+    "status": "REPLACEMENT_PAIR_RECORDED_REVIEW_REQUIRED",
+    "full": {
+      "duration_s": 900.0410538800061,
+      "cpu_s": 0.04,
+      "pss_end_kib": 144969,
+      "private_dirty_end_kib": 97708,
+      "group_pids": [
+        3328121,
+        3328216
+      ],
+      "sampler_outside_group": 3328083,
+      "wakeups": null,
+      "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+    },
+    "engine": {
+      "duration_s": 900.031132714008,
+      "cpu_s": 0.03,
+      "pss_end_kib": 47451,
+      "private_dirty_end_kib": 16376,
+      "group_pids": [
+        3346662
+      ],
+      "sampler_outside_group": 3328083,
+      "wakeups": null,
+      "wakeups_reason": "Без kernel tracing /proc не содержит точного per-process wakeup count; context switches опубликованы только как proxy."
+    },
+    "config_bytes_equal": true,
+    "config_sha256": "72dce20688cdad920ecdabe6e441164d17b834737e3315d04d390edc2e1e5cf8",
+    "result_config_sha256": "72dce20688cdad920ecdabe6e441164d17b834737e3315d04d390edc2e1e5cf8",
+    "manifest_sha256": "21f90aa0776ba26870c0e691c7479d9a122efbd64e961ae4beac8d781b51033e",
+    "pin_errors": [],
+    "owned_identity_checks": [
+      {
+        "pid": 3328083,
+        "starttime": "9257882",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328121,
+        "starttime": "9257928",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328216,
+        "starttime": "9258143",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3346662,
+        "starttime": "9348176",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328101,
+        "starttime": "9257915",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328117,
+        "starttime": "9257921",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328118,
+        "starttime": "9257921",
+        "proc_present": false,
+        "same_identity_alive": false
+      },
+      {
+        "pid": 3328119,
+        "starttime": "9257921",
+        "proc_present": false,
+        "same_identity_alive": false
+      }
+    ],
+    "live_owned_identities": [],
+    "failure_json_present": false,
+    "cleanup_fallbacks": [],
+    "result_sha256": "eb0442a7b0665e2b529e07724fe826586210c270c730732f5f7a20d31785bf0b",
+    "verified_unix": 1794664202.8129756
+  }
+}
