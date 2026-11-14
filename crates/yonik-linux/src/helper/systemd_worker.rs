@@ -207,6 +207,7 @@ impl RawIdentityIo for FixtureIdentityIo {
     }
 }
 impl BootstrapUnitObservation {
+    pub(super) fn native_pid(&self) -> u32 { self.pid }
     /// Только transport observation: NS_GET_NSTYPE/kernel attestation обязательны
     /// отдельно. Возвращаемое значение не может активировать attribution.
     pub fn exchange(
@@ -251,7 +252,7 @@ impl BootstrapUnitObservation {
         }
         Ok(())
     }
-    fn validate_identity(&self) -> Result<()> {
+    pub(super) fn validate_identity(&self) -> Result<()> {
         let io: &dyn RawIdentityIo = &RealIdentityIo;
         #[cfg(test)]
         let io: &dyn RawIdentityIo = self.fixture_io.as_ref().map_or(io, |fixture| fixture);
@@ -919,6 +920,17 @@ impl SystemWorkerSupervisor {
         }
         Ok((ack, binding))
     }
+    pub(super) async fn validate_native_profile_context(
+        &self, observation: &BootstrapUnitObservation,
+        cancel: &mut Cancellation, deadline: Instant,
+    ) -> Result<()> {
+        observation.validate_identity()?;
+        bounded(cancel, deadline, self.validate_contract()).await?;
+        observation.validate_identity()?;
+        let state = bounded(cancel, deadline, self.state(WorkerMode::Run)).await?;
+        observation.validate_state(&state)?;
+        observation.validate_identity()
+    }
     async fn revalidate_binding(
         &self,
         binding: &InvocationBinding,
@@ -1335,12 +1347,12 @@ async fn bounded<T>(
     tokio::select! {biased; _=cancel.cancelled()=>Err(WorkerSupervisorError::Cancelled),_=tokio::time::sleep_until(deadline)=>Err(WorkerSupervisorError::Timeout),result=operation=>result}
 }
 
-const FILE_FLAGS: OFlags = OFlags::RDONLY
+pub(super) const FILE_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
     .union(OFlags::NOFOLLOW)
     .union(OFlags::NONBLOCK);
 const DIR_FLAGS: OFlags = FILE_FLAGS.union(OFlags::DIRECTORY);
-fn trusted(file: &File, directory: bool) -> Result<()> {
+pub(super) fn trusted(file: &File, directory: bool) -> Result<()> {
     let m = file.metadata().map_err(unavailable)?;
     if m.uid() != 0
         || m.mode() & 0o022 != 0
@@ -1351,12 +1363,12 @@ fn trusted(file: &File, directory: bool) -> Result<()> {
     }
     Ok(())
 }
-fn child(parent: &File, name: &str) -> Result<File> {
+pub(super) fn child(parent: &File, name: &str) -> Result<File> {
     let file = File::from(openat(parent, name, DIR_FLAGS, Mode::empty()).map_err(unavailable)?);
     trusted(&file, true)?;
     Ok(file)
 }
-fn root() -> Result<File> {
+pub(super) fn root() -> Result<File> {
     let file = File::from(open("/", DIR_FLAGS, Mode::empty()).map_err(unavailable)?);
     trusted(&file, true)?;
     Ok(file)
@@ -1371,7 +1383,7 @@ fn read_bounded(file: File) -> Result<String> {
     }
     Ok(contents)
 }
-fn verify_installed() -> Result<()> {
+pub(super) fn verify_installed() -> Result<()> {
     let mut parent = root()?;
     for component in ["usr", "lib", "systemd", "system"] {
         parent = child(&parent, component)?;
