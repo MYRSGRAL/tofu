@@ -460,6 +460,25 @@ fn native_activation_ready(active: &str, pid: u32) -> Result<bool> {
         _ => Err(WorkerSupervisorError::Stale),
     }
 }
+/// Отмена выигрывает select, но завершённый неполученный результат остаётся owning.
+async fn wait_owned<T>(
+    slot: &mut Option<JoinHandle<T>>,
+    cancel: &mut Cancellation,
+    deadline: Instant,
+) -> Result<T> {
+    let handle = slot.as_mut().ok_or(WorkerSupervisorError::Protocol)?;
+    let mut joined = false;
+    let result = bounded(cancel, deadline, async {
+        let result = handle.await.map_err(unavailable);
+        joined = true;
+        result
+    })
+    .await;
+    if joined {
+        *slot = None;
+    }
+    result
+}
 type NativeAdmission = Result<(
     super::native_bootstrap::VerifiedPendingRun,
     crate::worker::anchor_exchange::NamespaceObservation,
@@ -750,7 +769,7 @@ impl SystemWorkerSupervisor {
             })
             .await?;
         }
-        let mut observation = self.inspect_anchor_bootstrap().await?;
+        let mut observation = bounded(cancel, deadline, self.inspect_anchor_bootstrap()).await?;
         observation.expires = deadline;
         let pid = observation.pid;
         let uid = observation.uid;
@@ -772,22 +791,8 @@ impl SystemWorkerSupervisor {
             let _permit = permit;
             pending.receive_blocking(admission_stream)
         }));
-        let handle = self
-            .native_admission
-            .as_mut()
-            .ok_or(WorkerSupervisorError::Protocol)?;
-        let result = bounded(cancel, deadline, async {
-            handle.await.map_err(unavailable)?
-        })
-        .await;
-        if self
-            .native_admission
-            .as_ref()
-            .is_some_and(JoinHandle::is_finished)
-        {
-            self.native_admission = None;
-        }
-        let (pending, custody, frame) = result?;
+        let (pending, custody, frame) =
+            wait_owned(&mut self.native_admission, cancel, deadline).await??;
         self.native_custody = Some(custody.retention());
         let coverage = pending
             .finish_receive(self, owner, custody, frame, cancel)
@@ -869,22 +874,7 @@ impl SystemWorkerSupervisor {
                 .send_output_before(&stream, WorkerMode::Run, None, deadline.into_std())
                 .map_err(unavailable)
         }));
-        let handle = self
-            .native_transfer
-            .as_mut()
-            .ok_or(WorkerSupervisorError::Protocol)?;
-        let result = bounded(cancel, deadline, async {
-            handle.await.map_err(unavailable)?
-        })
-        .await;
-        if self
-            .native_transfer
-            .as_ref()
-            .is_some_and(JoinHandle::is_finished)
-        {
-            self.native_transfer = None;
-        }
-        let ack = result?;
+        let ack = wait_owned(&mut self.native_transfer, cancel, deadline).await??;
         if ack.status != WorkerStatus::Accepted || ack.pid != pid {
             return Err(WorkerSupervisorError::Protocol);
         }
@@ -1897,6 +1887,46 @@ pub(super) fn unit_owner_payload() -> Arc<WorkerPayload> {
 #[cfg(test)]
 mod native_activation_tests {
     use super::*;
+    #[tokio::test]
+    async fn ready_admission_result_cancel_retains_ownership_until_consumed() {
+        struct Guard(Arc<AtomicBool>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Guard(Arc::clone(&dropped));
+        let mut slot = Some(tokio::spawn(async move { guard }));
+        tokio::task::yield_now().await;
+        assert!(slot.as_ref().unwrap().is_finished());
+        let (cancel_tx, mut cancel) = Cancellation::new();
+        cancel_tx.send(true).unwrap();
+        assert!(matches!(
+            wait_owned(&mut slot, &mut cancel, Instant::now() + DEADLINE).await,
+            Err(WorkerSupervisorError::Cancelled)
+        ));
+        assert!(slot.is_some());
+        assert!(!dropped.load(Ordering::Acquire));
+        let (_keep, mut fresh) = Cancellation::new();
+        let retained = wait_owned(&mut slot, &mut fresh, Instant::now() + DEADLINE)
+            .await
+            .unwrap();
+        assert!(slot.is_none());
+        assert!(!dropped.load(Ordering::Acquire));
+        drop(retained);
+        assert!(dropped.load(Ordering::Acquire));
+    }
+    #[tokio::test]
+    async fn bootstrap_inspection_uses_existing_absolute_deadline() {
+        let (_keep, mut cancel) = Cancellation::new();
+        let result = bounded(&mut cancel, Instant::now(), async {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(())
+        })
+        .await;
+        assert_eq!(result, Err(WorkerSupervisorError::Timeout));
+    }
     #[tokio::test]
     async fn cancelled_wait_retains_owned_transfer_until_join() {
         struct Guard(Arc<AtomicBool>);
