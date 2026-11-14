@@ -59,7 +59,7 @@ pub fn probe_process(pid: u32) -> Result<(), AttributionFailure> {
 /// Initial bus credential capture, не attested PeerProcess и не native authority.
 pub(crate) struct CapturedBusPeer(std::sync::Arc<CapturedBusScope>);
 pub(crate) struct CapturedBusScope {
-    bus: crate::helper::service::BusPeerIdentity,
+    bus: crate::helper::native_bootstrap::BusPeerIdentity,
     pidfd: std::os::fd::OwnedFd,
     pid: u32,
     uid: u32,
@@ -102,7 +102,7 @@ impl CapturedBusScope {
 }
 impl CapturedBusPeer {
     pub(crate) fn capture(
-        bus: crate::helper::service::BusPeerIdentity,
+        bus: crate::helper::native_bootstrap::BusPeerIdentity,
     ) -> Result<Self, AttributionFailure> {
         if !bus.validate() {
             return Err(AttributionFailure::ProcessChanged);

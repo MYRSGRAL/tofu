@@ -1,5 +1,6 @@
 //! Lifetime ровно actual unique D-Bus owner. Не permission/native permit.
-use super::{MAX_IN_FLIGHT, MAX_PENDING, PreparedError};
+use super::{MAX_IN_FLIGHT, PreparedError};
+use crate::helper::MAX_PENDING;
 use std::{
     collections::HashMap,
     sync::{
