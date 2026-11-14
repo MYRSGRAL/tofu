@@ -261,6 +261,29 @@ class ProcessGuard:
         deadline = time.monotonic() + 10
         errors = []
         group_reserved = False
+
+        def census() -> None:
+            try:
+                self.discover()
+            except Exception as error:
+                # Ошибка наблюдения запрещает COMPLETE, но не завершение группы.
+                errors.append(f"cleanup census: {error}")
+
+        def reap_group() -> None:
+            if not group_reserved:
+                return
+            while True:
+                try:
+                    pid, _ = os.waitpid(-self.process.pid, os.WNOHANG)
+                except ChildProcessError:
+                    return
+                if pid:
+                    continue
+                if time.monotonic() >= deadline:
+                    errors.append("owned group reap deadline")
+                    return
+                time.sleep(0.01)
+
         try:
             # WNOWAIT подтверждает, что direct child не reap внешним кодом.
             os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
@@ -275,7 +298,7 @@ class ProcessGuard:
                 if identity(self.process.pid) != self.identity:
                     group_reserved = False
                     errors.append("live namespace/executable identity mismatch")
-            self.discover()
+            census()
             for number in (signal.SIGTERM, signal.SIGKILL):
                 if group_reserved:
                     try:
@@ -291,7 +314,7 @@ class ProcessGuard:
                 if number == signal.SIGTERM:
                     # Не reap leader до KILL: числовой PGID остаётся зарезервирован.
                     time.sleep(min(1, max(0, deadline - time.monotonic())))
-                    self.discover()
+                    census()
             if self.pidfd is not None:
                 while not exited(self.pidfd) and time.monotonic() < deadline:
                     select.select(
@@ -301,11 +324,12 @@ class ProcessGuard:
                         min(0.1, max(0, deadline - time.monotonic())),
                     )
             # Последний census до reap leader сохраняет reservation числового SID.
-            self.discover()
+            census()
             for fd in self.tracked.values():
                 if not exited(fd):
                     signal.pidfd_send_signal(fd, signal.SIGKILL)
             self.process.wait(timeout=max(0.01, deadline - time.monotonic()))
+            reap_group()
             reaped = []
             for pid, fd in self.tracked.items():
                 while not exited(fd) and time.monotonic() < deadline:
@@ -332,6 +356,12 @@ class ProcessGuard:
             )
         except BaseException as error:
             errors.append(str(error))
+            # После wait leader reservation уже освобождена; PGID нельзя трогать.
+            if group_reserved and self.process.returncode is None:
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             # pidfd остаётся безопасным адресатом даже при испорченном metadata.
             for fd in [self.pidfd, *self.tracked.values()]:
                 if fd is not None and not exited(fd):
@@ -340,6 +370,7 @@ class ProcessGuard:
                 self.process.wait(timeout=max(0.01, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 errors.append("cleanup deadline")
+            reap_group()
             self.cleanup = dict(
                 reaped=self.process.returncode is not None, errors=errors
             )

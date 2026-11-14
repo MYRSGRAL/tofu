@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -12,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
     "campaign_runner", Path(__file__).with_name("runner.py")
@@ -77,6 +79,31 @@ class OwnershipTests(unittest.TestCase):
                 self.assertFalse(Path(f"/proc/{child.process.pid}").exists())
                 self.assertFalse(Path(f"/proc/{descendant}").exists())
                 self.assertTrue(child.guard.cleanup["reaped"])
+
+    def test_census_error_still_kills_unpinned_owned_group(self) -> None:
+        code = "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)"
+        parent = f"import signal,subprocess,sys,time,json;signal.signal(signal.SIGTERM,signal.SIG_IGN);p=subprocess.Popen([sys.executable,'-c',{code!r}]);print(json.dumps({{'child':p.pid}}),flush=True);time.sleep(60)"
+        child = runner.TrackedChild(
+            [sys.executable, "-u", "-c", parent], self.root / "census.stderr"
+        )
+        report, _ = child.ack(5)
+        descendant = report["child"]
+        try:
+            with patch.object(child.guard, "discover", side_effect=OSError("census")):
+                with self.assertRaises(runner.CoverageError):
+                    child.close()
+            self.assertFalse(Path(f"/proc/{child.process.pid}").exists())
+            self.assertFalse(Path(f"/proc/{descendant}").exists())
+        finally:
+            # Изолированный RED не должен оставлять собственного потомка.
+            try:
+                os.kill(descendant, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                os.waitpid(descendant, 0)
+            except ChildProcessError:
+                pass
 
     def test_malformed_metadata_after_spawn_cannot_skip_finally_or_emit_complete(
         self,
