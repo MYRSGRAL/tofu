@@ -3,7 +3,7 @@
 use super::{
     BootstrapUnitObservation, SystemWorkerSupervisor, WorkerSupervisorError as Error,
     kernel_evidence::{self, Expected},
-    native_profile::VerifiedInstalledProfile,
+    native_profile::{CandidateInstalledProfile, VerifiedInstalledProfile},
     run_authorization::{RunAuthority, RunAuthorization, RunRevocationGuard},
 };
 use crate::{
@@ -18,7 +18,7 @@ pub(crate) type NativeRoleContext = ([u8; 32], [u8; 16], u64, [u8; 16], u64, [u8
 type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) struct VerifiedPendingRun {
-    profile: VerifiedInstalledProfile,
+    profile: CandidateInstalledProfile,
     authorization: RunAuthorization,
     expected: Expected,
     deadline: Deadline,
@@ -54,7 +54,7 @@ impl VerifiedPendingRun {
             return Err(Error::Stale);
         }
         let profile =
-            VerifiedInstalledProfile::verify(supervisor, observation, cancel, deadline).await?;
+            CandidateInstalledProfile::verify(supervisor, observation, cancel, deadline).await?;
         if profile.policy_digest() != yonik_nsfs::fixed_self_fence::PROFILE_DIGEST {
             return Err(Error::Untrusted);
         }
@@ -153,9 +153,10 @@ impl VerifiedPendingRun {
             .validate_owner(owner)
             .map_err(|_| Error::Untrusted)?;
         validate_receive_admission(&self.authorization, self.deadline)?;
+        let executable = custody.take_executable().map_err(|_| Error::UnitProofGap)?;
         let profile = self
             .profile
-            .revalidate(supervisor, cancel, self.deadline)
+            .verify_executable(supervisor, executable, cancel, self.deadline)
             .await?;
         self.authorization
             .validate_owner(owner)

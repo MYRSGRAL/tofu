@@ -706,20 +706,20 @@ impl SystemWorkerSupervisor {
         deadline: Instant,
     ) -> Result<()> {
         // Ожидаемый fixed cgroup — единственный terminal fence. Неизвестность хранит guard.
-        match bounded(cancel, deadline, self.properties(&name, UNIT_IFACE)).await {
+        match bounded(cancel, deadline, self.properties(name, UNIT_IFACE)).await {
             Ok(unit) => {
                 let service =
-                    bounded(cancel, deadline, self.properties(&name, SERVICE_IFACE)).await?;
+                    bounded(cancel, deadline, self.properties(name, SERVICE_IFACE)).await?;
                 validate_properties(
                     &unit,
                     &service,
                     uid,
                     gid,
-                    &name,
+                    name,
                     matches!(
                         string(&unit, "ActiveState")?.as_str(),
                         "inactive" | "failed"
-                    ) && leaf_empty(&name)?,
+                    ) && leaf_empty(name)?,
                 )?;
                 if let Some(identity) = identity {
                     let invocation = array(&unit, "InvocationID")?;
@@ -727,16 +727,16 @@ impl SystemWorkerSupervisor {
                         return Err(WorkerSupervisorError::Stale);
                     }
                 }
-                bounded(cancel, deadline, self.unit_job("StopUnit", &name)).await?;
+                bounded(cancel, deadline, self.unit_job("StopUnit", name)).await?;
             }
             Err(error) => {
-                if !self.lookup_absent(&name, cancel, deadline).await? {
+                if !self.lookup_absent(name, cancel, deadline).await? {
                     return Err(error);
                 }
             }
         }
         loop {
-            if leaf_empty(&name)? {
+            if leaf_empty(name)? {
                 return Ok(());
             }
             bounded(cancel, deadline, async {

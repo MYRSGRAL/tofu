@@ -191,38 +191,71 @@ impl InstalledContract {
     }
 }
 struct ExecutableIdentity {
-    _actual: File,
+    actual: File,
 }
-impl ExecutableIdentity {
-    fn verify(
-        observation: &BootstrapUnitObservation,
-        installed: &InstalledContract,
-        deadline: std::time::Instant,
-    ) -> Result<Self> {
-        observation.validate_identity()?;
-        // Единственная намеренная proc magic-link: actual exe canonical pidfd/start.
-        // Никакой путь из sidecar или caller здесь не используется.
-        let actual = File::open(format!("/proc/{}/exe", observation.native_pid()))
+fn verify_actual_image(
+    installed: &InstalledContract,
+    image: &File,
+    deadline: std::time::Instant,
+) -> Result<()> {
+    use std::os::unix::fs::FileExt;
+    static_deadline(deadline)?;
+    immutable(image)?;
+    let before = stamp(image)?;
+    if before != stamp(&installed.image)? || before.len == 0 || before.len > MAX_ELF {
+        return Err(Error::Untrusted);
+    }
+    let mut offset = 0u64;
+    let mut digest = Sha256::new();
+    let mut bytes = [0u8; 16384];
+    while offset < before.len {
+        static_deadline(deadline)?;
+        let count = image
+            .read_at(&mut bytes, offset)
             .map_err(|_| Error::Unavailable)?;
-        immutable(&actual)?;
-        if stamp(&actual)? != stamp(&installed.image)?
-            || hash(&actual, MAX_ELF, true, deadline)? != installed.deployment.worker_sha256
+        if count == 0
+            || offset
+                .checked_add(count as u64)
+                .is_none_or(|v| v > before.len)
         {
+            return Err(Error::Stale);
+        }
+        if offset == 0 && (count < 4 || &bytes[..4] != b"\x7fELF") {
             return Err(Error::Untrusted);
         }
-        observation.validate_identity()?;
-        Ok(Self { _actual: actual })
+        digest.update(&bytes[..count]);
+        offset += count as u64;
     }
+    let actual: [u8; 32] = digest.finalize().into();
+    static_deadline(deadline)?;
+    if stamp(image)? != before || actual != installed.deployment.worker_sha256 {
+        return Err(Error::Stale);
+    }
+    Ok(())
 }
-
-/// Move-only owning input будущего coverage verifier. Не UnitProfile/permit.
-/// Поля закрыты; нет bytes/FD/bool конструктора, Clone или Serialize.
+fn same_deployment(old: &InstalledContract, fresh: &InstalledContract) -> Result<()> {
+    if stamp(&old.image)? != stamp(&fresh.image)?
+        || old.deployment.worker_sha256 != fresh.deployment.worker_sha256
+        || old.deployment.source_archive_sha256 != fresh.deployment.source_archive_sha256
+        || old.deployment.policy_sha256 != fresh.deployment.policy_sha256
+        || old.deployment.kernel_build_id != fresh.deployment.kernel_build_id
+    {
+        return Err(Error::Stale);
+    }
+    Ok(())
+}
+/// До authenticated own-exe FD: только static/canonical candidate, не coverage.
+pub(super) struct CandidateInstalledProfile {
+    observation: BootstrapUnitObservation,
+    installed: InstalledContract,
+}
+/// Выдаётся исключительно consuming candidate после exact canonical v4 own-exe FD.
 pub(super) struct VerifiedInstalledProfile {
     observation: BootstrapUnitObservation,
     installed: InstalledContract,
-    _executable: ExecutableIdentity,
+    executable: ExecutableIdentity,
 }
-impl VerifiedInstalledProfile {
+impl CandidateInstalledProfile {
     pub(super) async fn verify(
         supervisor: &SystemWorkerSupervisor,
         observation: BootstrapUnitObservation,
@@ -233,81 +266,70 @@ impl VerifiedInstalledProfile {
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
         let installed = InstalledContract::verify(deadline.into_std())?;
-        let executable = ExecutableIdentity::verify(&observation, &installed, deadline.into_std())?;
         supervisor
             .validate_native_profile_context(&observation, cancel, deadline)
             .await?;
         Ok(Self {
             observation,
             installed,
-            _executable: executable,
         })
     }
-    /// Consuming recheck после await; старый token при ошибке уничтожается.
-    /// Consumers удерживают возвращённый token до consume coverage/owner lease.
+    pub(super) fn observation(&self) -> &BootstrapUnitObservation {
+        &self.observation
+    }
+    pub(super) fn policy_digest(&self) -> [u8; 32] {
+        self.installed.deployment.policy_sha256
+    }
+    pub(super) async fn verify_executable(
+        self,
+        supervisor: &SystemWorkerSupervisor,
+        actual: File,
+        cancel: &mut Cancellation,
+        deadline: Instant,
+    ) -> Result<VerifiedInstalledProfile> {
+        supervisor
+            .validate_native_profile_context(&self.observation, cancel, deadline)
+            .await?;
+        let installed = InstalledContract::verify(deadline.into_std())?;
+        same_deployment(&self.installed, &installed)?;
+        verify_actual_image(&installed, &actual, deadline.into_std())?;
+        self.observation.validate_identity()?;
+        supervisor
+            .validate_native_profile_context(&self.observation, cancel, deadline)
+            .await?;
+        // После await повторяем retained FD checks без root /proc/<worker>/exe/ns.
+        verify_actual_image(&installed, &actual, deadline.into_std())?;
+        Ok(VerifiedInstalledProfile {
+            observation: self.observation,
+            installed,
+            executable: ExecutableIdentity { actual },
+        })
+    }
+}
+impl VerifiedInstalledProfile {
     pub(super) async fn revalidate(
         self,
         supervisor: &SystemWorkerSupervisor,
         cancel: &mut Cancellation,
         deadline: Instant,
     ) -> Result<Self> {
-        let fresh = Self::verify(supervisor, self.observation, cancel, deadline).await?;
-        if fresh.installed.deployment.worker_sha256 != self.installed.deployment.worker_sha256
-            || fresh.installed.deployment.source_archive_sha256
-                != self.installed.deployment.source_archive_sha256
-            || fresh.installed.deployment.policy_sha256 != self.installed.deployment.policy_sha256
-        {
-            return Err(Error::Stale);
-        }
-        Ok(fresh)
-    }
-    pub(super) fn policy_digest(&self) -> [u8; 32] {
-        self.installed.deployment.policy_sha256
+        let candidate = CandidateInstalledProfile {
+            observation: self.observation,
+            installed: self.installed,
+        };
+        candidate
+            .verify_executable(supervisor, self.executable.actual, cancel, deadline)
+            .await
     }
     pub(super) fn observation(&self) -> &BootstrapUnitObservation {
         &self.observation
     }
-}
-
-impl VerifiedInstalledProfile {
     pub(super) fn verify_lookup_image(
         &self,
         image: &File,
         deadline: std::time::Instant,
     ) -> Result<()> {
-        use std::os::unix::fs::FileExt;
-        immutable(image)?;
-        let before = stamp(image)?;
-        if before != stamp(&self.installed.image)? || before.len == 0 || before.len > MAX_ELF {
-            return Err(Error::Untrusted);
-        }
-        // read_at не зависит от offset shared FD и не меняет его у owner.
-        let mut offset = 0u64;
-        let mut digest = Sha256::new();
-        let mut bytes = [0u8; 16384];
-        while offset < before.len {
-            let count = image
-                .read_at(&mut bytes, offset)
-                .map_err(|_| Error::Unavailable)?;
-            if count == 0
-                || offset
-                    .checked_add(count as u64)
-                    .is_none_or(|v| v > before.len)
-            {
-                return Err(Error::Stale);
-            }
-            if offset == 0 && (count < 4 || &bytes[..4] != b"\x7fELF") {
-                return Err(Error::Untrusted);
-            }
-            digest.update(&bytes[..count]);
-            offset += count as u64;
-        }
-        let actual: [u8; 32] = digest.finalize().into();
-        static_deadline(deadline)?;
-        if stamp(image)? != before || actual != self.installed.deployment.worker_sha256 {
-            return Err(Error::Stale);
-        }
-        Ok(())
+        verify_actual_image(&self.installed, image, deadline)
     }
 }
 
