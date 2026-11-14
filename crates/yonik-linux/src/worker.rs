@@ -32,6 +32,10 @@ use yonik_engine::{CompiledConfig, Engine};
 #[cfg(test)]
 mod output_transport;
 
+// Frozen c083 receipt helper: форматирование не меняет проверенные байты.
+#[rustfmt::skip]
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64", target_env = "gnu"))]
+mod fixed_fence_receipt;
 pub mod anchor_exchange;
 pub mod role_handoff;
 
