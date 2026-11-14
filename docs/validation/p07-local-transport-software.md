@@ -37,3 +37,40 @@ assertion следует перевести на System compiler (Local success 
 До этой правки полный engine suite заведомо содержит устаревшее ожидание.
 Compile, новые tests и pure ELF проверки остаются pending до одного root refresh.
 Cores/Host/worker/proc/network/services/VM не запускались. **Full P07/P15 NOT PASS.**
+
+## Correction R2 P1: реальный Local Connect
+
+После ordinary merge a4e57632d3916aa724aa00e223b73885615bc80c (включая
+root correction пустого sing-box child и старого engine test) Local Connect
+больше не вызывает generic `yonik_engine::compile`.
+Цепочка: Command::Connect → `Actor::local_connect_config` →
+`persisted_local_draft` → `compile_local_connect` → `compile_policy` →
+`session(compiled, ...)` → CheckedConfig::validate → LocalSession.
+Pure regression вызывает именно `compile_local_connect`, выбранный этим callsite,
+и проверяет UDP/port Block, default, probe override/credentials/отдельный порт;
+это source regression, execution остаётся pending.
+
+Actor повторно читает selected profile через select_profile с snapshot revision,
+проверяет selected/source IDs, source generation и schedule generation; затем
+перечитывает encrypted routing draft, сверяет revision и сериализованное содержимое
+с текущим UI draft. Несовпадение/повреждение возвращает ошибку. Compiler использует
+fresh server и persisted draft. После await проверяется command generation через
+существующий await_current_schedule до создания Cancellation/session task.
+Session generation, cancellation, readiness/check/cleanup остаются прежними.
+
+PolicyMode выбирается как в существующем preset compiler: Names при enabled
+доменах, иначе IpOnly. Mixed domain/CIDR не получает DNS fallback: прежний compiler
+gate возвращает ошибку. Enabled resource reference получает явный Unsupported
+(`unsupported_option` в selection helper; существующий ранний draft.policy gate
+может вернуть routing_storage раньше). Resource-bound session wiring отсутствует,
+поэтому inline-only session не создаётся; refs/AND/OR не отбрасываются.
+
+Probe port выбирается существующей available_port(0), проверяющей TCP и UDP,
+с bounded retry и явным отличием от listen. Это существующая проверка доступности,
+а не FD reservation: ядро не принимает listener FD, гонка bind остаётся как прежде.
+Никакой арифметики port+1. CheckedConfig сохраняет probe_port и ProbeAccess для
+LocalSession::check; проверка readiness идёт через private authenticated inbound.
+
+Standalone rustfmt/diff-check выполнены. Cargo/build/test/clippy/ELF и runtime
+запрещены до terminal release root capture03; остаются PENDING. Ветка требует
+root review/проверки перед merge. Full P07/P15 NOT PASS.
