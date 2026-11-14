@@ -460,6 +460,11 @@ fn native_activation_ready(active: &str, pid: u32) -> Result<bool> {
         _ => Err(WorkerSupervisorError::Stale),
     }
 }
+type NativeAdmission = Result<(
+    super::native_bootstrap::VerifiedPendingRun,
+    crate::worker::anchor_exchange::NamespaceObservation,
+    [u8; 512],
+)>;
 struct NativeRuntime {
     stamp: Arc<std::sync::Mutex<Option<super::native_bootstrap::RuntimeScopeStamp>>>,
     stop: Arc<AtomicBool>,
@@ -491,10 +496,18 @@ pub struct SystemWorkerSupervisor {
     fence: Box<dyn WorkerFence>,
     native_runtime: Option<NativeRuntime>,
     native_transfer: Option<JoinHandle<Result<WorkerAck>>>,
+    native_admission: Option<JoinHandle<NativeAdmission>>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
         if !self.clean {
+            if let Some(task) = self.native_admission.take() {
+                std::mem::forget(task);
+            }
+            if let Some(task) = self.native_transfer.take() {
+                std::mem::forget(task);
+            }
+
             if let Some(runtime) = self.native_runtime.take() {
                 std::mem::forget(runtime);
             }
@@ -547,6 +560,7 @@ impl SystemWorkerSupervisor {
                 fence: Box::new(SystemFence),
                 native_runtime: None,
                 native_transfer: None,
+                native_admission: None,
             };
             supervisor.validate_contract().await?;
             // Startup лишь проверяет состояние. Старый worker останавливает только recover.
@@ -746,7 +760,31 @@ impl SystemWorkerSupervisor {
             deadline,
         )
         .await?;
-        let coverage = pending.receive(self, owner, &stream, cancel).await?;
+        let admission_stream = stream.try_clone().map_err(unavailable)?;
+        let permit = Arc::clone(&self.permit);
+        self.native_admission = Some(tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            pending.receive_blocking(admission_stream)
+        }));
+        let handle = self
+            .native_admission
+            .as_mut()
+            .ok_or(WorkerSupervisorError::Protocol)?;
+        let result = bounded(cancel, deadline, async {
+            handle.await.map_err(unavailable)?
+        })
+        .await;
+        if self
+            .native_admission
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+        {
+            self.native_admission = None;
+        }
+        let (pending, custody, frame) = result?;
+        let coverage = pending
+            .finish_receive(self, owner, custody, frame, cancel)
+            .await?;
         let handoff = coverage.take_handoff()?;
         let (helper, worker) = rustix::net::socketpair(
             rustix::net::AddressFamily::UNIX,
@@ -1184,6 +1222,14 @@ impl SystemWorkerSupervisor {
         // Сначала запрет новой активации, затем завершение уже начатой передачи.
         for mode in [WorkerMode::Check, WorkerMode::Run] {
             bounded(cancel, deadline, self.unit_job("StopUnit", mode.socket())).await?;
+        }
+        if let Some(handle) = self.native_admission.as_mut() {
+            bounded(cancel, deadline, async {
+                let _result = handle.await.map_err(unavailable)?;
+                Ok(())
+            })
+            .await?;
+            self.native_admission = None;
         }
         if let Some(handle) = self.native_transfer.as_mut() {
             bounded(cancel, deadline, async {
