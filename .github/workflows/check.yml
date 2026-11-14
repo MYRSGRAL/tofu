@@ -40,7 +40,10 @@ jobs:
       - name: Выполнить тесты
         # FD/flock fixtures требуют отсутствия fork из соседнего harness-теста.
         # Assertions и полный состав workspace-тестов сохраняются.
-        run: cargo +1.85.1 test --workspace --locked -- --test-threads=1
+        # Собственный P10 harness не принимает аргументы libtest.
+        env:
+          RUST_TEST_THREADS: '1'
+        run: cargo +1.85.1 test --workspace --locked
       - name: Проверить pure N5 guest driver
         run: |
           cargo +1.85.1 clippy -p yonik-desktop --example n5_guest_driver --features test-support --locked -- -D warnings
