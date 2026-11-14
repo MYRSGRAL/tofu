@@ -99,6 +99,10 @@ impl RunAuthority {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| RunAuthorizationError::Consumed)?;
         let token = RunAuthorization {
+            captured_scope: self
+                .owner_binding
+                .as_ref()
+                .map(|binding| binding.captured()),
             application_view: self.owner_binding.as_ref().map(|b| b.view()),
             owner_binding: self.owner_binding.as_ref().map(|b| b.ownership()),
             session: self.session,
@@ -125,6 +129,7 @@ impl Drop for RunAuthority {
 }
 
 pub(crate) struct RunAuthorization {
+    captured_scope: Option<Arc<crate::attribution::CapturedBusScope>>,
     application_view: Option<[(u64, u64); 3]>,
     owner_binding: Option<crate::managed_network::Ownership>,
     session: [u8; 16],
@@ -149,6 +154,14 @@ impl RunAuthorization {
     pub(super) fn validate(&self) -> Result<(), RunAuthorizationError> {
         if self.revoked.load(Ordering::Acquire) {
             return Err(RunAuthorizationError::Revoked);
+        }
+        if let Some(scope) = self.captured_scope.as_ref() {
+            scope
+                .validate()
+                .map_err(|_| RunAuthorizationError::Revoked)?;
+        } else {
+            #[cfg(not(test))]
+            return Err(RunAuthorizationError::InvalidContext);
         }
         if self.session == [0; 16]
             || self.nonce == [0; 32]

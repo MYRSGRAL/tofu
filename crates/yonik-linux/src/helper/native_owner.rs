@@ -12,12 +12,16 @@ pub(super) struct NativeArtifactStamp {
 /// Создаётся только consuming commit после exact record/queue проверки.
 pub(in crate::helper) struct OwnerBinding {
     view: [(u64, u64); 3],
+    captured: Arc<crate::attribution::CapturedBusScope>,
     owner: crate::managed_network::Ownership,
     session: [u8; 16],
     generation: u64,
     epoch: u64,
 }
 impl OwnerBinding {
+    pub(in crate::helper) fn captured(&self) -> Arc<crate::attribution::CapturedBusScope> {
+        Arc::clone(&self.captured)
+    }
     pub(in crate::helper) fn view(&self) -> [(u64, u64); 3] {
         self.view
     }
@@ -350,9 +354,19 @@ impl super::Backend {
         if view[0] != record.owner.namespace() {
             return Err(ServiceError::Unsupported);
         }
+        let captured = record
+            .artifact
+            .peer
+            .as_ref()
+            .ok_or(ServiceError::Unsupported)?
+            .captured()
+            .map_err(super::unavailable)?
+            .retained_scope();
+        captured.validate().map_err(super::unavailable)?;
         self.native_owner.consume(stamp)?;
         let authority = RunAuthority::from_bound(OwnerBinding {
             view,
+            captured,
             owner: record.owner,
             session: stamp.session,
             generation: stamp.generation,
