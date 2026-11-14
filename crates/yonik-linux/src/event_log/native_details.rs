@@ -59,7 +59,7 @@ fn digits(s: &str) -> bool {
 }
 fn sing_prefix<'a>(s: &'a str, level: &str, colored: &str) -> Option<&'a str> {
     let rest = s.strip_prefix(level).or_else(|| s.strip_prefix(colored))?;
-    // log.New при timestamp=false не выводит elapsed prefix вовсе.
+    // Без timestamp файловый output не содержит elapsed; stderr сохраняет [ssss].
     if let Some(body) = rest.strip_prefix(' ') {
         return Some(body);
     }
@@ -469,11 +469,11 @@ mod tests {
     }
 
     #[test]
-    fn normal_generated_info_without_timestamp() {
+    fn file_output_info_without_timestamp() {
         for prefix in ["INFO ", "\x1b[36mINFO\x1b[0m "] {
             let frame = format!("{prefix}sing-box started (0.01s)\n");
             let d =
-                classify(Core::SingBox, "1.14.4", frame.as_bytes()).expect("normal log.New prefix");
+                classify(Core::SingBox, "1.14.4", frame.as_bytes()).expect("file output prefix");
             assert_eq!(d.body(), "sing-box started (0.01s)");
         }
     }

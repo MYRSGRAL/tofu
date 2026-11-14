@@ -22,9 +22,11 @@ Classifier допускает `0.00`–`86400.00` (24 часа), без leading 
 допущенных значений renderer даёт **точную исходную body**, включая две цифры;
 colored/timestamp prefix — framing и в body не входит. Ограничение 24 часа —
 privacy/resource policy с withholding за пределами, не обещание всех возможных Go duration.
-Framing current INFO policy (`log.New`, timestamp=false): `INFO ` либо точный
-source cyan INFO/reset + space без timestamp. Историческая форма: `INFO[ssss] ` или точный source ANSI cyan INFO/reset + `[ssss] `;
-ssss=4–10 ASCII digits. Не включать общий ANSI-strip и свободный timestamp parser.
+Framing proposed stderr INFO capture (`log.New`, timestamp=false): `INFO[ssss] `
+либо точный source ANSI cyan INFO/reset + `[ssss] `; ssss=4–10 ASCII digits.
+`DisableTimestamp: !logOptions.Timestamp && logFilePath != ""` при stderr без
+файла равно false. Форма `INFO ` либо cyan INFO/reset + space без elapsed
+относится к файловому output с timestamp=false, а не к предлагаемому stderr capture. Не включать общий ANSI-strip и свободный timestamp parser.
 
 Xray `main/run.go:95` вызывает `server.Start()`, `core/xray.go:389–400` после
 успешного запуска features выводит **Warning** `Xray 26.10.31 started`. Warning
@@ -115,3 +117,9 @@ same-UID loopback fixture без connect/probe/DNS/idle traffic, затем Stop
 actual producer→EventLog→UI/export witness и loss/control/Stop integration negatives.
 Xray ordinary Start Warning и sing ordinary Start Info теперь source-bound достижимы,
 но execution здесь не разрешён и не выполнялся. Full FR16 PASS по pure parser запрещён.
+
+## Узкая поправка provenance после R2
+
+Исправлены атрибуция prefix, комментарий и имя/expect теста файлового output.
+Parser и assertions не изменены. GREEN/clippy в checks относятся к 46bbd284;
+новый запуск или сборка этим исправлением не заявляются.
