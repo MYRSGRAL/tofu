@@ -34,7 +34,10 @@ def gui_campaign(
         destinations=["192.0.2.0/24", "2001:db8::/32"],
         action="block",
         platform_sources=selector,
-        transport={"transport_protocols": ["tcp"], "destination_ports": [[443,443], [8000,8080]]},
+        transport={
+            "transport_protocols": ["tcp"],
+            "destination_ports": [[443, 443], [8000, 8080]],
+        },
     )
     other = dict(
         id=42,

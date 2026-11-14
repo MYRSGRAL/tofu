@@ -46,4 +46,4 @@ literal flow test; production closure осталась побайтово неи
 Проверки: Rust 1.85.1, locked/offline/jobs1; domain/engine tests PASS, editor 14/14,
 linux unit 575 PASS/38 existing ignored; all-targets clippy четырёх crates PASS
 с -D warnings. Final transport suite 4/4 и domain clippy PASS. GCC16/Qt C++ warnings
-сохранены в build log. Ruff отсутствует, новые зависимости не устанавливались.
+сохранены в build log. Ruff 0.16.6 из существующего uv cache: check/format PASS; новые зависимости не устанавливались. После GUI изменено только форматирование runner; выполненный runner сохранён как runner-executed.py вне TTL.

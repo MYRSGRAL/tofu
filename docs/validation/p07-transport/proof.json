@@ -182,7 +182,8 @@
     "linux_unit": "575 passed, 38 ignored",
     "domain_engine": "passed; native-dependent tests retain their existing ignores",
     "clippy": "all-targets four crates -D warnings passed; desktop rechecked after early gate fix",
-    "transport_final": "4 passed; domain all-targets clippy passed"
+    "transport_final": "4 passed; domain all-targets clippy passed",
+    "ruff": "0.16.6 cached executable: check/format passed"
   },
   "logs_sha256": {
     "red.log": "aa90652c0a47fd9d4bb6bd6861b8cb9a9fa76f684ae93f9b0cdced6b233c64ad",
@@ -199,5 +200,7 @@
     "gui-gate-build.log": "7da825008411a30c96b0d2c6d73194d915580881939b0e3cb9f91bfdffc8e232",
     "gui-final-run.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "transport-final.log": "2aee6ccade4c0d8b931ab3df2a9fef1fc54035e84716acdf8cf1769dcb721063"
-  }
+  },
+  "formatted_runner_sha256": "3949759cfe0bfaa185d14e21d7772aef31274d0e4f0207463ab2d7f779eacc70",
+  "executed_runner": "runner-executed.py в evidence_directory; hash соответствует bindings.runner_sha256"
 }
