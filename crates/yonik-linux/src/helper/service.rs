@@ -16,6 +16,11 @@ use super::{
 };
 use crate::Cancellation;
 
+#[path = "service_peer.rs"]
+mod peer_presence;
+pub(crate) use peer_presence::BusPeerIdentity;
+use peer_presence::PeerTracker;
+
 pub const SERVICE_NAME: &str = "cloud.highpriority.yonik.Network1";
 pub const SERVICE_PATH: &str = "/cloud/highpriority/yonik/Network";
 pub const SERVICE_INTERFACE: &str = SERVICE_NAME;
@@ -425,6 +430,7 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
     mut cancel: Cancellation,
 ) -> Result<(), ServiceError> {
     let broker = Arc::new(broker);
+    let peers = Arc::new(PeerTracker::default());
     let connection = broker.connection().clone();
     let mut calls = MessageStream::from(&connection);
     let rule = MatchRule::builder()
@@ -455,7 +461,7 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
             _ = cancel.cancelled() => break Ok(()),
             Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
             changed = changes.next() => match changed {
-                Some(Ok(message)) => if let Err(error) = forget_disconnected(&broker, &message) { break Err(error); },
+                Some(Ok(message)) => if let Err(error) = forget_disconnected(&broker, &peers, &message) { break Err(error); },
                 _ => break Err(ServiceError::Unavailable),
             },
             call = calls.next() => {
@@ -465,15 +471,16 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
                     Ok(permit) => permit,
                     Err(_) => { send_result(&connection, &message, Err(busy_at("rpc_in_flight_capacity"))).await; continue; }
                 };
-                let broker = broker.clone(); let host = host.clone(); let child_cancel = worker_cancel.clone();
+                let broker = broker.clone(); let host = host.clone(); let peers=Arc::clone(&peers); let child_cancel = worker_cancel.clone();
                 tasks.spawn(async move {
                     let _permit = permit;
-                    let result = dispatch(&broker, &host, &message, child_cancel).await;
+                    let result = dispatch(&broker, &host, &peers, &message, child_cancel).await;
                     send_result(broker.connection(), &message, result).await;
                 });
             }
         }
     };
+    peers.revoke_all();
     let _ = stop.send(true);
     while tasks.join_next().await.is_some() {}
     let _ = connection.release_name(SERVICE_NAME).await;
@@ -482,6 +489,7 @@ pub(super) async fn serve_with_broker<H: ProtectionHost>(
 
 fn forget_disconnected<A: PreparedArtifact>(
     broker: &PreparedRequests<A>,
+    peers: &PeerTracker,
     message: &Message,
 ) -> Result<(), ServiceError> {
     let h = message.header();
@@ -498,6 +506,7 @@ fn forget_disconnected<A: PreparedArtifact>(
         .deserialize()
         .map_err(|_| ServiceError::InvalidRequest)?;
     if name.starts_with(':') && name == old && new.is_empty() {
+        peers.revoke(name)?;
         broker.forget_peer(name)?;
     }
     Ok(())
@@ -506,6 +515,7 @@ fn forget_disconnected<A: PreparedArtifact>(
 async fn dispatch<H: ProtectionHost>(
     broker: &PreparedRequests<H::Artifact>,
     host: &Mutex<H>,
+    peers: &PeerTracker,
     message: &Message,
     mut cancel: Cancellation,
 ) -> Result<String, ServiceError> {
@@ -534,6 +544,7 @@ async fn dispatch<H: ProtectionHost>(
                     if !host.bundle_transport() {
                         return Err(PreparedError::Unsupported);
                     }
+                    let presence = peers.track(&sender, uid)?;
                     let pid = tokio::time::timeout(
                         Duration::from_secs(1),
                         broker.authorizer().peer_pid(&sender, uid),
@@ -541,10 +552,10 @@ async fn dispatch<H: ProtectionHost>(
                     .await
                     .map_err(|_| PreparedError::Unsupported)??;
                     request.owner = Some(sender.to_string());
-                    request.peer = Some(Arc::new(
-                        crate::attribution::PeerProcess::capture(pid, uid)
+                    request.peer = Some(Arc::new(crate::attribution::PeerProcess::pending(
+                        crate::attribution::CapturedBusPeer::capture(presence.bind(pid)?)
                             .map_err(|_| PreparedError::Unsupported)?,
-                    ));
+                    )));
                     let (artifact, context) = host
                         .prepare_bundle(uid, *request, cancel.clone())
                         .await
@@ -585,16 +596,17 @@ async fn dispatch<H: ProtectionHost>(
                         .as_ref()
                         .is_some_and(|policy| policy.requires_attribution())
                     {
+                        let presence = peers.track(&sender, uid)?;
                         let pid = tokio::time::timeout(
                             Duration::from_secs(1),
                             broker.authorizer().peer_pid(&sender, uid),
                         )
                         .await
                         .map_err(|_| PreparedError::Unsupported)??;
-                        request.peer = Some(Arc::new(
-                            crate::attribution::PeerProcess::capture(pid, uid)
+                        request.peer = Some(Arc::new(crate::attribution::PeerProcess::pending(
+                            crate::attribution::CapturedBusPeer::capture(presence.bind(pid)?)
                                 .map_err(|_| PreparedError::Unsupported)?,
-                        ));
+                        )));
                     }
                     host.prepare_profile(uid, *request, cancel.clone())
                         .await

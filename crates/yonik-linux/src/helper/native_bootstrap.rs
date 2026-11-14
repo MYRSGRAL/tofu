@@ -282,6 +282,13 @@ pub(crate) fn verify_pending(
     {
         return Err(Error::Untrusted);
     }
+    let application_view = coverage
+        .authorization
+        .application_view()
+        .map_err(|_| Error::Untrusted)?;
+    if application_view[0] != journal.ownership().namespace() {
+        return Err(Error::Untrusted);
+    }
     queue
         .project(topology, journal)
         .map_err(|_| Error::Untrusted)?;
@@ -358,6 +365,102 @@ fn validate_receive_admission(authorization: &RunAuthorization, deadline: Deadli
     Ok(())
 }
 
+impl RuntimeScopeStamp {
+    pub(crate) fn lookup_binding_data(&self) -> crate::attribution::broker::LookupBinding {
+        let e = &self.inner.expected;
+        crate::attribution::broker::LookupBinding {
+            target_uid: self.owner.owner_uid(),
+            epoch: e.epoch,
+            nonce: e.nonce,
+            digest: e.digest,
+            generation: e.generation,
+            invocation: e.invocation,
+            server_pid: e.server_pid,
+            server_start: e.server_start,
+            network: self.owner.namespace(),
+        }
+    }
+}
+
+pub(crate) use super::systemd_worker::{LookupLeafLease, VerifiedLookupLeaf};
+impl SessionRole {
+    pub(crate) fn lookup_scope(&self) -> RuntimeScopeStamp {
+        self.scope.fork_lookup()
+    }
+}
+impl RuntimeScopeStamp {
+    pub(crate) fn admission_deadline(&self) -> std::time::Instant {
+        self.inner.deadline.into_std()
+    }
+}
+impl VerifiedCoverage {
+    pub(crate) fn lookup_authorization(&self) -> &RunAuthorization {
+        &self.authorization
+    }
+    pub(crate) async fn revalidate(
+        self,
+        supervisor: &SystemWorkerSupervisor,
+        owner: &RunAuthority,
+        cancel: &mut Cancellation,
+    ) -> Result<Self> {
+        cancel.check().map_err(|_| Error::Cancelled)?;
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| Error::Untrusted)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        let profile = self
+            .profile
+            .revalidate(supervisor, cancel, self.deadline)
+            .await?;
+        cancel.check().map_err(|_| Error::Cancelled)?;
+        self.authorization
+            .validate_owner(owner)
+            .map_err(|_| Error::Untrusted)?;
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        if self.custody.retained_namespace_count() != 2 {
+            return Err(Error::UnitProofGap);
+        }
+        Ok(Self {
+            profile,
+            authorization: self.authorization,
+            expected: self.expected,
+            custody: self.custody,
+            guard: self.guard,
+            deadline: self.deadline,
+        })
+    }
+}
+
+impl RuntimeScopeStamp {
+    pub(crate) fn same_scope(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+            && self.owner == other.owner
+            && Arc::ptr_eq(&self.queue, &other.queue)
+    }
+}
+
+impl VerifiedCoverage {
+    pub(crate) fn verify_lookup_image(&self, image: &std::fs::File) -> Result<()> {
+        validate_receive_admission(&self.authorization, self.deadline)?;
+        self.profile
+            .verify_lookup_image(image, self.deadline.into_std())?;
+        validate_receive_admission(&self.authorization, self.deadline)
+    }
+}
+
+/// Только static installed contract. Actor удерживает FIFO/operation lease;
+/// inline file IO не создаёт detached task и не выдаёт apply authority.
+pub(crate) fn verify_preflight(deadline: std::time::Instant) -> Result<()> {
+    super::native_profile::verify_static_preflight(deadline)
+}
+
+pub(crate) use super::native_profile::VerifiedStaticInstalledImage;
+pub(crate) fn load_static_preflight(
+    deadline: std::time::Instant,
+) -> Result<VerifiedStaticInstalledImage> {
+    super::native_profile::load_static_image(deadline)
+}
+
 #[cfg(test)]
 mod split_receive_tests {
     use super::*;
@@ -392,19 +495,15 @@ mod split_receive_tests {
     }
 }
 
+pub(crate) use super::service::BusPeerIdentity;
+
+pub(crate) use super::systemd_worker::{PeerVerifierLease, VerifiedPeerVerifier};
+
 impl RuntimeScopeStamp {
-    pub(crate) fn lookup_binding_data(&self) -> crate::attribution::broker::LookupBinding {
-        let e = &self.inner.expected;
-        crate::attribution::broker::LookupBinding {
-            target_uid: self.owner.owner_uid(),
-            epoch: e.epoch,
-            nonce: e.nonce,
-            digest: e.digest,
-            generation: e.generation,
-            invocation: e.invocation,
-            server_pid: e.server_pid,
-            server_start: e.server_start,
-            network: self.owner.namespace(),
-        }
+    pub(crate) fn application_view(&self) -> Result<[(u64, u64); 3]> {
+        self.inner
+            .authorization
+            .application_view()
+            .map_err(|_| Error::Untrusted)
     }
 }

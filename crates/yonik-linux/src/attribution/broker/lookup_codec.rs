@@ -169,6 +169,283 @@ fn validate_flow(flow: Flow) -> Result<(), Unavailable> {
     Ok(())
 }
 
+pub(super) fn result_header(
+    binding: &LookupBinding,
+    id: u64,
+    status: u8,
+    reason: u16,
+) -> Result<[u8; REPLY], Unavailable> {
+    let header = binding.encode(RESULT, id)?;
+    let mut bytes = [0; REPLY];
+    bytes[..FRAME].copy_from_slice(&header);
+    bytes[9] = status;
+    bytes[10..12].copy_from_slice(&reason.to_be_bytes());
+    Ok(bytes)
+}
+pub(super) fn reason_code(value: Unavailable) -> u16 {
+    match value {
+        Unavailable::Authority => 1,
+        Unavailable::Coverage => 2,
+        Unavailable::Limit => 3,
+        Unavailable::Timeout => 4,
+        Unavailable::Malformed => 5,
+        Unavailable::Revoked => 6,
+        Unavailable::Cancelled => 7,
+        Unavailable::ReceiveOverflow => 8,
+        Unavailable::AmbiguousSocket => 9,
+        Unavailable::WorkerViewUnavailable => 10,
+        Unavailable::Disconnected => 11,
+    }
+}
+pub(super) fn reason_value(code: u16) -> Result<Unavailable, Unavailable> {
+    Ok(match code {
+        1 => Unavailable::Authority,
+        2 => Unavailable::Coverage,
+        3 => Unavailable::Limit,
+        4 => Unavailable::Timeout,
+        5 => Unavailable::Malformed,
+        6 => Unavailable::Revoked,
+        7 => Unavailable::Cancelled,
+        8 => Unavailable::ReceiveOverflow,
+        9 => Unavailable::AmbiguousSocket,
+        10 => Unavailable::WorkerViewUnavailable,
+        11 => Unavailable::Disconnected,
+        _ => return Err(Unavailable::Malformed),
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct KnownData {
+    pub(super) pid: u32,
+    pub(super) task_id: u32,
+    pub(super) start: u64,
+    pub(super) task_start: u64,
+    pub(super) socket_inode: u64,
+    pub(super) socket_fd: u32,
+    pub(super) cookie: u64,
+    pub(super) executable: (u64, u64),
+    pub(super) nanos: u64,
+    pub(super) path: String,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ResultData {
+    Unknown,
+    Unavailable(Unavailable),
+    Known(KnownData),
+}
+pub(super) fn decode_result(
+    binding: &LookupBinding,
+    bytes: &[u8],
+    id: u64,
+    rights: usize,
+) -> Result<ResultData, Unavailable> {
+    binding.validate(bytes, RESULT, id, REPLY)?;
+    let reason = u16::from_be_bytes([bytes[10], bytes[11]]);
+    if bytes[9] != 1 {
+        if rights != 0 || bytes[148..].iter().any(|b| *b != 0) {
+            return Err(Unavailable::Malformed);
+        }
+        return match (bytes[9], reason) {
+            (0, 0) => Ok(ResultData::Unknown),
+            (2, code) => Ok(ResultData::Unavailable(reason_value(code)?)),
+            _ => Err(Unavailable::Malformed),
+        };
+    }
+    if reason != 0 || rights != 2 || bytes[218..256].iter().any(|b| *b != 0) {
+        return Err(Unavailable::Malformed);
+    }
+    let value = KnownData {
+        pid: u32_at(bytes, 148)?,
+        task_id: u32_at(bytes, 152)?,
+        start: u64_at(bytes, 156)?,
+        task_start: u64_at(bytes, 164)?,
+        socket_inode: u64_at(bytes, 172)?,
+        socket_fd: u32_at(bytes, 180)?,
+        cookie: u64_at(bytes, 184)?,
+        executable: (u64_at(bytes, 192)?, u64_at(bytes, 200)?),
+        nanos: u64_at(bytes, 208)?,
+        path: String::new(),
+    };
+    let length = u16::from_be_bytes([bytes[216], bytes[217]]) as usize;
+    if value.pid == 0
+        || value.task_id == 0
+        || value.start == 0
+        || value.task_start == 0
+        || value.socket_inode == 0
+        || value.executable.1 == 0
+        || value.nanos == 0
+        || value.nanos > super::DEADLINE.as_nanos() as u64
+        || length > super::super::native_wire::MAX_PATH
+        || bytes[256 + length..].iter().any(|b| *b != 0)
+    {
+        return Err(Unavailable::Malformed);
+    }
+    let path = super::super::native_wire::executable_path(&bytes[256..256 + length])
+        .map_err(|_| Unavailable::Malformed)?
+        .to_owned();
+    Ok(ResultData::Known(KnownData { path, ..value }))
+}
+pub(super) fn known_frame(
+    binding: &LookupBinding,
+    id: u64,
+    value: &KnownData,
+) -> Result<[u8; REPLY], Unavailable> {
+    super::super::native_wire::executable_path(value.path.as_bytes())
+        .map_err(|_| Unavailable::Malformed)?;
+    let mut bytes = result_header(binding, id, 1, 0)?;
+    for (offset, number) in [
+        (148, value.pid),
+        (152, value.task_id),
+        (180, value.socket_fd),
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&number.to_be_bytes());
+    }
+    for (offset, number) in [
+        (156, value.start),
+        (164, value.task_start),
+        (172, value.socket_inode),
+        (184, value.cookie),
+        (192, value.executable.0),
+        (200, value.executable.1),
+        (208, value.nanos),
+    ] {
+        bytes[offset..offset + 8].copy_from_slice(&number.to_be_bytes());
+    }
+    bytes[216..218].copy_from_slice(&(value.path.len() as u16).to_be_bytes());
+    bytes[256..256 + value.path.len()].copy_from_slice(value.path.as_bytes());
+    decode_result(binding, &bytes, id, 2)?;
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod result_tests {
+    use super::*;
+    fn binding() -> LookupBinding {
+        LookupBinding {
+            target_uid: 1000,
+            epoch: 1,
+            nonce: [1; 32],
+            digest: [2; 32],
+            generation: 3,
+            invocation: [4; 16],
+            server_pid: 5,
+            server_start: 6,
+            network: (7, 8),
+        }
+    }
+    fn known() -> KnownData {
+        KnownData {
+            pid: 1,
+            task_id: 2,
+            start: 3,
+            task_start: 4,
+            socket_inode: 5,
+            socket_fd: 0,
+            cookie: 6,
+            executable: (7, 8),
+            nanos: 1,
+            path: "/usr/bin/app".into(),
+        }
+    }
+    #[test]
+    fn pure_lookup_result_roundtrip_known_unknown_and_every_unavailable_reason() {
+        let binding = binding();
+        let known = known();
+        let bytes = known_frame(&binding, 1, &known).unwrap();
+        assert_eq!(
+            decode_result(&binding, &bytes, 1, 2).unwrap(),
+            ResultData::Known(known)
+        );
+        assert_eq!(
+            decode_result(&binding, &result_header(&binding, 2, 0, 0).unwrap(), 2, 0).unwrap(),
+            ResultData::Unknown
+        );
+        for reason in 1..=11 {
+            assert_eq!(
+                decode_result(
+                    &binding,
+                    &result_header(&binding, 3, 2, reason).unwrap(),
+                    3,
+                    0
+                )
+                .unwrap(),
+                ResultData::Unavailable(reason_value(reason).unwrap())
+            );
+        }
+    }
+    #[test]
+    fn pure_lookup_result_rejects_fd_count_reserved_tail_binding_and_stale_id() {
+        let binding = binding();
+        let bytes = known_frame(&binding, 1, &known()).unwrap();
+        for count in [0, 1, 3, 4] {
+            assert!(decode_result(&binding, &bytes, 1, count).is_err());
+        }
+        for index in (218..256).chain(256 + known().path.len()..REPLY) {
+            let mut bad = bytes;
+            bad[index] = 1;
+            assert!(decode_result(&binding, &bad, 1, 2).is_err());
+        }
+        for index in [0, 12, 16, 24, 32, 64, 96, 104, 120, 124, 132, 140] {
+            let mut bad = bytes;
+            bad[index] ^= 1;
+            assert!(decode_result(&binding, &bad, 1, 2).is_err());
+        }
+        assert!(decode_result(&binding, &bytes, 2, 2).is_err());
+        assert!(decode_result(&binding, &bytes[..REPLY - 1], 1, 2).is_err());
+        let unknown = result_header(&binding, 1, 0, 0).unwrap();
+        assert!(decode_result(&binding, &unknown, 1, 2).is_err());
+    }
+    #[test]
+    fn pure_lookup_result_rejects_ttl_extension_zero_identity_and_unsafe_path() {
+        let binding = binding();
+        for nanos in [0, super::super::DEADLINE.as_nanos() as u64 + 1, u64::MAX] {
+            assert!(known_frame(&binding, 1, &KnownData { nanos, ..known() }).is_err());
+        }
+        for path in ["", "relative", "/app (deleted)", "/app\0tail"] {
+            assert!(
+                known_frame(
+                    &binding,
+                    1,
+                    &KnownData {
+                        path: path.into(),
+                        ..known()
+                    }
+                )
+                .is_err()
+            );
+        }
+        let exact = "/".to_owned() + &"a".repeat(511);
+        assert!(
+            known_frame(
+                &binding,
+                1,
+                &KnownData {
+                    path: exact,
+                    ..known()
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            known_frame(
+                &binding,
+                1,
+                &KnownData {
+                    path: "/".to_owned() + &"a".repeat(512),
+                    ..known()
+                }
+            )
+            .is_err()
+        );
+        let bytes = known_frame(&binding, 1, &known()).unwrap();
+        for (offset, size) in [(148, 4), (152, 4), (156, 8), (164, 8), (172, 8), (200, 8)] {
+            let mut bad = bytes;
+            bad[offset..offset + size].fill(0);
+            assert!(decode_result(&binding, &bad, 1, 2).is_err());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

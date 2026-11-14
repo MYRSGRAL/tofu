@@ -11,12 +11,17 @@ pub(super) struct NativeArtifactStamp {
 
 /// Создаётся только consuming commit после exact record/queue проверки.
 pub(in crate::helper) struct OwnerBinding {
+    view: [(u64, u64); 3],
     owner: crate::managed_network::Ownership,
     session: [u8; 16],
     generation: u64,
     epoch: u64,
 }
 impl OwnerBinding {
+    pub(in crate::helper) fn view(&self) -> [(u64, u64); 3] {
+        self.view
+    }
+
     pub(in crate::helper) fn context(&self) -> ([u8; 16], u64, u64) {
         (self.session, self.generation, self.epoch)
     }
@@ -289,6 +294,7 @@ impl super::Backend {
     }
     pub(super) async fn start_committed_native(
         &mut self,
+        output: Option<crate::output_transport::ValidatedWriters>,
         cancel: &mut crate::Cancellation,
     ) -> Result<crate::helper::systemd_worker::WorkerTicket, ServiceError> {
         self.supervisor().await?;
@@ -318,6 +324,7 @@ impl super::Backend {
                 self.journal.as_ref().ok_or(ServiceError::Unavailable)?,
                 topology,
                 pending.network_epoch,
+                output,
                 cancel,
             )
             .await
@@ -333,8 +340,19 @@ impl super::Backend {
             .native_owner_stamp
             .as_ref()
             .ok_or(ServiceError::Unavailable)?;
+        let view = record
+            .artifact
+            .peer
+            .as_ref()
+            .ok_or(ServiceError::Unsupported)?
+            .lookup_view()
+            .map_err(super::unavailable)?;
+        if view[0] != record.owner.namespace() {
+            return Err(ServiceError::Unsupported);
+        }
         self.native_owner.consume(stamp)?;
         let authority = RunAuthority::from_bound(OwnerBinding {
+            view,
             owner: record.owner,
             session: stamp.session,
             generation: stamp.generation,

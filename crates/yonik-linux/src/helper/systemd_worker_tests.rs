@@ -293,6 +293,10 @@ impl Fixture {
             native_transfer: None,
             native_admission: None,
             native_custody: None,
+            lookup_leaf: None,
+            peer_verifier: None,
+            native_lookup_transfer: None,
+            native_remote: None,
             connection: bus.connect().await,
             owner: server.unique_name().unwrap().to_string(),
             permit: Arc::new(Permit),
@@ -1237,4 +1241,69 @@ fn raw_identity_fixture_is_scoped_to_one_retained_observation() {
     raw.validate_owner(&first, &payload).unwrap();
     assert!(real.validate_owner(&second, &payload).is_err());
     raw.validate_owner(&first, &payload).unwrap();
+}
+
+#[tokio::test]
+async fn native_output_carrier_preserves_v3_stdout_stderr_without_exec() {
+    use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, recvmsg};
+    use std::{
+        io::{IoSliceMut, Write},
+        mem::MaybeUninit,
+        os::fd::AsFd,
+    };
+    use tokio::io::AsyncReadExt;
+    let (mut readers, writers) = crate::output_transport::create().unwrap();
+    let output = writers.validate().unwrap();
+    let payload = unit_owner_payload();
+    let (sender, mut peer) = std::os::unix::net::UnixStream::pair().unwrap();
+    let receiver = std::thread::spawn(move || {
+        let mut header = [0; 112];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(4))];
+        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+        let message = recvmsg(
+            &peer,
+            &mut [IoSliceMut::new(&mut header)],
+            &mut ancillary,
+            RecvFlags::CMSG_CLOEXEC | RecvFlags::WAITALL,
+        )
+        .unwrap();
+        assert_eq!(message.bytes, 112);
+        assert_eq!(header[7], 3);
+        assert_eq!(&header[96..100], &[0, 2, 1, 2]);
+        let mut roles = Vec::new();
+        for part in ancillary.drain() {
+            if let RecvAncillaryMessage::ScmRights(fds) = part {
+                roles.extend(fds);
+            } else {
+                panic!("Неожиданный ancillary");
+            }
+        }
+        assert_eq!(roles.len(), 4);
+        rustix::io::write(roles[2].as_fd(), b"native stdout").unwrap();
+        rustix::io::write(roles[3].as_fd(), b"native stderr").unwrap();
+        let mut ack = [0; 9];
+        ack[..4].copy_from_slice(b"YNKA");
+        ack[4..8].copy_from_slice(&42u32.to_be_bytes());
+        ack[8] = 2;
+        peer.write_all(&ack).unwrap();
+    });
+    let ack = tokio::task::spawn_blocking(move || {
+        payload.send_output_before(
+            &sender,
+            WorkerMode::Run,
+            Some(output),
+            std::time::Instant::now() + Duration::from_secs(1),
+        )
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(ack.status, WorkerStatus::Accepted);
+    receiver.join().unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    readers.stdout.read_to_end(&mut stdout).await.unwrap();
+    readers.stderr.read_to_end(&mut stderr).await.unwrap();
+    assert_eq!(stdout, b"native stdout");
+    assert_eq!(stderr, b"native stderr");
 }
