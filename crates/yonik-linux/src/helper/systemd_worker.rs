@@ -25,7 +25,9 @@ use zbus::{
 };
 
 mod lookup_leaf;
-pub(crate) use lookup_leaf::{LookupLeafLease, VerifiedLookupLeaf};
+pub(crate) use lookup_leaf::{
+    LookupLeafLease, PeerVerifierLease, VerifiedLookupLeaf, VerifiedPeerVerifier,
+};
 const BUS: &str = "unix:path=/run/dbus/system_bus_socket";
 const DESTINATION: &str = "org.freedesktop.systemd1";
 const MANAGER: &str = "/org/freedesktop/systemd1";
@@ -487,6 +489,7 @@ type NativeAdmission = Result<(
     [u8; 512],
 )>;
 struct NativeRuntime {
+    _permit: Arc<Permit>,
     task_start: u64,
     stamp: Arc<std::sync::Mutex<Option<super::native_bootstrap::RuntimeScopeStamp>>>,
     stop: Arc<AtomicBool>,
@@ -521,11 +524,17 @@ pub struct SystemWorkerSupervisor {
     native_admission: Option<JoinHandle<NativeAdmission>>,
     native_custody: Option<crate::worker::anchor_exchange::NamespaceRetention>,
     lookup_leaf: Option<lookup_leaf::LeafPending>,
+    peer_verifier: Option<lookup_leaf::PeerPending>,
     native_lookup_transfer: Option<JoinHandle<Result<crate::attribution::broker::RemoteLookup>>>,
     native_remote: Option<crate::attribution::broker::RemoteLookup>,
 }
 impl Drop for SystemWorkerSupervisor {
     fn drop(&mut self) {
+        // Preparation может жить при clean fixed worker units; неизвестный stop не освобождает permit.
+        if let Some(verifier) = self.peer_verifier.take() {
+            std::mem::forget(verifier);
+        }
+
         if !self.clean {
             if let Some(task) = self.native_lookup_transfer.take() {
                 std::mem::forget(task);
@@ -604,6 +613,7 @@ impl SystemWorkerSupervisor {
                 native_admission: None,
                 native_custody: None,
                 lookup_leaf: None,
+                peer_verifier: None,
                 native_lookup_transfer: None,
                 native_remote: None,
             };
@@ -828,7 +838,7 @@ impl SystemWorkerSupervisor {
         )
         .map_err(unavailable)?;
         let leaf = self
-            .launch_lookup_leaf(owner, coverage.lookup_authorization(), cancel, deadline)
+            .launch_lookup_leaf(owner, &coverage, cancel, deadline)
             .await?;
         let coverage = coverage.revalidate(self, owner, cancel).await?;
         let issued = verify_pending(coverage, owner, queue, journal, topology, helper)?;
@@ -879,6 +889,7 @@ impl SystemWorkerSupervisor {
             .map_err(unavailable)?;
         let scope = Arc::new(std::sync::Mutex::new(None));
         self.native_runtime = Some(NativeRuntime {
+            _permit: Arc::clone(&self.permit),
             task_start,
             stamp: Arc::clone(&scope),
             stop,
@@ -1084,7 +1095,8 @@ impl SystemWorkerSupervisor {
         bounded(cancel, deadline, self.validate_contract()).await?;
         self.clean = false;
         self.current = None;
-        self.cleanup(cancel, deadline).await
+        self.cleanup(cancel, deadline).await?;
+        self.stop_peer_verifier(cancel, deadline).await
     }
     async fn begin(
         &mut self,
