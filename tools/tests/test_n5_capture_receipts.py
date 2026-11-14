@@ -102,7 +102,9 @@ class CaptureReceiptTests(unittest.TestCase):
     def produce(self) -> tuple[dict, dict]:
         return seam.produce(self.retained, self.pins, self.commit)
 
-    def final_profile_fixture(self) -> None:
+    def final_profile_fixture(
+        self, registry: bool = False, probe_only: bool = False
+    ) -> None:
         """Форма enrich/retain: generated, source, staged SDK, normalized deps, observed."""
         from _p25_final_profile import PROFILE
 
@@ -131,7 +133,57 @@ class CaptureReceiptTests(unittest.TestCase):
             ).hexdigest(),
         }
         self.write("frozen.json", frozen)
+        registry_cwd = None
+        if registry:
+            import tarfile
+
+            registry_root = self.root / "registry"
+            self.enterContext(
+                patch.dict(
+                    PROFILE, {"registry_source_root": str(registry_root / "src")}
+                )
+            )
+            body["spec"] = dict(PROFILE)
+            frozen["final_profile"] = {
+                **body,
+                "sha256": hashlib.sha256(
+                    json.dumps(body, sort_keys=True).encode()
+                ).hexdigest(),
+            }
+            registry_cwd = str(
+                registry_root
+                / "src/index.crates.io-1949cf8c6b5b557f/link-cplusplus-1.0.12"
+            )
+            unit_bytes = b"// SPDX-License-Identifier: MIT\n// registry fixture\n"
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+                member = tarfile.TarInfo("link-cplusplus-1.0.12/src/dummy.cc")
+                member.size = len(unit_bytes)
+                tar.addfile(member, io.BytesIO(unit_bytes))
+                header_bytes = b"// SPDX-License-Identifier: LGPL-3.0-only\n"
+                member = tarfile.TarInfo("link-cplusplus-1.0.12/include/synthetic.h")
+                member.size = len(header_bytes)
+                tar.addfile(member, io.BytesIO(header_bytes))
+            checksum = hashlib.sha256(archive.getvalue()).hexdigest()
+            cache = registry_root / "cache/index.crates.io-1949cf8c6b5b557f"
+            cache.mkdir(parents=True)
+            (cache / "link-cplusplus-1.0.12.crate").write_bytes(archive.getvalue())
+            lock = (
+                'version = 4\n[[package]]\nname = "link-cplusplus"\nversion = "1.0.12"\n'
+                'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                f'checksum = "{checksum}"\n'
+            ).encode()
+            source_tar = io.BytesIO()
+            with tarfile.open(fileobj=source_tar, mode="w") as tar:
+                member = tarfile.TarInfo("src/Cargo.lock")
+                member.size = len(lock)
+                tar.addfile(member, io.BytesIO(lock))
+            (self.retained / "source.tar").write_bytes(source_tar.getvalue())
+            frozen["archive_sha256"] = self.digest("source.tar")
+            self.write("frozen.json", frozen)
         record = json.loads((self.retained / "build-capture-record.json").read_bytes())
+        if registry:
+            record["source"]["archive_sha256"] = frozen["archive_sha256"]
         data = {}
         origins = {}
 
@@ -165,9 +217,15 @@ class CaptureReceiptTests(unittest.TestCase):
             "generated",
             b"// SPDX-License-Identifier: MIT\n// generated retained bytes\n",
         )
+        if registry and not probe_only:
+            removed = record["files"].pop()
+            del data["build", removed["path"]]
+            unit = staged(registry_cwd + "/src/dummy.cc", "sdk-unit", unit_bytes)
         source = add("source", "input.cpp", "source", b"// source input\n")
         header = staged(
-            "/usr/include/synthetic.h",
+            registry_cwd + "/include/synthetic.h"
+            if registry
+            else "/usr/include/synthetic.h",
             "header",
             b"// SPDX-License-Identifier: LGPL-3.0-only\n",
         )
@@ -197,7 +255,9 @@ class CaptureReceiptTests(unittest.TestCase):
         argv = [
             PROFILE["compiler"],
             "-c",
-            roots["build"] + "/generated.cpp",
+            registry_cwd + "/src/dummy.cc"
+            if registry and not probe_only
+            else roots["build"] + "/generated.cpp",
             "-o",
             "out.o",
             "-MD",
@@ -225,13 +285,17 @@ class CaptureReceiptTests(unittest.TestCase):
                     "config_sha256": config_hash,
                     "argv": argv,
                     "original_argv": argv[1:-3],
-                    "cwd": roots["source"],
+                    "cwd": registry_cwd
+                    if registry and not probe_only
+                    else roots["source"],
                     "compiler": compiler,
                     "exit": 0,
                     "stdout_sha256": "d" * 64,
                     "stderr_sha256": "e" * 64,
                     "depfile": "p25capture/0.d",
-                    "unit": roots["build"] + "/generated.cpp",
+                    "unit": registry_cwd + "/src/dummy.cc"
+                    if registry and not probe_only
+                    else roots["build"] + "/generated.cpp",
                     "compiler_id": compiler_id,
                     "raw_depfile_sha256": "f" * 64,
                     "normalized_depfile": dep,
@@ -247,6 +311,24 @@ class CaptureReceiptTests(unittest.TestCase):
                 "stderr_sha256": "e" * 64,
             },
         }
+        if registry:
+            probe = {
+                key: value
+                for key, value in observed["records"][0].items()
+                if key not in {"raw_depfile_sha256", "normalized_depfile"}
+            }
+            probe.update(
+                original_argv=["-E", roots["build"] + "/generated-probe.cc"],
+                argv=[
+                    PROFILE["compiler"],
+                    "-E",
+                    roots["build"] + "/generated-probe.cc",
+                ],
+                unit=None,
+                depfile=None,
+                cwd=registry_cwd,
+            )
+            observed["records"].append(probe)
         self.write("build-cxx-observed.json", observed)
         reader = seam.RetainedReader(self.retained)
         reader.virtual = data
@@ -260,7 +342,9 @@ class CaptureReceiptTests(unittest.TestCase):
         )
         missing = [
             "qt:query-to-header-version-join",
-            f"generation-provenance:{unit}",
+            f"source-offer-primary-join:{unit}"
+            if registry and not probe_only
+            else f"generation-provenance:{unit}",
             f"source-offer-primary-join:{header}",
         ]
         manifest.update(
@@ -273,7 +357,7 @@ class CaptureReceiptTests(unittest.TestCase):
             positive_metadata={
                 "producer_missing": missing,
                 "compiled_units": 1,
-                "observed_invocations": 1,
+                "observed_invocations": len(observed["records"]),
                 "qt_version": "6.11.2",
                 "observed_sha256": self.digest("build-cxx-observed.json"),
             },
@@ -297,6 +381,7 @@ class CaptureReceiptTests(unittest.TestCase):
         self.write("build-capture-manifest.json", manifest)
         marker = json.loads((self.retained / "rust-captured-only.json").read_bytes())
         marker.update(
+            archive_sha256=frozen["archive_sha256"],
             final_profile=frozen["final_profile"],
             build_capture=manifest,
             commands=manifest["observed_commands"],
@@ -306,6 +391,22 @@ class CaptureReceiptTests(unittest.TestCase):
             name: self.digest(name)
             for name in (*seam.METADATA, "source.tar", "build-cxx-observed.json")
         }
+
+    def test_registry_cwd_requires_independent_sidecar(self) -> None:
+        self.final_profile_fixture(registry=True)
+        with self.assertRaisesRegex(ValueError, "MISSING.*registry proof"):
+            self.produce()
+
+    def test_no_registry_context_rejects_extra_proof(self) -> None:
+        self.final_profile_fixture()
+        with self.assertRaisesRegex(ValueError, "Unexpected registry proof"):
+            seam.produce(
+                self.retained,
+                self.pins,
+                self.commit,
+                registry_proof="registry-proof.json",
+                registry_proof_sha256="0" * 64,
+            )
 
     def test_final_profile_positive_actual_controller_shape(self) -> None:
         self.final_profile_fixture()

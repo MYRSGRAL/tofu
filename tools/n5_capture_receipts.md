@@ -85,3 +85,23 @@ CLI: `python tools/n5_capture_receipts.py --help`. Обязательны `--ret
 Проверка: `python -m unittest discover -s tools/tests -p test_n5_capture_receipts.py`
 и та же команда с `python -O`. Fixtures синтетические; real Rust build и доступ
 к реальному controller registry не требуются и не выполняются.
+
+Registry cwd требует отдельного retained sidecar `P25_CARGO_REGISTRY_PROOF_V1`.
+Передайте пару `--registry-proof registry-proof.json --registry-proof-sha256 <pin>`;
+путь относителен retained-каталогу, pin поступает независимо. При registry cwd без
+proof возвращается ошибка `MISSING`, receipt не создаётся. Original replay без
+registry cwd сохраняет прежние обязательные gates и не принимает лишний proof.
+
+Sidecar связывает independently pinned source.tar/frozen/record/report/observed,
+Cargo.lock SHA, точный selected crates.io package cwd/name/version/checksum,
+retained archive path/size/SHA и всех staged registry inputs fileID/memberPath/size/SHA (units и headers).
+Consumer читает только retained metadata/source.tar/archives. Registry/cache и
+старые absolute roots не открываются, compiler/query не запускаются.
+Registry input bytes из retained `.crate` проходят проверку member SHA против
+record/report/origin и участвуют в byte replay. Generated probe cwd требует exact selected-package context proof. Probe-only
+пакет может иметь пустой список units; это не утверждение о компиляции его source.
+
+Producer API и ограничения описаны в `n5_registry_source_proof.md`.
+Этот join остаётся проекцией внешне доверенного pipeline, не независимым
+подтверждением компиляции, legal/source closure или admission. Все прежние
+MISSING/legal gates сохраняются.
