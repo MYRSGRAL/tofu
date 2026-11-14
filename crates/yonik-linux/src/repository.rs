@@ -146,6 +146,11 @@ impl EncryptedSubscriptionRepository {
         }));
     }
 
+    /// Несекретный идентификатор экземпляра; не является разрешением доступа.
+    pub async fn database_identity(&self) -> Result<[u8; 32]> {
+        self.run(|database| Ok(database.id)).await
+    }
+
     pub async fn open(path: PathBuf, key: Zeroizing<[u8; 32]>) -> Result<Self> {
         let permit = OPEN_GATE
             .acquire()

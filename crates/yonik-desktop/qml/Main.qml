@@ -156,6 +156,19 @@ ApplicationWindow {
         searchQueued = false
         send({command: "query", search: search.text, favorites_only: false, offset: offset})
     }
+    property int startupSequence: 0
+    property string startupPending: ""
+    function saveStartup(capture, autostart, autoconnect) {
+        if (startupPending || !state.ready || !state.startup || startupSequence >= 2147483647) return
+        startupSequence += 1
+        startupPending = String(startupSequence)
+        const command = Object.create(null)
+        command.command = capture ? "autoconnect_target_set" : "startup_preferences_set"
+        command.request_id = startupPending
+        command.expected_revision = state.startup.revision
+        if (!capture) { command.autostart_into_tray = autostart; command.autoconnect = autoconnect }
+        send(command)
+    }
     function readSnapshot() {
         try {
             const raw = backend.snapshot_json
@@ -167,6 +180,8 @@ ApplicationWindow {
                 const update = commandContext === "source" ? {error: next.error, source_error: next.error} : {error: next.error, connection_error: next.error}
                 if (next.maintenance_ack && typeof next.maintenance_ack === "object") update.maintenance_ack = next.maintenance_ack
                 if (next.logs && typeof next.logs === "object" && !Array.isArray(next.logs) && typeof next.logs.request_id === "string") update.logs = next.logs
+                if (next.startup) update.startup = next.startup
+                if (next.startup && next.startup.request_id === startupPending && next.startup.save !== "pending") startupPending = ""
                 state = Object.assign({}, state, update)
                 parseError = ""
                 return
@@ -184,6 +199,7 @@ ApplicationWindow {
             if (desiredProfileId === next.selected_profile) desiredProfileId = null
             if (next.language) language = next.language
             state = next
+            if (next.startup && next.startup.request_id === startupPending && next.startup.save !== "pending") startupPending = ""
             completeRouting(next.routing_ack)
             if (searchQueued && !next.busy && !next.pending) searchDelay.restart()
             parseError = ""
@@ -351,6 +367,14 @@ ApplicationWindow {
             cancelled: ["Операция отменена.", "Operation cancelled."],
             cleanup_failed: ["Не удалось завершить отключение. Повторите остановку перед выходом.", "Cleanup failed. Retry stopping before quitting."]
         }
+        const startupMessages = {
+            startup_conflict: ["Настройки изменились. Проверьте актуальные значения и повторите действие.", "Settings changed. Review current values and retry."],
+            startup_binding: ["Цель или владелец недоступны. При замене БД или владельца перезапустите приложение; выберите сохранённый профиль и подтвердите цель заново.", "Target or owner unavailable. If the database or owner changed, restart the application; select a saved profile and confirm the target again."],
+            startup_timeout: ["Время ожидания startup истекло. Автоподключение не повторяется в этом запуске.", "Startup timed out. Autoconnect will not retry in this run."],
+            startup_admission: ["Автоподключение заблокировано текущим состоянием. Автоматического unlock или другого режима нет.", "Autoconnect blocked by current state. No automatic unlock or alternative mode."],
+            startup_xdg: ["Настройки сохранены, но применение записи XDG не подтверждено. Чужие файлы сохранены.", "Settings saved, but XDG entry application is unconfirmed. Foreign files are preserved."],
+            startup_xdg_unknown: ["Запись XDG опубликована, надёжность записи неизвестна. Автоподключение в этом запуске заблокировано.", "XDG entry published; durability unknown. Autoconnect blocked in this run."]
+        }
         const editorMessages = {
             action: ["Недопустимое действие правила маршрутизации.", "Invalid routing rule action."],
             format: ["Некорректный формат черновика маршрутизации.", "Invalid routing draft format."],
@@ -365,7 +389,7 @@ ApplicationWindow {
             id: ["Недопустимый или повторяющийся ID", "Invalid or duplicate ID"],
             limit: ["Лимит: 256 правил, 64 значения в группе, 4096 байт в значении", "Limit: 256 rules, 64 values per group, 4096 bytes per value"]
         }
-        const pair = messages[key] || editorMessages[key]
+        const pair = messages[key] || startupMessages[key] || editorMessages[key]
         return pair ? tr(pair[0], pair[1]) : tr("Категория ошибки отсутствует в каталоге сообщений.", "The error category is missing from the message catalog.")
     }
 
@@ -817,7 +841,7 @@ ApplicationWindow {
                         SettingsRow { objectName: "settingsConnectionButton"; text: window.tr("Подключение", "Connection"); description: window.tr("Ядро и локальный прокси", "Engine and local proxy"); symbol: "◎"; onClicked: window.settingsSection = "connection" }
                         SettingsRow { objectName: "settingsDiagnosticsButton"; text: window.tr("Диагностика", "Diagnostics"); description: window.tr("Доступность TCP и проверка HTTPS", "TCP reachability and HTTPS check"); symbol: "≋"; onClicked: window.settingsSection = "diagnostics" }
                         SettingsRow { objectName: "settingsMaintenanceButton"; text: window.tr("Резервная копия", "Backup"); description: window.tr("Зашифрованная копия и восстановление в новый файл", "Encrypted backup and restore to a new file"); symbol: "⇩"; onClicked: window.settingsSection = "maintenance" }
-                        SettingsRow { objectName: "settingsScheduleButton"; text: window.tr("Обновления подписок", "Subscription updates"); description: window.tr("Интервал и фоновое окно", "Interval and background window"); symbol: "↻"; onClicked: window.settingsSection = "schedule" }
+                        SettingsRow { objectName: "settingsScheduleButton"; text: window.tr("Запуск и обновления", "Startup and updates"); description: window.tr("Автозапуск, цель подключения, подписки", "Autostart, connection target, subscriptions"); symbol: "↻"; onClicked: window.settingsSection = "schedule" }
                         SettingsRow { objectName: "settingsAppearanceButton"; text: window.tr("Интерфейс", "Appearance"); description: window.tr("Язык приложения", "Application language"); symbol: "Aa"; onClicked: window.settingsSection = "appearance" }
                         SettingsRow { objectName: "settingsAboutButton"; text: window.tr("О приложении", "About"); description: window.tr("Сборка и поведение окна", "Build and window behavior"); symbol: "i"; onClicked: window.settingsSection = "about" }
                     }
@@ -1078,30 +1102,61 @@ ApplicationWindow {
     }
     Component {
         id: schedulePanel
-        ColumnLayout {
-            spacing: 18
-            PlainLabel { text: window.tr("Обновления подписок", "Subscription updates"); font.pixelSize: 19; font.weight: Font.DemiBold }
-            PlainLabel { text: window.tr("Интервал в часах (не менее 24)", "Interval in hours (at least 24)") }
-            SpinBox {
-                id: scheduleHours
-                objectName: "subscriptionInterval"
-                enabled: window.state.source_local === false
-                from: 24; to: 1193046
-                value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
-                editable: true
-                onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
-                Accessible.name: window.tr("Интервал обновлений в часах", "Update interval in hours")
+        PanelScroll {
+            id: startupScroll
+            ColumnLayout {
+                width: startupScroll.availableWidth
+                spacing: 18
+                PlainLabel { text: window.tr("Запуск приложения", "Application startup"); font.pixelSize: 19; font.weight: Font.DemiBold }
+                CheckBox {
+                    objectName: "autostartIntoTray"
+                    enabled: window.state.ready && !window.startupPending && !window.state.preferences_warning
+                    text: window.tr("Автозапуск в трей при входе", "Start in tray at login")
+                    checked: !!window.state.startup && window.state.startup.autostart_into_tray
+                    onClicked: window.saveStartup(false, checked, window.state.startup.autoconnect)
+                }
+                CheckBox {
+                    objectName: "startupAutoconnect"
+                    enabled: window.state.ready && !window.startupPending && !window.state.preferences_warning
+                    text: window.tr("Автоподключение при запуске", "Connect at startup")
+                    checked: !!window.state.startup && window.state.startup.autoconnect
+                    onClicked: window.saveStartup(false, window.state.startup.autostart_into_tray, checked)
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.state.startup && window.state.startup.target ? window.tr("Цель: ", "Target: ") + window.state.startup.target : window.tr("Цель не подтверждена", "No confirmed target") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Выбрано: ", "Selected: ") + (window.state.selected_name || "—") + " · " + (window.state.engine || "—") + " · " + (window.state.connection_mode || "—") }
+                ActionButton {
+                    objectName: "confirmStartupTarget"
+                    text: window.tr("Подтвердить текущую цель", "Confirm current target")
+                    enabled: window.state.ready && !!window.state.selected_profile && !window.state.ephemeral && !window.startupPending && !window.state.preferences_warning
+                    onClicked: window.saveStartup(true, false, false)
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Подтверждается текущий выбранный профиль, ядро, режим и ревизия маршрутизации. Сохранение не начинает соединение. Обычный запуск остаётся видимым; без готового трея окно всегда видно.", "Confirms the currently selected profile, core, mode and routing revision. Saving does not connect. Normal launches stay visible; without a ready tray the window remains visible.") }
+                PlainLabel {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#e6bc83"
+                    text: window.startupPending ? window.tr("Сохранение…", "Saving…") : window.state.startup && window.state.startup.xdg === "error" ? window.errorText("startup_xdg") : window.state.startup && window.state.startup.error ? window.errorText(window.state.startup.error) : window.state.startup && (window.state.startup.save === "durability_unknown" || window.state.startup.xdg === "durability_unknown") ? window.tr("Файл опубликован, надёжность записи неизвестна. Автоматические действия не выполняются.", "File published; durability unknown. No automatic actions performed.") : window.state.startup && window.state.startup.attempt === "blocked" ? window.tr("Автоподключение заблокировано до следующего запуска.", "Autoconnect blocked until the next launch.") : window.state.startup && window.state.startup.save === "durable" ? window.tr("Настройки сохранены", "Settings saved") : ""
+                }
+                PlainLabel { text: window.tr("Обновления подписок", "Subscription updates"); font.pixelSize: 19; font.weight: Font.DemiBold }
+                PlainLabel { text: window.tr("Интервал в часах (не менее 24)", "Interval in hours (at least 24)") }
+                SpinBox {
+                    id: scheduleHours
+                    objectName: "subscriptionInterval"
+                    enabled: window.state.source_local === false
+                    from: 24; to: 1193046
+                    value: Math.ceil((window.state.subscription_interval_seconds || 86400) / 3600)
+                    editable: true
+                    onValueModified: window.send({command: "set_subscription_schedule", interval_seconds: value * 3600, background: window.state.subscription_background === true})
+                    Accessible.name: window.tr("Интервал обновлений в часах", "Update interval in hours")
+                }
+                CheckBox {
+                    objectName: "subscriptionBackground"
+                    enabled: window.state.source_local === false
+                    text: window.tr("Разрешить обновления в фоне", "Allow background updates")
+                    checked: window.state.subscription_background === true
+                    onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
+                }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения.", "The shared background window is 60 seconds. Updates are deferred on unknown or metered networks and in power saving mode. The update report requires confirmation.") }
+                PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
             }
-            CheckBox {
-                objectName: "subscriptionBackground"
-                enabled: window.state.source_local === false
-                text: window.tr("Разрешить обновления в фоне", "Allow background updates")
-                checked: window.state.subscription_background === true
-                onClicked: window.send({command: "set_subscription_schedule", interval_seconds: window.state.subscription_interval_seconds || 86400, background: checked})
-            }
-            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.tr("Общее фоновое окно — 60 секунд. В неизвестной или лимитной сети и при экономии энергии обновления отложены. Отчёт обновления требует подтверждения.", "The shared background window is 60 seconds. Updates are deferred on unknown or metered networks and in power saving mode. The update report requires confirmation.") }
-            PlainLabel { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: window.connectionError === "preferences_write"; color: "#e6bc83"; text: visible ? window.errorText(window.connectionError) : "" }
-            Item { Layout.fillHeight: true }
         }
     }
     Component {

@@ -25,6 +25,8 @@ pub(crate) struct Preferences {
     pub autoconnect: bool,
     #[serde(default)]
     pub autoconnect_target: Option<crate::startup_policy::Target>,
+    #[serde(default)]
+    pub repository_identity: Option<crate::startup_identity::Identity>,
     pub engine: String,
     pub port: Option<std::num::NonZeroU16>,
     pub probe_url: String,
@@ -40,11 +42,12 @@ pub(crate) struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             revision: 0,
             autostart_into_tray: false,
             autoconnect: false,
             autoconnect_target: None,
+            repository_identity: None,
             engine: "xray".into(),
             port: None,
             probe_url: super::backend::DEFAULT_PROBE_URL.into(),
@@ -86,7 +89,7 @@ impl Store {
                 store.original = Some(bytes);
                 parsed.map(|mut settings| {
                     // Только read migration: original bytes остаются нетронутыми.
-                    settings.version = 2;
+                    settings.version = 3;
                     settings
                 })
             }
@@ -95,6 +98,9 @@ impl Store {
         store.blocked = settings.is_none();
         let warning = store.blocked;
         (store, settings.unwrap_or_default(), warning)
+    }
+    pub(crate) fn directory(&self) -> &Path {
+        self.path.parent().expect("каталог настроек")
     }
     fn read(&self) -> std::io::Result<Option<Vec<u8>>> {
         let file = match OpenOptions::new()
@@ -172,7 +178,7 @@ impl Store {
         if self.blocked || !valid(&settings) || settings.revision != expected_revision {
             return Err(std::io::Error::other("конфликт startup-настроек"));
         }
-        settings.version = 2;
+        settings.version = 3;
         settings.revision = expected_revision
             .checked_add(1)
             .ok_or_else(|| std::io::Error::other("ревизия startup исчерпана"))?;
@@ -245,7 +251,8 @@ impl Store {
     }
 }
 fn valid(p: &Preferences) -> bool {
-    matches!(p.version, 1 | 2)
+    matches!(p.version, 1..=3)
+        && (p.version == 3 || p.repository_identity.is_none())
         && (p.version != 1
             || (p.revision == 0
                 && !p.autostart_into_tray
@@ -478,7 +485,7 @@ mod startup_tests {
         let root = std::env::temp_dir().join(format!("yonik-startup-prefs-{}", std::process::id()));
         fs::create_dir(&root).expect("fixture");
         let (mut store, mut p, _) = Store::open(&root);
-        assert_eq!(p.version, 2);
+        assert_eq!(p.version, 3);
         assert!(!p.autostart_into_tray && !p.autoconnect);
         for (a, c) in [(false, false), (true, false), (false, true), (true, true)] {
             p = store.save_startup(p.revision, a, c, None).expect("CAS").0;
@@ -501,7 +508,7 @@ mod startup_tests {
         fs::write(root.join("preferences.json"), &raw).expect("write");
         let (_, migrated, warning) = Store::open(&root);
         assert!(!warning);
-        assert_eq!(migrated.version, 2);
+        assert_eq!(migrated.version, 3);
         assert_eq!(migrated.revision, 0);
         assert!(!migrated.autostart_into_tray && !migrated.autoconnect);
         assert_eq!(fs::read(root.join("preferences.json")).expect("read"), raw);
@@ -558,5 +565,72 @@ mod startup_tests {
             fs::read(root.join("preferences.json")).expect("read")
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+#[cfg(test)]
+mod startup_v3_tests {
+    use super::*;
+    #[test]
+    fn v2_read_migration_preserves_bytes_and_old_reader_refuses_v3_field() {
+        let root = std::env::temp_dir().join(format!("yonik-startup-v3-{}", std::process::id()));
+        fs::create_dir(&root).expect("fixture");
+        let (mut store, mut p, _) = Store::open(&root);
+        p.version = 2;
+        store.save(&p).expect("v2");
+        let raw = fs::read(root.join("preferences.json")).expect("fixture");
+        let (_, migrated, warning) = Store::open(&root);
+        assert!(!warning);
+        assert_eq!(migrated.version, 3);
+        assert_eq!(
+            fs::read(root.join("preferences.json")).expect("fixture"),
+            raw
+        );
+        // Включение binding под старой версией отвергается до публикации.
+        let mut value = serde_json::to_value(&p).expect("JSON");
+        value["repository_identity"] = serde_json::json!({"path":"/fixture/subscriptions.sqlite","device":1,"inode":2,"directory_device":1,"directory_inode":3,"database":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]});
+        let bound: Preferences = serde_json::from_value(value).expect("shape");
+        assert!(!valid(&bound));
+        assert!(store.save(&bound).is_err());
+        fs::remove_dir_all(root).expect("fixture");
+    }
+}
+
+#[cfg(test)]
+mod old_reader_tests {
+    use super::*;
+    /// Строгая serde-форма L1 v2 без нового repository_identity.
+    #[allow(dead_code)]
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct OldV2 {
+        version: u8,
+        revision: u64,
+        autostart_into_tray: bool,
+        autoconnect: bool,
+        autoconnect_target: Option<crate::startup_policy::Target>,
+        engine: String,
+        port: Option<std::num::NonZeroU16>,
+        probe_url: String,
+        probe_status: u16,
+        language: String,
+        proxy_fetch_dns: Option<std::net::SocketAddr>,
+        subscription_interval_seconds: u32,
+        subscription_background: bool,
+    }
+    #[test]
+    fn closed_v2_reader_refuses_v3_without_downgrade() {
+        let current = serde_json::to_vec(&Preferences::default()).expect("v3");
+        assert!(serde_json::from_slice::<OldV2>(&current).is_err());
+        let mut legacy: serde_json::Value = serde_json::from_slice(&current).expect("JSON");
+        legacy
+            .as_object_mut()
+            .expect("object")
+            .remove("repository_identity");
+        legacy["version"] = 2.into();
+        assert_eq!(
+            serde_json::from_value::<OldV2>(legacy).expect("v2").version,
+            2
+        );
     }
 }
