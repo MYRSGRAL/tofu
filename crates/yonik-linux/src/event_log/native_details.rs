@@ -469,11 +469,11 @@ mod tests {
     }
 
     #[test]
-    fn file_output_info_without_timestamp() {
+    fn accepted_info_grammar_without_elapsed() {
         for prefix in ["INFO ", "\x1b[36mINFO\x1b[0m "] {
             let frame = format!("{prefix}sing-box started (0.01s)\n");
             let d =
-                classify(Core::SingBox, "1.14.4", frame.as_bytes()).expect("file output prefix");
+                classify(Core::SingBox, "1.14.4", frame.as_bytes()).expect("accepted prefix grammar");
             assert_eq!(d.body(), "sing-box started (0.01s)");
         }
     }
