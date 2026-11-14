@@ -74,7 +74,16 @@ Root может переназначить worktree только после пр
 ссылок на worktree у runtime/launcher и совпадения manifest SHA. Launcher также
 следует запускать с cwd snapshot: команда ниже начинает с cd и exec.
 
-Финальный snapshot/точная команда/результат находятся в `preflight.json`.
+Актуальный reviewed snapshot v6, manifest SHA, точная абсолютная команда и
+terminal contract находятся в `launch-v6.json`. `preflight.json` сохраняет
+исторический v5 short proof и не является новым runtime proof для v6.
+v6 создан из reviewed cleanup-only source d5c99880cb14dbde2d870610d2cbbf509df472eb;
+root сообщил narrow CLEAN, 8 controls PASS и post-reap OSError control.
+Здесь выполнен только non-native validate/dry-run: 28 file hashes, 158 host inputs,
+source/import/cwd/exe/fd/maps audit; owned validator завершён, native/campaign
+процессы не создавались. У inspectable same-UID peers refs v6 не найдены;
+permission-denied peers перечислены в binding, общесистемное отсутствие refs не заявлено.
+Старый immutable v5 сохранён. GUI/18-cell/long запуск и повтор controls не выполнялись.
 Команда **не выполнялась в campaign mode**. Её запуск требует отдельного явного
 разрешения root после native frozen review и wrapper review.
 
