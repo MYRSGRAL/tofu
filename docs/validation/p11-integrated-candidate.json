@@ -489,11 +489,12 @@
   "source_accepted_in_main": true,
   "reviewed_source_updates": {
     "crates/yonik-desktop/src/backend.rs": {
-      "source": "3ef474ee56bdb4bb3324d015d6d6028311a040f1",
-      "blob": "7f88e0b7818373fb717a3d4f66bad865a8b40ec0",
-      "scope": "Обычный merge exact main41 A08 correlation + PR199 concrete subscription transport; historical executions не перепривязаны",
-      "review": "R2 8de CLEAN frozen7b; этот merge ожидает narrow integration review и fresh CI; новый runtime PASS не заявлен",
-      "review_pending": true
+      "source": "f0a1d13fb69facfb84bda5f68ba37db6cff92380",
+      "blob": "8f9d41384277888f98143e37bcc64a9899f9fc39",
+      "scope": "Approved actual Stop window fix + nondefault read-only scheduler trace; historical producer_execution не перепривязан",
+      "review": "Root approved exact replacement policy delta; actual RED/2-core GREEN retained; narrow independent review нового source pending",
+      "review_pending": true,
+      "execution": "docs/validation/p05-p10-accepted-witness/legacy-stop-binding.json"
     },
     "crates/yonik-desktop/qml/Main.qml": {
       "source": "a73e12ed21c5acd7828426cf22d17d3d85565681",
@@ -543,6 +544,14 @@
       "blob": "a9fd08eace6d2888872a333a520f370cc479d4c2",
       "scope": "A08 approved PRODUCT correlation: optional default-0 RoutingCatalog request_id; echo только successful positive-ID reply. Old producer execution не перепривязан; control.generation/N5 без изменений.",
       "review": "Scoped self-review 03bdf96..A08 correlation source commit: enum field, pure reply decoration and two tests; no changes to command admission/error generation/producer. RED retained old ELF; GREEN actual qrc/catalog controls, normal and test-support tests, GUI all-targets clippy passed. Независимый root review pending."
+    },
+    {
+      "path": "crates/yonik-desktop/src/backend.rs",
+      "source": "3ef474ee56bdb4bb3324d015d6d6028311a040f1",
+      "blob": "7f88e0b7818373fb717a3d4f66bad865a8b40ec0",
+      "scope": "Обычный merge exact main41 A08 correlation + PR199 concrete subscription transport; historical executions не перепривязаны",
+      "review": "R2 8de CLEAN frozen7b; этот merge ожидает narrow integration review и fresh CI; новый runtime PASS не заявлен",
+      "review_pending": true
     }
   ]
 }

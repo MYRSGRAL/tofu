@@ -220,3 +220,13 @@ current P05 actual-binding/source freeze не менялись. Новых Rust/
 runs/builds нет. Для другого full-history checkout нужно материализовать эти же
 два original файла с проверкой SHA в его local fixture path; новых producer replay
 или claims об исполнении текущего whole backend не требуется.
+
+## Новый отдельный legacy Stop proof
+
+После root approval выполнен actual RED → atomic production fix → двухъядерный
+GREEN с default DesktopFetch, без concrete transport override. См.
+[legacy-stop-actual.md](legacy-stop-actual.md) и отдельный
+[legacy-stop-binding.json](legacy-stop-binding.json). Измеренный source —
+`f0a1d13`; старые measured7b/actual-binding и historical producer proofs сохранены.
+Stop/window proposal и design-only отчёты выше остаются историческими; новый
+proof закрывает этот bounded legacy seam, не весь P05/P10 и не N5 authority.
