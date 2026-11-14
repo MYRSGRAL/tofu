@@ -633,6 +633,23 @@ impl Drop for Broker {
     }
 }
 
+/// Только fixed worker --lookup entry. Не принимает FD/path/UID/command от caller.
+pub fn serve_lookup() -> Result<(), Unavailable> {
+    lookup_leaf::run()
+}
+
+fn validate_lookup_credentials(
+    uid: u32,
+    euid: u32,
+    target: u32,
+    caps: [Option<u64>; 4],
+) -> Result<(), Unavailable> {
+    if target == 0 || uid != target || euid != target || caps != [Some(0); 4] {
+        return Err(Unavailable::Authority);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Process, TrustedContext, Unavailable};
@@ -680,22 +697,6 @@ mod lookup_view_tests {
 #[cfg(test)]
 pub(in crate::attribution) use kernel::report_cold_witnesses;
 
-/// Только fixed worker --lookup entry. Не принимает FD/path/UID/command от caller.
-pub fn serve_lookup() -> Result<(), Unavailable> {
-    lookup_leaf::run()
-}
-
-fn validate_lookup_credentials(
-    uid: u32,
-    euid: u32,
-    target: u32,
-    caps: [Option<u64>; 4],
-) -> Result<(), Unavailable> {
-    if target == 0 || uid != target || euid != target || caps != [Some(0); 4] {
-        return Err(Unavailable::Authority);
-    }
-    Ok(())
-}
 #[cfg(test)]
 mod lookup_identity_tests {
     use super::*;

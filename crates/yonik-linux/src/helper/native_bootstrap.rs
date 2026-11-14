@@ -358,40 +358,6 @@ fn validate_receive_admission(authorization: &RunAuthorization, deadline: Deadli
     Ok(())
 }
 
-#[cfg(test)]
-mod split_receive_tests {
-    use super::*;
-    #[test]
-    fn pure_receive_admission_accepts_live_token_and_rejects_expiry() {
-        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
-        let token = owner.authorize([2; 32]).unwrap();
-        assert_eq!(
-            validate_receive_admission(&token, Deadline::now() + std::time::Duration::from_secs(1)),
-            Ok(())
-        );
-        assert_eq!(
-            validate_receive_admission(&token, Deadline::now()),
-            Err(Error::Stale)
-        );
-    }
-    #[test]
-    fn pure_receive_admission_revocation_precedes_deadline() {
-        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
-        let token = owner.authorize([2; 32]).unwrap();
-        owner.revoke();
-        assert_eq!(
-            validate_receive_admission(&token, Deadline::now()),
-            Err(Error::Untrusted)
-        );
-    }
-    #[test]
-    fn pure_pending_transfer_owns_sendable_guard() {
-        fn sendable<T: Send + 'static>() {}
-        sendable::<VerifiedPendingRun>();
-        sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
-    }
-}
-
 impl RuntimeScopeStamp {
     pub(crate) fn lookup_binding_data(&self) -> crate::attribution::broker::LookupBinding {
         let e = &self.inner.expected;
@@ -471,5 +437,39 @@ impl VerifiedCoverage {
         validate_receive_admission(&self.authorization, self.deadline)?;
         self.profile.verify_lookup_image(image)?;
         validate_receive_admission(&self.authorization, self.deadline)
+    }
+}
+
+#[cfg(test)]
+mod split_receive_tests {
+    use super::*;
+    #[test]
+    fn pure_receive_admission_accepts_live_token_and_rejects_expiry() {
+        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
+        let token = owner.authorize([2; 32]).unwrap();
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now() + std::time::Duration::from_secs(1)),
+            Ok(())
+        );
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now()),
+            Err(Error::Stale)
+        );
+    }
+    #[test]
+    fn pure_receive_admission_revocation_precedes_deadline() {
+        let owner = RunAuthority::new([1; 16], 1, 1).unwrap();
+        let token = owner.authorize([2; 32]).unwrap();
+        owner.revoke();
+        assert_eq!(
+            validate_receive_admission(&token, Deadline::now()),
+            Err(Error::Untrusted)
+        );
+    }
+    #[test]
+    fn pure_pending_transfer_owns_sendable_guard() {
+        fn sendable<T: Send + 'static>() {}
+        sendable::<VerifiedPendingRun>();
+        sendable::<(VerifiedPendingRun, NamespaceObservation, [u8; 512])>();
     }
 }

@@ -128,13 +128,14 @@ impl RemoteLookup {
         }
     }
     fn exchange(&mut self, flow: super::Flow, epoch: u64) -> Result<ProjectedLookup, Unavailable> {
+        let began = Instant::now();
+        let deadline = began + DEADLINE;
         self.validate()?;
+        fence(deadline)?;
         if epoch != self.binding.epoch {
             return Err(Unavailable::Authority);
         }
         self.next = self.next.checked_add(1).ok_or(Unavailable::Limit)?;
-        let began = Instant::now();
-        let deadline = began + DEADLINE;
         self.channel
             .send(&self.binding.request(self.next, flow)?, &[], deadline)?;
         let packet = self.channel.receive(REPLY, Some(deadline))?;
@@ -185,11 +186,15 @@ impl RemoteLookup {
         // перед reply. Здесь проверяются retained FDs, identity и исходный бюджет.
         self.validate()?;
         fence(deadline)?;
-        let ttl =
-            Duration::from_nanos(nanos).min(deadline.saturating_duration_since(Instant::now()));
-        if ttl.is_zero() {
-            return Err(Unavailable::Timeout);
-        }
+        // TTL не перезапускается при receive: весь roundtrip уже израсходован.
+        // Root-start + leaf-remaining <= leaf-send + leaf-remaining, включая cache.
+        let expiry = conservative_expiry(began, nanos)?;
+        fence(expiry)?;
+        let ttl = expiry
+            .checked_duration_since(Instant::now())
+            .filter(|v| !v.is_zero())
+            .ok_or(Unavailable::Timeout)?;
+        let observed_from = expiry.checked_sub(DEADLINE).ok_or(Unavailable::Timeout)?;
         let owner = OwnerSnapshot {
             socket_inode,
             task_id,
@@ -197,7 +202,7 @@ impl RemoteLookup {
             socket_fd,
             pidfd,
             executable_fd,
-            observed_from: began,
+            observed_from,
             observed_until: Instant::now(),
             pid,
             start_time: start,
@@ -255,5 +260,32 @@ fn validate_owner_fds(
 impl Drop for RemoteLookup {
     fn drop(&mut self) {
         self.revoke();
+    }
+}
+
+fn conservative_expiry(began: Instant, nanos: u64) -> Result<Instant, Unavailable> {
+    if nanos == 0 || nanos > DEADLINE.as_nanos() as u64 {
+        return Err(Unavailable::Malformed);
+    }
+    began
+        .checked_add(Duration::from_nanos(nanos))
+        .ok_or(Unavailable::Timeout)
+}
+#[cfg(test)]
+mod ttl_tests {
+    use super::*;
+    #[test]
+    fn pure_remote_ttl_never_restarts_at_receive_or_extends_cached_snapshot() {
+        let began = Instant::now();
+        let transport = Duration::from_millis(3);
+        let leaf_ttl = Duration::from_millis(1);
+        let expiry = conservative_expiry(began, leaf_ttl.as_nanos() as u64).unwrap();
+        assert!(expiry < began + transport);
+        assert_eq!(
+            conservative_expiry(began, DEADLINE.as_nanos() as u64).unwrap(),
+            began + DEADLINE
+        );
+        assert!(conservative_expiry(began, 0).is_err());
+        assert!(conservative_expiry(began, DEADLINE.as_nanos() as u64 + 1).is_err());
     }
 }
