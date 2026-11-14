@@ -1,0 +1,24 @@
+{
+  "base_sha": "59ece58809b749804f1e4fc41eb83bb8be55b6e1",
+  "production_base_sha": "8ea826a04a745c8916e14a4329588c75f66b683e",
+  "finding_sha": "59ece58809b749804f1e4fc41eb83bb8be55b6e1",
+  "patch_sha256": "b7b9c2d0f7bb08db43864fb9f206ae75ba33df5e1662316cb921b7020b13c8a2",
+  "files": {
+    "crates/yonik-nsfs/Cargo.toml": {
+      "before_sha256": "2d15e7f03f35d4be707bc2c2583d7cb0ccac24dc72784176d20fcd8e05d11c4f",
+      "after_sha256": "720731485eaac2a6cbb2e76d8e526f8fa87b8a0f0b8f4d8703ff6e8395b01069"
+    },
+    "crates/yonik-nsfs/src/lib.rs": {
+      "before_sha256": "aff0ef25bec3b2531008e28c3cdf13bde371a1ed5d932caf24e7df5fdf67d84a",
+      "after_sha256": "4b6b4f86cc3fd3a7e598d684d6a3701fa29696b8a4ea61d15bd4c777070f332b"
+    },
+    "crates/yonik-linux/src/host/binary.rs": {
+      "before_sha256": "06322331c8f42c6c275513b207241ba7d957d45760f49d48025ae683af569bed",
+      "after_sha256": "976068a5eb175b87c3c7389f9b49367ebdb37d1ce884a63bb3fcf4f06508acd2"
+    },
+    "crates/yonik-nsfs/src/local_parent_death.rs": {
+      "before_sha256": null,
+      "after_sha256": "91e20c5e1d689e7d8f6be7f23437b96cbc8a40e2de5af49ffbe6bfada9fcf7cd"
+    }
+  }
+}
