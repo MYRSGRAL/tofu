@@ -182,6 +182,9 @@ impl PeerAttestation {
             id: 0,
         };
         let snapshot = Arc::new(protocol.observe(deadline.min(Instant::now() + DEADLINE), &lease)?);
+        if snapshot.view != inspector.view {
+            return Err(AttributionFailure::NativeMechanismUnverified);
+        }
         captured.validate()?;
         source.validate().map_err(native)?;
         lease.validate().map_err(native)?;

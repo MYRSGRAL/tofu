@@ -282,6 +282,13 @@ pub(crate) fn verify_pending(
     {
         return Err(Error::Untrusted);
     }
+    let application_view = coverage
+        .authorization
+        .application_view()
+        .map_err(|_| Error::Untrusted)?;
+    if application_view[0] != journal.ownership().namespace() {
+        return Err(Error::Untrusted);
+    }
     queue
         .project(topology, journal)
         .map_err(|_| Error::Untrusted)?;
@@ -491,3 +498,12 @@ mod split_receive_tests {
 pub(crate) use super::service::BusPeerIdentity;
 
 pub(crate) use super::systemd_worker::{PeerVerifierLease, VerifiedPeerVerifier};
+
+impl RuntimeScopeStamp {
+    pub(crate) fn application_view(&self) -> Result<[(u64, u64); 3]> {
+        self.inner
+            .authorization
+            .application_view()
+            .map_err(|_| Error::Untrusted)
+    }
+}
