@@ -485,6 +485,7 @@ type NativeAdmission = Result<(
     [u8; 512],
 )>;
 struct NativeRuntime {
+    task_start: u64,
     stamp: Arc<std::sync::Mutex<Option<super::native_bootstrap::RuntimeScopeStamp>>>,
     stop: Arc<AtomicBool>,
     thread: Option<
@@ -771,6 +772,7 @@ impl SystemWorkerSupervisor {
         }
         let mut observation = bounded(cancel, deadline, self.inspect_anchor_bootstrap()).await?;
         observation.expires = deadline;
+        let task_start = observation.start;
         let pid = observation.pid;
         let uid = observation.uid;
         let invocation = observation.invocation;
@@ -846,6 +848,7 @@ impl SystemWorkerSupervisor {
             .map_err(unavailable)?;
         let scope = Arc::new(std::sync::Mutex::new(None));
         self.native_runtime = Some(NativeRuntime {
+            task_start,
             stamp: Arc::clone(&scope),
             stop,
             thread: Some(thread),
@@ -896,6 +899,9 @@ impl SystemWorkerSupervisor {
             .native_runtime
             .as_mut()
             .ok_or(WorkerSupervisorError::Stale)?;
+        if bootstrap_start(ticket.pid())? != runtime.task_start {
+            return Err(WorkerSupervisorError::Stale);
+        }
         runtime
             .stamp
             .lock()
