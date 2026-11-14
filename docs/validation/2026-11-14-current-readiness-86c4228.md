@@ -1,4 +1,4 @@
-# Текущая готовность и оставшаяся очередь — accepted b5a9af1
+# Текущая готовность и оставшаяся очередь — accepted 4b432f8
 
 Это компактный source-bound реестр 26 пунктов, не новый test framework и не
 замена исторических 256 строк. Исторический счёт **3/21/2**, знаменатель **26**
@@ -10,7 +10,7 @@ Linux done, final A5 и release PASS не заявлены.
 
 ## Принятая база и источник утверждений
 
-Авторитетный MAIN — `b5a9af15e8a652ad4c9cde7901df776e94edcca8` (PR218);
+Проверенная принятая база этого среза — `4b432f8ee6b88c15ea26a9703f9bfa91c303fa6e` (PR221, 2026-11-14 18:38:02 UTC);
 исторический PR187 — `48ce74304a3fb7263ccc7e2c06d96394113a687d`;
 source transfer P05 ограничен `cfcb4576dd0ead9cbf65a5bed95ff4f008813ba9`
 (PR191), предыдущий accepted217 — `a3f609e66e5a95b978c0bf3da34ade4f1445e219`.
@@ -61,12 +61,12 @@ Candidate_Verified/transport, root exact compile inputs/retained source+ELF bind
 Это заменяет прежний DRAFT/known-positive-path repair статус, но не runtime PASS.
 
 [PR218](https://github.com/MYRSGRAL/yonik/pull/218): exact head
-`088b502197f16e49ce41045ddcf4a5947b6feee9`, merge/current accepted MAIN
+`088b502197f16e49ce41045ddcf4a5947b6feee9`, merge, предыдущий accepted MAIN
 `b5a9af15e8a652ad4c9cde7901df776e94edcca8`, exact 10 CI green и trusted R1/R2
 CLEAN (`38cf32c5` controller/default pipeline, `7991ecc2` used-input retainer).
 Приняты только source-only Rust capturepartial/SDK bytes helpers: они позволяют
 `RUST_CAPTURED_ONLY`, никогда не означают `COLLECTED`; full source OPEN,
-legal NOTPROVEN. Actual build/capture NOT RUN.
+legal NOTPROVEN. На момент приёмки PR218 actual build/capture не выполнялись.
 
 Acceptance receipts root: локальные
 `/home/myrs/projects/yonik/local/orchestration/evidence/accepted-216-merge.json` и
@@ -75,13 +75,14 @@ CI/review утверждения взяты только из trusted acceptance
 в этой задаче CI и review заново не исполнялись.
 Локальный Git подтверждает parents merge216: `48ce743` + exact head216;
 parents merge218: merge216 + exact head218. Оба exact head и merge216 — ancestors
-accepted MAIN; accepted MAIN — ancestor текущего task HEAD.
+принятой базы этого среза; эта база — ancestor текущего task HEAD.
 
-Read-only eligibility `41b` — LOCAL review CLEAN, не accepted main.
-Driver/fixture/root capture CODE pending. Actual sealed tuple, runtime grant,
+[PR219](https://github.com/MYRSGRAL/yonik/pull/219) принят на `f3941a1716800e7e15bc0702301403e6b756c361`: eligibility, driver fixture и root capture source. [PR220](https://github.com/MYRSGRAL/yonik/pull/220) принят на `f0ea828982a085ede4862606ec78f8c0cca7e4ea`: capture → N5 receipts, external pins и projection. Квитанции root: `/home/myrs/projects/yonik/local/orchestration/evidence/accepted-219-merge.json` и `/home/myrs/projects/yonik/local/orchestration/evidence/accepted-220-merge.json`; локальный Git подтверждает ancestry 219 → 220 → 221 → task HEAD. [PR221](https://github.com/MYRSGRAL/yonik/pull/221) принят с head `91fe56cb34d29fff77bb41f8bb14d4fde19d0855` на `4b432f8ee6b88c15ea26a9703f9bfa91c303fa6e`: driver/unit producer только в source scope, exact-head CI 10/10 SUCCESS и scoped reviews приняты root. Это не actual N5/FR16 runtime. Квитанции: `/home/myrs/projects/yonik/local/orchestration/evidence/accepted-221-merge.json` и `/home/myrs/projects/yonik/local/orchestration/evidence/accepted-221-ready.json`. PR223 (prep), PR224 (FR16) и PR225 (Qt path) ожидают приёмки.
+
+P14 требует production DNS software integration и отдельной runtime-проверки; evidence root: `/home/myrs/projects/yonik/local/orchestration/evidence/p14-production-software-boundary/boundary.md`. P20: software замены активной сессии отсутствует в текущих LocalSocks и System; evidence root: `/home/myrs/projects/yonik/local/orchestration/evidence/p20-atomic-current-boundary/boundary.md`. Actual sealed tuple, runtime grant,
 profile registration, packet/DNS/app owner, cleanup, full FR16, physical PAM/power
 и final A4/A5 остаются OPEN. Runtime/profile исполнения закрыты для этой задачи;
-новые сборки, capture, runtime и профильные проверки не запускались.
+в рамках этой задачи сборки, capture, runtime и профильные проверки не запускались. Root отдельно выполнил freeze/capture01 на source `91fe56c`: попытка FAILED до компиляции из-за отсутствия фиксированного `/usr/bin/qtpaths6`. Source и evidence сохранены; target очищен через cargo clean и удалён (44 МБ). CXX/Rust payload PASS нет.
 
 ## P05: принятое решение и границы
 
@@ -146,13 +147,13 @@ Android deferred: P03/P26 (2).
 | P11 | Готов | Принятый #213 replacement/source freshness; #211 worker source integration принят без расширения runtime scope. |
 | P12 | Частично | Production helper ownership, live topology и app/domain Apply OPEN. |
 | P13 | Частично | Full production TUN обоих cores, authority и cleanup OPEN. |
-| P14 | Частично | Полный DNS/Fake DNS D-01…D-07 обоих cores OPEN. |
+| P14 | Частично | Production DNS software integration и runtime D-01…D-07 обоих cores OPEN. |
 | P15 | Частично | Полная native attribution A-01…A-08 и стоимость OPEN. |
 | P16 | Частично | Private VPN/LAN, split DNS, сеть/sleep/recovery OPEN. |
 | P17 | Частично | Integrated native policy priorities и Linux acceptance OPEN. |
 | P18 | Готов | Исходные UI/HWID; product/physical gates отдельно. |
 | P19 | Частично | Production GUI/TUN, recovery и полный пользовательский путь OPEN. |
-| P20 | Частично | Actual atomic Apply и полная семантика двух редакторов OPEN. |
+| P20 | Частично | Замена активной сессии в LocalSocks/System отсутствует; actual atomic Apply и полная семантика двух редакторов OPEN. |
 | P21 | Частично | Две отдельные обязательные startup-настройки с default OFF software accepted в #214/8223. #215 capture + #217 join accepted отдельно; physical PAM/reboot/lock OPEN, NOT PASS. Полный критерий OPEN. |
 | P22 | Готов | Исходные batch checks/diagnostics с сохранёнными source bounds. |
 | P23 | Частично | Toolkit191 software-only accepted; physical G-UI/G-POWER отложены без waiver/PASS. |
