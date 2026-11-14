@@ -589,6 +589,22 @@ enum ConnectionMode {
     System,
 }
 
+// Только LocalSocks имеет доказанное software lowering transport, без process authority.
+fn unsupported_connect_policy(policy: &yonik_domain::Policy, mode: ConnectionMode) -> Option<u64> {
+    policy.unsupported_selector().or_else(|| {
+        if mode == ConnectionMode::System {
+            policy.unsupported_transport()
+        } else {
+            policy
+                .user_rules
+                .iter()
+                .chain(&policy.preset_rules)
+                .find(|rule| rule.enabled && !rule.conditions.executables.is_empty())
+                .map(|rule| rule.id)
+        }
+    })
+}
+
 struct Envelope {
     generation: u64,
     tcp_generation: u64,
@@ -2039,7 +2055,10 @@ impl Actor {
             && !self.state.can_stop
             && !self.state.system_busy
             && !self.state.busy
-            && self.state.pending.is_none();
+            && self.state.pending.is_none()
+            && self.state.routing.policy().is_ok_and(|policy| {
+                unsupported_connect_policy(&policy, self.state.connection_mode).is_none()
+            });
         self.state.emit(&self.callback);
     }
     fn clear_selection(&mut self) {
@@ -5369,7 +5388,7 @@ async fn run(
                     }
                     Command::Connect if actor.routing_revision.is_none() => Err(DesktopError("routing_storage").into()),
                     Command::Connect if actor.state.routing.policy().is_err() => Err(DesktopError("routing_storage").into()),
-                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| p.unsupported_selector().or_else(|| p.unsupported_transport())).is_some() => Err(DesktopError("unsupported_option").into()),
+                    Command::Connect if actor.state.routing.policy().ok().and_then(|p| unsupported_connect_policy(&p, actor.state.connection_mode)).is_some() => Err(DesktopError("unsupported_option").into()),
                     command @ (Command::Connect | Command::RoutingApply { .. }) if actor.state.connection_mode == ConnectionMode::System => {
                         let request_id = if let Command::RoutingApply { request_id, .. } = &command { Some(*request_id) } else { None };
                         if let Err(error) = actor.check_routing_apply(&command).await { Err(error.into()) }
@@ -7209,3 +7228,48 @@ mod probe_context_tests {
 #[cfg(all(test, feature = "test-support"))]
 #[path = "disk_host_acceptance.rs"]
 mod disk_host_acceptance;
+
+#[cfg(test)]
+mod p07_local_transport_tests {
+    use super::{ConnectionMode, unsupported_connect_policy};
+    use yonik_domain::{Action, Conditions, Policy, Rule, TransportConditions};
+    #[test]
+    fn connect_gate_разделяет_local_и_system() {
+        let mut policy = Policy::default();
+        policy.user_rules.push(Rule {
+            id: 71,
+            enabled: true,
+            action: Action::Block,
+            conditions: Conditions {
+                transport: TransportConditions::parse(Some(&["udp"]), None).unwrap(),
+                ..Default::default()
+            },
+        });
+        assert_eq!(
+            unsupported_connect_policy(&policy, ConnectionMode::Local),
+            None
+        );
+        assert_eq!(
+            unsupported_connect_policy(&policy, ConnectionMode::System),
+            Some(71)
+        );
+        policy.user_rules[0]
+            .conditions
+            .executables
+            .push("/usr/bin/app".into());
+        assert_eq!(
+            unsupported_connect_policy(&policy, ConnectionMode::Local),
+            Some(71)
+        );
+        assert!(super::inline_policy_conversion::inline_policy(&policy).is_err());
+        policy.user_rules[0].enabled = false;
+        assert_eq!(
+            unsupported_connect_policy(&policy, ConnectionMode::Local),
+            None
+        );
+        assert_eq!(
+            unsupported_connect_policy(&policy, ConnectionMode::System),
+            None
+        );
+    }
+}
