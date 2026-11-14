@@ -69,6 +69,8 @@ pub struct HostConfig {
     #[cfg(feature = "test-support")]
     cleanup_fault: Option<Arc<AtomicBool>>,
     #[cfg(feature = "test-support")]
+    lifecycle_gate: Option<yonik_linux::LifecycleGate>,
+    #[cfg(feature = "test-support")]
     catalog_observer: Option<yonik_linux::applications::CatalogObserver>,
     #[cfg(feature = "test-support")]
     scheduler_capacity: Option<usize>,
@@ -100,6 +102,8 @@ impl HostConfig {
             #[cfg(feature = "test-support")]
             cleanup_fault: None,
             #[cfg(feature = "test-support")]
+            lifecycle_gate: None,
+            #[cfg(feature = "test-support")]
             catalog_observer: None,
             #[cfg(feature = "test-support")]
             scheduler_capacity: None,
@@ -122,6 +126,11 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn with_startup_fixture_config(mut self, root: PathBuf) -> Self {
         self.startup_xdg_root = Some(root);
+        self
+    }
+    #[cfg(feature = "test-support")]
+    pub fn with_lifecycle_gate(mut self, gate: yonik_linux::LifecycleGate) -> Self {
+        self.lifecycle_gate = Some(gate);
         self
     }
     /// Concrete socket transport отдельного subscription fixture; не native authority.
@@ -4823,6 +4832,10 @@ async fn run(
                 actor.emit();
             }
             result = async { (&mut running.as_mut().expect("guard").task).await }, if running.is_some() => {
+                #[cfg(feature = "test-support")]
+                if matches!(&result, Ok(Ok(()))) {
+                    if let Some(gate) = &config.lifecycle_gate { gate.confirm_stopped(session_generation); }
+                }
                 running = None;
                 if let Ok(Err(session)) = result { failed_session = Some(session); actor.state.session_error(Cause::CleanupFailed, session_generation); }
                 if failed_session.is_none() && !preset_stopping { actor.state.can_stop = false; actor.state.active_name = None; actor.state.active_engine = None; }
@@ -5392,6 +5405,8 @@ async fn run(
                                         let (cancel, receiver) = Cancellation::new();
                                         let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, compiled.listen_port().get()));
                                         session_generation = session_generation.saturating_add(1); actor.state.error_generation = session_generation;
+                                        #[cfg(feature = "test-support")]
+                                        let receiver = if let Some(gate) = config.lifecycle_gate.clone() { receiver.with_lifecycle_gate(gate, session_generation) } else { receiver };
                                         let task = tokio::spawn(session(compiled, config.engine_dir.clone(), actor.state.engine.engine(), target, receiver, (updates.clone(), actor.event_log.clone(), session_generation), network.clone(), #[cfg(feature = "test-support")] config.cleanup_fault.clone()));
                                         running = Some(Running { lease: (session_generation, endpoint), cancel, task }); actor.state.can_stop = true;
                                         actor.state.active_name = Some(profile.profile.name.clone()); actor.state.active_engine = Some(actor.state.engine);

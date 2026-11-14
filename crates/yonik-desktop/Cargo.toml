@@ -93,3 +93,7 @@ required-features = ["gui", "test-support"]
 name = "startup_host"
 path = "examples/startup_host.rs"
 required-features = ["startup-diagnostics"]
+
+[[example]]
+name = "p09_cancellation"
+required-features = ["test-support"]
